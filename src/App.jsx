@@ -80,22 +80,90 @@ const StatCard = ({ label, value, sub, accent, pct }) => (
 );
 
 // ── DASHBOARD ─────────────────────────────────────────────────
-const Dashboard = () => (
-  <div>
-    <div style={styles.header}>
-      <div>
-        <div style={styles.pageTitle}>Good morning, MD 👋</div>
-        <div style={styles.pageSubtitle}>Business overview — Abuja Precast Concrete Limited</div>
+const Dashboard = () => {
+  const [stats, setStats] = useState({ staff: 0, produced: 0, orders: 0, revenue: 0, pending: 0, waybills: 0, damages: 0 });
+  const [recent, setRecent] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const [staffList, productions, orders, waybills] = await Promise.all([
+          staffService.getAll(),
+          productionService.getAll(),
+          ordersService.getAll(),
+          waybillsService.getAll(),
+        ]);
+        const produced = productions.reduce((s, p) => s + (p.quantity_produced || 0), 0);
+        const damages = waybills.reduce((s, w) => s + (w.quantity_damaged || 0), 0);
+        const revenue = orders.reduce((s, o) =>
+          s + (o.invoices || []).flatMap(inv => inv.payments || []).filter(p => p.status === "confirmed").reduce((a, p) => a + p.amount_paid, 0), 0);
+        const pending = orders.filter(o => o.status === "pending").length;
+        setStats({ staff: staffList.length, produced, orders: orders.length, revenue, pending, waybills: waybills.length, damages });
+        setRecent(orders.slice(0, 5));
+      } catch {
+        // show zeros on error
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
+  }, []);
+
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+
+  return (
+    <div>
+      <div style={styles.header}>
+        <div>
+          <div style={styles.pageTitle}>{greeting}, MD 👋</div>
+          <div style={styles.pageSubtitle}>Business overview — Abuja Precast Concrete Limited</div>
+        </div>
+        <span style={styles.badge(theme.green)}>Operations Active</span>
       </div>
-      <span style={styles.badge(theme.green)}>Operations Active</span>
+      {loading ? <Spinner /> : (
+        <>
+          <div style={styles.grid(4)}>
+            <StatCard label="Total Staff" value={stats.staff} sub="Active employees" accent={theme.blue} />
+            <StatCard label="Blocks Produced" value={fmt(stats.produced)} sub="All time" accent={theme.accent} />
+            <StatCard label="Total Orders" value={stats.orders} sub={`${stats.pending} pending`} accent={theme.blue} />
+            <StatCard label="Waybills Issued" value={stats.waybills} sub="All deliveries" accent={theme.accentDim} />
+          </div>
+          <div style={styles.grid(3)}>
+            <StatCard label="Revenue Collected" value={naira(stats.revenue)} sub="Confirmed payments" accent={theme.green} />
+            <StatCard label="Pending Orders" value={stats.pending} sub="Awaiting processing" accent={theme.accent} />
+            <StatCard label="Transit Damages" value={fmt(stats.damages)} sub="Blocks damaged in delivery" accent={theme.red} />
+          </div>
+          {recent.length > 0 && (
+            <div style={styles.card}>
+              <div style={styles.sectionTitle}>Recent Orders</div>
+              <table style={styles.table}>
+                <thead>
+                  <tr>{["Customer", "Location", "Status", "Value"].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
+                </thead>
+                <tbody>
+                  {recent.map(o => {
+                    const total = (o.order_items || []).reduce((s, i) => s + (i.subtotal || i.quantity * i.unit_price), 0);
+                    const statusColor = o.status === "completed" ? theme.green : o.status === "invoiced" ? theme.blue : o.status === "cancelled" ? theme.red : theme.accent;
+                    return (
+                      <tr key={o.id}>
+                        <td style={styles.td}><strong>{o.customer?.name || "—"}</strong></td>
+                        <td style={styles.td}>{o.customer?.location || "—"}</td>
+                        <td style={styles.td}><span style={styles.badge(statusColor)}>{o.status}</span></td>
+                        <td style={styles.td}><strong style={{ color: theme.accent }}>{naira(total)}</strong></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
     </div>
-    <div style={{ ...styles.card, textAlign: "center", padding: "40px", color: theme.textMuted }}>
-      <div style={{ fontSize: "32px", marginBottom: "12px" }}>📊</div>
-      <div style={{ fontSize: "15px", fontWeight: "600", color: theme.text, marginBottom: "6px" }}>Dashboard coming soon</div>
-      <div style={{ fontSize: "13px" }}>Use the sidebar to access Production, Orders, Staff, and Waybills with live data.</div>
-    </div>
-  </div>
-);
+  );
+};
 
 // ── PRODUCTION ────────────────────────────────────────────────
 const Production = () => {
@@ -433,7 +501,7 @@ const Orders = () => {
   useEffect(() => { load(); }, []);
 
   const orderTotal = (order) => (order.order_items || []).reduce((s, i) => s + (i.subtotal || i.quantity * i.unit_price), 0);
-  const orderPaid = (order) => (order.payments || []).filter(p => p.status === "confirmed").reduce((s, p) => s + p.amount_paid, 0);
+  const orderPaid = (order) => (order.invoices || []).flatMap(inv => inv.payments || []).filter(p => p.status === "confirmed").reduce((s, p) => s + p.amount_paid, 0);
   const orderQty = (order) => (order.order_items || []).reduce((s, i) => s + i.quantity, 0);
 
   const updateItem = (idx, field, val) => {
