@@ -6,8 +6,8 @@ export const deliveriesService = {
       .from('deliveries')
       .select(`
         *,
-        order:orders(id, customer:customers(name)),
-        driver:staff(id, full_name),
+        order:order_id(id, customer:customer_id(name)),
+        driver:driver_id(id, full_name),
         waybills(*)
       `)
       .order('delivery_date', { ascending: false })
@@ -32,9 +32,7 @@ export const waybillsService = {
       .from('waybills')
       .select(`
         *,
-        delivery:deliveries(id, destination, order:orders(customer:customers(name))),
-        driver:staff(id, full_name),
-        recorder:staff!waybills_recorded_by_fkey(full_name)
+        driver:driver_id(id, full_name)
       `)
       .order('waybill_date', { ascending: false })
     if (error) throw error
@@ -49,5 +47,13 @@ export const waybillsService = {
       .single()
     if (error) throw error
     return data
+  },
+
+  async getCount() {
+    const { count, error } = await supabase
+      .from('waybills')
+      .select('*', { count: 'exact', head: true })
+    if (error) throw error
+    return count || 0
   },
 }
