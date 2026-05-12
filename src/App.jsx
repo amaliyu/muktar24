@@ -37,20 +37,43 @@ const styles = {
     bottom: 0,
   },
   logo: {
-    padding: "24px 20px",
+    padding: "20px 20px 16px",
     borderBottom: `1px solid ${theme.border}`,
   },
+  logoPlaceholder: {
+    width: "52px",
+    height: "52px",
+    borderRadius: "10px",
+    background: theme.card,
+    border: `2px dashed ${theme.border}`,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: "12px",
+    cursor: "pointer",
+    transition: "border-color 0.15s",
+  },
+  logoPlaceholderText: {
+    fontSize: "9px",
+    color: theme.textDim,
+    textAlign: "center",
+    marginTop: "2px",
+    letterSpacing: "0.04em",
+  },
   logoTitle: {
-    fontSize: "13px",
+    fontSize: "12px",
     fontWeight: "700",
     color: theme.accent,
-    letterSpacing: "0.08em",
+    letterSpacing: "0.06em",
     textTransform: "uppercase",
+    lineHeight: "1.3",
   },
   logoSub: {
-    fontSize: "11px",
+    fontSize: "10.5px",
     color: theme.textMuted,
-    marginTop: "2px",
+    marginTop: "3px",
+    lineHeight: "1.4",
   },
   nav: {
     padding: "12px 0",
@@ -744,8 +767,12 @@ export default function App() {
     <div style={styles.app}>
       <div style={styles.sidebar}>
         <div style={styles.logo}>
-          <div style={styles.logoTitle}>APC Manager</div>
-          <div style={styles.logoSub}>Abuja Precast Concrete</div>
+          <div style={styles.logoPlaceholder} title="Logo coming soon">
+            <span style={{ fontSize: "20px" }}>🏗️</span>
+            <span style={styles.logoPlaceholderText}>Your Logo</span>
+          </div>
+          <div style={styles.logoTitle}>Abuja Precast Concrete Limited</div>
+          <div style={styles.logoSub}>Quality Precast products. Reliable Delivery.</div>
         </div>
         <nav style={styles.nav}>
           {navItems.map(section => (
@@ -764,9 +791,11 @@ export default function App() {
             </div>
           ))}
         </nav>
-        <div style={{ padding: "16px 20px", borderTop: `1px solid ${theme.border}`, fontSize: "12px", color: theme.textMuted }}>
-          <div style={{ fontWeight: "600", color: theme.text }}>MD Access</div>
-          <div>Full permissions</div>
+        <div style={{ padding: "14px 20px", borderTop: `1px solid ${theme.border}`, fontSize: "11px", color: theme.textMuted, lineHeight: "1.7" }}>
+          <div style={{ fontWeight: "700", color: theme.text, fontSize: "12px", marginBottom: "6px" }}>MD Access · Full permissions</div>
+          <div>📍 No. 1, Off Bwari Road, Abuja, Nigeria.</div>
+          <div>📞 +234 905 554 4433</div>
+          <div style={{ wordBreak: "break-all" }}>✉️ abujaprecastconcreteltd@gmail.com</div>
         </div>
       </div>
       <main style={styles.main}>
