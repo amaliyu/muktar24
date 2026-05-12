@@ -52,15 +52,15 @@ export async function generateInvoicePDF(invoice, order) {
   doc.text(`Invoice No:`, pageWidth - margin - 50, 45);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(0);
-  doc.text(invoice.invoice_number, pageWidth - margin, 45, { align: 'right' });
+  doc.text(String(invoice.invoice_number || '—'), pageWidth - margin, 45, { align: 'right' });
 
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(60);
   doc.text(`Issue Date:`, pageWidth - margin - 50, 51);
   doc.text(`Due Date:`, pageWidth - margin - 50, 57);
   doc.setTextColor(0);
-  doc.text(invoice.issued_date || '—', pageWidth - margin, 51, { align: 'right' });
-  doc.text(invoice.due_date || '—', pageWidth - margin, 57, { align: 'right' });
+  doc.text(String(invoice.issued_date || '—'), pageWidth - margin, 51, { align: 'right' });
+  doc.text(String(invoice.due_date || '—'), pageWidth - margin, 57, { align: 'right' });
 
   // ── BILL TO ───────────────────────────────────────────────────
   doc.setFontSize(8);
@@ -71,7 +71,7 @@ export async function generateInvoicePDF(invoice, order) {
   doc.setFontSize(11);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(20);
-  doc.text(order.customer?.name || '—', margin, 69);
+  doc.text(String(order.customer?.name || '—'), margin, 69);
 
   doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
