@@ -40,27 +40,6 @@ const styles = {
     padding: "20px 20px 16px",
     borderBottom: `1px solid ${theme.border}`,
   },
-  logoPlaceholder: {
-    width: "52px",
-    height: "52px",
-    borderRadius: "10px",
-    background: theme.card,
-    border: `2px dashed ${theme.border}`,
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: "12px",
-    cursor: "pointer",
-    transition: "border-color 0.15s",
-  },
-  logoPlaceholderText: {
-    fontSize: "9px",
-    color: theme.textDim,
-    textAlign: "center",
-    marginTop: "2px",
-    letterSpacing: "0.04em",
-  },
   logoTitle: {
     fontSize: "12px",
     fontWeight: "700",
@@ -767,11 +746,11 @@ export default function App() {
     <div style={styles.app}>
       <div style={styles.sidebar}>
         <div style={styles.logo}>
-          <div style={styles.logoPlaceholder} title="Logo coming soon">
-            <span style={{ fontSize: "20px" }}>🏗️</span>
-            <span style={styles.logoPlaceholderText}>Your Logo</span>
-          </div>
-          <div style={styles.logoTitle}>Abuja Precast Concrete Limited</div>
+          <img
+            src="/logo.png"
+            alt="Abuja Precast Concrete Limited"
+            style={{ width: "100%", maxWidth: "180px", marginBottom: "10px", display: "block" }}
+          />
           <div style={styles.logoSub}>Quality Precast products. Reliable Delivery.</div>
         </div>
         <nav style={styles.nav}>
