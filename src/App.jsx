@@ -4,6 +4,7 @@ import { staffService } from './services/staff';
 import { ordersService, customersService } from './services/orders';
 import { waybillsService } from './services/deliveries';
 import { invoicesService, paymentsService } from './services/payments';
+import { generateInvoicePDF } from './utils/generateInvoicePDF';
 
 const theme = {
   bg: "#0f1117", surface: "#1a1d27", card: "#21263a", border: "#2e3452",
@@ -541,16 +542,23 @@ const Orders = ({ onNavigate }) => {
     if (!selected) return;
     setInvoicing(true);
     try {
-      if ((selected.invoices || []).length > 0) { setAlert({ type: "error", msg: `Invoice ${selected.invoices[0].invoice_number} already exists.` }); return; }
+      if ((selected.invoices || []).length > 0) {
+        await generateInvoicePDF(selected.invoices[0], selected);
+        return;
+      }
       const count = orders.reduce((s, o) => s + (o.invoices || []).length, 0);
-      const invoiceNumber = `APC-INV-${String((count || 0) + 1).padStart(3, "0")}`;
+      const year = new Date().getFullYear();
+      const invoiceNumber = `APC-INV-${year}-${String((count || 0) + 1).padStart(3, "0")}`;
       const total = orderTotal(selected);
       const today = new Date().toISOString().split("T")[0];
       const due = new Date(Date.now() + 30 * 86400000).toISOString().split("T")[0];
-      await invoicesService.create({ order_id: selected.id, invoice_number: invoiceNumber, total_amount: total, issued_date: today, due_date: due });
+      const newInvoice = await invoicesService.create({ order_id: selected.id, invoice_number: invoiceNumber, total_amount: total, issued_date: today, due_date: due });
+      await ordersService.updateStatus(selected.id, "invoiced");
       const newOrders = await load();
-      if (newOrders) setSelected(newOrders.find(o => o.id === selected.id) || selected);
-      setAlert({ type: "success", msg: `Invoice ${invoiceNumber} generated!` });
+      const updatedOrder = newOrders?.find(o => o.id === selected.id) || selected;
+      if (newOrders) setSelected(updatedOrder);
+      await generateInvoicePDF(newInvoice, updatedOrder);
+      setAlert({ type: "success", msg: `Invoice ${invoiceNumber} generated and downloaded!` });
     } catch (e) {
       setAlert({ type: "error", msg: "Failed to generate invoice. " + e.message });
     } finally {
@@ -737,7 +745,8 @@ const Orders = ({ onNavigate }) => {
                           <div style={{ width: "100%", fontSize: "12px", color: theme.textMuted, marginBottom: "6px" }}>
                             Invoice: <strong style={{ color: theme.accent }}>{selected.invoices[0].invoice_number}</strong>
                           </div>
-                          <button style={styles.btn("primary")} onClick={() => setShowPayForm(!showPayForm)}>+ Record Payment</button>
+                          <button style={styles.btn("primary")} onClick={handleGenerateInvoice} disabled={invoicing}>{invoicing ? "Downloading…" : "Download Invoice PDF"}</button>
+                          <button style={styles.btn("secondary")} onClick={() => setShowPayForm(!showPayForm)}>+ Record Payment</button>
                         </>
                       )}
                       <button style={styles.btn("secondary")} onClick={() => onNavigate("waybills")}>View Waybills</button>
