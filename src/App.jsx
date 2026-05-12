@@ -3,6 +3,7 @@ import { productionService } from './services/production';
 import { staffService } from './services/staff';
 import { ordersService, customersService } from './services/orders';
 import { waybillsService } from './services/deliveries';
+import { invoicesService, paymentsService } from './services/payments';
 
 const theme = {
   bg: "#0f1117", surface: "#1a1d27", card: "#21263a", border: "#2e3452",
@@ -474,16 +475,19 @@ const Staff = () => {
 // ── ORDERS ────────────────────────────────────────────────────
 const emptyItem = () => ({ blockType: "9-inch", quantity: "", unitPrice: "" });
 
-const Orders = () => {
+const Orders = ({ onNavigate }) => {
   const [orders, setOrders] = useState([]);
   const [staff, setStaff] = useState([]);
   const [selected, setSelected] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [invoicing, setInvoicing] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  const [showPayForm, setShowPayForm] = useState(false);
   const [alert, setAlert] = useState(null);
   const emptyForm = { customerName: "", customerPhone: "", customerLocation: "", marketerId: "", items: [emptyItem()] };
   const [form, setForm] = useState(emptyForm);
+  const [payForm, setPayForm] = useState({ amount: "", date: "" });
 
   const load = async () => {
     setLoading(true);
@@ -491,6 +495,7 @@ const Orders = () => {
       const [o, s] = await Promise.all([ordersService.getAll(), staffService.getActive()]);
       setOrders(o);
       setStaff(s);
+      return o;
     } catch {
       setAlert({ type: "error", msg: "Could not load orders." });
     } finally {
@@ -529,6 +534,43 @@ const Orders = () => {
       setAlert({ type: "error", msg: "Failed to create order. " + e.message });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleGenerateInvoice = async () => {
+    if (!selected) return;
+    setInvoicing(true);
+    try {
+      if ((selected.invoices || []).length > 0) { setAlert({ type: "error", msg: `Invoice ${selected.invoices[0].invoice_number} already exists.` }); return; }
+      const count = orders.reduce((s, o) => s + (o.invoices || []).length, 0);
+      const invoiceNumber = `APC-INV-${String((count || 0) + 1).padStart(3, "0")}`;
+      const total = orderTotal(selected);
+      const today = new Date().toISOString().split("T")[0];
+      const due = new Date(Date.now() + 30 * 86400000).toISOString().split("T")[0];
+      await invoicesService.create({ order_id: selected.id, invoice_number: invoiceNumber, total_amount: total, issued_date: today, due_date: due });
+      const newOrders = await load();
+      if (newOrders) setSelected(newOrders.find(o => o.id === selected.id) || selected);
+      setAlert({ type: "success", msg: `Invoice ${invoiceNumber} generated!` });
+    } catch (e) {
+      setAlert({ type: "error", msg: "Failed to generate invoice. " + e.message });
+    } finally {
+      setInvoicing(false);
+    }
+  };
+
+  const handleRecordPayment = async () => {
+    if (!payForm.amount || !payForm.date) return setAlert({ type: "error", msg: "Amount and date are required." });
+    const invoice = selected?.invoices?.[0];
+    if (!invoice) return setAlert({ type: "error", msg: "Generate an invoice first." });
+    try {
+      await paymentsService.recordPayment({ invoice_id: invoice.id, amount_paid: parseFloat(payForm.amount), payment_date: payForm.date, status: "confirmed" });
+      const newOrders = await load();
+      if (newOrders) setSelected(newOrders.find(o => o.id === selected.id) || selected);
+      setPayForm({ amount: "", date: "" });
+      setShowPayForm(false);
+      setAlert({ type: "success", msg: "Payment recorded successfully!" });
+    } catch (e) {
+      setAlert({ type: "error", msg: "Failed to record payment. " + e.message });
     }
   };
 
@@ -686,9 +728,39 @@ const Orders = () => {
                       </div>
                     ))}
                   </div>
-                  <div style={{ marginTop: "16px", display: "flex", gap: "8px" }}>
-                    <button style={styles.btn("primary")}>Generate Invoice</button>
-                    <button style={styles.btn("secondary")}>View Waybills</button>
+                  <div style={{ marginTop: "16px" }}>
+                    <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                      {(selected.invoices || []).length === 0 ? (
+                        <button style={styles.btn("primary")} onClick={handleGenerateInvoice} disabled={invoicing}>{invoicing ? "Generating…" : "Generate Invoice"}</button>
+                      ) : (
+                        <>
+                          <div style={{ width: "100%", fontSize: "12px", color: theme.textMuted, marginBottom: "6px" }}>
+                            Invoice: <strong style={{ color: theme.accent }}>{selected.invoices[0].invoice_number}</strong>
+                          </div>
+                          <button style={styles.btn("primary")} onClick={() => setShowPayForm(!showPayForm)}>+ Record Payment</button>
+                        </>
+                      )}
+                      <button style={styles.btn("secondary")} onClick={() => onNavigate("waybills")}>View Waybills</button>
+                    </div>
+                    {showPayForm && (
+                      <div style={{ marginTop: "12px", padding: "14px", background: theme.surface, borderRadius: "8px", border: `1px solid ${theme.border}` }}>
+                        <div style={{ fontSize: "11px", fontWeight: "700", color: theme.textMuted, marginBottom: "10px", textTransform: "uppercase", letterSpacing: "0.06em" }}>Record Payment</div>
+                        <div style={styles.row}>
+                          <div style={{ flex: 1 }}>
+                            <label style={styles.label}>Amount (₦)</label>
+                            <input style={styles.input} type="number" placeholder="e.g. 500000" value={payForm.amount} onChange={e => setPayForm({ ...payForm, amount: e.target.value })} />
+                          </div>
+                          <div style={{ flex: 1 }}>
+                            <label style={styles.label}>Payment Date</label>
+                            <input style={styles.input} type="date" value={payForm.date} onChange={e => setPayForm({ ...payForm, date: e.target.value })} />
+                          </div>
+                        </div>
+                        <div style={{ ...styles.row, marginTop: "10px" }}>
+                          <button style={styles.btn("primary")} onClick={handleRecordPayment}>Confirm Payment</button>
+                          <button style={styles.btn("secondary")} onClick={() => setShowPayForm(false)}>Cancel</button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </>
               );
@@ -925,7 +997,7 @@ const navItems = [
 // ── APP ───────────────────────────────────────────────────────
 export default function App() {
   const [active, setActive] = useState("dashboard");
-  const pages = { dashboard: <Dashboard />, production: <Production />, waybills: <Waybills />, staff: <Staff />, orders: <Orders />, reports: <Reports /> };
+  const pages = { dashboard: <Dashboard />, production: <Production />, waybills: <Waybills />, staff: <Staff />, orders: <Orders onNavigate={setActive} />, reports: <Reports /> };
 
   return (
     <div style={styles.app}>
