@@ -3,188 +3,234 @@ import autoTable from 'jspdf-autotable';
 
 export async function generateInvoicePDF(invoice, order) {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-  const pageWidth = doc.internal.pageSize.getWidth();
-  const pageHeight = doc.internal.pageSize.getHeight();
-  const margin = 18;
+  const W = doc.internal.pageSize.getWidth();   // 210mm
+  const ml = 14;                                 // left margin
+  const mr = W - 14;                             // right edge
+  const mid = W / 2;                             // 105mm midpoint
+  const colW = (W - 28) / 2;                    // each column = 91mm
 
-  // ── HEADER ──────────────────────────────────────────────────
-  // Logo (left)
+  // ── HEADER ────────────────────────────────────────────────────
+  // Left: Logo
   try {
     const res = await fetch('/logo.png');
     const blob = await res.blob();
-    const b64 = await new Promise((resolve) => {
+    const b64 = await new Promise(resolve => {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result);
       reader.readAsDataURL(blob);
     });
-    doc.addImage(b64, 'PNG', margin, 12, 44, 22);
-  } catch {
-    doc.setFontSize(13);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(40);
-    doc.text('ABUJA PRECAST CONCRETE LTD', margin, 22);
-  }
+    doc.addImage(b64, 'PNG', ml, 8, 30, 15);
+  } catch { /* continue without logo */ }
 
-  // Company info (right)
+  doc.setFontSize(12);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(20);
+  doc.text('ABUJA PRECAST CONCRETE', ml + 33, 14);
   doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(80);
-  doc.text('Abuja Precast Concrete Limited', pageWidth - margin, 14, { align: 'right' });
-  doc.text('RC: 1838184', pageWidth - margin, 19, { align: 'right' });
-  doc.text('No. 1, Off Bwari Road, Abuja, Nigeria', pageWidth - margin, 24, { align: 'right' });
-  doc.text('+234 905 554 4433', pageWidth - margin, 29, { align: 'right' });
-  doc.text('abujaprecastconcreteltd@gmail.com', pageWidth - margin, 34, { align: 'right' });
+  doc.text('RC: 1838184', ml + 33, 19);
 
-  // Header divider
-  doc.setDrawColor(220, 220, 220);
-  doc.setLineWidth(0.4);
-  doc.line(margin, 40, pageWidth - margin, 40);
-
-  // ── INVOICE TITLE + META ─────────────────────────────────────
+  // Right: INVOICE + number + date
   doc.setFontSize(22);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(245, 166, 35);
-  doc.text('INVOICE', margin, 51);
+  doc.text('INVOICE', mr, 15, { align: 'right' });
 
   doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
-  doc.setTextColor(60);
-  doc.text(`Invoice No:`, pageWidth - margin - 50, 45);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(0);
-  doc.text(String(invoice.invoice_number || '—'), pageWidth - margin, 45, { align: 'right' });
+  doc.setTextColor(40);
+  doc.text(`No: ${String(invoice.invoice_number || '—')}`, mr, 21, { align: 'right' });
+  doc.text(`Date: ${String(invoice.issued_date || new Date().toISOString().split('T')[0])}`, mr, 26, { align: 'right' });
 
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(60);
-  doc.text(`Issue Date:`, pageWidth - margin - 50, 51);
-  doc.text(`Due Date:`, pageWidth - margin - 50, 57);
-  doc.setTextColor(0);
-  doc.text(String(invoice.issued_date || '—'), pageWidth - margin, 51, { align: 'right' });
-  doc.text(String(invoice.due_date || '—'), pageWidth - margin, 57, { align: 'right' });
+  // Header rule
+  doc.setDrawColor(180);
+  doc.setLineWidth(0.5);
+  doc.line(ml, 30, mr, 30);
 
-  // ── BILL TO ───────────────────────────────────────────────────
+  // ── BILL TO / FOR SUPPLY ──────────────────────────────────────
+  let leftY = 37;
   doc.setFontSize(8);
   doc.setFont('helvetica', 'bold');
-  doc.setTextColor(150);
-  doc.text('BILL TO', margin, 63);
+  doc.setTextColor(140);
+  doc.text('BILL TO:', ml, leftY);
+  leftY += 5;
 
   doc.setFontSize(11);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(20);
-  doc.text(String(order.customer?.name || '—'), margin, 69);
+  doc.text(String(order.customer?.name || '—'), ml, leftY);
+  leftY += 5;
 
   doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
-  doc.setTextColor(80);
-  let billY = 75;
-  if (order.customer?.phone) { doc.text(order.customer.phone, margin, billY); billY += 5; }
-  if (order.customer?.location) { doc.text(`Site: ${order.customer.location}`, margin, billY); billY += 5; }
-  if (order.marketer?.full_name) { doc.text(`Marketer: ${order.marketer.full_name}`, margin, billY); }
+  doc.setTextColor(70);
+  if (order.customer?.location) { doc.text(order.customer.location, ml, leftY); leftY += 5; }
+  if (order.customer?.phone)    { doc.text(order.customer.phone,    ml, leftY); leftY += 5; }
+
+  // Right: supply description
+  const supplyText = 'FOR SUPPLY AND LOADING OF HOLLOW CONCRETE BLOCKS AND INTERLOCKS';
+  const supplyLines = doc.splitTextToSize(supplyText, colW - 6);
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(20);
+  doc.text(supplyLines, mid + 5, 37);
+
+  const billEndY = Math.max(leftY, 37 + supplyLines.length * 4.5) + 4;
+
+  doc.setDrawColor(200);
+  doc.setLineWidth(0.3);
+  doc.line(ml, billEndY, mr, billEndY);
 
   // ── ITEMS TABLE ───────────────────────────────────────────────
   const items = order.order_items || [];
-  const tableBody = items.map((item, i) => [
-    i + 1,
-    `${item.block_type} Blocks`,
+  const subtotal   = items.reduce((s, i) => s + Number(i.subtotal ?? i.quantity * i.unit_price), 0);
+  const vat        = subtotal * 0.075;
+  const grandTotal = subtotal + vat;
+
+  const tableRows = items.map(item => [
+    `${item.block_type} Hollow Concrete Blocks`,
     Number(item.quantity).toLocaleString(),
-    `₦${Number(item.unit_price).toLocaleString()}`,
-    `₦${Number(item.subtotal ?? item.quantity * item.unit_price).toLocaleString()}`,
+    `N${Number(item.unit_price).toLocaleString()}`,
+    `N${Number(item.subtotal ?? item.quantity * item.unit_price).toLocaleString()}`,
+  ]);
+
+  // Subtotal / VAT / Grand Total rows
+  const spanRight = (label, value, bold, color) => ([
+    { content: label, colSpan: 3, styles: { halign: 'right', fontStyle: bold ? 'bold' : 'normal', textColor: color || [40, 40, 40] } },
+    { content: value, styles: { halign: 'right', fontStyle: bold ? 'bold' : 'normal', textColor: color || [40, 40, 40] } },
   ]);
 
   autoTable(doc, {
-    startY: billY + 8,
-    head: [['#', 'DESCRIPTION', 'QTY', 'UNIT PRICE', 'AMOUNT']],
-    body: tableBody,
-    margin: { left: margin, right: margin },
+    startY: billEndY + 3,
+    head: [['DETAILS', 'QUANTITY', 'RATE (N)', 'AMOUNT (N)']],
+    body: [
+      ...tableRows,
+      spanRight('SUBTOTAL', `N${Math.round(subtotal).toLocaleString()}`),
+      spanRight('VAT (7.5%)', `N${Math.round(vat).toLocaleString()}`),
+      spanRight('GRAND TOTAL', `N${Math.round(grandTotal).toLocaleString()}`, true, [180, 100, 0]),
+    ],
+    margin: { left: ml, right: 14 },
     headStyles: {
-      fillColor: [245, 166, 35],
-      textColor: [20, 20, 20],
+      fillColor: [30, 30, 30],
+      textColor: [255, 255, 255],
       fontStyle: 'bold',
       fontSize: 9,
       halign: 'center',
     },
     bodyStyles: { fontSize: 10, textColor: [30, 30, 30] },
     columnStyles: {
-      0: { cellWidth: 10, halign: 'center' },
-      1: { cellWidth: 72 },
-      2: { cellWidth: 22, halign: 'right' },
-      3: { cellWidth: 30, halign: 'right' },
-      4: { cellWidth: 30, halign: 'right', fontStyle: 'bold' },
+      0: { cellWidth: 90 },
+      1: { cellWidth: 24, halign: 'center' },
+      2: { cellWidth: 30, halign: 'right' },
+      3: { cellWidth: 36, halign: 'right' },
     },
-    alternateRowStyles: { fillColor: [252, 252, 252] },
-    tableLineColor: [220, 220, 220],
-    tableLineWidth: 0.3,
+    tableLineColor: [210, 210, 210],
+    tableLineWidth: 0.25,
   });
 
-  // ── TOTALS ─────────────────────────────────────────────────────
-  const tableEndY = doc.lastAutoTable.finalY;
-  const grandTotal = items.reduce((s, i) => s + Number(i.subtotal ?? i.quantity * i.unit_price), 0);
-  const paid = (order.invoices?.[0]?.payments || [])
-    .filter(p => p.status === 'confirmed')
-    .reduce((s, p) => s + Number(p.amount_paid), 0);
-  const balance = grandTotal - paid;
+  const tableEndY = doc.lastAutoTable.finalY + 6;
 
-  const rightCol = pageWidth - margin;
-  const labelCol = rightCol - 52;
-  let ty = tableEndY + 7;
-
-  const drawTotalRow = (label, value, bold, color) => {
-    doc.setFontSize(10);
-    doc.setFont('helvetica', bold ? 'bold' : 'normal');
-    doc.setTextColor(...(color || [60, 60, 60]));
-    doc.text(label, labelCol, ty, { align: 'right' });
-    doc.text(value, rightCol, ty, { align: 'right' });
-    ty += 7;
-  };
-
-  drawTotalRow('Subtotal:', `₦${grandTotal.toLocaleString()}`);
-  doc.setDrawColor(220);
-  doc.line(labelCol - 30, ty - 3, rightCol, ty - 3);
-  drawTotalRow('GRAND TOTAL:', `₦${grandTotal.toLocaleString()}`, true, [245, 166, 35]);
-
-  if (paid > 0) {
-    drawTotalRow('Amount Paid:', `₦${paid.toLocaleString()}`, false, [34, 180, 120]);
-    doc.setDrawColor(220);
-    doc.line(labelCol - 30, ty - 3, rightCol, ty - 3);
-    drawTotalRow('BALANCE DUE:', `₦${balance.toLocaleString()}`, true, [220, 60, 60]);
-  }
-
-  // ── BANK DETAILS ──────────────────────────────────────────────
-  const bankY = ty + 6;
-  doc.setFillColor(248, 248, 248);
-  doc.roundedRect(margin, bankY, 90, 30, 2, 2, 'F');
+  // ── IMPORTANT NOTICES + AUTHORISED BY ────────────────────────
+  const notices = [
+    'Invoice valid for 48 HOURS from date of issue. After this, invoice becomes void.',
+    'All prices are inclusive of VAT at 7.5%.',
+    'No refunds except for reasonable and justifiable cause, submitted in writing within 48 hours of delivery.',
+    'Block prices are fixed after payment. Delivery costs are subject to change without notice.',
+    'If delivery is not requested within 2 months of payment, material prices are subject to review.',
+    'Payment must be confirmed before delivery commences.',
+  ];
 
   doc.setFontSize(8);
   doc.setFont('helvetica', 'bold');
-  doc.setTextColor(100);
-  doc.text('PAYMENT DETAILS', margin + 4, bankY + 6);
+  doc.setTextColor(40);
+  doc.text('IMPORTANT NOTICES:', ml, tableEndY + 5);
 
-  doc.setFontSize(9.5);
+  let noticeY = tableEndY + 10;
   doc.setFont('helvetica', 'normal');
-  doc.setTextColor(20);
-  doc.text('Bank:', margin + 4, bankY + 13);
-  doc.text('Account Name:', margin + 4, bankY + 19);
-  doc.text('Account Number:', margin + 4, bankY + 25);
+  doc.setTextColor(55);
+  notices.forEach((text, i) => {
+    const lines = doc.splitTextToSize(`${i + 1}. ${text}`, colW - 4);
+    doc.setFontSize(7.5);
+    doc.text(lines, ml, noticeY);
+    noticeY += lines.length * 3.8 + 1.5;
+  });
 
+  // Right column: AUTHORISED BY box
+  const authX    = mid + 5;
+  const authBoxY = tableEndY + 5;
+  const authBoxH = noticeY - authBoxY + 2;
+
+  doc.setFontSize(8);
   doc.setFont('helvetica', 'bold');
-  doc.text('TAJ BANK NIG', margin + 28, bankY + 13);
-  doc.text('ABUJA PRECAST CONCRETE LTD', margin + 36, bankY + 19);
-  doc.text('0001732895', margin + 40, bankY + 25);
+  doc.setTextColor(40);
+  doc.text('AUTHORISED BY:', authX, tableEndY + 5);
 
-  // ── FOOTER ────────────────────────────────────────────────────
-  doc.setDrawColor(220);
-  doc.line(margin, pageHeight - 18, pageWidth - margin, pageHeight - 18);
+  doc.setDrawColor(170);
+  doc.setLineWidth(0.4);
+  doc.rect(authX, authBoxY + 6, colW - 6, Math.max(authBoxH - 6, 28));
+
   doc.setFontSize(8);
   doc.setFont('helvetica', 'italic');
-  doc.setTextColor(160);
+  doc.setTextColor(190);
+  const boxMidX = authX + (colW - 6) / 2;
+  const boxMidY = authBoxY + 6 + Math.max(authBoxH - 6, 28) / 2;
+  doc.text('Stamp & Signature', boxMidX, boxMidY, { align: 'center' });
+
+  const sectionEndY = noticeY + 4;
+
+  // ── PAYMENT DETAILS ───────────────────────────────────────────
+  doc.setDrawColor(180);
+  doc.setLineWidth(0.4);
+  doc.line(ml, sectionEndY, mr, sectionEndY);
+
+  doc.setFontSize(8.5);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(40);
+  doc.text('PAYMENT DETAILS', ml, sectionEndY + 6);
+
+  const labelX  = ml;
+  const valueX  = ml + 32;
+  const payRowH = 5;
+  let payY = sectionEndY + 12;
+
+  [
+    ['Account Name:', 'ABUJA PRECAST CONCRETE LTD'],
+    ['Bank:',         'TAJ BANK PLC'],
+    ['Account No:',   '0001732895'],
+  ].forEach(([label, value]) => {
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(80);
+    doc.setFontSize(9);
+    doc.text(label, labelX, payY);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(20);
+    doc.text(value, valueX, payY);
+    payY += payRowH;
+  });
+
+  // ── FOOTER ────────────────────────────────────────────────────
+  const footerY = payY + 6;
+  doc.setDrawColor(200);
+  doc.setLineWidth(0.3);
+  doc.line(ml, footerY, mr, footerY);
+
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(245, 166, 35);
+  doc.text('THANK YOU FOR YOUR PATRONAGE!', W / 2, footerY + 7, { align: 'center' });
+
+  doc.setFontSize(7.5);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(90);
   doc.text(
-    'Thank you for choosing Abuja Precast Concrete Limited. Payment due within 30 days of invoice date.',
-    pageWidth / 2, pageHeight - 12, { align: 'center' }
+    '1, Dutse Alhaji, Behind Tipper Garage, Beside Istanbul Quarry, Off Bwari Expressway, Bmuko Village, Abuja, Nigeria.',
+    W / 2, footerY + 13, { align: 'center' }
   );
   doc.text(
-    'RC: 1838184 | No. 1, Off Bwari Road, Abuja, Nigeria | +234 905 554 4433',
-    pageWidth / 2, pageHeight - 7, { align: 'center' }
+    'Tel: 09055541433, 07030647949   |   Email: iabujaprecast@gmail.com',
+    W / 2, footerY + 18, { align: 'center' }
   );
 
-  doc.save(`${invoice.invoice_number}.pdf`);
+  doc.save(`${invoice.invoice_number || 'invoice'}.pdf`);
 }
