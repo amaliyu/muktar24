@@ -48,6 +48,12 @@ const styles = {
 
 const BLOCK_TYPES = ["9-inch", "6-inch", "Interlock"];
 const ROLES = ["Driver", "Labourer", "Marketer", "Supervisor", "Other"];
+const HOW_HEARD = [
+  { value: "referral", label: "Referral" },
+  { value: "social_media", label: "Social Media" },
+  { value: "drive_by", label: "Drive-By" },
+  { value: "marketer", label: "Brought by Marketer" },
+];
 const fmt = (n) => (n || 0).toLocaleString();
 const naira = (n) => `₦${fmt(n)}`;
 
@@ -486,6 +492,10 @@ const Orders = ({ onNavigate }) => {
   const [showForm, setShowForm] = useState(false);
   const [showPayForm, setShowPayForm] = useState(false);
   const [alert, setAlert] = useState(null);
+  const [customerMode, setCustomerMode] = useState("new");
+  const [allCustomers, setAllCustomers] = useState([]);
+  const [custSearch, setCustSearch] = useState("");
+  const [pickedCustomer, setPickedCustomer] = useState(null);
   const emptyForm = { customerName: "", customerPhone: "", customerLocation: "", marketerId: "", items: [emptyItem()] };
   const [form, setForm] = useState(emptyForm);
   const [payForm, setPayForm] = useState({ amount: "", date: "" });
@@ -493,9 +503,10 @@ const Orders = ({ onNavigate }) => {
   const load = async () => {
     setLoading(true);
     try {
-      const [o, s] = await Promise.all([ordersService.getAll(), staffService.getActive()]);
+      const [o, s, c] = await Promise.all([ordersService.getAll(), staffService.getActive(), customersService.getAll()]);
       setOrders(o);
       setStaff(s);
+      setAllCustomers(c);
       return o;
     } catch {
       setAlert({ type: "error", msg: "Could not load orders." });
@@ -517,18 +528,28 @@ const Orders = ({ onNavigate }) => {
   };
 
   const handleSave = async () => {
-    if (!form.customerName) return setAlert({ type: "error", msg: "Customer name is required." });
+    if (customerMode === "existing" && !pickedCustomer) return setAlert({ type: "error", msg: "Please select a customer." });
+    if (customerMode === "new" && !form.customerName) return setAlert({ type: "error", msg: "Customer name is required." });
     if (form.items.some(i => !i.quantity || !i.unitPrice)) return setAlert({ type: "error", msg: "All items need quantity and unit price." });
     setSaving(true);
     setAlert(null);
     try {
-      const customer = await customersService.create({ name: form.customerName, phone: form.customerPhone || null, location: form.customerLocation || null });
+      let customerId;
+      if (customerMode === "existing") {
+        customerId = pickedCustomer.id;
+      } else {
+        const customer = await customersService.create({ name: form.customerName, phone: form.customerPhone || null, location: form.customerLocation || null });
+        customerId = customer.id;
+      }
       await ordersService.create({
-        order: { customer_id: customer.id, marketer_id: form.marketerId || null, status: "pending" },
+        order: { customer_id: customerId, marketer_id: form.marketerId || null, status: "pending" },
         items: form.items.map(i => ({ block_type: i.blockType, quantity: parseInt(i.quantity), unit_price: parseFloat(i.unitPrice) })),
       });
       await load();
       setForm(emptyForm);
+      setPickedCustomer(null);
+      setCustSearch("");
+      setCustomerMode("new");
       setShowForm(false);
       setAlert({ type: "success", msg: "Order created successfully!" });
     } catch (e) {
@@ -603,21 +624,53 @@ const Orders = ({ onNavigate }) => {
         <div style={{ ...styles.card, marginBottom: "24px", borderColor: theme.accent + "44" }}>
           <div style={styles.sectionTitle}>New Order Request</div>
           <div style={{ marginBottom: "16px", paddingBottom: "16px", borderBottom: `1px solid ${theme.border}` }}>
-            <div style={{ fontSize: "12px", fontWeight: "700", color: theme.textMuted, marginBottom: "10px", textTransform: "uppercase", letterSpacing: "0.06em" }}>Customer Details</div>
-            <div style={styles.grid(3)}>
-              <div style={styles.formGroup}>
-                <label style={styles.label}>Customer Name *</label>
-                <input style={styles.input} placeholder="e.g. Metama Housing" value={form.customerName} onChange={e => setForm({ ...form, customerName: e.target.value })} />
-              </div>
-              <div style={styles.formGroup}>
-                <label style={styles.label}>Phone</label>
-                <input style={styles.input} placeholder="+234..." value={form.customerPhone} onChange={e => setForm({ ...form, customerPhone: e.target.value })} />
-              </div>
-              <div style={styles.formGroup}>
-                <label style={styles.label}>Location</label>
-                <input style={styles.input} placeholder="e.g. Gwarinpa, Abuja" value={form.customerLocation} onChange={e => setForm({ ...form, customerLocation: e.target.value })} />
-              </div>
+            <div style={{ fontSize: "12px", fontWeight: "700", color: theme.textMuted, marginBottom: "10px", textTransform: "uppercase", letterSpacing: "0.06em" }}>Customer</div>
+            <div style={{ display: "flex", gap: "8px", marginBottom: "14px" }}>
+              {["new", "existing"].map(m => (
+                <button key={m} style={{ ...styles.btn(customerMode === m ? "primary" : "secondary"), textTransform: "capitalize" }} onClick={() => { setCustomerMode(m); setPickedCustomer(null); setCustSearch(""); }}>{m === "new" ? "New Customer" : "Existing Customer"}</button>
+              ))}
             </div>
+            {customerMode === "existing" ? (
+              <div>
+                <input style={{ ...styles.input, marginBottom: "10px" }} placeholder="Search by name or phone…" value={custSearch} onChange={e => setCustSearch(e.target.value)} />
+                {custSearch.length > 0 && (
+                  <div style={{ background: theme.surface, borderRadius: "8px", border: `1px solid ${theme.border}`, maxHeight: "160px", overflowY: "auto", marginBottom: "10px" }}>
+                    {allCustomers.filter(c => [c.name, c.phone, c.company_name].some(f => f?.toLowerCase().includes(custSearch.toLowerCase()))).map(c => (
+                      <div key={c.id} onClick={() => { setPickedCustomer(c); setCustSearch(""); }} style={{ padding: "10px 14px", cursor: "pointer", borderBottom: `1px solid ${theme.border}22`, background: pickedCustomer?.id === c.id ? "rgba(245,166,35,0.08)" : "transparent" }}>
+                        <div style={{ fontWeight: "600", fontSize: "13px" }}>{c.name}{c.company_name ? ` — ${c.company_name}` : ""}</div>
+                        <div style={{ fontSize: "11px", color: theme.textMuted }}>{c.phone}{c.location ? ` · ${c.location}` : ""}</div>
+                      </div>
+                    ))}
+                    {allCustomers.filter(c => [c.name, c.phone].some(f => f?.toLowerCase().includes(custSearch.toLowerCase()))).length === 0 && (
+                      <div style={{ padding: "14px", fontSize: "13px", color: theme.textMuted }}>No customers found</div>
+                    )}
+                  </div>
+                )}
+                {pickedCustomer && (
+                  <div style={{ padding: "12px 14px", background: "rgba(245,166,35,0.08)", borderRadius: "8px", border: `1px solid ${theme.accent}44`, fontSize: "13px" }}>
+                    <strong>{pickedCustomer.name}</strong>{pickedCustomer.company_name ? ` · ${pickedCustomer.company_name}` : ""}
+                    <div style={{ fontSize: "11px", color: theme.textMuted, marginTop: "2px" }}>{pickedCustomer.phone} · {pickedCustomer.location}</div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <>
+                <div style={styles.grid(3)}>
+                  <div style={styles.formGroup}>
+                    <label style={styles.label}>Customer Name *</label>
+                    <input style={styles.input} placeholder="e.g. Metama Housing" value={form.customerName} onChange={e => setForm({ ...form, customerName: e.target.value })} />
+                  </div>
+                  <div style={styles.formGroup}>
+                    <label style={styles.label}>Phone</label>
+                    <input style={styles.input} placeholder="+234…" value={form.customerPhone} onChange={e => setForm({ ...form, customerPhone: e.target.value })} />
+                  </div>
+                  <div style={styles.formGroup}>
+                    <label style={styles.label}>Location</label>
+                    <input style={styles.input} placeholder="e.g. Gwarinpa, Abuja" value={form.customerLocation} onChange={e => setForm({ ...form, customerLocation: e.target.value })} />
+                  </div>
+                </div>
+              </>
+            )}
             <div style={styles.formGroup}>
               <label style={styles.label}>Marketer (optional)</label>
               <select style={{ ...styles.input, maxWidth: "260px" }} value={form.marketerId} onChange={e => setForm({ ...form, marketerId: e.target.value })}>
@@ -963,6 +1016,244 @@ const Waybills = () => {
   );
 };
 
+// ── CUSTOMERS ─────────────────────────────────────────────────
+const Customers = () => {
+  const [customers, setCustomers] = useState([]);
+  const [staff, setStaff] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [editMode, setEditMode] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [alert, setAlert] = useState(null);
+  const today = new Date().toISOString().split("T")[0];
+  const emptyForm = { name: "", company_name: "", phone: "", email: "", location: "", how_heard: "", added_by: "", date_registered: today };
+  const [form, setForm] = useState(emptyForm);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [c, s] = await Promise.all([customersService.getAllWithStats(), staffService.getAll()]);
+      setCustomers(c);
+      setStaff(s);
+      return c;
+    } catch {
+      setAlert({ type: "error", msg: "Could not load customers." });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const filtered = customers.filter(c => {
+    const q = search.toLowerCase();
+    return !q || [c.name, c.phone, c.location, c.company_name].some(f => f?.toLowerCase().includes(q));
+  });
+
+  const getStats = (c) => {
+    const orders = c.orders || [];
+    const totalValue = orders.reduce((s, o) => s + (o.order_items || []).reduce((si, i) => si + Number(i.subtotal ?? i.quantity * i.unit_price), 0), 0);
+    const totalPaid = orders.reduce((s, o) => s + (o.invoices || []).flatMap(inv => inv.payments || []).filter(p => p.status === "confirmed").reduce((sp, p) => sp + Number(p.amount_paid), 0), 0);
+    return { totalValue, totalPaid, outstanding: totalValue - totalPaid, orderCount: orders.length };
+  };
+
+  const startEdit = (c) => {
+    setForm({ name: c.name || "", company_name: c.company_name || "", phone: c.phone || "", email: c.email || "", location: c.location || "", how_heard: c.how_heard || "", added_by: c.added_by || "", date_registered: c.date_registered || today });
+    setEditMode(true);
+  };
+
+  const handleSave = async () => {
+    if (!form.name || !form.phone) return setAlert({ type: "error", msg: "Name and phone are required." });
+    setSaving(true);
+    try {
+      const payload = { name: form.name, company_name: form.company_name || null, phone: form.phone, email: form.email || null, location: form.location || null, how_heard: form.how_heard || null, added_by: form.added_by || null, date_registered: form.date_registered || today };
+      const saved = await customersService.create(payload);
+      const newList = await load();
+      setShowForm(false);
+      setForm(emptyForm);
+      if (newList) setSelected(newList.find(c => c.id === saved.id) || null);
+      setAlert({ type: "success", msg: `${saved.name} registered successfully!` });
+    } catch (e) {
+      setAlert({ type: "error", msg: "Failed to register. " + e.message });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleUpdate = async () => {
+    if (!form.name || !form.phone) return setAlert({ type: "error", msg: "Name and phone are required." });
+    setSaving(true);
+    try {
+      await customersService.update(selected.id, { name: form.name, company_name: form.company_name || null, phone: form.phone, email: form.email || null, location: form.location || null, how_heard: form.how_heard || null, added_by: form.added_by || null });
+      const newList = await load();
+      if (newList) setSelected(newList.find(c => c.id === selected.id) || null);
+      setEditMode(false);
+      setAlert({ type: "success", msg: "Customer updated!" });
+    } catch (e) {
+      setAlert({ type: "error", msg: "Failed to update. " + e.message });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const howHeardLabel = (v) => HOW_HEARD.find(h => h.value === v)?.label || v || "—";
+  const statusColor = (s) => s === "completed" ? theme.green : s === "invoiced" ? theme.blue : s === "cancelled" ? theme.red : theme.accent;
+
+  const CustomerForm = ({ onSubmit, onCancel, submitLabel }) => (
+    <div style={{ ...styles.card, marginBottom: "24px", borderColor: theme.accent + "44" }}>
+      <div style={styles.sectionTitle}>{submitLabel === "Register" ? "Register New Customer" : "Edit Customer"}</div>
+      <div style={styles.grid(3)}>
+        {[{ label: "Full Name *", key: "name", placeholder: "e.g. Emeka Okafor" }, { label: "Company Name", key: "company_name", placeholder: "Optional" }, { label: "Phone *", key: "phone", placeholder: "+234…" }, { label: "Email", key: "email", placeholder: "Optional" }, { label: "Site Location / Delivery Address", key: "location", placeholder: "e.g. Gwarinpa, Abuja" }].map(f => (
+          <div key={f.key} style={styles.formGroup}>
+            <label style={styles.label}>{f.label}</label>
+            <input style={styles.input} placeholder={f.placeholder} value={form[f.key]} onChange={e => setForm({ ...form, [f.key]: e.target.value })} />
+          </div>
+        ))}
+        <div style={styles.formGroup}>
+          <label style={styles.label}>How They Heard About Us</label>
+          <select style={styles.input} value={form.how_heard} onChange={e => setForm({ ...form, how_heard: e.target.value })}>
+            <option value="">— Select —</option>
+            {HOW_HEARD.map(h => <option key={h.value} value={h.value}>{h.label}</option>)}
+          </select>
+        </div>
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Marketer</label>
+          <select style={styles.input} value={form.added_by} onChange={e => setForm({ ...form, added_by: e.target.value })}>
+            <option value="">— None —</option>
+            {staff.map(s => <option key={s.id} value={s.id}>{s.full_name} ({s.role})</option>)}
+          </select>
+        </div>
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Date Registered</label>
+          <input style={styles.input} type="date" value={form.date_registered} onChange={e => setForm({ ...form, date_registered: e.target.value })} />
+        </div>
+      </div>
+      <div style={styles.row}>
+        <button style={styles.btn("primary")} onClick={onSubmit} disabled={saving}>{saving ? "Saving…" : submitLabel}</button>
+        <button style={styles.btn("secondary")} onClick={onCancel}>Cancel</button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div>
+      <div style={styles.header}>
+        <div>
+          <div style={styles.pageTitle}>Customer Registry</div>
+          <div style={styles.pageSubtitle}>All customers, order history, and account balances</div>
+        </div>
+        <button style={styles.btn("primary")} onClick={() => { setShowForm(!showForm); setEditMode(false); setForm(emptyForm); }}>+ Register Customer</button>
+      </div>
+
+      {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
+      {showForm && !editMode && <CustomerForm onSubmit={handleSave} onCancel={() => setShowForm(false)} submitLabel="Register" />}
+
+      <div style={styles.grid(3)}>
+        <StatCard label="Total Customers" value={customers.length} sub="All registered" accent={theme.blue} />
+        <StatCard label="This Month" value={customers.filter(c => c.created_at?.startsWith(new Date().toISOString().slice(0, 7))).length} sub="New registrations" accent={theme.green} />
+        <StatCard label="With Active Orders" value={customers.filter(c => (c.orders || []).some(o => o.status !== "completed" && o.status !== "cancelled")).length} sub="Pending/in progress" accent={theme.accent} />
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1.6fr", gap: "16px" }}>
+        <div style={styles.card}>
+          <div style={{ marginBottom: "12px" }}>
+            <input style={styles.input} placeholder="Search by name, phone, or location…" value={search} onChange={e => setSearch(e.target.value)} />
+          </div>
+          <div style={{ fontSize: "11px", color: theme.textMuted, marginBottom: "8px" }}>{filtered.length} customer{filtered.length !== 1 ? "s" : ""}</div>
+          {loading ? <Spinner /> : filtered.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "30px", color: theme.textMuted, fontSize: "13px" }}>No customers found.</div>
+          ) : (
+            <div style={{ maxHeight: "600px", overflowY: "auto" }}>
+              {filtered.map(c => {
+                const { totalValue, outstanding, orderCount } = getStats(c);
+                return (
+                  <div key={c.id} onClick={() => { setSelected(c); setEditMode(false); }} style={{ padding: "12px 14px", borderRadius: "8px", marginBottom: "6px", cursor: "pointer", border: `1px solid ${selected?.id === c.id ? theme.accent + "66" : theme.border}`, background: selected?.id === c.id ? "rgba(245,166,35,0.06)" : "transparent", transition: "all 0.15s" }}>
+                    <div style={{ fontWeight: "600", fontSize: "13px" }}>{c.name}</div>
+                    {c.company_name && <div style={{ fontSize: "11px", color: theme.accent, marginTop: "1px" }}>{c.company_name}</div>}
+                    <div style={{ fontSize: "11px", color: theme.textMuted, marginTop: "2px" }}>{c.phone}{c.location ? ` · ${c.location}` : ""}</div>
+                    <div style={{ display: "flex", gap: "12px", marginTop: "6px", fontSize: "11px" }}>
+                      <span style={{ color: theme.textMuted }}>{orderCount} order{orderCount !== 1 ? "s" : ""}</span>
+                      <span style={{ color: theme.accent }}>{naira(totalValue)}</span>
+                      {outstanding > 0 && <span style={{ color: theme.red }}>Owes {naira(outstanding)}</span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div style={styles.card}>
+          {!selected ? (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "300px", color: theme.textMuted, fontSize: "13px" }}>← Select a customer to view profile</div>
+          ) : editMode ? (
+            <CustomerForm onSubmit={handleUpdate} onCancel={() => setEditMode(false)} submitLabel="Save Changes" />
+          ) : (() => {
+            const { totalValue, totalPaid, outstanding, orderCount } = getStats(selected);
+            const orders = selected.orders || [];
+            return (
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "16px" }}>
+                  <div>
+                    <div style={{ fontSize: "18px", fontWeight: "700", color: theme.text }}>{selected.name}</div>
+                    {selected.company_name && <div style={{ fontSize: "13px", color: theme.accent, marginTop: "2px" }}>{selected.company_name}</div>}
+                    <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "4px", display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                      {selected.phone && <span>📞 {selected.phone}</span>}
+                      {selected.email && <span>✉️ {selected.email}</span>}
+                      {selected.location && <span>📍 {selected.location}</span>}
+                    </div>
+                    <div style={{ display: "flex", gap: "8px", marginTop: "8px", flexWrap: "wrap" }}>
+                      {selected.how_heard && <span style={styles.badge(theme.blue)}>{howHeardLabel(selected.how_heard)}</span>}
+                      {selected.marketer?.full_name && <span style={styles.badge(theme.green)}>via {selected.marketer.full_name}</span>}
+                      {selected.date_registered && <span style={{ fontSize: "11px", color: theme.textMuted }}>Registered: {selected.date_registered}</span>}
+                    </div>
+                  </div>
+                  <button style={styles.btn("secondary")} onClick={() => startEdit(selected)}>Edit Details</button>
+                </div>
+
+                <div style={styles.grid(4)}>
+                  <StatCard label="Orders" value={orderCount} sub="All time" accent={theme.blue} />
+                  <StatCard label="Total Value" value={naira(totalValue)} sub="All orders" accent={theme.accent} />
+                  <StatCard label="Total Paid" value={naira(totalPaid)} sub="Confirmed" accent={theme.green} />
+                  <StatCard label="Outstanding" value={naira(outstanding)} sub="Balance due" accent={outstanding > 0 ? theme.red : theme.green} />
+                </div>
+
+                <div style={{ ...styles.sectionTitle, marginBottom: "10px" }}>Order History</div>
+                {orders.length === 0 ? (
+                  <div style={{ textAlign: "center", padding: "20px", color: theme.textMuted, fontSize: "13px" }}>No orders yet.</div>
+                ) : (
+                  <table style={styles.table}>
+                    <thead>
+                      <tr>{["Date", "Items", "Value", "Paid", "Status"].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
+                    </thead>
+                    <tbody>
+                      {orders.map(o => {
+                        const val = (o.order_items || []).reduce((s, i) => s + Number(i.subtotal ?? i.quantity * i.unit_price), 0);
+                        const paid = (o.invoices || []).flatMap(inv => inv.payments || []).filter(p => p.status === "confirmed").reduce((s, p) => s + Number(p.amount_paid), 0);
+                        return (
+                          <tr key={o.id}>
+                            <td style={styles.td}>{o.created_at?.split("T")[0]}</td>
+                            <td style={styles.td}>{(o.order_items || []).map(i => i.block_type).join(", ") || "—"}</td>
+                            <td style={styles.td}><strong style={{ color: theme.accent }}>{naira(val)}</strong></td>
+                            <td style={styles.td}><span style={{ color: theme.green }}>{naira(paid)}</span></td>
+                            <td style={styles.td}><span style={styles.badge(statusColor(o.status))}>{o.status}</span></td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            );
+          })()}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // ── REPORTS ───────────────────────────────────────────────────
 const Reports = () => (
   <div>
@@ -999,14 +1290,14 @@ const Reports = () => (
 const navItems = [
   { section: "Overview", items: [{ id: "dashboard", label: "Dashboard", icon: "dashboard" }] },
   { section: "Operations", items: [{ id: "production", label: "Production", icon: "production" }, { id: "waybills", label: "Waybills", icon: "waybill" }, { id: "staff", label: "Staff", icon: "staff" }] },
-  { section: "Sales", items: [{ id: "orders", label: "Orders & Invoicing", icon: "orders" }] },
+  { section: "Sales", items: [{ id: "customers", label: "Customers", icon: "staff" }, { id: "orders", label: "Orders & Invoicing", icon: "orders" }] },
   { section: "Analytics", items: [{ id: "reports", label: "Reports", icon: "reports" }] },
 ];
 
 // ── APP ───────────────────────────────────────────────────────
 export default function App() {
   const [active, setActive] = useState("dashboard");
-  const pages = { dashboard: <Dashboard />, production: <Production />, waybills: <Waybills />, staff: <Staff />, orders: <Orders onNavigate={setActive} />, reports: <Reports /> };
+  const pages = { dashboard: <Dashboard />, production: <Production />, waybills: <Waybills />, staff: <Staff />, customers: <Customers />, orders: <Orders onNavigate={setActive} />, reports: <Reports /> };
 
   return (
     <div style={styles.app}>

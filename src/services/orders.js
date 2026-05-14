@@ -6,7 +6,7 @@ export const ordersService = {
       .from('orders')
       .select(`
         *,
-        customer:customer_id(id, name, location, phone),
+        customer:customer_id(id, name, company_name, location, phone),
         marketer:marketer_id(id, full_name),
         order_items(*),
         invoices(id, invoice_number, total_amount, issued_date, due_date, payments(id, amount_paid, status))
@@ -21,7 +21,7 @@ export const ordersService = {
       .from('orders')
       .select(`
         *,
-        customer:customer_id(id, name, location, phone),
+        customer:customer_id(id, name, company_name, location, phone),
         marketer:marketer_id(id, full_name),
         order_items(*),
         invoices(*, payments(*)),
@@ -72,10 +72,38 @@ export const customersService = {
     return data
   },
 
+  async getAllWithStats() {
+    const { data, error } = await supabase
+      .from('customers')
+      .select(`
+        *,
+        marketer:added_by(id, full_name),
+        orders(
+          id, status, created_at,
+          order_items(quantity, unit_price, subtotal),
+          invoices(id, payments(amount_paid, status))
+        )
+      `)
+      .order('created_at', { ascending: false })
+    if (error) throw error
+    return data
+  },
+
   async create(customer) {
     const { data, error } = await supabase
       .from('customers')
       .insert(customer)
+      .select()
+      .single()
+    if (error) throw error
+    return data
+  },
+
+  async update(id, updates) {
+    const { data, error } = await supabase
+      .from('customers')
+      .update(updates)
+      .eq('id', id)
       .select()
       .single()
     if (error) throw error
