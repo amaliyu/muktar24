@@ -6,10 +6,10 @@ export const ordersService = {
       .from('orders')
       .select(`
         *,
-        customer:customer_id(id, name, company_name, location, phone),
+        customer:customer_id(*),
         marketer:marketer_id(id, full_name),
         order_items(*),
-        invoices(id, invoice_number, total_amount, issued_date, due_date, payments(id, amount_paid, status))
+        invoices(id, invoice_number, total_amount, issued_date, due_date, payments(id, amount_paid, payment_date, status))
       `)
       .order('created_at', { ascending: false })
     if (error) throw error

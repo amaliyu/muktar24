@@ -509,8 +509,8 @@ const Orders = ({ onNavigate }) => {
       setStaff(s);
       setAllCustomers(c);
       return o;
-    } catch {
-      setAlert({ type: "error", msg: "Could not load orders." });
+    } catch (e) {
+      setAlert({ type: "error", msg: "Could not load orders: " + (e?.message || String(e)) });
     } finally {
       setLoading(false);
     }
