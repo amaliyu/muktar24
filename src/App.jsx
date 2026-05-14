@@ -853,15 +853,19 @@ const Waybills = () => {
   const load = async () => {
     setLoading(true);
     try {
-      const [w, s, orders] = await Promise.all([waybillsService.getAll(), staffService.getActive(), ordersService.getAll()]);
+      const [w, s] = await Promise.all([waybillsService.getAll(), staffService.getActive()]);
       setWaybills(w);
       setStaff(s);
-      setActiveOrders(orders.filter(o => ["invoiced", "in_progress"].includes(o.status)));
     } catch {
       setAlert({ type: "error", msg: "Could not load waybills." });
-    } finally {
-      setLoading(false);
     }
+    try {
+      const orders = await ordersService.getAll();
+      setActiveOrders(orders.filter(o => ["invoiced", "in_progress"].includes(o.status)));
+    } catch {
+      // silently fail — waybills still display, dropdown will be empty
+    }
+    setLoading(false);
   };
 
   useEffect(() => { load(); }, []);
