@@ -5,6 +5,7 @@ import { ordersService, customersService } from './services/orders';
 import { waybillsService } from './services/deliveries';
 import { invoicesService, paymentsService } from './services/payments';
 import { generateInvoicePDF } from './utils/generateInvoicePDF';
+import { generateStatementPDF } from './utils/generateStatementPDF';
 
 const theme = {
   bg: "#0f1117", surface: "#1a1d27", card: "#21263a", border: "#2e3452",
@@ -1030,6 +1031,9 @@ const Customers = () => {
   const today = new Date().toISOString().split("T")[0];
   const emptyForm = { name: "", company_name: "", phone: "", email: "", location: "", how_heard: "", added_by: "", date_registered: today };
   const [form, setForm] = useState(emptyForm);
+  const [stmtFrom, setStmtFrom] = useState("");
+  const [stmtTo, setStmtTo] = useState("");
+  const [stmtLoading, setStmtLoading] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -1099,6 +1103,18 @@ const Customers = () => {
   };
 
   const howHeardLabel = (v) => HOW_HEARD.find(h => h.value === v)?.label || v || "—";
+
+  const handleGenerateStatement = async (customer) => {
+    setStmtLoading(true);
+    try {
+      const orders = await customersService.getStatement(customer.id);
+      await generateStatementPDF(customer, orders, stmtFrom || null, stmtTo || null);
+    } catch (e) {
+      setAlert({ type: "error", msg: "Failed to generate statement. " + e.message });
+    } finally {
+      setStmtLoading(false);
+    }
+  };
   const statusColor = (s) => s === "completed" ? theme.green : s === "invoiced" ? theme.blue : s === "cancelled" ? theme.red : theme.accent;
 
   const CustomerForm = ({ onSubmit, onCancel, submitLabel }) => (
@@ -1245,6 +1261,31 @@ const Customers = () => {
                     </tbody>
                   </table>
                 )}
+
+                <div style={{ marginTop: "20px", paddingTop: "16px", borderTop: `1px solid ${theme.border}` }}>
+                  <div style={{ ...styles.sectionTitle, marginBottom: "10px" }}>Download Statement</div>
+                  <div style={{ display: "flex", gap: "10px", alignItems: "flex-end", flexWrap: "wrap" }}>
+                    <div>
+                      <label style={styles.label}>From Date</label>
+                      <input style={{ ...styles.input, width: "140px" }} type="date" value={stmtFrom} onChange={e => setStmtFrom(e.target.value)} />
+                    </div>
+                    <div>
+                      <label style={styles.label}>To Date</label>
+                      <input style={{ ...styles.input, width: "140px" }} type="date" value={stmtTo} onChange={e => setStmtTo(e.target.value)} />
+                    </div>
+                    <div style={{ display: "flex", gap: "8px" }}>
+                      <button style={styles.btn("primary")} onClick={() => handleGenerateStatement(selected)} disabled={stmtLoading}>
+                        {stmtLoading ? "Generating…" : "Download Statement PDF"}
+                      </button>
+                      {(stmtFrom || stmtTo) && (
+                        <button style={styles.btn("secondary")} onClick={() => { setStmtFrom(""); setStmtTo(""); }}>Clear</button>
+                      )}
+                    </div>
+                  </div>
+                  <div style={{ fontSize: "11px", color: theme.textMuted, marginTop: "6px" }}>
+                    {stmtFrom || stmtTo ? `Showing: ${stmtFrom || "all time"} → ${stmtTo || "present"}` : "Showing: all time (set dates to filter)"}
+                  </div>
+                </div>
               </div>
             );
           })()}

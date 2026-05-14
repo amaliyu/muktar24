@@ -109,4 +109,21 @@ export const customersService = {
     if (error) throw error
     return data
   },
+
+  async getStatement(customerId) {
+    const { data, error } = await supabase
+      .from('orders')
+      .select(`
+        id, created_at,
+        order_items(block_type, quantity, unit_price, subtotal),
+        invoices(
+          id, invoice_number, total_amount, issued_date,
+          payments(id, amount_paid, payment_date, status)
+        )
+      `)
+      .eq('customer_id', customerId)
+      .order('created_at', { ascending: true })
+    if (error) throw error
+    return data || []
+  },
 }
