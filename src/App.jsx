@@ -841,19 +841,22 @@ const Orders = ({ onNavigate }) => {
 const Waybills = () => {
   const [waybills, setWaybills] = useState([]);
   const [staff, setStaff] = useState([]);
+  const [activeOrders, setActiveOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [alert, setAlert] = useState(null);
-  const emptyForm = { waybillDate: "", driverId: "", truckNumber: "", blockType: "9-inch", quantityLoaded: "", quantityReceived: "", quantityDamaged: "0", receiverName: "", notes: "" };
+  const [selectedOrderId, setSelectedOrderId] = useState("");
+  const emptyForm = { waybillDate: "", driverId: "", truckNumber: "", blockType: "9-inch", quantityLoaded: "", quantityReceived: "", quantityDamaged: "0", notes: "" };
   const [form, setForm] = useState(emptyForm);
 
   const load = async () => {
     setLoading(true);
     try {
-      const [w, s] = await Promise.all([waybillsService.getAll(), staffService.getActive()]);
+      const [w, s, orders] = await Promise.all([waybillsService.getAll(), staffService.getActive(), ordersService.getAll()]);
       setWaybills(w);
       setStaff(s);
+      setActiveOrders(orders.filter(o => ["invoiced", "in_progress"].includes(o.status)));
     } catch {
       setAlert({ type: "error", msg: "Could not load waybills." });
     } finally {
@@ -863,7 +866,10 @@ const Waybills = () => {
 
   useEffect(() => { load(); }, []);
 
+  const selectedOrder = activeOrders.find(o => o.id === selectedOrderId) || null;
+
   const handleSave = async () => {
+    if (!selectedOrderId) return setAlert({ type: "error", msg: "Select a customer with an active invoice before recording a waybill." });
     if (!form.waybillDate || !form.quantityLoaded) return setAlert({ type: "error", msg: "Date and quantity loaded are required." });
     setSaving(true);
     setAlert(null);
@@ -880,7 +886,7 @@ const Waybills = () => {
         quantity_loaded: parseInt(form.quantityLoaded) || 0,
         quantity_received: parseInt(form.quantityReceived) || 0,
         quantity_damaged: damaged,
-        receiver_name: form.receiverName || null,
+        receiver_name: selectedOrder?.customer?.name || null,
         waybill_date: form.waybillDate,
         notes: form.notes || null,
       });
@@ -897,8 +903,9 @@ const Waybills = () => {
 
       await load();
       setForm(emptyForm);
+      setSelectedOrderId("");
       setShowForm(false);
-      setAlert({ type: "success", msg: `Waybill ${waybillNumber} recorded${damaged > 0 ? " — transit damage logged automatically." : "."}` });
+      setAlert({ type: "success", msg: `Waybill ${waybillNumber} recorded for ${selectedOrder?.customer?.name}${damaged > 0 ? " — transit damage logged automatically." : "."}` });
     } catch (e) {
       setAlert({ type: "error", msg: "Failed to save waybill. " + e.message });
     } finally {
@@ -960,8 +967,16 @@ const Waybills = () => {
               <input style={styles.input} type="number" placeholder="0" value={form.quantityDamaged} onChange={e => setForm({ ...form, quantityDamaged: e.target.value })} />
             </div>
             <div style={styles.formGroup}>
-              <label style={styles.label}>Receiver Name</label>
-              <input style={styles.input} placeholder="e.g. Mr. Tunde" value={form.receiverName} onChange={e => setForm({ ...form, receiverName: e.target.value })} />
+              <label style={styles.label}>Receiver (Customer with Active Invoice) *</label>
+              <select style={{ ...styles.input, borderColor: !selectedOrderId ? theme.red + "88" : theme.border }} value={selectedOrderId} onChange={e => setSelectedOrderId(e.target.value)}>
+                <option value="">— Select customer —</option>
+                {activeOrders.map(o => (
+                  <option key={o.id} value={o.id}>
+                    {o.customer?.name}{o.customer?.location ? ` · ${o.customer.location}` : ""} — {o.invoices?.[0]?.invoice_number || "Invoice"}
+                  </option>
+                ))}
+              </select>
+              {activeOrders.length === 0 && <div style={{ fontSize: "11px", color: theme.red, marginTop: "4px" }}>No customers with active invoices. Generate an invoice first.</div>}
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Notes</label>
@@ -975,7 +990,7 @@ const Waybills = () => {
           )}
           <div style={styles.row}>
             <button style={styles.btn("primary")} onClick={handleSave} disabled={saving}>{saving ? "Saving…" : "Record Waybill"}</button>
-            <button style={styles.btn("secondary")} onClick={() => { setShowForm(false); setForm(emptyForm); }}>Cancel</button>
+            <button style={styles.btn("secondary")} onClick={() => { setShowForm(false); setForm(emptyForm); setSelectedOrderId(""); }}>Cancel</button>
           </div>
         </div>
       )}
