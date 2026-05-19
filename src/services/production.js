@@ -48,4 +48,10 @@ export const productionService = {
     if (error) throw error
     return data
   },
+
+  async deleteEntry(id) {
+    await supabase.from('damage_log').delete().eq('production_log_id', id)
+    const { error } = await supabase.from('production_log').delete().eq('id', id)
+    if (error) throw error
+  },
 }

@@ -70,6 +70,19 @@ const Alert = ({ msg, type = "error", onClose }) => (
   </div>
 );
 
+const ConfirmModal = ({ msg, onConfirm, onCancel }) => (
+  <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+    <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: "12px", padding: "28px 32px", maxWidth: "380px", width: "90%" }}>
+      <div style={{ fontWeight: "700", fontSize: "15px", marginBottom: "10px", color: theme.text }}>Confirm Delete</div>
+      <div style={{ fontSize: "13px", color: theme.textMuted, marginBottom: "24px", lineHeight: "1.5" }}>{msg}</div>
+      <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
+        <button style={styles.btn("secondary")} onClick={onCancel}>Cancel</button>
+        <button style={styles.btn("danger")} onClick={onConfirm}>Delete</button>
+      </div>
+    </div>
+  </div>
+);
+
 const Icon = ({ name, size = 16 }) => {
   const icons = { dashboard: "⊞", production: "🏭", orders: "📋", staff: "👥", waybill: "📄", reports: "📊", settings: "⚙", logout: "→" };
   return <span style={{ fontSize: size }}>{icons[name] || "•"}</span>;
@@ -181,6 +194,7 @@ const Production = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [alert, setAlert] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(null);
   const emptyForm = { date: "", blockType: "9-inch", produced: "", cement: "", granite: "", diesel: "", dmgProd: "0", dmgStack: "0" };
   const [form, setForm] = useState(emptyForm);
 
@@ -236,6 +250,18 @@ const Production = () => {
     }
   };
 
+  const handleDelete = async (id) => {
+    try {
+      await productionService.deleteEntry(id);
+      setRecords(prev => prev.filter(r => r.id !== id));
+      setAlert({ type: "success", msg: "Entry deleted." });
+    } catch (e) {
+      setAlert({ type: "error", msg: "Failed to delete. " + e.message });
+    } finally {
+      setConfirmDelete(null);
+    }
+  };
+
   const totalProduced = records.reduce((s, r) => s + (r.quantity_produced || 0), 0);
   const totalCement = records.reduce((s, r) => s + (r.cement_bags || 0), 0);
   const totalDiesel = records.reduce((s, r) => s + (r.diesel_litres || 0), 0);
@@ -243,6 +269,7 @@ const Production = () => {
 
   return (
     <div>
+      {confirmDelete && <ConfirmModal msg={`Delete production entry for ${confirmDelete.date}? This will also remove any linked damage records.`} onConfirm={() => handleDelete(confirmDelete.id)} onCancel={() => setConfirmDelete(null)} />}
       <div style={styles.header}>
         <div>
           <div style={styles.pageTitle}>Production Log</div>
@@ -306,7 +333,7 @@ const Production = () => {
         ) : (
           <table style={styles.table}>
             <thead>
-              <tr>{["Date", "Block Type", "Produced", "Cement (bags)", "Granite (kg)", "Diesel (L)", "Dmg Production", "Dmg Stacking", "Net Output"].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
+              <tr>{["Date", "Block Type", "Produced", "Cement (bags)", "Granite (kg)", "Diesel (L)", "Dmg Production", "Dmg Stacking", "Net Output", ""].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
             </thead>
             <tbody>
               {records.map((p) => {
@@ -322,6 +349,7 @@ const Production = () => {
                     <td style={styles.td}><span style={styles.badge(p.damaged?.production > 0 ? theme.red : theme.green)}>{p.damaged?.production || 0}</span></td>
                     <td style={styles.td}><span style={styles.badge(p.damaged?.stacking > 0 ? theme.red : theme.green)}>{p.damaged?.stacking || 0}</span></td>
                     <td style={styles.td}><strong style={{ color: theme.green }}>{fmt(net)}</strong></td>
+                    <td style={styles.td}><button style={{ ...styles.btn("danger"), padding: "4px 10px", fontSize: "11px" }} onClick={() => setConfirmDelete(p)}>Delete</button></td>
                   </tr>
                 );
               })}
@@ -493,6 +521,7 @@ const Orders = ({ onNavigate }) => {
   const [showForm, setShowForm] = useState(false);
   const [showPayForm, setShowPayForm] = useState(false);
   const [alert, setAlert] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(null);
   const [customerMode, setCustomerMode] = useState("new");
   const [allCustomers, setAllCustomers] = useState([]);
   const [custSearch, setCustSearch] = useState("");
@@ -604,6 +633,32 @@ const Orders = ({ onNavigate }) => {
     }
   };
 
+  const handleDeleteOrder = async (id) => {
+    try {
+      await ordersService.delete(id);
+      if (selected?.id === id) setSelected(null);
+      await load();
+      setAlert({ type: "success", msg: "Order deleted." });
+    } catch (e) {
+      setAlert({ type: "error", msg: "Failed to delete order. " + e.message });
+    } finally {
+      setConfirmDelete(null);
+    }
+  };
+
+  const handleDeletePayment = async (paymentId) => {
+    try {
+      await paymentsService.deletePayment(paymentId);
+      const newOrders = await load();
+      if (newOrders) setSelected(newOrders.find(o => o.id === selected?.id) || null);
+      setAlert({ type: "success", msg: "Payment removed." });
+    } catch (e) {
+      setAlert({ type: "error", msg: "Failed to delete payment. " + e.message });
+    } finally {
+      setConfirmDelete(null);
+    }
+  };
+
   const statusColor = (s) => s === "completed" ? theme.green : s === "invoiced" ? theme.blue : s === "cancelled" ? theme.red : theme.accent;
 
   const totalValue = orders.reduce((s, o) => s + orderTotal(o), 0);
@@ -611,6 +666,7 @@ const Orders = ({ onNavigate }) => {
 
   return (
     <div>
+      {confirmDelete && <ConfirmModal msg={confirmDelete.type === "payment" ? `Remove payment of ${naira(confirmDelete.amount_paid)} recorded on ${confirmDelete.payment_date}? This cannot be undone.` : `Delete order for ${confirmDelete.customer?.name}? This will also delete all invoices and payments.`} onConfirm={() => confirmDelete.type === "payment" ? handleDeletePayment(confirmDelete.id) : handleDeleteOrder(confirmDelete.id)} onCancel={() => setConfirmDelete(null)} />}
       <div style={styles.header}>
         <div>
           <div style={styles.pageTitle}>Orders & Invoicing</div>
@@ -742,7 +798,10 @@ const Orders = ({ onNavigate }) => {
                       <div style={{ fontWeight: "600", fontSize: "14px" }}>{o.customer?.name || "—"}</div>
                       <div style={{ fontSize: "12px", color: theme.textMuted }}>{o.customer?.location} · {o.marketer?.full_name || "No marketer"}</div>
                     </div>
-                    <span style={styles.badge(statusColor(o.status))}>{o.status}</span>
+                    <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                      <span style={styles.badge(statusColor(o.status))}>{o.status}</span>
+                      <button style={{ ...styles.btn("danger"), padding: "3px 9px", fontSize: "11px" }} onClick={e => { e.stopPropagation(); setConfirmDelete(o); }}>Delete</button>
+                    </div>
                   </div>
                   <div style={{ marginTop: "8px", display: "flex", gap: "20px", fontSize: "12px", color: theme.textMuted }}>
                     <span>Value: <strong style={{ color: theme.text }}>{naira(total)}</strong></span>
@@ -790,6 +849,22 @@ const Orders = ({ onNavigate }) => {
                       </div>
                     ))}
                   </div>
+                  {(() => {
+                    const allPayments = (selected.invoices || []).flatMap(inv => (inv.payments || []).map(p => ({ ...p })));
+                    return allPayments.length > 0 ? (
+                      <div style={{ marginTop: "16px", marginBottom: "4px" }}>
+                        <div style={{ fontSize: "11px", fontWeight: "700", color: theme.textMuted, marginBottom: "8px", textTransform: "uppercase", letterSpacing: "0.06em" }}>Payment History</div>
+                        {allPayments.map(p => (
+                          <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: `1px solid ${theme.border}22`, fontSize: "13px" }}>
+                            <span style={{ color: theme.textMuted }}>{p.payment_date}</span>
+                            <span style={{ color: theme.green, fontWeight: "600" }}>{naira(p.amount_paid)}</span>
+                            <span style={styles.badge(p.status === "confirmed" ? theme.green : theme.accent)}>{p.status}</span>
+                            <button style={{ ...styles.btn("danger"), padding: "3px 8px", fontSize: "11px" }} onClick={() => setConfirmDelete({ ...p, type: "payment" })}>Remove</button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null;
+                  })()}
                   <div style={{ marginTop: "16px" }}>
                     <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
                       {(selected.invoices || []).length === 0 ? (
@@ -846,6 +921,7 @@ const Waybills = () => {
   const [saving, setSaving] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [alert, setAlert] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(null);
   const [selectedOrderId, setSelectedOrderId] = useState("");
   const emptyForm = { waybillDate: "", driverId: "", truckNumber: "", blockType: "9-inch", quantityLoaded: "", quantityReceived: "", quantityDamaged: "0", notes: "" };
   const [form, setForm] = useState(emptyForm);
@@ -917,12 +993,25 @@ const Waybills = () => {
     }
   };
 
+  const handleDeleteWaybill = async (id) => {
+    try {
+      await waybillsService.delete(id);
+      setWaybills(prev => prev.filter(w => w.id !== id));
+      setAlert({ type: "success", msg: "Waybill deleted." });
+    } catch (e) {
+      setAlert({ type: "error", msg: "Failed to delete waybill. " + e.message });
+    } finally {
+      setConfirmDelete(null);
+    }
+  };
+
   const totalLoaded = waybills.reduce((s, w) => s + (w.quantity_loaded || 0), 0);
   const totalDamaged = waybills.reduce((s, w) => s + (w.quantity_damaged || 0), 0);
   const damageRate = totalLoaded > 0 ? ((totalDamaged / totalLoaded) * 100).toFixed(2) : "0.00";
 
   return (
     <div>
+      {confirmDelete && <ConfirmModal msg={`Delete waybill ${confirmDelete.waybill_number}? This cannot be undone.`} onConfirm={() => handleDeleteWaybill(confirmDelete.id)} onCancel={() => setConfirmDelete(null)} />}
       <div style={styles.header}>
         <div>
           <div style={styles.pageTitle}>Waybill Records</div>
@@ -1012,7 +1101,7 @@ const Waybills = () => {
         ) : (
           <table style={styles.table}>
             <thead>
-              <tr>{["Waybill No.", "Date", "Driver", "Truck", "Block Type", "Loaded", "Received", "Damaged", "Receiver"].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
+              <tr>{["Waybill No.", "Date", "Driver", "Truck", "Block Type", "Loaded", "Received", "Damaged", "Receiver", ""].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
             </thead>
             <tbody>
               {waybills.map(w => (
@@ -1026,6 +1115,7 @@ const Waybills = () => {
                   <td style={styles.td}><strong style={{ color: theme.green }}>{fmt(w.quantity_received)}</strong></td>
                   <td style={styles.td}><span style={styles.badge(w.quantity_damaged > 0 ? theme.red : theme.green)}>{w.quantity_damaged}</span></td>
                   <td style={styles.td}>{w.receiver_name || "—"}</td>
+                  <td style={styles.td}><button style={{ ...styles.btn("danger"), padding: "4px 10px", fontSize: "11px" }} onClick={() => setConfirmDelete(w)}>Delete</button></td>
                 </tr>
               ))}
             </tbody>
