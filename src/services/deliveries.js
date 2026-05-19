@@ -61,4 +61,9 @@ export const waybillsService = {
     const { error } = await supabase.from('waybills').delete().eq('id', id)
     if (error) throw error
   },
+
+  async update(id, data) {
+    const { error } = await supabase.from('waybills').update(data).eq('id', id)
+    if (error) throw error
+  },
 }

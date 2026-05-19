@@ -36,6 +36,11 @@ export const paymentsService = {
     const { error } = await supabase.from('payments').delete().eq('id', id)
     if (error) throw error
   },
+
+  async updatePayment(id, data) {
+    const { error } = await supabase.from('payments').update(data).eq('id', id)
+    if (error) throw error
+  },
 }
 
 export const invoicesService = {

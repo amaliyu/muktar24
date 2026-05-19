@@ -195,6 +195,7 @@ const Production = () => {
   const [saving, setSaving] = useState(false);
   const [alert, setAlert] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [editTarget, setEditTarget] = useState(null);
   const emptyForm = { date: "", blockType: "9-inch", produced: "", cement: "", granite: "", diesel: "", dmgProd: "0", dmgStack: "0" };
   const [form, setForm] = useState(emptyForm);
 
@@ -222,27 +223,51 @@ const Production = () => {
 
   useEffect(() => { load(); }, []);
 
+  const startEdit = (record) => {
+    setEditTarget(record);
+    setForm({
+      date: record.date, blockType: record.block_type,
+      produced: String(record.quantity_produced || ""),
+      cement: String(record.cement_bags || ""),
+      granite: String(record.granite_dust_kg || ""),
+      diesel: String(record.diesel_litres || ""),
+      dmgProd: String(record.damaged?.production || 0),
+      dmgStack: String(record.damaged?.stacking || 0),
+    });
+    setShowForm(true);
+  };
+
   const handleSave = async () => {
     if (!form.date || !form.produced) return setAlert({ type: "error", msg: "Date and quantity produced are required." });
     setSaving(true);
     setAlert(null);
     try {
-      const entry = await productionService.create({
-        date: form.date,
-        block_type: form.blockType,
+      const dmgProd = parseInt(form.dmgProd) || 0;
+      const dmgStack = parseInt(form.dmgStack) || 0;
+      const entryData = {
+        date: form.date, block_type: form.blockType,
         quantity_produced: parseInt(form.produced) || 0,
         cement_bags: parseFloat(form.cement) || 0,
         granite_dust_kg: parseFloat(form.granite) || 0,
         diesel_litres: parseFloat(form.diesel) || 0,
-      });
-      const dmgProd = parseInt(form.dmgProd) || 0;
-      const dmgStack = parseInt(form.dmgStack) || 0;
-      if (dmgProd > 0) await productionService.logDamage({ date: form.date, block_type: form.blockType, stage: "production", quantity_damaged: dmgProd, production_log_id: entry.id });
-      if (dmgStack > 0) await productionService.logDamage({ date: form.date, block_type: form.blockType, stage: "stacking", quantity_damaged: dmgStack, production_log_id: entry.id });
-      setRecords(prev => [{ ...entry, damaged: { production: dmgProd, stacking: dmgStack } }, ...prev]);
+      };
+      if (editTarget) {
+        await productionService.update(editTarget.id, entryData);
+        await productionService.clearDamages(editTarget.id);
+        if (dmgProd > 0) await productionService.logDamage({ date: form.date, block_type: form.blockType, stage: "production", quantity_damaged: dmgProd, production_log_id: editTarget.id });
+        if (dmgStack > 0) await productionService.logDamage({ date: form.date, block_type: form.blockType, stage: "stacking", quantity_damaged: dmgStack, production_log_id: editTarget.id });
+        await load();
+        setAlert({ type: "success", msg: "Production entry updated." });
+      } else {
+        const entry = await productionService.create(entryData);
+        if (dmgProd > 0) await productionService.logDamage({ date: form.date, block_type: form.blockType, stage: "production", quantity_damaged: dmgProd, production_log_id: entry.id });
+        if (dmgStack > 0) await productionService.logDamage({ date: form.date, block_type: form.blockType, stage: "stacking", quantity_damaged: dmgStack, production_log_id: entry.id });
+        setRecords(prev => [{ ...entry, damaged: { production: dmgProd, stacking: dmgStack } }, ...prev]);
+        setAlert({ type: "success", msg: "Production entry saved successfully!" });
+      }
       setForm(emptyForm);
       setShowForm(false);
-      setAlert({ type: "success", msg: "Production entry saved successfully!" });
+      setEditTarget(null);
     } catch (e) {
       setAlert({ type: "error", msg: "Failed to save. " + e.message });
     } finally {
@@ -282,7 +307,7 @@ const Production = () => {
 
       {showForm && (
         <div style={{ ...styles.card, marginBottom: "24px", borderColor: theme.accent + "44" }}>
-          <div style={styles.sectionTitle}>New Production Entry</div>
+          <div style={styles.sectionTitle}>{editTarget ? "Edit Production Entry" : "New Production Entry"}</div>
           <div style={styles.grid(3)}>
             {[
               { label: "Date", key: "date", type: "date" },
@@ -313,8 +338,8 @@ const Production = () => {
             ))}
           </div>
           <div style={styles.row}>
-            <button style={styles.btn("primary")} onClick={handleSave} disabled={saving}>{saving ? "Saving…" : "Save Entry"}</button>
-            <button style={styles.btn("secondary")} onClick={() => { setShowForm(false); setForm(emptyForm); }}>Cancel</button>
+            <button style={styles.btn("primary")} onClick={handleSave} disabled={saving}>{saving ? "Saving…" : editTarget ? "Update Entry" : "Save Entry"}</button>
+            <button style={styles.btn("secondary")} onClick={() => { setShowForm(false); setForm(emptyForm); setEditTarget(null); }}>Cancel</button>
           </div>
         </div>
       )}
@@ -349,7 +374,12 @@ const Production = () => {
                     <td style={styles.td}><span style={styles.badge(p.damaged?.production > 0 ? theme.red : theme.green)}>{p.damaged?.production || 0}</span></td>
                     <td style={styles.td}><span style={styles.badge(p.damaged?.stacking > 0 ? theme.red : theme.green)}>{p.damaged?.stacking || 0}</span></td>
                     <td style={styles.td}><strong style={{ color: theme.green }}>{fmt(net)}</strong></td>
-                    <td style={styles.td}><button style={{ ...styles.btn("danger"), padding: "4px 10px", fontSize: "11px" }} onClick={() => setConfirmDelete(p)}>Delete</button></td>
+                    <td style={styles.td}>
+                      <div style={{ display: "flex", gap: "6px" }}>
+                        <button style={{ ...styles.btn("secondary"), padding: "4px 10px", fontSize: "11px" }} onClick={() => startEdit(p)}>Edit</button>
+                        <button style={{ ...styles.btn("danger"), padding: "4px 10px", fontSize: "11px" }} onClick={() => setConfirmDelete(p)}>Delete</button>
+                      </div>
+                    </td>
                   </tr>
                 );
               })}
@@ -520,6 +550,7 @@ const Orders = ({ onNavigate }) => {
   const [invoicing, setInvoicing] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [showPayForm, setShowPayForm] = useState(false);
+  const [editPayment, setEditPayment] = useState(null);
   const [alert, setAlert] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [customerMode, setCustomerMode] = useState("new");
@@ -529,6 +560,9 @@ const Orders = ({ onNavigate }) => {
   const emptyForm = { customerName: "", customerPhone: "", customerLocation: "", marketerId: "", items: [emptyItem()] };
   const [form, setForm] = useState(emptyForm);
   const [payForm, setPayForm] = useState({ amount: "", date: "" });
+  const [orderEditMode, setOrderEditMode] = useState(false);
+  const [orderEditItems, setOrderEditItems] = useState([]);
+  const [orderEditMarketer, setOrderEditMarketer] = useState("");
 
   const load = async () => {
     setLoading(true);
@@ -619,17 +653,23 @@ const Orders = ({ onNavigate }) => {
 
   const handleRecordPayment = async () => {
     if (!payForm.amount || !payForm.date) return setAlert({ type: "error", msg: "Amount and date are required." });
-    const invoice = selected?.invoices?.[0];
-    if (!invoice) return setAlert({ type: "error", msg: "Generate an invoice first." });
     try {
-      await paymentsService.recordPayment({ invoice_id: invoice.id, amount_paid: parseFloat(payForm.amount), payment_date: payForm.date, status: "confirmed" });
+      if (editPayment) {
+        await paymentsService.updatePayment(editPayment.id, { amount_paid: parseFloat(payForm.amount), payment_date: payForm.date });
+        setAlert({ type: "success", msg: "Payment updated." });
+      } else {
+        const invoice = selected?.invoices?.[0];
+        if (!invoice) return setAlert({ type: "error", msg: "Generate an invoice first." });
+        await paymentsService.recordPayment({ invoice_id: invoice.id, amount_paid: parseFloat(payForm.amount), payment_date: payForm.date, status: "confirmed" });
+        setAlert({ type: "success", msg: "Payment recorded successfully!" });
+      }
       const newOrders = await load();
-      if (newOrders) setSelected(newOrders.find(o => o.id === selected.id) || selected);
+      if (newOrders) setSelected(newOrders.find(o => o.id === selected?.id) || null);
       setPayForm({ amount: "", date: "" });
       setShowPayForm(false);
-      setAlert({ type: "success", msg: "Payment recorded successfully!" });
+      setEditPayment(null);
     } catch (e) {
-      setAlert({ type: "error", msg: "Failed to record payment. " + e.message });
+      setAlert({ type: "error", msg: "Failed to save payment. " + e.message });
     }
   };
 
@@ -656,6 +696,28 @@ const Orders = ({ onNavigate }) => {
       setAlert({ type: "error", msg: "Failed to delete payment. " + e.message });
     } finally {
       setConfirmDelete(null);
+    }
+  };
+
+  const startOrderEdit = (order) => {
+    setOrderEditItems((order.order_items || []).map(i => ({ blockType: i.block_type, quantity: String(i.quantity), unitPrice: String(i.unit_price) })));
+    setOrderEditMarketer(order.marketer_id || "");
+    setOrderEditMode(true);
+  };
+
+  const handleUpdateOrder = async () => {
+    if (orderEditItems.some(i => !i.quantity || !i.unitPrice)) return setAlert({ type: "error", msg: "All items need quantity and unit price." });
+    try {
+      await ordersService.updateOrder(selected.id, {
+        marketerId: orderEditMarketer || null,
+        items: orderEditItems.map(i => ({ block_type: i.blockType, quantity: parseInt(i.quantity), unit_price: parseFloat(i.unitPrice) })),
+      });
+      const newOrders = await load();
+      if (newOrders) setSelected(newOrders.find(o => o.id === selected.id) || null);
+      setOrderEditMode(false);
+      setAlert({ type: "success", msg: "Order updated." });
+    } catch (e) {
+      setAlert({ type: "error", msg: "Failed to update order. " + e.message });
     }
   };
 
@@ -819,8 +881,39 @@ const Orders = ({ onNavigate }) => {
               const qty = orderQty(selected);
               return (
                 <>
-                  <div style={styles.sectionTitle}>Customer Statement — {selected.customer?.name}</div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                    <div style={styles.sectionTitle}>Customer Statement — {selected.customer?.name}</div>
+                    {!orderEditMode && <button style={{ ...styles.btn("secondary"), padding: "4px 12px", fontSize: "12px" }} onClick={() => startOrderEdit(selected)}>Edit Order</button>}
+                  </div>
                   <div style={{ marginBottom: "12px", fontSize: "13px", color: theme.textMuted }}>{selected.customer?.location} · {selected.customer?.phone}</div>
+                  {orderEditMode ? (
+                    <div style={{ marginBottom: "16px", padding: "14px", background: theme.surface, borderRadius: "8px", border: `1px solid ${theme.accent}44` }}>
+                      <div style={{ fontSize: "12px", fontWeight: "700", color: theme.textMuted, marginBottom: "10px", textTransform: "uppercase", letterSpacing: "0.06em" }}>Edit Order Items</div>
+                      <div style={{ marginBottom: "10px" }}>
+                        <label style={styles.label}>Marketer</label>
+                        <select style={{ ...styles.input, maxWidth: "240px" }} value={orderEditMarketer} onChange={e => setOrderEditMarketer(e.target.value)}>
+                          <option value="">— No marketer —</option>
+                          {staff.map(s => <option key={s.id} value={s.id}>{s.full_name} ({s.role})</option>)}
+                        </select>
+                      </div>
+                      {orderEditItems.map((item, idx) => (
+                        <div key={idx} style={{ display: "flex", gap: "8px", marginBottom: "8px", alignItems: "center" }}>
+                          <select style={{ ...styles.input, flex: 1 }} value={item.blockType} onChange={e => { const it = [...orderEditItems]; it[idx] = { ...it[idx], blockType: e.target.value }; setOrderEditItems(it); }}>
+                            {BLOCK_TYPES.map(t => <option key={t}>{t}</option>)}
+                          </select>
+                          <input style={{ ...styles.input, flex: 1 }} type="number" placeholder="Qty" value={item.quantity} onChange={e => { const it = [...orderEditItems]; it[idx] = { ...it[idx], quantity: e.target.value }; setOrderEditItems(it); }} />
+                          <input style={{ ...styles.input, flex: 1 }} type="number" placeholder="Unit Price" value={item.unitPrice} onChange={e => { const it = [...orderEditItems]; it[idx] = { ...it[idx], unitPrice: e.target.value }; setOrderEditItems(it); }} />
+                          <div style={{ ...styles.input, flex: 1, background: "transparent", color: theme.accent, fontWeight: "700" }}>{item.quantity && item.unitPrice ? naira(parseInt(item.quantity) * parseFloat(item.unitPrice)) : "—"}</div>
+                          {orderEditItems.length > 1 && <button style={{ ...styles.btn("danger"), padding: "8px 10px" }} onClick={() => setOrderEditItems(orderEditItems.filter((_, i) => i !== idx))}>✕</button>}
+                        </div>
+                      ))}
+                      {orderEditItems.length < 5 && <button style={{ ...styles.btn("secondary"), fontSize: "12px", marginBottom: "10px" }} onClick={() => setOrderEditItems([...orderEditItems, emptyItem()])}>+ Add Item</button>}
+                      <div style={styles.row}>
+                        <button style={styles.btn("primary")} onClick={handleUpdateOrder}>Save Changes</button>
+                        <button style={styles.btn("secondary")} onClick={() => setOrderEditMode(false)}>Cancel</button>
+                      </div>
+                    </div>
+                  ) : (
                   <div style={{ marginBottom: "16px" }}>
                     <div style={styles.sectionTitle}>Order Items</div>
                     {(selected.order_items || []).map((item, i) => (
@@ -834,6 +927,7 @@ const Orders = ({ onNavigate }) => {
                       <span style={{ color: theme.accent }}>{naira(total)}</span>
                     </div>
                   </div>
+                  )}
                   <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                     {[
                       { label: "Amount Paid", value: naira(paid), color: theme.green, pct: total ? (paid / total) * 100 : 0 },
@@ -859,7 +953,10 @@ const Orders = ({ onNavigate }) => {
                             <span style={{ color: theme.textMuted }}>{p.payment_date}</span>
                             <span style={{ color: theme.green, fontWeight: "600" }}>{naira(p.amount_paid)}</span>
                             <span style={styles.badge(p.status === "confirmed" ? theme.green : theme.accent)}>{p.status}</span>
-                            <button style={{ ...styles.btn("danger"), padding: "3px 8px", fontSize: "11px" }} onClick={() => setConfirmDelete({ ...p, type: "payment" })}>Remove</button>
+                            <div style={{ display: "flex", gap: "6px" }}>
+                              <button style={{ ...styles.btn("secondary"), padding: "3px 8px", fontSize: "11px" }} onClick={() => { setEditPayment(p); setPayForm({ amount: String(p.amount_paid), date: p.payment_date }); setShowPayForm(true); }}>Edit</button>
+                              <button style={{ ...styles.btn("danger"), padding: "3px 8px", fontSize: "11px" }} onClick={() => setConfirmDelete({ ...p, type: "payment" })}>Remove</button>
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -882,7 +979,7 @@ const Orders = ({ onNavigate }) => {
                     </div>
                     {showPayForm && (
                       <div style={{ marginTop: "12px", padding: "14px", background: theme.surface, borderRadius: "8px", border: `1px solid ${theme.border}` }}>
-                        <div style={{ fontSize: "11px", fontWeight: "700", color: theme.textMuted, marginBottom: "10px", textTransform: "uppercase", letterSpacing: "0.06em" }}>Record Payment</div>
+                        <div style={{ fontSize: "11px", fontWeight: "700", color: theme.textMuted, marginBottom: "10px", textTransform: "uppercase", letterSpacing: "0.06em" }}>{editPayment ? "Edit Payment" : "Record Payment"}</div>
                         <div style={styles.row}>
                           <div style={{ flex: 1 }}>
                             <label style={styles.label}>Amount (₦)</label>
@@ -894,8 +991,8 @@ const Orders = ({ onNavigate }) => {
                           </div>
                         </div>
                         <div style={{ ...styles.row, marginTop: "10px" }}>
-                          <button style={styles.btn("primary")} onClick={handleRecordPayment}>Confirm Payment</button>
-                          <button style={styles.btn("secondary")} onClick={() => setShowPayForm(false)}>Cancel</button>
+                          <button style={styles.btn("primary")} onClick={handleRecordPayment}>{editPayment ? "Update Payment" : "Confirm Payment"}</button>
+                          <button style={styles.btn("secondary")} onClick={() => { setShowPayForm(false); setEditPayment(null); setPayForm({ amount: "", date: "" }); }}>Cancel</button>
                         </div>
                       </div>
                     )}
@@ -922,6 +1019,7 @@ const Waybills = () => {
   const [showForm, setShowForm] = useState(false);
   const [alert, setAlert] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [editTarget, setEditTarget] = useState(null);
   const [selectedOrderId, setSelectedOrderId] = useState("");
   const emptyForm = { waybillDate: "", driverId: "", truckNumber: "", blockType: "9-inch", quantityLoaded: "", quantityReceived: "", quantityDamaged: "0", notes: "" };
   const [form, setForm] = useState(emptyForm);
@@ -948,44 +1046,56 @@ const Waybills = () => {
 
   const selectedOrder = activeOrders.find(o => o.id === selectedOrderId) || null;
 
+  const startEditWaybill = (w) => {
+    setEditTarget(w);
+    setForm({
+      waybillDate: w.waybill_date, driverId: w.driver_id || "",
+      truckNumber: w.truck_number || "", blockType: w.block_type || "9-inch",
+      quantityLoaded: String(w.quantity_loaded || ""),
+      quantityReceived: String(w.quantity_received || ""),
+      quantityDamaged: String(w.quantity_damaged || 0),
+      notes: w.notes || "",
+    });
+    setSelectedOrderId("");
+    setShowForm(true);
+  };
+
   const handleSave = async () => {
-    if (!selectedOrderId) return setAlert({ type: "error", msg: "Select a customer with an active invoice before recording a waybill." });
+    if (!editTarget && !selectedOrderId) return setAlert({ type: "error", msg: "Select a customer with an active invoice before recording a waybill." });
     if (!form.waybillDate || !form.quantityLoaded) return setAlert({ type: "error", msg: "Date and quantity loaded are required." });
     setSaving(true);
     setAlert(null);
     try {
-      const count = await waybillsService.getCount();
-      const waybillNumber = `APC-WB-${String(count + 1).padStart(3, "0")}`;
       const damaged = parseInt(form.quantityDamaged) || 0;
-
-      await waybillsService.create({
-        waybill_number: waybillNumber,
+      const waybillData = {
         driver_id: form.driverId || null,
         truck_number: form.truckNumber || null,
         block_type: form.blockType,
         quantity_loaded: parseInt(form.quantityLoaded) || 0,
         quantity_received: parseInt(form.quantityReceived) || 0,
         quantity_damaged: damaged,
-        receiver_name: selectedOrder?.customer?.name || null,
         waybill_date: form.waybillDate,
         notes: form.notes || null,
-      });
+      };
 
-      if (damaged > 0) {
-        await productionService.logDamage({
-          date: form.waybillDate,
-          block_type: form.blockType,
-          stage: "delivery",
-          quantity_damaged: damaged,
-          notes: `Transit damage on waybill ${waybillNumber}`,
-        });
+      if (editTarget) {
+        await waybillsService.update(editTarget.id, waybillData);
+        await load();
+        setAlert({ type: "success", msg: `Waybill ${editTarget.waybill_number} updated.` });
+      } else {
+        const count = await waybillsService.getCount();
+        const waybillNumber = `APC-WB-${String(count + 1).padStart(3, "0")}`;
+        await waybillsService.create({ ...waybillData, waybill_number: waybillNumber, receiver_name: selectedOrder?.customer?.name || null });
+        if (damaged > 0) {
+          await productionService.logDamage({ date: form.waybillDate, block_type: form.blockType, stage: "delivery", quantity_damaged: damaged, notes: `Transit damage on waybill ${waybillNumber}` });
+        }
+        await load();
+        setAlert({ type: "success", msg: `Waybill ${waybillNumber} recorded for ${selectedOrder?.customer?.name}${damaged > 0 ? " — transit damage logged automatically." : "."}` });
       }
-
-      await load();
       setForm(emptyForm);
       setSelectedOrderId("");
       setShowForm(false);
-      setAlert({ type: "success", msg: `Waybill ${waybillNumber} recorded for ${selectedOrder?.customer?.name}${damaged > 0 ? " — transit damage logged automatically." : "."}` });
+      setEditTarget(null);
     } catch (e) {
       setAlert({ type: "error", msg: "Failed to save waybill. " + e.message });
     } finally {
@@ -1024,7 +1134,7 @@ const Waybills = () => {
 
       {showForm && (
         <div style={{ ...styles.card, marginBottom: "24px", borderColor: theme.accent + "44" }}>
-          <div style={styles.sectionTitle}>New Waybill Entry</div>
+          <div style={styles.sectionTitle}>{editTarget ? `Edit Waybill — ${editTarget.waybill_number}` : "New Waybill Entry"}</div>
           <div style={styles.grid(3)}>
             <div style={styles.formGroup}>
               <label style={styles.label}>Date *</label>
@@ -1082,8 +1192,8 @@ const Waybills = () => {
             </div>
           )}
           <div style={styles.row}>
-            <button style={styles.btn("primary")} onClick={handleSave} disabled={saving}>{saving ? "Saving…" : "Record Waybill"}</button>
-            <button style={styles.btn("secondary")} onClick={() => { setShowForm(false); setForm(emptyForm); setSelectedOrderId(""); }}>Cancel</button>
+            <button style={styles.btn("primary")} onClick={handleSave} disabled={saving}>{saving ? "Saving…" : editTarget ? "Update Waybill" : "Record Waybill"}</button>
+            <button style={styles.btn("secondary")} onClick={() => { setShowForm(false); setForm(emptyForm); setSelectedOrderId(""); setEditTarget(null); }}>Cancel</button>
           </div>
         </div>
       )}
@@ -1115,7 +1225,12 @@ const Waybills = () => {
                   <td style={styles.td}><strong style={{ color: theme.green }}>{fmt(w.quantity_received)}</strong></td>
                   <td style={styles.td}><span style={styles.badge(w.quantity_damaged > 0 ? theme.red : theme.green)}>{w.quantity_damaged}</span></td>
                   <td style={styles.td}>{w.receiver_name || "—"}</td>
-                  <td style={styles.td}><button style={{ ...styles.btn("danger"), padding: "4px 10px", fontSize: "11px" }} onClick={() => setConfirmDelete(w)}>Delete</button></td>
+                  <td style={styles.td}>
+                    <div style={{ display: "flex", gap: "6px" }}>
+                      <button style={{ ...styles.btn("secondary"), padding: "4px 10px", fontSize: "11px" }} onClick={() => startEditWaybill(w)}>Edit</button>
+                      <button style={{ ...styles.btn("danger"), padding: "4px 10px", fontSize: "11px" }} onClick={() => setConfirmDelete(w)}>Delete</button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>

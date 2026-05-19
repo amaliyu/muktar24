@@ -61,6 +61,13 @@ export const ordersService = {
     return data
   },
 
+  async updateOrder(id, { marketerId, items }) {
+    await supabase.from('orders').update({ marketer_id: marketerId || null }).eq('id', id)
+    await supabase.from('order_items').delete().eq('order_id', id)
+    const { error } = await supabase.from('order_items').insert(items.map(i => ({ ...i, order_id: id })))
+    if (error) throw error
+  },
+
   async delete(id) {
     const { data: invoices } = await supabase.from('invoices').select('id').eq('order_id', id)
     if (invoices?.length) {
