@@ -5,9 +5,15 @@ import { ordersService, customersService } from './services/orders';
 import { waybillsService } from './services/deliveries';
 import { invoicesService, paymentsService } from './services/payments';
 import { inventoryService } from './services/inventory';
+import { lpoService } from './services/lpo';
+import { pendingDeliveryService } from './services/pendingDelivery';
+import { schedulesService } from './services/schedules';
+import { batchesService } from './services/batches';
+import { finishedGoodsService } from './services/finishedGoods';
 import { generateInvoicePDF } from './utils/generateInvoicePDF';
 import { generateStatementPDF } from './utils/generateStatementPDF';
 import { generateInventoryReportPDF } from './utils/generateInventoryReportPDF';
+import { generateWaybillPDF } from './utils/generateWaybillPDF';
 
 const theme = {
   bg: "#0f1117", surface: "#1a1d27", card: "#21263a", border: "#2e3452",
@@ -190,7 +196,7 @@ const ConfirmModal = ({ msg, onConfirm, onCancel }) => (
 );
 
 const Icon = ({ name, size = 16 }) => {
-  const icons = { dashboard: "⊞", production: "🏭", orders: "📋", staff: "👥", waybill: "📄", reports: "📊", inventory: "📦", settings: "⚙", logout: "→" };
+  const icons = { dashboard: "⊞", production: "🏭", orders: "📋", staff: "👥", waybill: "📄", reports: "📊", inventory: "📦", batches: "🗂", pending: "⏳", schedule: "📅", lpo: "📝", approve: "✓", settings: "⚙", logout: "→" };
   return <span style={{ fontSize: size }}>{icons[name] || "•"}</span>;
 };
 
@@ -209,7 +215,8 @@ const StatCard = ({ label, value, sub, accent, pct }) => (
 
 // ── DASHBOARD ─────────────────────────────────────────────────
 const Dashboard = () => {
-  const [stats, setStats] = useState({ staff: 0, produced: 0, orders: 0, revenue: 0, pending: 0, waybills: 0, damages: 0 });
+  const [stats, setStats] = useState({ staff: 0, produced: 0, orders: 0, revenue: 0, pending: 0, waybills: 0, damages: 0, lpoQueue: 0, scheduleQueue: 0, pendingRegister: 0 });
+  const [finishedGoods, setFinishedGoods] = useState([]);
   const [recent, setRecent] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -227,11 +234,21 @@ const Dashboard = () => {
         const revenue = orders.reduce((s, o) =>
           s + (o.invoices || []).flatMap(inv => inv.payments || []).filter(p => p.status === "confirmed").reduce((a, p) => a + p.amount_paid, 0), 0);
         const pending = orders.filter(o => o.status === "pending").length;
-        setStats({ staff: staffList.length, produced, orders: orders.length, revenue, pending, waybills: waybills.length, damages });
+        setStats({ staff: staffList.length, produced, orders: orders.length, revenue, pending, waybills: waybills.length, damages, lpoQueue: 0, scheduleQueue: 0, pendingRegister: 0 });
         setRecent(orders.slice(0, 5));
       } catch {
         // show zeros on error
-      } finally {
+      }
+      try {
+        const [lpos, scheds, pendReg, fg] = await Promise.all([
+          lpoService.getPending(),
+          schedulesService.getSubmitted(),
+          pendingDeliveryService.getAll(),
+          finishedGoodsService.getAll(),
+        ]);
+        setStats(s => ({ ...s, lpoQueue: lpos.length, scheduleQueue: scheds.length, pendingRegister: pendReg.length }));
+        setFinishedGoods(fg);
+      } catch { /* workflow tables may not exist yet */ } finally {
         setLoading(false);
       }
     };
@@ -263,6 +280,45 @@ const Dashboard = () => {
             <StatCard label="Pending Orders" value={stats.pending} sub="Awaiting processing" accent={theme.accent} />
             <StatCard label="Transit Damages" value={fmt(stats.damages)} sub="Blocks damaged in delivery" accent={theme.red} />
           </div>
+          {(stats.lpoQueue > 0 || stats.scheduleQueue > 0 || stats.pendingRegister > 0) && (
+            <div style={{ display: "flex", gap: "12px", marginBottom: "16px", flexWrap: "wrap" }}>
+              {stats.lpoQueue > 0 && (
+                <div style={{ background: "rgba(245,166,35,0.12)", border: `1px solid ${theme.accent}55`, borderRadius: "10px", padding: "12px 18px", flex: 1, minWidth: "200px" }}>
+                  <div style={{ fontSize: "11px", fontWeight: "700", color: theme.accent, textTransform: "uppercase", letterSpacing: "0.05em" }}>LPO Approvals Pending</div>
+                  <div style={{ fontSize: "28px", fontWeight: "700", color: theme.text, marginTop: "4px" }}>{stats.lpoQueue}</div>
+                  <div style={{ fontSize: "12px", color: theme.textMuted }}>Orders awaiting MD approval</div>
+                </div>
+              )}
+              {stats.scheduleQueue > 0 && (
+                <div style={{ background: "rgba(91,141,238,0.12)", border: `1px solid ${theme.blue}55`, borderRadius: "10px", padding: "12px 18px", flex: 1, minWidth: "200px" }}>
+                  <div style={{ fontSize: "11px", fontWeight: "700", color: theme.blue, textTransform: "uppercase", letterSpacing: "0.05em" }}>Schedules Awaiting ICO</div>
+                  <div style={{ fontSize: "28px", fontWeight: "700", color: theme.text, marginTop: "4px" }}>{stats.scheduleQueue}</div>
+                  <div style={{ fontSize: "12px", color: theme.textMuted }}>Delivery schedules submitted</div>
+                </div>
+              )}
+              {stats.pendingRegister > 0 && (
+                <div style={{ background: "rgba(45,212,160,0.10)", border: `1px solid ${theme.green}55`, borderRadius: "10px", padding: "12px 18px", flex: 1, minWidth: "200px" }}>
+                  <div style={{ fontSize: "11px", fontWeight: "700", color: theme.green, textTransform: "uppercase", letterSpacing: "0.05em" }}>Pending Deliveries</div>
+                  <div style={{ fontSize: "28px", fontWeight: "700", color: theme.text, marginTop: "4px" }}>{stats.pendingRegister}</div>
+                  <div style={{ fontSize: "12px", color: theme.textMuted }}>Customers awaiting delivery</div>
+                </div>
+              )}
+            </div>
+          )}
+          {finishedGoods.length > 0 && (
+            <div style={{ ...styles.card, marginBottom: "16px" }}>
+              <div style={styles.sectionTitle}>Finished Goods in Yard</div>
+              <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
+                {finishedGoods.map(fg => (
+                  <div key={fg.id} style={{ background: theme.surface, borderRadius: "8px", padding: "12px 18px", flex: 1, minWidth: "120px", textAlign: "center" }}>
+                    <div style={{ fontSize: "11px", color: theme.textMuted, marginBottom: "4px" }}>{fg.block_type}</div>
+                    <div style={{ fontSize: "24px", fontWeight: "700", color: theme.accent }}>{Number(fg.quantity_in_yard || 0).toLocaleString()}</div>
+                    <div style={{ fontSize: "11px", color: theme.textMuted }}>blocks</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {recent.length > 0 && (
             <div style={styles.card}>
               <div style={styles.sectionTitle}>Recent Orders</div>
@@ -702,7 +758,7 @@ const Orders = ({ onNavigate }) => {
   const [allCustomers, setAllCustomers] = useState([]);
   const [custSearch, setCustSearch] = useState("");
   const [pickedCustomer, setPickedCustomer] = useState(null);
-  const emptyForm = { customerName: "", customerPhone: "", customerLocation: "", marketerId: "", items: [emptyItem()] };
+  const emptyForm = { customerName: "", customerPhone: "", customerLocation: "", marketerId: "", items: [emptyItem()], isLpo: false, lpoSubmittedBy: "" };
   const [form, setForm] = useState(emptyForm);
   const [payForm, setPayForm] = useState({ amount: "", date: "" });
   const [orderEditMode, setOrderEditMode] = useState(false);
@@ -750,17 +806,22 @@ const Orders = ({ onNavigate }) => {
         const customer = await customersService.create({ name: form.customerName, phone: form.customerPhone || null, location: form.customerLocation || null });
         customerId = customer.id;
       }
-      await ordersService.create({
-        order: { customer_id: customerId, marketer_id: form.marketerId || null, status: "pending" },
+      const newOrder = await ordersService.create({
+        order: { customer_id: customerId, marketer_id: form.marketerId || null, status: form.isLpo ? "lpo_pending" : "pending", is_lpo: form.isLpo || false },
         items: form.items.map(i => ({ block_type: i.blockType, quantity: parseInt(i.quantity), unit_price: parseFloat(i.unitPrice) })),
       });
+      if (form.isLpo) {
+        try {
+          await lpoService.create({ order_id: newOrder.id, submitted_by: form.lpoSubmittedBy || "BDM" });
+        } catch { /* LPO table may not exist yet */ }
+      }
       await load();
       setForm(emptyForm);
       setPickedCustomer(null);
       setCustSearch("");
       setCustomerMode("new");
       setShowForm(false);
-      setAlert({ type: "success", msg: "Order created successfully!" });
+      setAlert({ type: "success", msg: form.isLpo ? "LPO order submitted for MD approval!" : "Order created successfully!" });
     } catch (e) {
       setAlert({ type: "error", msg: "Failed to create order. " + e.message });
     } finally {
@@ -857,7 +918,19 @@ const Orders = ({ onNavigate }) => {
         const invoice = selected?.invoices?.[0];
         if (!invoice) return setAlert({ type: "error", msg: "Generate an invoice first." });
         await paymentsService.recordPayment({ invoice_id: invoice.id, amount_paid: parseFloat(payForm.amount), payment_date: payForm.date, status: "confirmed" });
-        setAlert({ type: "success", msg: "Payment recorded successfully!" });
+        // Check if order is now fully paid → add to pending delivery register
+        try {
+          const totalInvoiced = (selected.invoices || []).reduce((s, inv) => s + Number(inv.total_amount || 0), 0);
+          const alreadyPaid = (selected.invoices || []).flatMap(inv => (inv.payments || []).filter(p => p.status === "confirmed")).reduce((s, p) => s + Number(p.amount_paid), 0);
+          const newTotal = alreadyPaid + parseFloat(payForm.amount);
+          if (newTotal >= totalInvoiced && totalInvoiced > 0) {
+            const fullOrder = await ordersService.getById(selected.id);
+            await pendingDeliveryService.addFromOrder(fullOrder);
+            setAlert({ type: "success", msg: "Payment confirmed! Customer added to Pending Delivery Register." });
+          } else {
+            setAlert({ type: "success", msg: "Payment recorded successfully!" });
+          }
+        } catch { setAlert({ type: "success", msg: "Payment recorded successfully!" }); }
       }
       const newOrders = await load();
       if (newOrders) setSelected(newOrders.find(o => o.id === selected?.id) || null);
@@ -1028,8 +1101,17 @@ const Orders = ({ onNavigate }) => {
               <button style={styles.btn("secondary")} onClick={() => setForm({ ...form, items: [...form.items, emptyItem()] })}>+ Add Item</button>
             )}
           </div>
+          <div style={{ display: "flex", alignItems: "center", gap: "12px", padding: "12px 0", borderTop: `1px solid ${theme.border}22`, marginBottom: "4px" }}>
+            <input type="checkbox" id="lpo_flag" checked={form.isLpo} onChange={e => setForm({ ...form, isLpo: e.target.checked })} style={{ width: "16px", height: "16px", cursor: "pointer", accentColor: theme.accent }} />
+            <label htmlFor="lpo_flag" style={{ ...styles.label, marginBottom: 0, cursor: "pointer", color: form.isLpo ? theme.accent : theme.textMuted, fontWeight: form.isLpo ? "700" : "400" }}>
+              This is an LPO order (requires MD approval before delivery)
+            </label>
+            {form.isLpo && (
+              <input style={{ ...styles.input, maxWidth: "220px", marginLeft: "8px" }} placeholder="Submitted by (BDM name)" value={form.lpoSubmittedBy} onChange={e => setForm({ ...form, lpoSubmittedBy: e.target.value })} />
+            )}
+          </div>
           <div style={styles.row}>
-            <button style={styles.btn("primary")} onClick={handleSave} disabled={saving}>{saving ? "Saving…" : "Create Order"}</button>
+            <button style={styles.btn(form.isLpo ? "secondary" : "primary")} onClick={handleSave} disabled={saving}>{saving ? "Saving…" : form.isLpo ? "Submit LPO for MD Approval" : "Create Order"}</button>
             <button style={styles.btn("secondary")} onClick={() => { setShowForm(false); setForm(emptyForm); }}>Cancel</button>
           </div>
         </div>
@@ -1058,6 +1140,7 @@ const Orders = ({ onNavigate }) => {
                       <div style={{ fontSize: "12px", color: theme.textMuted }}>{o.customer?.location} · {o.marketer?.full_name || "No marketer"}</div>
                     </div>
                     <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                      {o.is_lpo && <span style={styles.badge(theme.blue)}>LPO</span>}
                       <span style={styles.badge(statusColor(o.status))}>{o.status}</span>
                       <button style={{ ...styles.btn("danger"), padding: "3px 9px", fontSize: "11px" }} onClick={e => { e.stopPropagation(); setConfirmDelete(o); }}>Delete</button>
                     </div>
@@ -1210,6 +1293,7 @@ const Orders = ({ onNavigate }) => {
 const Waybills = () => {
   const [waybills, setWaybills] = useState([]);
   const [staff, setStaff] = useState([]);
+  const [activeBatches, setActiveBatches] = useState([]);
   const [activeOrders, setActiveOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -1218,7 +1302,7 @@ const Waybills = () => {
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [editTarget, setEditTarget] = useState(null);
   const [selectedOrderId, setSelectedOrderId] = useState("");
-  const emptyForm = { waybillDate: "", driverId: "", truckNumber: "", blockType: "9-inch", quantityLoaded: "", quantityReceived: "", quantityDamaged: "0", notes: "" };
+  const emptyForm = { waybillDate: "", driverId: "", truckNumber: "", blockType: "9-inch", quantityLoaded: "", quantityReceived: "", quantityDamaged: "0", batchId: "", notes: "" };
   const [form, setForm] = useState(emptyForm);
 
   const load = async () => {
@@ -1231,8 +1315,9 @@ const Waybills = () => {
       setAlert({ type: "error", msg: "Could not load waybills." });
     }
     try {
-      const orders = await ordersService.getAll();
-      setActiveOrders(orders.filter(o => ["invoiced", "in_progress"].includes(o.status)));
+      const [orders, batches] = await Promise.all([ordersService.getAll(), batchesService.getActive().catch(() => [])]);
+      setActiveOrders(orders.filter(o => ["invoiced", "in_progress", "lpo_approved"].includes(o.status)));
+      setActiveBatches(batches);
     } catch {
       // silently fail — waybills still display, dropdown will be empty
     }
@@ -1251,6 +1336,7 @@ const Waybills = () => {
       quantityLoaded: String(w.quantity_loaded || ""),
       quantityReceived: String(w.quantity_received || ""),
       quantityDamaged: String(w.quantity_damaged || 0),
+      batchId: w.batch_id || "",
       notes: w.notes || "",
     });
     setSelectedOrderId("");
@@ -1276,16 +1362,28 @@ const Waybills = () => {
       };
 
       if (editTarget) {
-        await waybillsService.update(editTarget.id, waybillData);
+        await waybillsService.update(editTarget.id, { ...waybillData, batch_id: form.batchId || null });
         await load();
         setAlert({ type: "success", msg: `Waybill ${editTarget.waybill_number} updated.` });
       } else {
         const nextNum = await waybillsService.getNextNumber();
         const waybillNumber = `APC-WB-${String(nextNum).padStart(3, "0")}`;
-        await waybillsService.create({ ...waybillData, waybill_number: waybillNumber, receiver_name: selectedOrder?.customer?.name || null });
+        const qtyLoaded = parseInt(form.quantityLoaded) || 0;
+        const qtyReceived = parseInt(form.quantityReceived) || 0;
+        await waybillsService.create({ ...waybillData, batch_id: form.batchId || null, waybill_number: waybillNumber, receiver_name: selectedOrder?.customer?.name || null });
         if (damaged > 0) {
           await productionService.logDamage({ date: form.waybillDate, block_type: form.blockType, stage: "delivery", quantity_damaged: damaged, notes: `Transit damage on waybill ${waybillNumber}` });
         }
+        // Side effects (non-blocking)
+        try {
+          if (qtyLoaded > 0) await finishedGoodsService.decrease(form.blockType, qtyLoaded);
+          if (form.batchId && qtyLoaded > 0) await batchesService.reduceStock(form.batchId, qtyLoaded);
+          if (qtyReceived > 0 && selectedOrder) {
+            const pending = await pendingDeliveryService.getByOrder(selectedOrder.id);
+            const match = pending.find(p => p.block_type === form.blockType);
+            if (match) await pendingDeliveryService.updateDelivered(match.id, qtyReceived);
+          }
+        } catch { /* side effects optional */ }
         await load();
         setAlert({ type: "success", msg: `Waybill ${waybillNumber} recorded for ${selectedOrder?.customer?.name}${damaged > 0 ? " — transit damage logged automatically." : "."}` });
       }
@@ -1363,6 +1461,15 @@ const Waybills = () => {
               <input style={styles.input} type="number" placeholder="e.g. 498" value={form.quantityReceived} onChange={e => setForm({ ...form, quantityReceived: e.target.value })} />
             </div>
             <div style={styles.formGroup}>
+              <label style={styles.label}>Batch Number</label>
+              <select style={styles.input} value={form.batchId} onChange={e => setForm({ ...form, batchId: e.target.value })}>
+                <option value="">— Select batch (optional) —</option>
+                {activeBatches.filter(b => !form.blockType || b.block_type === form.blockType).map(b => (
+                  <option key={b.id} value={b.id}>{b.batch_number} — {b.block_type} ({Number(b.qty_remaining).toLocaleString()} remaining)</option>
+                ))}
+              </select>
+            </div>
+            <div style={styles.formGroup}>
               <label style={styles.label}>Quantity Damaged in Transit</label>
               <input style={styles.input} type="number" placeholder="0" value={form.quantityDamaged} onChange={e => setForm({ ...form, quantityDamaged: e.target.value })} />
             </div>
@@ -1424,6 +1531,10 @@ const Waybills = () => {
                   <td style={styles.td}>{w.receiver_name || "—"}</td>
                   <td style={styles.td}>
                     <div style={{ display: "flex", gap: "6px" }}>
+                      <button style={{ ...styles.btn("secondary"), padding: "4px 10px", fontSize: "11px" }} onClick={() => {
+                        const driver = staff.find(s => s.id === w.driver_id);
+                        generateWaybillPDF({ waybill_number: w.waybill_number, date: w.waybill_date, customer_name: w.receiver_name, customer_location: "", block_type: w.block_type, quantity_loaded: w.quantity_loaded, batch_number: w.batch_id || "", driver_name: driver?.full_name || "", truck_number: w.truck_number || "", notes: w.notes || "" });
+                      }}>PDF</button>
                       <button style={{ ...styles.btn("secondary"), padding: "4px 10px", fontSize: "11px" }} onClick={() => startEditWaybill(w)}>Edit</button>
                       <button style={{ ...styles.btn("danger"), padding: "4px 10px", fontSize: "11px" }} onClick={() => setConfirmDelete(w)}>Delete</button>
                     </div>
@@ -2250,16 +2361,655 @@ const Inventory = ({ onLowStockChange }) => {
   );
 };
 
+// ── LPO APPROVALS ─────────────────────────────────────────────
+const LPOApprovals = () => {
+  const [lpos, setLpos] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(null);
+  const [alert, setAlert] = useState(null);
+  const [selected, setSelected] = useState(null);
+  const [note, setNote] = useState("");
+  const today = new Date().toISOString().split("T")[0];
+  const due = new Date(Date.now() + 30 * 86400000).toISOString().split("T")[0];
+
+  const load = async () => {
+    setLoading(true);
+    try { setLpos(await lpoService.getAll()); }
+    catch (e) { setAlert({ type: "error", msg: "Could not load LPO queue: " + e.message }); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const handleDecide = async (lpo, decision) => {
+    if (decision === "rejected" && !note.trim()) return setAlert({ type: "error", msg: "A rejection note is required." });
+    setSaving(lpo.id + decision);
+    try {
+      await lpoService.decide(lpo.id, decision, note.trim() || null);
+      if (decision === "approved") {
+        await ordersService.updateStatus(lpo.order.id, "lpo_approved");
+        // Auto-create invoice if none exists
+        const existing = await invoicesService.getByOrder(lpo.order.id);
+        if (existing.length === 0) {
+          const total = (lpo.order.order_items || []).reduce((s, i) => s + i.quantity * i.unit_price, 0);
+          const count = lpos.length;
+          const year = new Date().getFullYear();
+          await invoicesService.create({ order_id: lpo.order.id, invoice_number: `APC-LPO-${year}-${String(count + 1).padStart(3, "0")}`, total_amount: total, issued_date: today, due_date: due });
+        }
+        await pendingDeliveryService.addFromOrder(lpo.order);
+        setAlert({ type: "success", msg: `LPO approved — ${lpo.order?.customer?.name} added to Pending Delivery Register.` });
+      } else {
+        setAlert({ type: "success", msg: "LPO rejected. BDM will be notified." });
+      }
+      setNote(""); setSelected(null);
+      await load();
+    } catch (e) { setAlert({ type: "error", msg: "Failed: " + e.message }); }
+    finally { setSaving(null); }
+  };
+
+  const pendingLpos = lpos.filter(l => !l.md_decision);
+  const decidedLpos = lpos.filter(l => l.md_decision);
+  const statusColor = (d) => d === "approved" ? theme.green : d === "rejected" ? theme.red : theme.accent;
+
+  return (
+    <div>
+      <div style={styles.header}>
+        <div>
+          <div style={styles.pageTitle}>LPO Approvals</div>
+          <div style={styles.pageSubtitle}>Orders submitted as LPO awaiting MD approval</div>
+        </div>
+        {pendingLpos.length > 0 && <span style={{ ...styles.badge(theme.red), fontSize: "13px", padding: "6px 14px" }}>{pendingLpos.length} pending</span>}
+      </div>
+      {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
+      {loading ? <Spinner /> : (
+        <div>
+          {pendingLpos.length === 0 ? (
+            <div style={{ ...styles.card, textAlign: "center", padding: "48px", color: theme.textMuted }}>No LPO orders awaiting approval.</div>
+          ) : pendingLpos.map(lpo => {
+            const order = lpo.order || {};
+            const total = (order.order_items || []).reduce((s, i) => s + i.quantity * i.unit_price, 0);
+            const isOpen = selected?.id === lpo.id;
+            return (
+              <div key={lpo.id} style={{ ...styles.card, marginBottom: "14px", borderLeft: `4px solid ${theme.accent}` }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                  <div>
+                    <div style={{ fontWeight: "700", fontSize: "15px" }}>{order.customer?.name || "—"}</div>
+                    <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "3px" }}>{order.customer?.location} · Submitted by: {lpo.submitted_by || "—"} · {lpo.submitted_at?.split("T")[0]}</div>
+                    <div style={{ marginTop: "8px", display: "flex", gap: "12px", fontSize: "13px" }}>
+                      {(order.order_items || []).map((it, i) => (
+                        <span key={i} style={styles.badge(theme.blue)}>{it.quantity?.toLocaleString()} {it.block_type}</span>
+                      ))}
+                      <span style={{ color: theme.accent, fontWeight: "700" }}>{naira(total)}</span>
+                    </div>
+                  </div>
+                  <button style={styles.btn("secondary")} onClick={() => { setSelected(isOpen ? null : lpo); setNote(""); }}>{isOpen ? "Hide" : "Review"}</button>
+                </div>
+                {isOpen && (
+                  <div style={{ marginTop: "16px", borderTop: `1px solid ${theme.border}`, paddingTop: "16px" }}>
+                    <div style={styles.formGroup}>
+                      <label style={styles.label}>MD Note (required for rejection, optional for approval)</label>
+                      <input style={styles.input} placeholder="Enter note…" value={note} onChange={e => setNote(e.target.value)} />
+                    </div>
+                    <div style={styles.row}>
+                      <button style={styles.btn("primary")} disabled={saving} onClick={() => handleDecide(lpo, "approved")}>{saving === lpo.id + "approved" ? "Approving…" : "✓ Approve LPO"}</button>
+                      <button style={styles.btn("danger")} disabled={saving} onClick={() => handleDecide(lpo, "rejected")}>{saving === lpo.id + "rejected" ? "Rejecting…" : "✕ Reject"}</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {decidedLpos.length > 0 && (
+            <div style={styles.card}>
+              <div style={styles.sectionTitle}>Decision History</div>
+              <table style={styles.table}>
+                <thead><tr>{["Customer", "Submitted By", "Date", "Decision", "MD Note"].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {decidedLpos.map(l => (
+                    <tr key={l.id}>
+                      <td style={styles.td}><strong>{l.order?.customer?.name || "—"}</strong></td>
+                      <td style={styles.td}>{l.submitted_by || "—"}</td>
+                      <td style={styles.td}>{l.decided_at?.split("T")[0] || "—"}</td>
+                      <td style={styles.td}><span style={styles.badge(statusColor(l.md_decision))}>{l.md_decision}</span></td>
+                      <td style={styles.td}><span style={{ fontSize: "12px", color: theme.textMuted }}>{l.md_note || "—"}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ── PENDING DELIVERY REGISTER ──────────────────────────────────
+const PendingDeliveryRegister = () => {
+  const [entries, setEntries] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [alert, setAlert] = useState(null);
+
+  const load = async () => {
+    setLoading(true);
+    try { setEntries(await pendingDeliveryService.getAll()); }
+    catch (e) { setAlert({ type: "error", msg: "Could not load register: " + e.message }); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const daysSince = (iso) => Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+  const statusColor = (s) => s === "completed" ? theme.green : s === "partially_delivered" ? theme.blue : s === "scheduled" ? theme.accent : theme.textMuted;
+  const totalRemaining = entries.reduce((s, e) => s + (Number(e.remaining_qty) || 0), 0);
+
+  return (
+    <div>
+      <div style={styles.header}>
+        <div>
+          <div style={styles.pageTitle}>Pending Delivery Register</div>
+          <div style={styles.pageSubtitle}>All customers currently awaiting delivery</div>
+        </div>
+      </div>
+      {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
+      <div style={styles.grid(3)}>
+        <StatCard label="Customers Waiting" value={entries.length} sub="Non-completed entries" accent={theme.blue} />
+        <StatCard label="Total Blocks Remaining" value={fmt(totalRemaining)} sub="Still to be delivered" accent={theme.accent} />
+        <StatCard label="Longest Wait" value={entries.length > 0 ? `${Math.max(...entries.map(e => daysSince(e.added_at)))} days` : "—"} sub="Days in register" accent={theme.red} />
+      </div>
+      {loading ? <Spinner /> : entries.length === 0 ? (
+        <div style={{ ...styles.card, textAlign: "center", padding: "48px", color: theme.textMuted }}>No pending deliveries. Customers are added here when payment is confirmed or LPO is approved.</div>
+      ) : (
+        <div style={styles.card}>
+          <table style={styles.table}>
+            <thead>
+              <tr>{["Customer", "Location", "Block Type", "Total Qty", "Delivered", "Remaining", "Days Waiting", "Added", "Status"].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
+            </thead>
+            <tbody>
+              {entries.map(e => {
+                const days = daysSince(e.added_at);
+                const pct = e.total_qty > 0 ? Math.round((e.delivered_qty / e.total_qty) * 100) : 0;
+                return (
+                  <tr key={e.id} style={{ background: days > 14 ? "rgba(240,107,107,0.04)" : "transparent" }}>
+                    <td style={styles.td}><strong>{e.customer?.name || "—"}</strong>{e.customer?.company_name && <div style={{ fontSize: "11px", color: theme.textMuted }}>{e.customer.company_name}</div>}</td>
+                    <td style={styles.td}>{e.customer?.location || "—"}</td>
+                    <td style={styles.td}><span style={styles.badge(theme.blue)}>{e.block_type}</span></td>
+                    <td style={styles.td}>{Number(e.total_qty).toLocaleString()}</td>
+                    <td style={styles.td}><span style={{ color: theme.green }}>{Number(e.delivered_qty).toLocaleString()}</span></td>
+                    <td style={styles.td}><strong style={{ color: Number(e.remaining_qty) > 0 ? theme.accent : theme.green }}>{Number(e.remaining_qty).toLocaleString()}</strong></td>
+                    <td style={styles.td}><span style={{ color: days > 14 ? theme.red : theme.textMuted, fontWeight: days > 14 ? "700" : "400" }}>{days}d</span></td>
+                    <td style={styles.td}>{e.added_at?.split("T")[0]}</td>
+                    <td style={styles.td}>
+                      <div>
+                        <span style={styles.badge(statusColor(e.status))}>{e.status?.replace(/_/g, " ")}</span>
+                        <div style={{ ...styles.progressBar(), marginTop: "4px" }}><div style={styles.progressFill(pct, theme.green)} /></div>
+                        <div style={{ fontSize: "10px", color: theme.textMuted, marginTop: "2px" }}>{pct}%</div>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ── DAILY SCHEDULE ─────────────────────────────────────────────
+const DailySchedule = () => {
+  const [schedules, setSchedules] = useState([]);
+  const [pending, setPending] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [alert, setAlert] = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  const [selectedEntries, setSelectedEntries] = useState([]);
+  const [schedDate, setSchedDate] = useState(new Date().toISOString().split("T")[0]);
+  const [createdBy, setCreatedBy] = useState("");
+  const [expandedId, setExpandedId] = useState(null);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [s, p] = await Promise.all([schedulesService.getAll(), pendingDeliveryService.getAll()]);
+      setSchedules(s);
+      setPending(p.filter(p => p.status !== "completed"));
+    } catch (e) { setAlert({ type: "error", msg: "Could not load schedules: " + e.message }); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const toggleEntry = (entry) => {
+    setSelectedEntries(prev => {
+      const exists = prev.find(e => e.id === entry.id);
+      if (exists) return prev.filter(e => e.id !== entry.id);
+      return [...prev, { ...entry, qtyToday: String(entry.remaining_qty), notes: "" }];
+    });
+  };
+
+  const updateSelectedQty = (id, qty) => setSelectedEntries(prev => prev.map(e => e.id === id ? { ...e, qtyToday: qty } : e));
+  const updateSelectedNotes = (id, notes) => setSelectedEntries(prev => prev.map(e => e.id === id ? { ...e, notes } : e));
+
+  const handleCreate = async (submit = false) => {
+    if (selectedEntries.length === 0) return setAlert({ type: "error", msg: "Select at least one customer from the register." });
+    if (!schedDate) return setAlert({ type: "error", msg: "Schedule date is required." });
+    setSaving(true);
+    try {
+      const sched = await schedulesService.create(
+        { schedule_date: schedDate, created_by: createdBy || "BDM", status: submit ? "submitted" : "draft" },
+        selectedEntries.map(e => ({
+          customer_id: e.customer_id, order_id: e.order_id, pending_register_id: e.id,
+          block_type: e.block_type, qty_scheduled: parseInt(e.qtyToday) || e.remaining_qty,
+          location: e.customer?.location || "", notes: e.notes || null,
+        }))
+      );
+      await load();
+      setShowForm(false);
+      setSelectedEntries([]);
+      setAlert({ type: "success", msg: submit ? "Schedule submitted for ICO approval!" : "Schedule saved as draft." });
+    } catch (e) { setAlert({ type: "error", msg: "Failed to create schedule: " + e.message }); }
+    finally { setSaving(false); }
+  };
+
+  const handleSubmit = async (id) => {
+    try { await schedulesService.updateStatus(id, "submitted"); await load(); setAlert({ type: "success", msg: "Schedule submitted for ICO approval." }); }
+    catch (e) { setAlert({ type: "error", msg: e.message }); }
+  };
+
+  const statusColor = (s) => ({ draft: theme.textMuted, submitted: theme.accent, ico_approved: theme.green, rejected: theme.red, completed: theme.blue, in_progress: theme.blue, store_notified: theme.green }[s] || theme.textMuted);
+
+  return (
+    <div>
+      <div style={styles.header}>
+        <div><div style={styles.pageTitle}>Daily Delivery Schedule</div><div style={styles.pageSubtitle}>Plan and track daily deliveries</div></div>
+        <button style={styles.btn("primary")} onClick={() => { setShowForm(!showForm); setSelectedEntries([]); }}>+ Create Schedule</button>
+      </div>
+      {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
+
+      {showForm && (
+        <div style={{ ...styles.card, marginBottom: "20px", borderColor: theme.accent + "44" }}>
+          <div style={styles.sectionTitle}>New Delivery Schedule</div>
+          <div style={{ display: "flex", gap: "16px", marginBottom: "16px", flexWrap: "wrap" }}>
+            <div style={styles.formGroup}><label style={styles.label}>Schedule Date *</label><input style={{ ...styles.input, width: "180px" }} type="date" value={schedDate} onChange={e => setSchedDate(e.target.value)} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Created By</label><input style={{ ...styles.input, width: "200px" }} placeholder="BDM name" value={createdBy} onChange={e => setCreatedBy(e.target.value)} /></div>
+          </div>
+          <div style={{ fontSize: "11px", fontWeight: "700", color: theme.textMuted, marginBottom: "10px", textTransform: "uppercase", letterSpacing: "0.05em" }}>Select Customers from Pending Register</div>
+          {pending.length === 0 ? (
+            <div style={{ padding: "20px", color: theme.textMuted, fontSize: "13px" }}>No pending deliveries in the register.</div>
+          ) : pending.map(entry => {
+            const sel = selectedEntries.find(e => e.id === entry.id);
+            return (
+              <div key={entry.id} style={{ padding: "10px 14px", marginBottom: "8px", borderRadius: "8px", border: `1px solid ${sel ? theme.accent + "66" : theme.border}`, background: sel ? "rgba(245,166,35,0.05)" : "transparent" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                  <input type="checkbox" checked={!!sel} onChange={() => toggleEntry(entry)} style={{ width: "16px", height: "16px", cursor: "pointer", accentColor: theme.accent }} />
+                  <div style={{ flex: 1 }}>
+                    <strong>{entry.customer?.name}</strong>
+                    <span style={{ ...styles.badge(theme.blue), marginLeft: "8px" }}>{entry.block_type}</span>
+                    <div style={{ fontSize: "11px", color: theme.textMuted, marginTop: "2px" }}>{entry.customer?.location} · Remaining: {Number(entry.remaining_qty).toLocaleString()} blocks</div>
+                  </div>
+                  {sel && (
+                    <div style={{ display: "flex", gap: "8px" }}>
+                      <div><label style={{ ...styles.label, fontSize: "10px" }}>Qty Today</label><input style={{ ...styles.input, width: "100px" }} type="number" value={sel.qtyToday} onChange={e => updateSelectedQty(entry.id, e.target.value)} /></div>
+                      <div><label style={{ ...styles.label, fontSize: "10px" }}>Instructions</label><input style={{ ...styles.input, width: "180px" }} placeholder="Optional" value={sel.notes} onChange={e => updateSelectedNotes(entry.id, e.target.value)} /></div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+          {selectedEntries.length > 0 && (
+            <div style={{ padding: "10px 14px", background: theme.surface, borderRadius: "8px", marginBottom: "16px", fontSize: "13px", color: theme.textMuted }}>
+              {selectedEntries.length} customer{selectedEntries.length > 1 ? "s" : ""} selected · Total: {selectedEntries.reduce((s, e) => s + (parseInt(e.qtyToday) || 0), 0).toLocaleString()} blocks
+            </div>
+          )}
+          <div style={styles.row}>
+            <button style={styles.btn("primary")} onClick={() => handleCreate(true)} disabled={saving}>{saving ? "Submitting…" : "Save & Submit for ICO Approval"}</button>
+            <button style={styles.btn("secondary")} onClick={() => handleCreate(false)} disabled={saving}>Save as Draft</button>
+            <button style={styles.btn("secondary")} onClick={() => { setShowForm(false); setSelectedEntries([]); }}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      <div style={styles.card}>
+        <div style={styles.sectionTitle}>All Schedules ({schedules.length})</div>
+        {loading ? <Spinner /> : schedules.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "40px", color: theme.textMuted }}>No schedules yet.</div>
+        ) : schedules.map(s => (
+          <div key={s.id} style={{ borderRadius: "8px", border: `1px solid ${theme.border}`, marginBottom: "10px", overflow: "hidden" }}>
+            <div style={{ padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", background: expandedId === s.id ? "rgba(245,166,35,0.06)" : "transparent" }} onClick={() => setExpandedId(expandedId === s.id ? null : s.id)}>
+              <div>
+                <strong>{s.schedule_date}</strong>
+                <span style={{ fontSize: "12px", color: theme.textMuted, marginLeft: "10px" }}>Created by {s.created_by || "—"} · {(s.items || []).length} deliveries</span>
+                {s.ico_notes && <div style={{ fontSize: "11px", color: theme.textMuted, marginTop: "3px" }}>ICO note: {s.ico_notes}</div>}
+              </div>
+              <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                <span style={styles.badge(statusColor(s.status))}>{s.status?.replace(/_/g, " ")}</span>
+                {s.status === "draft" && <button style={{ ...styles.btn("primary"), padding: "4px 12px", fontSize: "11px" }} onClick={e => { e.stopPropagation(); handleSubmit(s.id); }}>Submit for Approval</button>}
+              </div>
+            </div>
+            {expandedId === s.id && (
+              <div style={{ padding: "12px 16px", borderTop: `1px solid ${theme.border}`, background: theme.surface }}>
+                <table style={styles.table}>
+                  <thead><tr>{["Customer", "Location", "Block Type", "Qty Scheduled", "Notes", "Status"].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
+                  <tbody>
+                    {(s.items || []).map(item => (
+                      <tr key={item.id}>
+                        <td style={styles.td}><strong>{item.customer?.name || "—"}</strong></td>
+                        <td style={styles.td}>{item.location || item.customer?.location || "—"}</td>
+                        <td style={styles.td}><span style={styles.badge(theme.blue)}>{item.block_type}</span></td>
+                        <td style={styles.td}><strong style={{ color: theme.accent }}>{Number(item.qty_scheduled).toLocaleString()}</strong></td>
+                        <td style={styles.td}>{item.notes || "—"}</td>
+                        <td style={styles.td}><span style={styles.badge(statusColor(item.status))}>{item.status}</span></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// ── SCHEDULE APPROVALS (ICO) ────────────────────────────────────
+const ScheduleApprovals = () => {
+  const [submitted, setSubmitted] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(null);
+  const [alert, setAlert] = useState(null);
+  const [expandedId, setExpandedId] = useState(null);
+  const [notes, setNotes] = useState({});
+  const [approvedBy, setApprovedBy] = useState("");
+  const [rejectedItems, setRejectedItems] = useState({});
+
+  const load = async () => {
+    setLoading(true);
+    try { setSubmitted(await schedulesService.getSubmitted()); }
+    catch (e) { setAlert({ type: "error", msg: "Could not load submissions: " + e.message }); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const toggleRejectItem = (schedId, itemId) => {
+    setRejectedItems(prev => {
+      const cur = prev[schedId] || [];
+      return { ...prev, [schedId]: cur.includes(itemId) ? cur.filter(i => i !== itemId) : [...cur, itemId] };
+    });
+  };
+
+  const handleApprove = async (sched) => {
+    if (!approvedBy.trim()) return setAlert({ type: "error", msg: "Enter your name as ICO approver." });
+    setSaving(sched.id + "approve");
+    try {
+      const rejected = rejectedItems[sched.id] || [];
+      await schedulesService.icoApprove(sched.id, approvedBy, notes[sched.id] || null, rejected);
+      const approved = (sched.items || []).filter(i => !rejected.includes(i.id));
+      for (const item of approved) {
+        if (item.pending_register_id) {
+          await pendingDeliveryService.updateDelivered(item.pending_register_id, 0).catch(() => {});
+          await supabaseUpdateScheduleItemStatus(item.pending_register_id);
+        }
+      }
+      setAlert({ type: "success", msg: `Schedule approved by ICO. ${rejected.length > 0 ? `${rejected.length} delivery(ies) removed.` : ""}` });
+      await load();
+    } catch (e) { setAlert({ type: "error", msg: "Failed: " + e.message }); }
+    finally { setSaving(null); }
+  };
+
+  const handleReject = async (sched) => {
+    if (!approvedBy.trim()) return setAlert({ type: "error", msg: "Enter your name as ICO reviewer." });
+    if (!notes[sched.id]?.trim()) return setAlert({ type: "error", msg: "Rejection comments are required." });
+    setSaving(sched.id + "reject");
+    try {
+      await schedulesService.icoReject(sched.id, approvedBy, notes[sched.id]);
+      setAlert({ type: "success", msg: "Schedule rejected and returned to BDM." });
+      await load();
+    } catch (e) { setAlert({ type: "error", msg: "Failed: " + e.message }); }
+    finally { setSaving(null); }
+  };
+
+  const supabaseUpdateScheduleItemStatus = async () => {}; // status updates handled by icoApprove
+
+  return (
+    <div>
+      <div style={styles.header}>
+        <div><div style={styles.pageTitle}>Schedule Approvals</div><div style={styles.pageSubtitle}>ICO review queue for submitted delivery schedules</div></div>
+        {submitted.length > 0 && <span style={{ ...styles.badge(theme.red), fontSize: "13px", padding: "6px 14px" }}>{submitted.length} pending</span>}
+      </div>
+      {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
+
+      <div style={{ ...styles.card, marginBottom: "16px" }}>
+        <div style={styles.formGroup}>
+          <label style={styles.label}>ICO Reviewer Name</label>
+          <input style={{ ...styles.input, maxWidth: "280px" }} placeholder="Enter your name to approve/reject" value={approvedBy} onChange={e => setApprovedBy(e.target.value)} />
+        </div>
+      </div>
+
+      {loading ? <Spinner /> : submitted.length === 0 ? (
+        <div style={{ ...styles.card, textAlign: "center", padding: "48px", color: theme.textMuted }}>No schedules awaiting ICO approval.</div>
+      ) : submitted.map(sched => {
+        const rejected = rejectedItems[sched.id] || [];
+        const isOpen = expandedId === sched.id;
+        return (
+          <div key={sched.id} style={{ ...styles.card, marginBottom: "14px", borderLeft: `4px solid ${theme.accent}` }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }} onClick={() => setExpandedId(isOpen ? null : sched.id)}>
+              <div>
+                <div style={{ fontWeight: "700", fontSize: "15px" }}>Schedule for {sched.schedule_date}</div>
+                <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "3px" }}>Created by {sched.created_by || "—"} · {(sched.items || []).length} customers · Submitted for ICO review</div>
+              </div>
+              <span style={{ ...styles.badge(theme.accent), cursor: "pointer" }}>{isOpen ? "▲ Hide" : "▼ Review"}</span>
+            </div>
+            {isOpen && (
+              <div style={{ marginTop: "16px", borderTop: `1px solid ${theme.border}`, paddingTop: "16px" }}>
+                <div style={{ fontSize: "12px", color: theme.textMuted, marginBottom: "10px" }}>Check items to <strong style={{ color: theme.red }}>REMOVE</strong> from this schedule before approving:</div>
+                {(sched.items || []).map(item => {
+                  const isRejected = rejected.includes(item.id);
+                  return (
+                    <div key={item.id} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "8px 12px", marginBottom: "6px", borderRadius: "6px", background: isRejected ? "rgba(240,107,107,0.08)" : "rgba(45,212,160,0.05)", border: `1px solid ${isRejected ? theme.red + "44" : theme.green + "44"}` }}>
+                      <input type="checkbox" checked={isRejected} onChange={() => toggleRejectItem(sched.id, item.id)} style={{ width: "16px", height: "16px", cursor: "pointer", accentColor: theme.red }} />
+                      <div style={{ flex: 1 }}>
+                        <strong style={{ textDecoration: isRejected ? "line-through" : "none", opacity: isRejected ? 0.5 : 1 }}>{item.customer?.name || "—"}</strong>
+                        <span style={{ ...styles.badge(theme.blue), marginLeft: "8px", opacity: isRejected ? 0.5 : 1 }}>{item.block_type}</span>
+                        <span style={{ marginLeft: "10px", fontSize: "12px", color: theme.textMuted }}>{Number(item.qty_scheduled).toLocaleString()} blocks · {item.location || item.customer?.location || ""}</span>
+                      </div>
+                      {isRejected && <span style={{ fontSize: "11px", color: theme.red }}>Will be removed</span>}
+                    </div>
+                  );
+                })}
+                {rejected.length > 0 && <div style={{ fontSize: "12px", color: theme.red, marginBottom: "8px" }}>{rejected.length} item(s) marked for removal. The rest will be approved.</div>}
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>ICO Notes (required for rejection)</label>
+                  <input style={styles.input} placeholder="Comments for BDM…" value={notes[sched.id] || ""} onChange={e => setNotes(prev => ({ ...prev, [sched.id]: e.target.value }))} />
+                </div>
+                <div style={styles.row}>
+                  <button style={styles.btn("primary")} disabled={!!saving} onClick={() => handleApprove(sched)}>{saving === sched.id + "approve" ? "Approving…" : rejected.length > 0 ? `Approve (Remove ${rejected.length})` : "Approve Full Schedule"}</button>
+                  <button style={styles.btn("danger")} disabled={!!saving} onClick={() => handleReject(sched)}>{saving === sched.id + "reject" ? "Rejecting…" : "Reject Entire Schedule"}</button>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+// ── BATCHES ────────────────────────────────────────────────────
+const Batches = () => {
+  const [batches, setBatches] = useState([]);
+  const [productions, setProductions] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [alert, setAlert] = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  const [expandedId, setExpandedId] = useState(null);
+  const today = new Date().toISOString().split("T")[0];
+  const emptyForm = { blockType: "9-inch", dateCured: today, qtyAccepted: "", createdBy: "", notes: "", linkedProds: [] };
+  const [form, setForm] = useState(emptyForm);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [b, p] = await Promise.all([batchesService.getAll(), productionService.getAll()]);
+      setBatches(b);
+      setProductions(p);
+    } catch (e) { setAlert({ type: "error", msg: "Could not load batches: " + e.message }); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const toggleProdLink = (id) => setForm(f => ({ ...f, linkedProds: f.linkedProds.includes(id) ? f.linkedProds.filter(p => p !== id) : [...f.linkedProds, id] }));
+
+  const handleCreate = async () => {
+    if (!form.qtyAccepted || !form.dateCured) return setAlert({ type: "error", msg: "Quantity accepted and cure date are required." });
+    setSaving(true);
+    try {
+      const batchNum = await batchesService.getNextNumber();
+      const batch = await batchesService.create({
+        batch_number: batchNum, block_type: form.blockType, date_cured: form.dateCured,
+        qty_accepted: parseInt(form.qtyAccepted), qty_remaining: parseInt(form.qtyAccepted),
+        status: "active", notes: form.notes || null, created_by: form.createdBy || null,
+      }, form.linkedProds);
+      // Increase finished goods stock
+      try { await finishedGoodsService.increase(form.blockType, parseInt(form.qtyAccepted)); } catch {}
+      await load();
+      setShowForm(false);
+      setForm(emptyForm);
+      setAlert({ type: "success", msg: `Batch ${batchNum} created. Finished goods stock updated.` });
+    } catch (e) { setAlert({ type: "error", msg: "Failed to create batch: " + e.message }); }
+    finally { setSaving(false); }
+  };
+
+  const filteredProds = productions.filter(p => p.block_type === form.blockType);
+  const totalInYard = batches.filter(b => b.status === "active").reduce((s, b) => s + Number(b.qty_remaining || 0), 0);
+
+  return (
+    <div>
+      <div style={styles.header}>
+        <div><div style={styles.pageTitle}>Batch Management</div><div style={styles.pageSubtitle}>Finished goods batches after curing — link to production logs</div></div>
+        <button style={styles.btn("primary")} onClick={() => setShowForm(!showForm)}>+ Create Batch</button>
+      </div>
+      {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
+
+      <div style={styles.grid(3)}>
+        <StatCard label="Active Batches" value={batches.filter(b => b.status === "active").length} sub="With stock remaining" accent={theme.green} />
+        <StatCard label="Blocks In Yard" value={fmt(totalInYard)} sub="Across all active batches" accent={theme.accent} />
+        <StatCard label="Exhausted Batches" value={batches.filter(b => b.status === "exhausted").length} sub="Fully delivered" accent={theme.textMuted} />
+      </div>
+
+      {showForm && (
+        <div style={{ ...styles.card, marginBottom: "20px", borderColor: theme.accent + "44" }}>
+          <div style={styles.sectionTitle}>Create New Batch</div>
+          <div style={styles.grid(3)}>
+            <div style={styles.formGroup}><label style={styles.label}>Block Type</label><select style={styles.input} value={form.blockType} onChange={e => setForm({ ...form, blockType: e.target.value, linkedProds: [] })}>{BLOCK_TYPES.map(t => <option key={t}>{t}</option>)}</select></div>
+            <div style={styles.formGroup}><label style={styles.label}>Date Cured *</label><input style={styles.input} type="date" value={form.dateCured} onChange={e => setForm({ ...form, dateCured: e.target.value })} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Qty Accepted (Good Blocks) *</label><input style={styles.input} type="number" placeholder="e.g. 2500" value={form.qtyAccepted} onChange={e => setForm({ ...form, qtyAccepted: e.target.value })} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Created By</label><input style={styles.input} placeholder="Store Officer name" value={form.createdBy} onChange={e => setForm({ ...form, createdBy: e.target.value })} /></div>
+            <div style={{ ...styles.formGroup, gridColumn: "span 2" }}><label style={styles.label}>Notes</label><input style={styles.input} placeholder="Optional" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></div>
+          </div>
+          {filteredProds.length > 0 && (
+            <div style={{ marginBottom: "14px" }}>
+              <div style={{ fontSize: "11px", fontWeight: "700", color: theme.textMuted, marginBottom: "8px", textTransform: "uppercase", letterSpacing: "0.05em" }}>Link Production Log Entries (optional)</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                {filteredProds.map(p => {
+                  const linked = form.linkedProds.includes(p.id);
+                  return (
+                    <div key={p.id} onClick={() => toggleProdLink(p.id)} style={{ padding: "5px 10px", borderRadius: "6px", fontSize: "12px", cursor: "pointer", border: `1px solid ${linked ? theme.accent : theme.border}`, background: linked ? "rgba(245,166,35,0.08)" : "transparent", color: linked ? theme.accent : theme.textMuted }}>
+                      {p.date} · {p.block_type} · {p.quantity_produced?.toLocaleString()} blocks
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          <div style={styles.row}>
+            <button style={styles.btn("primary")} onClick={handleCreate} disabled={saving}>{saving ? "Creating…" : "Create Batch & Update Stock"}</button>
+            <button style={styles.btn("secondary")} onClick={() => { setShowForm(false); setForm(emptyForm); }}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      <div style={styles.card}>
+        <div style={styles.sectionTitle}>All Batches ({batches.length})</div>
+        {loading ? <Spinner /> : batches.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "40px", color: theme.textMuted }}>No batches created yet.</div>
+        ) : batches.map(b => {
+          const delivered = b.qty_accepted - b.qty_remaining;
+          const pct = b.qty_accepted > 0 ? Math.round((delivered / b.qty_accepted) * 100) : 0;
+          const isOpen = expandedId === b.id;
+          return (
+            <div key={b.id} style={{ borderRadius: "8px", border: `1px solid ${b.status === "exhausted" ? theme.border : theme.accent + "44"}`, marginBottom: "10px", overflow: "hidden" }}>
+              <div style={{ padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }} onClick={() => setExpandedId(isOpen ? null : b.id)}>
+                <div>
+                  <strong style={{ fontSize: "14px" }}>{b.batch_number}</strong>
+                  <span style={{ ...styles.badge(theme.blue), marginLeft: "8px" }}>{b.block_type}</span>
+                  <span style={styles.badge(b.status === "active" ? theme.green : theme.textMuted)}>{b.status}</span>
+                  <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "3px" }}>Cured: {b.date_cured} · Created by: {b.created_by || "—"}</div>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontSize: "13px" }}>Accepted: <strong style={{ color: theme.accent }}>{Number(b.qty_accepted).toLocaleString()}</strong></div>
+                  <div style={{ fontSize: "13px" }}>Remaining: <strong style={{ color: b.status === "active" ? theme.green : theme.textMuted }}>{Number(b.qty_remaining).toLocaleString()}</strong></div>
+                </div>
+              </div>
+              {isOpen && (
+                <div style={{ padding: "12px 16px", borderTop: `1px solid ${theme.border}`, background: theme.surface }}>
+                  <div style={{ fontSize: "12px", fontWeight: "700", color: theme.textMuted, marginBottom: "10px", textTransform: "uppercase", letterSpacing: "0.05em" }}>Batch Reconciliation</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: "10px", marginBottom: "12px" }}>
+                    {[["Total Accepted", b.qty_accepted, theme.accent], ["Total Delivered", delivered, theme.green], ["Remaining in Batch", b.qty_remaining, b.status === "active" ? theme.blue : theme.textMuted], ["Delivery Rate", pct + "%", theme.green]].map(([label, val, color]) => (
+                      <div key={label} style={{ background: theme.card, borderRadius: "6px", padding: "10px 12px" }}>
+                        <div style={{ fontSize: "11px", color: theme.textMuted }}>{label}</div>
+                        <div style={{ fontSize: "18px", fontWeight: "700", color }}>{Number(val).toLocaleString()}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={styles.progressBar()}><div style={styles.progressFill(pct, theme.green)} /></div>
+                  <div style={{ fontSize: "11px", color: theme.textMuted, marginTop: "4px" }}>{pct}% of batch delivered</div>
+                  {(b.links || []).length > 0 && (
+                    <div style={{ marginTop: "12px" }}>
+                      <div style={{ fontSize: "11px", fontWeight: "700", color: theme.textMuted, marginBottom: "6px", textTransform: "uppercase" }}>Linked Production Entries</div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                        {b.links.map(l => l.production && (
+                          <span key={l.production_log_id} style={{ ...styles.badge(theme.blue), fontSize: "11px" }}>{l.production.date} · {l.production.quantity_produced?.toLocaleString()} blocks</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
 // ── NAV ───────────────────────────────────────────────────────
 const navItems = [
   { section: "Overview", items: [{ id: "dashboard", label: "Dashboard", icon: "dashboard" }] },
   { section: "Operations", items: [
     { id: "production", label: "Production", icon: "production" },
     { id: "inventory", label: "Inventory", icon: "inventory" },
+    { id: "batches", label: "Batches", icon: "batches" },
     { id: "waybills", label: "Waybills", icon: "waybill" },
     { id: "staff", label: "Staff", icon: "staff" },
   ]},
+  { section: "Deliveries", items: [
+    { id: "pending_register", label: "Pending Deliveries", icon: "pending" },
+    { id: "daily_schedule", label: "Daily Schedule", icon: "schedule" },
+  ]},
   { section: "Sales", items: [{ id: "customers", label: "Customers", icon: "staff" }, { id: "orders", label: "Orders & Invoicing", icon: "orders" }] },
+  { section: "Approvals", items: [
+    { id: "lpo_approvals", label: "LPO Approvals", icon: "lpo" },
+    { id: "schedule_approvals", label: "Schedule Approvals", icon: "approve" },
+  ]},
   { section: "Analytics", items: [{ id: "reports", label: "Reports", icon: "reports" }] },
 ];
 
@@ -2267,20 +3017,41 @@ const navItems = [
 export default function App() {
   const [active, setActive] = useState("dashboard");
   const [lowStockCount, setLowStockCount] = useState(0);
+  const [lpoCount, setLpoCount] = useState(0);
+  const [scheduleCount, setScheduleCount] = useState(0);
+
   const pages = {
     dashboard: <Dashboard />,
     production: <Production />,
     inventory: <Inventory onLowStockChange={setLowStockCount} />,
+    batches: <Batches />,
     waybills: <Waybills />,
     staff: <Staff />,
     customers: <Customers />,
     orders: <Orders onNavigate={setActive} />,
+    pending_register: <PendingDeliveryRegister />,
+    daily_schedule: <DailySchedule />,
+    lpo_approvals: <LPOApprovals />,
+    schedule_approvals: <ScheduleApprovals />,
     reports: <Reports />,
+  };
+
+  // Load approval badge counts on mount
+  useEffect(() => {
+    lpoService.getPending().then(l => setLpoCount(l.length)).catch(() => {});
+    schedulesService.getSubmitted().then(s => setScheduleCount(s.length)).catch(() => {});
+  }, [active]);
+
+  const getBadge = (id) => {
+    if (id === "inventory" && lowStockCount > 0) return lowStockCount;
+    if (id === "lpo_approvals" && lpoCount > 0) return lpoCount;
+    if (id === "schedule_approvals" && scheduleCount > 0) return scheduleCount;
+    return 0;
   };
 
   return (
     <div style={styles.app}>
-      <div style={styles.sidebar}>
+      <div style={{ ...styles.sidebar, overflowY: "auto" }}>
         <div style={styles.logo}>
           <img src="/logo.png" alt="Abuja Precast Concrete Limited" style={{ width: "100%", maxWidth: "180px", marginBottom: "10px", display: "block" }} />
           <div style={styles.logoSub}>Quality Precast products. Reliable Delivery.</div>
@@ -2289,15 +3060,18 @@ export default function App() {
           {navItems.map(section => (
             <div key={section.section}>
               <div style={styles.navSection}>{section.section}</div>
-              {section.items.map(item => (
-                <div key={item.id} style={styles.navItem(active === item.id)} onClick={() => setActive(item.id)}>
-                  <Icon name={item.icon} size={14} />
-                  <span style={{ flex: 1 }}>{item.label}</span>
-                  {item.id === "inventory" && lowStockCount > 0 && (
-                    <span style={{ background: theme.red, color: "#fff", fontSize: "10px", fontWeight: "700", borderRadius: "10px", padding: "1px 6px", minWidth: "18px", textAlign: "center" }}>{lowStockCount}</span>
-                  )}
-                </div>
-              ))}
+              {section.items.map(item => {
+                const badge = getBadge(item.id);
+                return (
+                  <div key={item.id} style={styles.navItem(active === item.id)} onClick={() => setActive(item.id)}>
+                    <Icon name={item.icon} size={14} />
+                    <span style={{ flex: 1 }}>{item.label}</span>
+                    {badge > 0 && (
+                      <span style={{ background: theme.red, color: "#fff", fontSize: "10px", fontWeight: "700", borderRadius: "10px", padding: "1px 6px", minWidth: "18px", textAlign: "center" }}>{badge}</span>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           ))}
         </nav>
