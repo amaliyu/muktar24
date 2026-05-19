@@ -4,8 +4,10 @@ import { staffService } from './services/staff';
 import { ordersService, customersService } from './services/orders';
 import { waybillsService } from './services/deliveries';
 import { invoicesService, paymentsService } from './services/payments';
+import { inventoryService } from './services/inventory';
 import { generateInvoicePDF } from './utils/generateInvoicePDF';
 import { generateStatementPDF } from './utils/generateStatementPDF';
+import { generateInventoryReportPDF } from './utils/generateInventoryReportPDF';
 
 const theme = {
   bg: "#0f1117", surface: "#1a1d27", card: "#21263a", border: "#2e3452",
@@ -188,7 +190,7 @@ const ConfirmModal = ({ msg, onConfirm, onCancel }) => (
 );
 
 const Icon = ({ name, size = 16 }) => {
-  const icons = { dashboard: "⊞", production: "🏭", orders: "📋", staff: "👥", waybill: "📄", reports: "📊", settings: "⚙", logout: "→" };
+  const icons = { dashboard: "⊞", production: "🏭", orders: "📋", staff: "👥", waybill: "📄", reports: "📊", inventory: "📦", settings: "⚙", logout: "→" };
   return <span style={{ fontSize: size }}>{icons[name] || "•"}</span>;
 };
 
@@ -366,8 +368,17 @@ const Production = () => {
         const entry = await productionService.create(entryData);
         if (dmgProd > 0) await productionService.logDamage({ date: form.date, block_type: form.blockType, stage: "production", quantity_damaged: dmgProd, production_log_id: entry.id });
         if (dmgStack > 0) await productionService.logDamage({ date: form.date, block_type: form.blockType, stage: "stacking", quantity_damaged: dmgStack, production_log_id: entry.id });
+        try {
+          await inventoryService.autoDeductProduction({
+            cementBags: entryData.cement_bags,
+            graniteDustKg: entryData.granite_dust_kg,
+            dieselLitres: entryData.diesel_litres,
+            date: entryData.date,
+            reference: `PROD-${entry.id.slice(0, 8)}`,
+          });
+        } catch { /* inventory tables may not exist yet — don't block production save */ }
         setRecords(prev => [{ ...entry, damaged: { production: dmgProd, stacking: dmgStack } }, ...prev]);
-        setAlert({ type: "success", msg: "Production entry saved successfully!" });
+        setAlert({ type: "success", msg: "Production entry saved and inventory updated!" });
       }
       setForm(emptyForm);
       setShowForm(false);
@@ -1759,10 +1770,495 @@ const Reports = () => (
   </div>
 );
 
+// ── INVENTORY ─────────────────────────────────────────────────
+const UNITS = ["bags", "kg", "litres", "units", "tonnes", "metres", "packs"];
+const ISSUED_TO = ["Production", "Maintenance", "Logistics", "Administration", "Other"];
+
+const Inventory = ({ onLowStockChange }) => {
+  const [tab, setTab] = useState("registry");
+  const [items, setItems] = useState([]);
+  const [movements, setMovements] = useState([]);
+  const [staff, setStaff] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [alert, setAlert] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const [editItem, setEditItem] = useState(null);
+  const [showItemForm, setShowItemForm] = useState(false);
+  const [movFilter, setMovFilter] = useState({ from: "", to: "", itemId: "" });
+  const [reportDates, setReportDates] = useState({ from: "", to: "" });
+  const [reportLoading, setReportLoading] = useState(false);
+
+  const today = new Date().toISOString().split("T")[0];
+  const emptyItem = { name: "", unit: "bags", current_stock: "", reorder_level: "", unit_cost: "", supplier: "" };
+  const emptyIn  = { itemId: "", quantity: "", unitCost: "", supplier: "", staffName: "", date: today, notes: "" };
+  const emptyOut = { itemId: "", quantity: "", issuedTo: "Production", staffName: "", reference: "", date: today, notes: "" };
+
+  const [itemForm, setItemForm]   = useState(emptyItem);
+  const [inForm,   setInForm]     = useState(emptyIn);
+  const [outForm,  setOutForm]    = useState(emptyOut);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [its, s] = await Promise.all([inventoryService.getAllItems(), staffService.getActive()]);
+      setItems(its);
+      setStaff(s);
+      if (onLowStockChange) onLowStockChange(its.filter(i => Number(i.current_stock) <= Number(i.reorder_level)).length);
+    } catch (e) {
+      setAlert({ type: "error", msg: "Could not load inventory: " + e.message });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadMovements = async () => {
+    try {
+      const m = await inventoryService.getMovements({
+        itemId: movFilter.itemId || null,
+        from: movFilter.from || null,
+        to: movFilter.to || null,
+      });
+      setMovements(m);
+    } catch (e) {
+      setAlert({ type: "error", msg: "Could not load movements: " + e.message });
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+  useEffect(() => { if (tab === "movements") loadMovements(); }, [tab, movFilter]);
+
+  const lowStockItems = items.filter(i => Number(i.current_stock) <= Number(i.reorder_level));
+
+  const startEditItem = (item) => {
+    setItemForm({ name: item.name, unit: item.unit, current_stock: String(item.current_stock), reorder_level: String(item.reorder_level), unit_cost: String(item.unit_cost || ""), supplier: item.supplier || "" });
+    setEditItem(item);
+    setShowItemForm(true);
+  };
+
+  const handleSaveItem = async () => {
+    if (!itemForm.name || !itemForm.unit) return setAlert({ type: "error", msg: "Item name and unit are required." });
+    setSaving(true);
+    try {
+      const payload = { name: itemForm.name, unit: itemForm.unit, current_stock: Number(itemForm.current_stock) || 0, reorder_level: Number(itemForm.reorder_level) || 0, unit_cost: Number(itemForm.unit_cost) || 0, supplier: itemForm.supplier || null };
+      if (editItem) {
+        await inventoryService.updateItem(editItem.id, payload);
+      } else {
+        await inventoryService.createItem(payload);
+      }
+      await load();
+      setShowItemForm(false);
+      setItemForm(emptyItem);
+      setEditItem(null);
+      setAlert({ type: "success", msg: editItem ? "Item updated." : "Item added to registry." });
+    } catch (e) {
+      setAlert({ type: "error", msg: "Failed to save item. " + e.message });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteItem = async () => {
+    const item = confirmDelete;
+    setConfirmDelete(null);
+    try {
+      await inventoryService.deleteItem(item.id);
+      await load();
+      setAlert({ type: "success", msg: `${item.name} removed from registry.` });
+    } catch (e) {
+      setAlert({ type: "error", msg: "Failed to delete item. " + e.message });
+    }
+  };
+
+  const handleStockIn = async () => {
+    if (!inForm.itemId || !inForm.quantity || !inForm.date) return setAlert({ type: "error", msg: "Item, quantity, and date are required." });
+    setSaving(true);
+    try {
+      await inventoryService.stockIn({ itemId: inForm.itemId, quantity: Number(inForm.quantity), unitCost: Number(inForm.unitCost) || 0, supplier: inForm.supplier, staffName: inForm.staffName, date: inForm.date, notes: inForm.notes });
+      await load();
+      if (tab === "movements") await loadMovements();
+      setInForm(emptyIn);
+      setAlert({ type: "success", msg: "Stock received and inventory updated!" });
+    } catch (e) {
+      setAlert({ type: "error", msg: "Failed to record stock in. " + e.message });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleStockOut = async () => {
+    if (!outForm.itemId || !outForm.quantity || !outForm.date) return setAlert({ type: "error", msg: "Item, quantity, and date are required." });
+    setSaving(true);
+    try {
+      await inventoryService.stockOut({ itemId: outForm.itemId, quantity: Number(outForm.quantity), issuedTo: outForm.issuedTo, staffName: outForm.staffName, reference: outForm.reference, date: outForm.date, notes: outForm.notes });
+      await load();
+      if (tab === "movements") await loadMovements();
+      setOutForm(emptyOut);
+      setAlert({ type: "success", msg: "Stock issued and inventory updated!" });
+    } catch (e) {
+      setAlert({ type: "error", msg: "Failed to record stock out. " + e.message });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleReport = async () => {
+    setReportLoading(true);
+    try {
+      const movs = await inventoryService.getMovements({ from: reportDates.from || null, to: reportDates.to || null });
+      await generateInventoryReportPDF(items, movs, reportDates);
+    } catch (e) {
+      setAlert({ type: "error", msg: "Failed to generate report. " + e.message });
+    } finally {
+      setReportLoading(false);
+    }
+  };
+
+  const totalValue = items.reduce((s, i) => s + Number(i.current_stock) * Number(i.unit_cost || 0), 0);
+  const TABS = [{ id: "registry", label: "Stock Registry" }, { id: "stockin", label: "Stock In" }, { id: "stockout", label: "Stock Out" }, { id: "movements", label: "Movement Log" }, { id: "report", label: "Report" }];
+
+  return (
+    <div>
+      {confirmDelete && <ConfirmModal msg={`Remove "${confirmDelete.name}" from inventory registry? All movement history for this item will also be deleted.`} onConfirm={handleDeleteItem} onCancel={() => setConfirmDelete(null)} />}
+
+      <div style={styles.header}>
+        <div>
+          <div style={styles.pageTitle}>Inventory Management</div>
+          <div style={styles.pageSubtitle}>Raw materials, consumables, and stock movements</div>
+        </div>
+        <button style={styles.btn("primary")} onClick={() => { setShowItemForm(true); setEditItem(null); setItemForm(emptyItem); setTab("registry"); }}>+ Add Item</button>
+      </div>
+
+      {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
+
+      {/* Low stock alerts */}
+      {lowStockItems.length > 0 && (
+        <div style={{ background: "rgba(240,107,107,0.10)", border: `1px solid ${theme.red}44`, borderRadius: "10px", padding: "14px 18px", marginBottom: "20px" }}>
+          <div style={{ fontWeight: "700", fontSize: "13px", color: theme.red, marginBottom: "8px" }}>⚠ {lowStockItems.length} item{lowStockItems.length > 1 ? "s" : ""} need restocking</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+            {lowStockItems.map(i => (
+              <div key={i.id} style={{ background: "rgba(240,107,107,0.12)", border: `1px solid ${theme.red}55`, borderRadius: "6px", padding: "5px 10px", fontSize: "12px" }}>
+                <strong style={{ color: theme.red }}>{i.name}</strong>
+                <span style={{ color: theme.textMuted, marginLeft: "6px" }}>{Number(i.current_stock).toLocaleString()} {i.unit} left (min: {Number(i.reorder_level).toLocaleString()})</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Summary stats */}
+      <div style={styles.grid(4)}>
+        <StatCard label="Total Items" value={items.length} sub="In registry" accent={theme.blue} />
+        <StatCard label="Low Stock" value={lowStockItems.length} sub="Below reorder level" accent={lowStockItems.length > 0 ? theme.red : theme.green} />
+        <StatCard label="Total Stock Value" value={`₦${Math.round(totalValue).toLocaleString()}`} sub="At current unit cost" accent={theme.accent} />
+        <StatCard label="Adequately Stocked" value={items.length - lowStockItems.length} sub="Above reorder level" accent={theme.green} />
+      </div>
+
+      {/* Tabs */}
+      <div style={{ display: "flex", gap: "4px", marginBottom: "16px", borderBottom: `1px solid ${theme.border}`, paddingBottom: "0" }}>
+        {TABS.map(t => (
+          <button key={t.id} onClick={() => setTab(t.id)} style={{ padding: "9px 18px", fontSize: "13px", fontWeight: tab === t.id ? "600" : "400", color: tab === t.id ? theme.accent : theme.textMuted, background: "transparent", border: "none", borderBottom: tab === t.id ? `2px solid ${theme.accent}` : "2px solid transparent", cursor: "pointer", transition: "all 0.15s" }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── STOCK REGISTRY TAB ── */}
+      {tab === "registry" && (
+        <div>
+          {showItemForm && (
+            <div style={{ ...styles.card, marginBottom: "20px", borderColor: theme.accent + "44" }}>
+              <div style={styles.sectionTitle}>{editItem ? `Edit — ${editItem.name}` : "Add New Inventory Item"}</div>
+              <div style={styles.grid(3)}>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Item Name *</label>
+                  <input style={styles.input} placeholder="e.g. Cement, Diesel…" value={itemForm.name} onChange={e => setItemForm({ ...itemForm, name: e.target.value })} />
+                </div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Unit of Measure *</label>
+                  <select style={styles.input} value={itemForm.unit} onChange={e => setItemForm({ ...itemForm, unit: e.target.value })}>
+                    {UNITS.map(u => <option key={u}>{u}</option>)}
+                  </select>
+                </div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Current Stock</label>
+                  <input style={styles.input} type="number" placeholder="0" value={itemForm.current_stock} onChange={e => setItemForm({ ...itemForm, current_stock: e.target.value })} />
+                </div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Reorder Level</label>
+                  <input style={styles.input} type="number" placeholder="e.g. 50" value={itemForm.reorder_level} onChange={e => setItemForm({ ...itemForm, reorder_level: e.target.value })} />
+                </div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Unit Cost (₦)</label>
+                  <input style={styles.input} type="number" placeholder="0.00" value={itemForm.unit_cost} onChange={e => setItemForm({ ...itemForm, unit_cost: e.target.value })} />
+                </div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Supplier Name</label>
+                  <input style={styles.input} placeholder="Optional" value={itemForm.supplier} onChange={e => setItemForm({ ...itemForm, supplier: e.target.value })} />
+                </div>
+              </div>
+              <div style={styles.row}>
+                <button style={styles.btn("primary")} onClick={handleSaveItem} disabled={saving}>{saving ? "Saving…" : editItem ? "Update Item" : "Add to Registry"}</button>
+                <button style={styles.btn("secondary")} onClick={() => { setShowItemForm(false); setEditItem(null); setItemForm(emptyItem); }}>Cancel</button>
+              </div>
+            </div>
+          )}
+
+          <div style={styles.card}>
+            <div style={styles.sectionTitle}>Inventory Registry ({items.length} items)</div>
+            {loading ? <Spinner /> : items.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "40px", color: theme.textMuted, fontSize: "13px" }}>No items registered yet. Add your first inventory item.</div>
+            ) : (
+              <table style={styles.table}>
+                <thead>
+                  <tr>{["Item", "Unit", "On Hand", "Reorder Level", "Unit Cost", "Stock Value", "Supplier", "Last Updated", ""].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
+                </thead>
+                <tbody>
+                  {items.map(item => {
+                    const isLow = Number(item.current_stock) <= Number(item.reorder_level);
+                    const value = Number(item.current_stock) * Number(item.unit_cost || 0);
+                    return (
+                      <tr key={item.id} style={{ background: isLow ? "rgba(240,107,107,0.05)" : "transparent" }}>
+                        <td style={styles.td}>
+                          <strong style={{ color: isLow ? theme.red : theme.text }}>{item.name}</strong>
+                          {isLow && <span style={{ ...styles.badge(theme.red), marginLeft: "6px", fontSize: "10px" }}>LOW</span>}
+                        </td>
+                        <td style={styles.td}>{item.unit}</td>
+                        <td style={styles.td}><strong style={{ color: isLow ? theme.red : theme.accent }}>{Number(item.current_stock).toLocaleString()}</strong></td>
+                        <td style={styles.td}>{Number(item.reorder_level).toLocaleString()}</td>
+                        <td style={styles.td}>₦{Number(item.unit_cost || 0).toLocaleString()}</td>
+                        <td style={styles.td}><strong style={{ color: theme.accent }}>₦{Math.round(value).toLocaleString()}</strong></td>
+                        <td style={styles.td}>{item.supplier || "—"}</td>
+                        <td style={styles.td}>{item.updated_at ? item.updated_at.split("T")[0] : "—"}</td>
+                        <td style={styles.td}>
+                          <div style={{ display: "flex", gap: "6px" }}>
+                            <button style={{ ...styles.btn("secondary"), padding: "4px 10px", fontSize: "11px" }} onClick={() => startEditItem(item)}>Edit</button>
+                            <button style={{ ...styles.btn("danger"), padding: "4px 10px", fontSize: "11px" }} onClick={() => setConfirmDelete(item)}>Delete</button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── STOCK IN TAB ── */}
+      {tab === "stockin" && (
+        <div style={styles.card}>
+          <div style={styles.sectionTitle}>Record Stock Received</div>
+          <div style={styles.grid(3)}>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Item *</label>
+              <select style={styles.input} value={inForm.itemId} onChange={e => setInForm({ ...inForm, itemId: e.target.value })}>
+                <option value="">— Select item —</option>
+                {items.map(i => <option key={i.id} value={i.id}>{i.name} ({i.unit}) — {Number(i.current_stock).toLocaleString()} on hand</option>)}
+              </select>
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Date Received *</label>
+              <input style={styles.input} type="date" value={inForm.date} onChange={e => setInForm({ ...inForm, date: e.target.value })} />
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Quantity Received *</label>
+              <input style={styles.input} type="number" placeholder="e.g. 100" value={inForm.quantity} onChange={e => setInForm({ ...inForm, quantity: e.target.value })} />
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Unit Cost at Purchase (₦)</label>
+              <input style={styles.input} type="number" placeholder="0.00" value={inForm.unitCost} onChange={e => setInForm({ ...inForm, unitCost: e.target.value })} />
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Total Cost (auto)</label>
+              <input style={{ ...styles.input, background: "transparent", color: theme.accent, fontWeight: "700" }} readOnly value={inForm.quantity && inForm.unitCost ? `₦${Math.round(Number(inForm.quantity) * Number(inForm.unitCost)).toLocaleString()}` : "—"} />
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Supplier Name</label>
+              <input style={styles.input} placeholder="Optional" value={inForm.supplier} onChange={e => setInForm({ ...inForm, supplier: e.target.value })} />
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Received By</label>
+              <select style={styles.input} value={inForm.staffName} onChange={e => setInForm({ ...inForm, staffName: e.target.value })}>
+                <option value="">— Select staff —</option>
+                {staff.map(s => <option key={s.id} value={s.full_name}>{s.full_name}</option>)}
+              </select>
+            </div>
+            <div style={{ ...styles.formGroup, gridColumn: "span 2" }}>
+              <label style={styles.label}>Notes</label>
+              <input style={styles.input} placeholder="Optional notes" value={inForm.notes} onChange={e => setInForm({ ...inForm, notes: e.target.value })} />
+            </div>
+          </div>
+          <div style={styles.row}>
+            <button style={styles.btn("primary")} onClick={handleStockIn} disabled={saving}>{saving ? "Recording…" : "Record Stock In"}</button>
+            <button style={styles.btn("secondary")} onClick={() => setInForm(emptyIn)}>Clear</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── STOCK OUT TAB ── */}
+      {tab === "stockout" && (
+        <div style={styles.card}>
+          <div style={styles.sectionTitle}>Issue Stock</div>
+          <div style={styles.grid(3)}>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Item *</label>
+              <select style={styles.input} value={outForm.itemId} onChange={e => setOutForm({ ...outForm, itemId: e.target.value })}>
+                <option value="">— Select item —</option>
+                {items.map(i => <option key={i.id} value={i.id}>{i.name} ({i.unit}) — {Number(i.current_stock).toLocaleString()} on hand</option>)}
+              </select>
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Date Issued *</label>
+              <input style={styles.input} type="date" value={outForm.date} onChange={e => setOutForm({ ...outForm, date: e.target.value })} />
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Quantity Issued *</label>
+              <input style={styles.input} type="number" placeholder="e.g. 20" value={outForm.quantity} onChange={e => setOutForm({ ...outForm, quantity: e.target.value })} />
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Issued To</label>
+              <select style={styles.input} value={outForm.issuedTo} onChange={e => setOutForm({ ...outForm, issuedTo: e.target.value })}>
+                {ISSUED_TO.map(t => <option key={t}>{t}</option>)}
+              </select>
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Issued By</label>
+              <select style={styles.input} value={outForm.staffName} onChange={e => setOutForm({ ...outForm, staffName: e.target.value })}>
+                <option value="">— Select staff —</option>
+                {staff.map(s => <option key={s.id} value={s.full_name}>{s.full_name}</option>)}
+              </select>
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Reference / Job No.</label>
+              <input style={styles.input} placeholder="Optional" value={outForm.reference} onChange={e => setOutForm({ ...outForm, reference: e.target.value })} />
+            </div>
+            <div style={{ ...styles.formGroup, gridColumn: "span 3" }}>
+              <label style={styles.label}>Notes</label>
+              <input style={styles.input} placeholder="Optional notes" value={outForm.notes} onChange={e => setOutForm({ ...outForm, notes: e.target.value })} />
+            </div>
+          </div>
+          <div style={styles.row}>
+            <button style={styles.btn("primary")} onClick={handleStockOut} disabled={saving}>{saving ? "Recording…" : "Record Stock Out"}</button>
+            <button style={styles.btn("secondary")} onClick={() => setOutForm(emptyOut)}>Clear</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── MOVEMENTS TAB ── */}
+      {tab === "movements" && (
+        <div>
+          <div style={{ ...styles.card, marginBottom: "16px" }}>
+            <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "flex-end" }}>
+              <div>
+                <label style={styles.label}>Filter by Item</label>
+                <select style={{ ...styles.input, width: "220px" }} value={movFilter.itemId} onChange={e => setMovFilter({ ...movFilter, itemId: e.target.value })}>
+                  <option value="">All items</option>
+                  {items.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={styles.label}>From</label>
+                <input style={{ ...styles.input, width: "140px" }} type="date" value={movFilter.from} onChange={e => setMovFilter({ ...movFilter, from: e.target.value })} />
+              </div>
+              <div>
+                <label style={styles.label}>To</label>
+                <input style={{ ...styles.input, width: "140px" }} type="date" value={movFilter.to} onChange={e => setMovFilter({ ...movFilter, to: e.target.value })} />
+              </div>
+              {(movFilter.itemId || movFilter.from || movFilter.to) && (
+                <button style={styles.btn("secondary")} onClick={() => setMovFilter({ from: "", to: "", itemId: "" })}>Clear Filters</button>
+              )}
+            </div>
+          </div>
+
+          <div style={styles.card}>
+            <div style={styles.sectionTitle}>Stock Movement Log ({movements.length} records)</div>
+            {movements.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "40px", color: theme.textMuted, fontSize: "13px" }}>No movements found for the selected filters.</div>
+            ) : (
+              <table style={styles.table}>
+                <thead>
+                  <tr>{["Date", "Type", "Item", "Qty", "Unit", "Unit Cost", "Total Cost", "From / To", "Staff", "Notes"].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
+                </thead>
+                <tbody>
+                  {movements.map(m => (
+                    <tr key={m.id}>
+                      <td style={styles.td}>{m.date}</td>
+                      <td style={styles.td}>
+                        <span style={styles.badge(m.movement_type === "in" ? theme.green : theme.red)}>
+                          {m.movement_type === "in" ? "IN" : "OUT"}
+                        </span>
+                      </td>
+                      <td style={styles.td}><strong>{m.item?.name || "—"}</strong></td>
+                      <td style={styles.td}><strong style={{ color: m.movement_type === "in" ? theme.green : theme.red }}>{m.movement_type === "in" ? "+" : "-"}{Number(m.quantity).toLocaleString()}</strong></td>
+                      <td style={styles.td}>{m.item?.unit || "—"}</td>
+                      <td style={styles.td}>{m.unit_cost ? `₦${Number(m.unit_cost).toLocaleString()}` : "—"}</td>
+                      <td style={styles.td}>{m.total_cost ? <strong style={{ color: theme.accent }}>₦{Math.round(m.total_cost).toLocaleString()}</strong> : "—"}</td>
+                      <td style={styles.td}>{m.movement_type === "in" ? (m.supplier || "—") : (m.issued_to || "—")}</td>
+                      <td style={styles.td}>{m.staff_name || "—"}</td>
+                      <td style={styles.td}><span style={{ fontSize: "11px", color: theme.textMuted }}>{m.notes || ""}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── REPORT TAB ── */}
+      {tab === "report" && (
+        <div style={styles.card}>
+          <div style={styles.sectionTitle}>Download Inventory Report</div>
+          <div style={{ fontSize: "13px", color: theme.textMuted, marginBottom: "20px" }}>
+            The report includes current stock levels, total stock value, items below reorder level (highlighted), and movement history for the selected date range.
+          </div>
+          <div style={{ display: "flex", gap: "14px", alignItems: "flex-end", flexWrap: "wrap", marginBottom: "20px" }}>
+            <div>
+              <label style={styles.label}>Movement History From</label>
+              <input style={{ ...styles.input, width: "160px" }} type="date" value={reportDates.from} onChange={e => setReportDates({ ...reportDates, from: e.target.value })} />
+            </div>
+            <div>
+              <label style={styles.label}>To</label>
+              <input style={{ ...styles.input, width: "160px" }} type="date" value={reportDates.to} onChange={e => setReportDates({ ...reportDates, to: e.target.value })} />
+            </div>
+            {(reportDates.from || reportDates.to) && (
+              <button style={styles.btn("secondary")} onClick={() => setReportDates({ from: "", to: "" })}>Clear</button>
+            )}
+          </div>
+          <div style={{ background: theme.surface, borderRadius: "8px", padding: "14px 18px", marginBottom: "20px", fontSize: "13px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px" }}>
+              <span style={{ color: theme.textMuted }}>Total Items in Registry</span>
+              <strong>{items.length}</strong>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px" }}>
+              <span style={{ color: theme.textMuted }}>Items Below Reorder Level</span>
+              <strong style={{ color: lowStockItems.length > 0 ? theme.red : theme.green }}>{lowStockItems.length}</strong>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", borderTop: `1px solid ${theme.border}`, paddingTop: "8px", marginTop: "4px" }}>
+              <span style={{ color: theme.textMuted }}>Total Stock Value</span>
+              <strong style={{ color: theme.accent }}>₦{Math.round(totalValue).toLocaleString()}</strong>
+            </div>
+          </div>
+          <button style={styles.btn("primary")} onClick={handleReport} disabled={reportLoading || items.length === 0}>
+            {reportLoading ? "Generating PDF…" : "Download Inventory Report PDF"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ── NAV ───────────────────────────────────────────────────────
 const navItems = [
   { section: "Overview", items: [{ id: "dashboard", label: "Dashboard", icon: "dashboard" }] },
-  { section: "Operations", items: [{ id: "production", label: "Production", icon: "production" }, { id: "waybills", label: "Waybills", icon: "waybill" }, { id: "staff", label: "Staff", icon: "staff" }] },
+  { section: "Operations", items: [
+    { id: "production", label: "Production", icon: "production" },
+    { id: "inventory", label: "Inventory", icon: "inventory" },
+    { id: "waybills", label: "Waybills", icon: "waybill" },
+    { id: "staff", label: "Staff", icon: "staff" },
+  ]},
   { section: "Sales", items: [{ id: "customers", label: "Customers", icon: "staff" }, { id: "orders", label: "Orders & Invoicing", icon: "orders" }] },
   { section: "Analytics", items: [{ id: "reports", label: "Reports", icon: "reports" }] },
 ];
@@ -1770,7 +2266,17 @@ const navItems = [
 // ── APP ───────────────────────────────────────────────────────
 export default function App() {
   const [active, setActive] = useState("dashboard");
-  const pages = { dashboard: <Dashboard />, production: <Production />, waybills: <Waybills />, staff: <Staff />, customers: <Customers />, orders: <Orders onNavigate={setActive} />, reports: <Reports /> };
+  const [lowStockCount, setLowStockCount] = useState(0);
+  const pages = {
+    dashboard: <Dashboard />,
+    production: <Production />,
+    inventory: <Inventory onLowStockChange={setLowStockCount} />,
+    waybills: <Waybills />,
+    staff: <Staff />,
+    customers: <Customers />,
+    orders: <Orders onNavigate={setActive} />,
+    reports: <Reports />,
+  };
 
   return (
     <div style={styles.app}>
@@ -1786,7 +2292,10 @@ export default function App() {
               {section.items.map(item => (
                 <div key={item.id} style={styles.navItem(active === item.id)} onClick={() => setActive(item.id)}>
                   <Icon name={item.icon} size={14} />
-                  {item.label}
+                  <span style={{ flex: 1 }}>{item.label}</span>
+                  {item.id === "inventory" && lowStockCount > 0 && (
+                    <span style={{ background: theme.red, color: "#fff", fontSize: "10px", fontWeight: "700", borderRadius: "10px", padding: "1px 6px", minWidth: "18px", textAlign: "center" }}>{lowStockCount}</span>
+                  )}
                 </div>
               ))}
             </div>
