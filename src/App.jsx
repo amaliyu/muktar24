@@ -2973,12 +2973,8 @@ const Batches = () => {
                   <div style={{ fontSize: "11px", color: theme.textMuted, marginTop: "4px" }}>{pct}% of batch delivered</div>
                   {(b.links || []).length > 0 && (
                     <div style={{ marginTop: "12px" }}>
-                      <div style={{ fontSize: "11px", fontWeight: "700", color: theme.textMuted, marginBottom: "6px", textTransform: "uppercase" }}>Linked Production Entries</div>
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
-                        {b.links.map(l => l.production && (
-                          <span key={l.production_log_id} style={{ ...styles.badge(theme.blue), fontSize: "11px" }}>{l.production.date} · {l.production.quantity_produced?.toLocaleString()} blocks</span>
-                        ))}
-                      </div>
+                      <div style={{ fontSize: "11px", fontWeight: "700", color: theme.textMuted, marginBottom: "6px", textTransform: "uppercase" }}>Linked Production Entries ({b.links.length})</div>
+                      <div style={{ fontSize: "12px", color: theme.textMuted }}>{b.links.length} production log entr{b.links.length > 1 ? "ies" : "y"} linked to this batch.</div>
                     </div>
                   )}
                 </div>

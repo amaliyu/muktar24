@@ -4,9 +4,7 @@ export const batchesService = {
   async getAll() {
     const { data, error } = await supabase
       .from('batches')
-      .select(`*, links:batch_production_links(
-        production_log_id, production:production_log_id(date, block_type, quantity_produced)
-      )`)
+      .select('*, links:batch_production_links(production_log_id)')
       .order('created_at', { ascending: false })
     if (error) throw error
     return data || []
