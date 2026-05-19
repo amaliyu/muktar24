@@ -14,6 +14,7 @@ import { generateInvoicePDF } from './utils/generateInvoicePDF';
 import { generateStatementPDF } from './utils/generateStatementPDF';
 import { generateInventoryReportPDF } from './utils/generateInventoryReportPDF';
 import { generateWaybillPDF } from './utils/generateWaybillPDF';
+import { productsService } from './services/products';
 
 const theme = {
   bg: "#0f1117", surface: "#1a1d27", card: "#21263a", border: "#2e3452",
@@ -196,8 +197,33 @@ const ConfirmModal = ({ msg, onConfirm, onCancel }) => (
 );
 
 const Icon = ({ name, size = 16 }) => {
-  const icons = { dashboard: "⊞", production: "🏭", orders: "📋", staff: "👥", waybill: "📄", reports: "📊", inventory: "📦", batches: "🗂", pending: "⏳", schedule: "📅", lpo: "📝", approve: "✓", settings: "⚙", logout: "→" };
+  const icons = { dashboard: "⊞", production: "🏭", orders: "📋", staff: "👥", waybill: "📄", reports: "📊", inventory: "📦", batches: "🗂", pending: "⏳", schedule: "📅", lpo: "📝", approve: "✓", settings: "⚙", products: "🧱", logout: "→" };
   return <span style={{ fontSize: size }}>{icons[name] || "•"}</span>;
+};
+
+const ProductSelect = ({ value, onChange, style, showEmpty = false }) => {
+  const [products, setProducts] = useState([]);
+  useEffect(() => {
+    productsService.getActive().then(setProducts).catch(() => {});
+  }, []);
+  const categories = [...new Set(products.map(p => p.category))];
+  return (
+    <select style={style || styles.input} value={value} onChange={e => {
+      const p = products.find(pr => pr.name === e.target.value);
+      onChange(e.target.value, p?.unit || "pieces");
+    }}>
+      {showEmpty && <option value="">— Select product —</option>}
+      {value && !products.find(p => p.name === value) && <option value={value}>{value}</option>}
+      {categories.length === 0 && !value && <option value="9-inch">9-inch</option>}
+      {categories.map(cat => (
+        <optgroup key={cat} label={cat}>
+          {products.filter(p => p.category === cat).map(p => (
+            <option key={p.id} value={p.name}>{p.name}</option>
+          ))}
+        </optgroup>
+      ))}
+    </select>
+  );
 };
 
 const StatCard = ({ label, value, sub, accent, pct }) => (
@@ -490,9 +516,7 @@ const Production = () => {
             ))}
             <div style={styles.formGroup}>
               <label style={styles.label}>Block Type</label>
-              <select style={styles.input} value={form.blockType} onChange={e => setForm({ ...form, blockType: e.target.value })}>
-                {BLOCK_TYPES.map(t => <option key={t}>{t}</option>)}
-              </select>
+              <ProductSelect value={form.blockType} onChange={(name) => setForm({ ...form, blockType: name })} style={styles.input} />
             </div>
             {[
               { label: "Quantity Produced", key: "produced", placeholder: "e.g. 850" },
@@ -739,7 +763,7 @@ const Staff = () => {
 };
 
 // ── ORDERS ────────────────────────────────────────────────────
-const emptyItem = () => ({ blockType: "9-inch", quantity: "", unitPrice: "" });
+const emptyItem = () => ({ blockType: "9-inch", quantity: "", unitPrice: "", unit: "pieces" });
 
 const Orders = ({ onNavigate }) => {
   const [orders, setOrders] = useState([]);
@@ -829,22 +853,29 @@ const Orders = ({ onNavigate }) => {
     }
   };
 
-  const handleGenerateInvoice = () => {
+  const handleGenerateInvoice = async () => {
     if (!selected) return;
     const today = new Date().toISOString().split("T")[0];
     const due = new Date(Date.now() + 30 * 86400000).toISOString().split("T")[0];
+    let productMap = {};
+    try {
+      const prods = await productsService.getActive();
+      prods.forEach(p => { productMap[p.name] = p.unit; });
+    } catch {}
+    const buildItems = (orderItems) => orderItems.map(i => ({
+      description: i.block_type || i.description || "",
+      quantity: i.quantity,
+      unit_price: i.unit_price,
+      unit: productMap[i.block_type] || "",
+    }));
     const existingInvoice = (selected.invoices || [])[0];
     if (existingInvoice) {
-      const editorItems = (selected.order_items || []).map(i => ({
-        description: i.block_type || i.description || "",
-        quantity: i.quantity,
-        unit_price: i.unit_price,
-      }));
+      const editorItems = buildItems(selected.order_items || []);
       setInvoiceEditor({
         invoice_number: existingInvoice.invoice_number,
         issued_date: existingInvoice.issued_date || today,
         due_date: existingInvoice.due_date || due,
-        items: editorItems.length > 0 ? editorItems : [{ description: "", quantity: "", unit_price: "" }],
+        items: editorItems.length > 0 ? editorItems : [{ description: "", quantity: "", unit_price: "", unit: "" }],
         delivery_cost: "",
         include_vat: true,
         discount: "",
@@ -854,16 +885,12 @@ const Orders = ({ onNavigate }) => {
       const count = orders.reduce((s, o) => s + (o.invoices || []).length, 0);
       const year = new Date().getFullYear();
       const invoiceNumber = `APC-INV-${year}-${String((count || 0) + 1).padStart(3, "0")}`;
-      const editorItems = (selected.order_items || []).map(i => ({
-        description: i.block_type || i.description || "",
-        quantity: i.quantity,
-        unit_price: i.unit_price,
-      }));
+      const editorItems = buildItems(selected.order_items || []);
       setInvoiceEditor({
         invoice_number: invoiceNumber,
         issued_date: today,
         due_date: due,
-        items: editorItems.length > 0 ? editorItems : [{ description: "", quantity: "", unit_price: "" }],
+        items: editorItems.length > 0 ? editorItems : [{ description: "", quantity: "", unit_price: "", unit: "" }],
         delivery_cost: "",
         include_vat: true,
         discount: "",
@@ -1074,9 +1101,7 @@ const Orders = ({ onNavigate }) => {
               <div key={idx} style={{ display: "flex", gap: "10px", marginBottom: "10px", alignItems: "flex-end" }}>
                 <div style={{ flex: 1 }}>
                   {idx === 0 && <label style={styles.label}>Block Type</label>}
-                  <select style={styles.input} value={item.blockType} onChange={e => updateItem(idx, "blockType", e.target.value)}>
-                    {BLOCK_TYPES.map(t => <option key={t}>{t}</option>)}
-                  </select>
+                  <ProductSelect value={item.blockType} onChange={(name, unit) => { const its = [...form.items]; its[idx] = { ...its[idx], blockType: name, unit }; setForm({ ...form, items: its }); }} style={styles.input} />
                 </div>
                 <div style={{ flex: 1 }}>
                   {idx === 0 && <label style={styles.label}>Quantity</label>}
@@ -1178,9 +1203,7 @@ const Orders = ({ onNavigate }) => {
                       </div>
                       {orderEditItems.map((item, idx) => (
                         <div key={idx} style={{ display: "flex", gap: "8px", marginBottom: "8px", alignItems: "center" }}>
-                          <select style={{ ...styles.input, flex: 1 }} value={item.blockType} onChange={e => { const it = [...orderEditItems]; it[idx] = { ...it[idx], blockType: e.target.value }; setOrderEditItems(it); }}>
-                            {BLOCK_TYPES.map(t => <option key={t}>{t}</option>)}
-                          </select>
+                          <ProductSelect value={item.blockType} onChange={(name, unit) => { const it = [...orderEditItems]; it[idx] = { ...it[idx], blockType: name, unit }; setOrderEditItems(it); }} style={{ ...styles.input, flex: 1 }} />
                           <input style={{ ...styles.input, flex: 1 }} type="number" placeholder="Qty" value={item.quantity} onChange={e => { const it = [...orderEditItems]; it[idx] = { ...it[idx], quantity: e.target.value }; setOrderEditItems(it); }} />
                           <input style={{ ...styles.input, flex: 1 }} type="number" placeholder="Unit Price" value={item.unitPrice} onChange={e => { const it = [...orderEditItems]; it[idx] = { ...it[idx], unitPrice: e.target.value }; setOrderEditItems(it); }} />
                           <div style={{ ...styles.input, flex: 1, background: "transparent", color: theme.accent, fontWeight: "700" }}>{item.quantity && item.unitPrice ? naira(parseInt(item.quantity) * parseFloat(item.unitPrice)) : "—"}</div>
@@ -1448,9 +1471,7 @@ const Waybills = () => {
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Block Type</label>
-              <select style={styles.input} value={form.blockType} onChange={e => setForm({ ...form, blockType: e.target.value })}>
-                {BLOCK_TYPES.map(t => <option key={t}>{t}</option>)}
-              </select>
+              <ProductSelect value={form.blockType} onChange={(name) => setForm({ ...form, blockType: name })} style={styles.input} />
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Quantity Loaded *</label>
@@ -2908,7 +2929,7 @@ const Batches = () => {
         <div style={{ ...styles.card, marginBottom: "20px", borderColor: theme.accent + "44" }}>
           <div style={styles.sectionTitle}>Create New Batch</div>
           <div style={styles.grid(3)}>
-            <div style={styles.formGroup}><label style={styles.label}>Block Type</label><select style={styles.input} value={form.blockType} onChange={e => setForm({ ...form, blockType: e.target.value, linkedProds: [] })}>{BLOCK_TYPES.map(t => <option key={t}>{t}</option>)}</select></div>
+            <div style={styles.formGroup}><label style={styles.label}>Block Type</label><ProductSelect value={form.blockType} onChange={(name) => setForm({ ...form, blockType: name, linkedProds: [] })} style={styles.input} /></div>
             <div style={styles.formGroup}><label style={styles.label}>Date Cured *</label><input style={styles.input} type="date" value={form.dateCured} onChange={e => setForm({ ...form, dateCured: e.target.value })} /></div>
             <div style={styles.formGroup}><label style={styles.label}>Qty Accepted (Good Blocks) *</label><input style={styles.input} type="number" placeholder="e.g. 2500" value={form.qtyAccepted} onChange={e => setForm({ ...form, qtyAccepted: e.target.value })} /></div>
             <div style={styles.formGroup}><label style={styles.label}>Created By</label><input style={styles.input} placeholder="Store Officer name" value={form.createdBy} onChange={e => setForm({ ...form, createdBy: e.target.value })} /></div>
@@ -2987,6 +3008,148 @@ const Batches = () => {
   );
 };
 
+// ── PRODUCTS ──────────────────────────────────────────────────
+const Products = () => {
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [alert, setAlert] = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  const [editTarget, setEditTarget] = useState(null);
+  const CATEGORIES = ["Blocks", "Interlocks", "Kerb Stones", "Other"];
+  const UNITS = ["pieces", "sqm", "linear meter", "kg", "bags", "litres", "tonnes"];
+  const emptyForm = { name: "", category: "Blocks", unit: "pieces", unit_price: "", description: "" };
+  const [form, setForm] = useState(emptyForm);
+
+  const load = async () => {
+    setLoading(true);
+    try { setProducts(await productsService.getAll()); }
+    catch (e) { setAlert({ type: "error", msg: "Could not load products: " + e.message }); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const startEdit = (p) => {
+    setEditTarget(p);
+    setForm({ name: p.name, category: p.category, unit: p.unit, unit_price: String(p.unit_price || ""), description: p.description || "" });
+    setShowForm(true);
+  };
+
+  const handleSave = async () => {
+    if (!form.name) return setAlert({ type: "error", msg: "Product name is required." });
+    setSaving(true); setAlert(null);
+    try {
+      const payload = { name: form.name, category: form.category, unit: form.unit, unit_price: parseFloat(form.unit_price) || 0, description: form.description || null };
+      if (editTarget) {
+        await productsService.update(editTarget.id, payload);
+        setAlert({ type: "success", msg: `${form.name} updated.` });
+      } else {
+        await productsService.create(payload);
+        setAlert({ type: "success", msg: `${form.name} added!` });
+      }
+      await load();
+      setShowForm(false); setForm(emptyForm); setEditTarget(null);
+    } catch (e) { setAlert({ type: "error", msg: "Failed to save. " + e.message }); }
+    finally { setSaving(false); }
+  };
+
+  const handleToggle = async (p) => {
+    try {
+      await productsService.toggleActive(p.id, !p.is_active);
+      await load();
+      setAlert({ type: "success", msg: `${p.name} ${p.is_active ? "deactivated" : "activated"}.` });
+    } catch (e) { setAlert({ type: "error", msg: "Failed to update: " + e.message }); }
+  };
+
+  const byCategory = {};
+  CATEGORIES.forEach(cat => {
+    const prods = products.filter(p => p.category === cat);
+    if (prods.length > 0) byCategory[cat] = prods;
+  });
+  [...new Set(products.filter(p => !CATEGORIES.includes(p.category)).map(p => p.category))].forEach(cat => {
+    byCategory[cat] = products.filter(p => p.category === cat);
+  });
+
+  return (
+    <div>
+      <div style={styles.header}>
+        <div>
+          <div style={styles.pageTitle}>Product Catalogue</div>
+          <div style={styles.pageSubtitle}>Manage all product types, units of measure, and default pricing</div>
+        </div>
+        <button style={styles.btn("primary")} onClick={() => { setShowForm(!showForm); if (showForm) { setEditTarget(null); setForm(emptyForm); } }}>+ Add Product</button>
+      </div>
+      {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
+      {showForm && (
+        <div style={{ ...styles.card, marginBottom: "24px", borderColor: theme.accent + "44" }}>
+          <div style={styles.sectionTitle}>{editTarget ? `Edit — ${editTarget.name}` : "New Product"}</div>
+          <div style={styles.grid(3)}>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Product Name *</label>
+              <input style={styles.input} placeholder="e.g. 9 Inch 3 Hole Block" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Category</label>
+              <select style={styles.input} value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}>
+                {CATEGORIES.map(c => <option key={c}>{c}</option>)}
+              </select>
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Unit of Measure</label>
+              <select style={styles.input} value={form.unit} onChange={e => setForm({ ...form, unit: e.target.value })}>
+                {UNITS.map(u => <option key={u}>{u}</option>)}
+              </select>
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Default Unit Price (₦)</label>
+              <input style={styles.input} type="number" placeholder="0" value={form.unit_price} onChange={e => setForm({ ...form, unit_price: e.target.value })} />
+            </div>
+            <div style={{ ...styles.formGroup, gridColumn: "span 2" }}>
+              <label style={styles.label}>Description (optional)</label>
+              <input style={styles.input} placeholder="Additional notes" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} />
+            </div>
+          </div>
+          <div style={styles.row}>
+            <button style={styles.btn("primary")} onClick={handleSave} disabled={saving}>{saving ? "Saving…" : editTarget ? "Update Product" : "Add Product"}</button>
+            <button style={styles.btn("secondary")} onClick={() => { setShowForm(false); setEditTarget(null); setForm(emptyForm); }}>Cancel</button>
+          </div>
+        </div>
+      )}
+      {loading ? <Spinner /> : Object.keys(byCategory).length === 0 ? (
+        <div style={{ ...styles.card, textAlign: "center", padding: "40px", color: theme.textMuted }}>
+          No products yet. Add products above or run the SQL to seed initial products.
+        </div>
+      ) : Object.entries(byCategory).map(([cat, prods]) => (
+        <div key={cat} style={{ ...styles.card, marginBottom: "16px" }}>
+          <div style={styles.sectionTitle}>{cat} ({prods.length})</div>
+          <table style={styles.table}>
+            <thead>
+              <tr>{["Name", "Unit", "Default Price", "Status", ""].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
+            </thead>
+            <tbody>
+              {prods.map(p => (
+                <tr key={p.id} style={{ opacity: p.is_active ? 1 : 0.5 }}>
+                  <td style={styles.td}><strong>{p.name}</strong>{p.description && <div style={{ fontSize: "11px", color: theme.textMuted }}>{p.description}</div>}</td>
+                  <td style={styles.td}><span style={styles.badge(theme.blue)}>{p.unit}</span></td>
+                  <td style={styles.td}>{p.unit_price > 0 ? naira(p.unit_price) : <span style={{ color: theme.textMuted }}>—</span>}</td>
+                  <td style={styles.td}><span style={styles.badge(p.is_active ? theme.green : theme.red)}>{p.is_active ? "active" : "inactive"}</span></td>
+                  <td style={styles.td}>
+                    <div style={{ display: "flex", gap: "6px" }}>
+                      <button style={{ ...styles.btn("secondary"), padding: "4px 10px", fontSize: "11px" }} onClick={() => startEdit(p)}>Edit</button>
+                      <button style={{ ...styles.btn(p.is_active ? "danger" : "primary"), padding: "4px 10px", fontSize: "11px" }} onClick={() => handleToggle(p)}>{p.is_active ? "Deactivate" : "Activate"}</button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ))}
+    </div>
+  );
+};
+
 // ── NAV ───────────────────────────────────────────────────────
 const navItems = [
   { section: "Overview", items: [{ id: "dashboard", label: "Dashboard", icon: "dashboard" }] },
@@ -3007,6 +3170,7 @@ const navItems = [
     { id: "schedule_approvals", label: "Schedule Approvals", icon: "approve" },
   ]},
   { section: "Analytics", items: [{ id: "reports", label: "Reports", icon: "reports" }] },
+  { section: "Settings", items: [{ id: "products", label: "Products", icon: "products" }] },
 ];
 
 // ── APP ───────────────────────────────────────────────────────
@@ -3030,6 +3194,7 @@ export default function App() {
     lpo_approvals: <LPOApprovals />,
     schedule_approvals: <ScheduleApprovals />,
     reports: <Reports />,
+    products: <Products />,
   };
 
   // Load approval badge counts on mount

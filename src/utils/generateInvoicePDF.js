@@ -80,7 +80,7 @@ export async function generateInvoicePDF(invoiceData, customer) {
 
   const tableRows = items.map(item => [
     String(item.description || ''),
-    Number(item.quantity || 0).toLocaleString(),
+    `${Number(item.quantity || 0).toLocaleString()}${item.unit ? ' ' + item.unit : ''}`,
     N(item.unit_price),
     N((Number(item.quantity) || 0) * (Number(item.unit_price) || 0)),
   ]);
@@ -99,7 +99,7 @@ export async function generateInvoicePDF(invoiceData, customer) {
 
   autoTable(doc, {
     startY: billEndY + 3,
-    head: [['DETAILS', 'QUANTITY', 'RATE (N)', 'AMOUNT (N)']],
+    head: [['DESCRIPTION', 'QTY / UNIT', 'UNIT PRICE (N)', 'AMOUNT (N)']],
     body: [...tableRows, ...summaryRows],
     margin: { left: ml, right: 14 },
     headStyles: { fillColor: [30, 30, 30], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 9, halign: 'center' },
