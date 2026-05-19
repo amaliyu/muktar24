@@ -1241,6 +1241,43 @@ const Waybills = () => {
   );
 };
 
+// ── CUSTOMER FORM (top-level to avoid focus loss on re-render) ────
+const CustomerForm = ({ form, setForm, staff, saving, onSubmit, onCancel, submitLabel }) => (
+  <div style={{ ...styles.card, marginBottom: "24px", borderColor: theme.accent + "44" }}>
+    <div style={styles.sectionTitle}>{submitLabel === "Register" ? "Register New Customer" : "Edit Customer"}</div>
+    <div style={styles.grid(3)}>
+      {[{ label: "Full Name *", key: "name", placeholder: "e.g. Emeka Okafor" }, { label: "Company Name", key: "company_name", placeholder: "Optional" }, { label: "Phone *", key: "phone", placeholder: "+234…" }, { label: "Email", key: "email", placeholder: "Optional" }, { label: "Site Location / Delivery Address", key: "location", placeholder: "e.g. Gwarinpa, Abuja" }].map(f => (
+        <div key={f.key} style={styles.formGroup}>
+          <label style={styles.label}>{f.label}</label>
+          <input style={styles.input} placeholder={f.placeholder} value={form[f.key]} onChange={e => setForm({ ...form, [f.key]: e.target.value })} />
+        </div>
+      ))}
+      <div style={styles.formGroup}>
+        <label style={styles.label}>How They Heard About Us</label>
+        <select style={styles.input} value={form.how_heard} onChange={e => setForm({ ...form, how_heard: e.target.value })}>
+          <option value="">— Select —</option>
+          {HOW_HEARD.map(h => <option key={h.value} value={h.value}>{h.label}</option>)}
+        </select>
+      </div>
+      <div style={styles.formGroup}>
+        <label style={styles.label}>Marketer</label>
+        <select style={styles.input} value={form.added_by} onChange={e => setForm({ ...form, added_by: e.target.value })}>
+          <option value="">— None —</option>
+          {staff.map(s => <option key={s.id} value={s.id}>{s.full_name} ({s.role})</option>)}
+        </select>
+      </div>
+      <div style={styles.formGroup}>
+        <label style={styles.label}>Date Registered</label>
+        <input style={styles.input} type="date" value={form.date_registered} onChange={e => setForm({ ...form, date_registered: e.target.value })} />
+      </div>
+    </div>
+    <div style={styles.row}>
+      <button style={styles.btn("primary")} onClick={onSubmit} disabled={saving}>{saving ? "Saving…" : submitLabel}</button>
+      <button style={styles.btn("secondary")} onClick={onCancel}>Cancel</button>
+    </div>
+  </div>
+);
+
 // ── CUSTOMERS ─────────────────────────────────────────────────
 const Customers = () => {
   const [customers, setCustomers] = useState([]);
@@ -1341,41 +1378,6 @@ const Customers = () => {
   };
   const statusColor = (s) => s === "completed" ? theme.green : s === "invoiced" ? theme.blue : s === "cancelled" ? theme.red : theme.accent;
 
-  const CustomerForm = ({ onSubmit, onCancel, submitLabel }) => (
-    <div style={{ ...styles.card, marginBottom: "24px", borderColor: theme.accent + "44" }}>
-      <div style={styles.sectionTitle}>{submitLabel === "Register" ? "Register New Customer" : "Edit Customer"}</div>
-      <div style={styles.grid(3)}>
-        {[{ label: "Full Name *", key: "name", placeholder: "e.g. Emeka Okafor" }, { label: "Company Name", key: "company_name", placeholder: "Optional" }, { label: "Phone *", key: "phone", placeholder: "+234…" }, { label: "Email", key: "email", placeholder: "Optional" }, { label: "Site Location / Delivery Address", key: "location", placeholder: "e.g. Gwarinpa, Abuja" }].map(f => (
-          <div key={f.key} style={styles.formGroup}>
-            <label style={styles.label}>{f.label}</label>
-            <input style={styles.input} placeholder={f.placeholder} value={form[f.key]} onChange={e => setForm({ ...form, [f.key]: e.target.value })} />
-          </div>
-        ))}
-        <div style={styles.formGroup}>
-          <label style={styles.label}>How They Heard About Us</label>
-          <select style={styles.input} value={form.how_heard} onChange={e => setForm({ ...form, how_heard: e.target.value })}>
-            <option value="">— Select —</option>
-            {HOW_HEARD.map(h => <option key={h.value} value={h.value}>{h.label}</option>)}
-          </select>
-        </div>
-        <div style={styles.formGroup}>
-          <label style={styles.label}>Marketer</label>
-          <select style={styles.input} value={form.added_by} onChange={e => setForm({ ...form, added_by: e.target.value })}>
-            <option value="">— None —</option>
-            {staff.map(s => <option key={s.id} value={s.id}>{s.full_name} ({s.role})</option>)}
-          </select>
-        </div>
-        <div style={styles.formGroup}>
-          <label style={styles.label}>Date Registered</label>
-          <input style={styles.input} type="date" value={form.date_registered} onChange={e => setForm({ ...form, date_registered: e.target.value })} />
-        </div>
-      </div>
-      <div style={styles.row}>
-        <button style={styles.btn("primary")} onClick={onSubmit} disabled={saving}>{saving ? "Saving…" : submitLabel}</button>
-        <button style={styles.btn("secondary")} onClick={onCancel}>Cancel</button>
-      </div>
-    </div>
-  );
 
   return (
     <div>
@@ -1388,7 +1390,7 @@ const Customers = () => {
       </div>
 
       {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
-      {showForm && !editMode && <CustomerForm onSubmit={handleSave} onCancel={() => setShowForm(false)} submitLabel="Register" />}
+      {showForm && !editMode && <CustomerForm form={form} setForm={setForm} staff={staff} saving={saving} onSubmit={handleSave} onCancel={() => setShowForm(false)} submitLabel="Register" />}
 
       <div style={styles.grid(3)}>
         <StatCard label="Total Customers" value={customers.length} sub="All registered" accent={theme.blue} />
@@ -1429,7 +1431,7 @@ const Customers = () => {
           {!selected ? (
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "300px", color: theme.textMuted, fontSize: "13px" }}>← Select a customer to view profile</div>
           ) : editMode ? (
-            <CustomerForm onSubmit={handleUpdate} onCancel={() => setEditMode(false)} submitLabel="Save Changes" />
+            <CustomerForm form={form} setForm={setForm} staff={staff} saving={saving} onSubmit={handleUpdate} onCancel={() => setEditMode(false)} submitLabel="Save Changes" />
           ) : (() => {
             const { totalValue, totalPaid, outstanding, orderCount } = getStats(selected);
             const orders = selected.orders || [];
