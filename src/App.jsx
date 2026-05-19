@@ -70,6 +70,110 @@ const Alert = ({ msg, type = "error", onClose }) => (
   </div>
 );
 
+const InvoiceEditorModal = ({ editor, setEditor, onSave, saving }) => {
+  if (!editor) return null;
+  const { items, delivery_cost, include_vat, discount } = editor;
+  const itemSubtotal = items.reduce((s, i) => s + (Number(i.quantity) || 0) * (Number(i.unit_price) || 0), 0);
+  const delivN = Number(delivery_cost) || 0;
+  const discN  = Number(discount) || 0;
+  const sub    = itemSubtotal + delivN;
+  const afterDisc = sub - discN;
+  const vat    = include_vat ? afterDisc * 0.075 : 0;
+  const grand  = afterDisc + vat;
+  const N = n => `₦${Math.round(Number(n) || 0).toLocaleString()}`;
+  const upd = (field, val) => setEditor(e => ({ ...e, [field]: val }));
+  const updItem = (idx, field, val) => setEditor(e => { const it = [...e.items]; it[idx] = { ...it[idx], [field]: val }; return { ...e, items: it }; });
+  const addItem = () => setEditor(e => ({ ...e, items: [...e.items, { description: '', quantity: '', unit_price: '' }] }));
+  const removeItem = idx => setEditor(e => ({ ...e, items: e.items.filter((_, i) => i !== idx) }));
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', zIndex: 1000, overflowY: 'auto', padding: '24px 16px' }}>
+      <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: '12px', width: '100%', maxWidth: '720px' }}>
+        <div style={{ padding: '20px 24px', borderBottom: `1px solid ${theme.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ fontSize: '16px', fontWeight: '700', color: theme.text }}>Invoice Editor</div>
+          <button style={{ ...styles.btn('secondary'), padding: '4px 10px' }} onClick={() => setEditor(null)}>✕ Close</button>
+        </div>
+
+        <div style={{ padding: '20px 24px' }}>
+          {/* Invoice meta */}
+          <div style={styles.grid(3)}>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Invoice Number</label>
+              <input style={styles.input} value={editor.invoice_number} onChange={e => upd('invoice_number', e.target.value)} />
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Issue Date</label>
+              <input style={styles.input} type="date" value={editor.issued_date} onChange={e => upd('issued_date', e.target.value)} />
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Due Date</label>
+              <input style={styles.input} type="date" value={editor.due_date} onChange={e => upd('due_date', e.target.value)} />
+            </div>
+          </div>
+
+          {/* Line items */}
+          <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: '8px' }}>Line Items</div>
+          {items.map((item, idx) => (
+            <div key={idx} style={{ display: 'flex', gap: '8px', marginBottom: '8px', alignItems: 'center' }}>
+              <input style={{ ...styles.input, flex: 2 }} placeholder="Description" value={item.description} onChange={e => updItem(idx, 'description', e.target.value)} />
+              <input style={{ ...styles.input, flex: 1 }} type="number" placeholder="Qty" value={item.quantity} onChange={e => updItem(idx, 'quantity', e.target.value)} />
+              <input style={{ ...styles.input, flex: 1 }} type="number" placeholder="Unit Price" value={item.unit_price} onChange={e => updItem(idx, 'unit_price', e.target.value)} />
+              <div style={{ ...styles.input, flex: 1, background: 'transparent', color: theme.accent, fontWeight: '700', fontSize: '12px' }}>
+                {item.quantity && item.unit_price ? N((Number(item.quantity) || 0) * (Number(item.unit_price) || 0)) : '—'}
+              </div>
+              {items.length > 1 && <button style={{ ...styles.btn('danger'), padding: '8px 10px' }} onClick={() => removeItem(idx)}>✕</button>}
+            </div>
+          ))}
+          <button style={{ ...styles.btn('secondary'), fontSize: '12px', marginBottom: '16px' }} onClick={addItem}>+ Add Line Item</button>
+
+          {/* Extra charges */}
+          <div style={styles.grid(3)}>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Delivery Cost (₦)</label>
+              <input style={styles.input} type="number" placeholder="0" value={editor.delivery_cost} onChange={e => upd('delivery_cost', e.target.value)} />
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Discount (₦)</label>
+              <input style={styles.input} type="number" placeholder="0" value={editor.discount} onChange={e => upd('discount', e.target.value)} />
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>VAT</label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', paddingTop: '6px' }}>
+                <input type="checkbox" id="vat_toggle" checked={editor.include_vat} onChange={e => upd('include_vat', e.target.checked)} style={{ width: '16px', height: '16px', cursor: 'pointer' }} />
+                <label htmlFor="vat_toggle" style={{ ...styles.label, marginBottom: 0, cursor: 'pointer' }}>Include VAT (7.5%)</label>
+              </div>
+            </div>
+          </div>
+
+          {/* Totals summary */}
+          <div style={{ background: theme.surface, borderRadius: '8px', padding: '14px', marginTop: '8px', marginBottom: '16px' }}>
+            {[
+              ['Item Subtotal', N(itemSubtotal), theme.text],
+              ...(delivN > 0 ? [['Delivery Cost', N(delivN), theme.text]] : []),
+              ...(discN  > 0 ? [['Discount',      `-${N(discN)}`, theme.red]] : []),
+              ...(include_vat ? [['VAT (7.5%)', N(vat), theme.textMuted]] : []),
+            ].map(([label, val, color]) => (
+              <div key={label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '6px' }}>
+                <span style={{ color: theme.textMuted }}>{label}</span>
+                <span style={{ color }}>{val}</span>
+              </div>
+            ))}
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: '700', fontSize: '15px', borderTop: `1px solid ${theme.border}`, paddingTop: '8px', marginTop: '4px' }}>
+              <span>Grand Total</span>
+              <span style={{ color: theme.accent }}>{N(grand)}</span>
+            </div>
+          </div>
+
+          <div style={styles.row}>
+            <button style={styles.btn('primary')} onClick={onSave} disabled={saving}>{saving ? 'Saving…' : 'Save & Download PDF'}</button>
+            <button style={styles.btn('secondary')} onClick={() => setEditor(null)}>Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const ConfirmModal = ({ msg, onConfirm, onCancel }) => (
   <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
     <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: "12px", padding: "28px 32px", maxWidth: "380px", width: "90%" }}>
@@ -398,6 +502,7 @@ const Staff = () => {
   const [saving, setSaving] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [alert, setAlert] = useState(null);
+  const [editTarget, setEditTarget] = useState(null);
   const emptyForm = { full_name: "", phone: "", role: "Driver", staff_type: "permanent", monthly_salary: "", daily_rate: "", date_hired: "" };
   const [form, setForm] = useState(emptyForm);
 
@@ -414,6 +519,12 @@ const Staff = () => {
 
   useEffect(() => { load(); }, []);
 
+  const startEdit = (s) => {
+    setEditTarget(s);
+    setForm({ full_name: s.full_name, phone: s.phone || "", role: s.role, staff_type: s.staff_type, monthly_salary: String(s.monthly_salary || ""), daily_rate: String(s.daily_rate || ""), date_hired: s.date_hired || "" });
+    setShowForm(true);
+  };
+
   const handleSave = async () => {
     if (!form.full_name) return setAlert({ type: "error", msg: "Full name is required." });
     setSaving(true);
@@ -427,17 +538,33 @@ const Staff = () => {
         monthly_salary: form.staff_type === "permanent" ? parseFloat(form.monthly_salary) || null : null,
         daily_rate: form.staff_type === "daily" ? parseFloat(form.daily_rate) || null : null,
         date_hired: form.date_hired || null,
-        is_active: true,
       };
-      const saved = await staffService.create(payload);
-      setStaff(prev => [...prev, saved]);
+      if (editTarget) {
+        const updated = await staffService.update(editTarget.id, payload);
+        setStaff(prev => prev.map(s => s.id === editTarget.id ? { ...s, ...updated } : s));
+        setAlert({ type: "success", msg: `${updated.full_name} updated.` });
+      } else {
+        const saved = await staffService.create({ ...payload, is_active: true });
+        setStaff(prev => [...prev, saved]);
+        setAlert({ type: "success", msg: `${saved.full_name} added successfully!` });
+      }
       setForm(emptyForm);
       setShowForm(false);
-      setAlert({ type: "success", msg: `${saved.full_name} added successfully!` });
+      setEditTarget(null);
     } catch (e) {
       setAlert({ type: "error", msg: "Failed to save staff. " + e.message });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleToggleActive = async (s) => {
+    try {
+      const updated = s.is_active ? await staffService.deactivate(s.id) : await staffService.activate(s.id);
+      setStaff(prev => prev.map(m => m.id === s.id ? { ...m, ...updated } : m));
+      setAlert({ type: "success", msg: `${s.full_name} marked as ${updated.is_active ? "active" : "inactive"}.` });
+    } catch (e) {
+      setAlert({ type: "error", msg: "Failed to update status. " + e.message });
     }
   };
 
@@ -458,7 +585,7 @@ const Staff = () => {
 
       {showForm && (
         <div style={{ ...styles.card, marginBottom: "24px", borderColor: theme.accent + "44" }}>
-          <div style={styles.sectionTitle}>Add New Staff Member</div>
+          <div style={styles.sectionTitle}>{editTarget ? `Edit — ${editTarget.full_name}` : "Add New Staff Member"}</div>
           <div style={styles.grid(3)}>
             <div style={styles.formGroup}>
               <label style={styles.label}>Full Name *</label>
@@ -498,8 +625,8 @@ const Staff = () => {
             </div>
           </div>
           <div style={styles.row}>
-            <button style={styles.btn("primary")} onClick={handleSave} disabled={saving}>{saving ? "Saving…" : "Add Staff Member"}</button>
-            <button style={styles.btn("secondary")} onClick={() => { setShowForm(false); setForm(emptyForm); }}>Cancel</button>
+            <button style={styles.btn("primary")} onClick={handleSave} disabled={saving}>{saving ? "Saving…" : editTarget ? "Update Staff" : "Add Staff Member"}</button>
+            <button style={styles.btn("secondary")} onClick={() => { setShowForm(false); setForm(emptyForm); setEditTarget(null); }}>Cancel</button>
           </div>
         </div>
       )}
@@ -517,7 +644,7 @@ const Staff = () => {
         ) : (
           <table style={styles.table}>
             <thead>
-              <tr>{["Name", "Role", "Type", "Pay Rate", "Date Hired", "Status"].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
+              <tr>{["Name", "Role", "Type", "Pay Rate", "Date Hired", "Status", "Actions"].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
             </thead>
             <tbody>
               {staff.map(s => (
@@ -528,6 +655,12 @@ const Staff = () => {
                   <td style={styles.td}>{s.staff_type === "permanent" ? naira(s.monthly_salary) + "/mo" : naira(s.daily_rate) + "/day"}</td>
                   <td style={styles.td}>{s.date_hired || "—"}</td>
                   <td style={styles.td}><span style={styles.badge(s.is_active ? theme.green : theme.red)}>{s.is_active ? "active" : "inactive"}</span></td>
+                  <td style={styles.td}>
+                    <div style={{ display: "flex", gap: "6px" }}>
+                      <button style={{ ...styles.btn("secondary"), padding: "4px 10px", fontSize: "11px" }} onClick={() => startEdit(s)}>Edit</button>
+                      <button style={{ ...styles.btn(s.is_active ? "danger" : "primary"), padding: "4px 10px", fontSize: "11px" }} onClick={() => handleToggleActive(s)}>{s.is_active ? "Deactivate" : "Activate"}</button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -553,6 +686,7 @@ const Orders = ({ onNavigate }) => {
   const [editPayment, setEditPayment] = useState(null);
   const [alert, setAlert] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [invoiceEditor, setInvoiceEditor] = useState(null);
   const [customerMode, setCustomerMode] = useState("new");
   const [allCustomers, setAllCustomers] = useState([]);
   const [custSearch, setCustSearch] = useState("");
@@ -623,29 +757,80 @@ const Orders = ({ onNavigate }) => {
     }
   };
 
-  const handleGenerateInvoice = async () => {
+  const handleGenerateInvoice = () => {
     if (!selected) return;
-    setInvoicing(true);
-    try {
-      if ((selected.invoices || []).length > 0) {
-        await generateInvoicePDF(selected.invoices[0], selected);
-        return;
-      }
+    const today = new Date().toISOString().split("T")[0];
+    const due = new Date(Date.now() + 30 * 86400000).toISOString().split("T")[0];
+    const existingInvoice = (selected.invoices || [])[0];
+    if (existingInvoice) {
+      const editorItems = (selected.order_items || []).map(i => ({
+        description: i.block_type || i.description || "",
+        quantity: i.quantity,
+        unit_price: i.unit_price,
+      }));
+      setInvoiceEditor({
+        invoice_number: existingInvoice.invoice_number,
+        issued_date: existingInvoice.issued_date || today,
+        due_date: existingInvoice.due_date || due,
+        items: editorItems.length > 0 ? editorItems : [{ description: "", quantity: "", unit_price: "" }],
+        delivery_cost: "",
+        include_vat: true,
+        discount: "",
+        _existingId: existingInvoice.id,
+      });
+    } else {
       const count = orders.reduce((s, o) => s + (o.invoices || []).length, 0);
       const year = new Date().getFullYear();
       const invoiceNumber = `APC-INV-${year}-${String((count || 0) + 1).padStart(3, "0")}`;
-      const total = orderTotal(selected);
-      const today = new Date().toISOString().split("T")[0];
-      const due = new Date(Date.now() + 30 * 86400000).toISOString().split("T")[0];
-      const newInvoice = await invoicesService.create({ order_id: selected.id, invoice_number: invoiceNumber, total_amount: total, issued_date: today, due_date: due });
-      await ordersService.updateStatus(selected.id, "invoiced");
+      const editorItems = (selected.order_items || []).map(i => ({
+        description: i.block_type || i.description || "",
+        quantity: i.quantity,
+        unit_price: i.unit_price,
+      }));
+      setInvoiceEditor({
+        invoice_number: invoiceNumber,
+        issued_date: today,
+        due_date: due,
+        items: editorItems.length > 0 ? editorItems : [{ description: "", quantity: "", unit_price: "" }],
+        delivery_cost: "",
+        include_vat: true,
+        discount: "",
+        _existingId: null,
+      });
+    }
+  };
+
+  const handleSaveInvoice = async () => {
+    if (!invoiceEditor) return;
+    setInvoicing(true);
+    try {
+      const { _existingId, invoice_number, issued_date, due_date, items, delivery_cost, include_vat, discount } = invoiceEditor;
+      const itemSubtotal = items.reduce((s, i) => s + (Number(i.quantity) || 0) * (Number(i.unit_price) || 0), 0);
+      const delivN = Number(delivery_cost) || 0;
+      const discN = Number(discount) || 0;
+      const sub = itemSubtotal + delivN;
+      const afterDisc = sub - discN;
+      const vat = include_vat ? afterDisc * 0.075 : 0;
+      const total = afterDisc + vat;
+
+      let invoiceId = _existingId;
+      if (_existingId) {
+        await invoicesService.update(_existingId, { invoice_number, issued_date, due_date, total_amount: total });
+      } else {
+        const newInvoice = await invoicesService.create({ order_id: selected.id, invoice_number, issued_date, due_date, total_amount: total });
+        invoiceId = newInvoice.id;
+        await ordersService.updateStatus(selected.id, "invoiced");
+      }
+
+      const customer = selected.customer || { name: selected.customerName, location: selected.customerLocation, phone: selected.customerPhone };
+      await generateInvoicePDF({ invoice_number, issued_date, due_date, items, delivery_cost: delivN, include_vat, discount: discN }, customer);
+
+      setInvoiceEditor(null);
       const newOrders = await load();
-      const updatedOrder = newOrders?.find(o => o.id === selected.id) || selected;
-      if (newOrders) setSelected(updatedOrder);
-      await generateInvoicePDF(newInvoice, updatedOrder);
-      setAlert({ type: "success", msg: `Invoice ${invoiceNumber} generated and downloaded!` });
+      if (newOrders) setSelected(newOrders.find(o => o.id === selected.id) || null);
+      setAlert({ type: "success", msg: `Invoice ${invoice_number} saved and downloaded!` });
     } catch (e) {
-      setAlert({ type: "error", msg: "Failed to generate invoice. " + e.message });
+      setAlert({ type: "error", msg: "Failed to save invoice. " + e.message });
     } finally {
       setInvoicing(false);
     }
@@ -729,6 +914,7 @@ const Orders = ({ onNavigate }) => {
   return (
     <div>
       {confirmDelete && <ConfirmModal msg={confirmDelete.type === "payment" ? `Remove payment of ${naira(confirmDelete.amount_paid)} recorded on ${confirmDelete.payment_date}? This cannot be undone.` : `Delete order for ${confirmDelete.customer?.name}? This will also delete all invoices and payments.`} onConfirm={() => confirmDelete.type === "payment" ? handleDeletePayment(confirmDelete.id) : handleDeleteOrder(confirmDelete.id)} onCancel={() => setConfirmDelete(null)} />}
+      <InvoiceEditorModal editor={invoiceEditor} setEditor={setInvoiceEditor} onSave={handleSaveInvoice} saving={invoicing} />
       <div style={styles.header}>
         <div>
           <div style={styles.pageTitle}>Orders & Invoicing</div>
@@ -1295,6 +1481,7 @@ const Customers = () => {
   const [stmtFrom, setStmtFrom] = useState("");
   const [stmtTo, setStmtTo] = useState("");
   const [stmtLoading, setStmtLoading] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(null);
 
   const load = async () => {
     setLoading(true);
@@ -1365,6 +1552,19 @@ const Customers = () => {
 
   const howHeardLabel = (v) => HOW_HEARD.find(h => h.value === v)?.label || v || "—";
 
+  const handleDeleteCustomer = async () => {
+    const c = confirmDelete;
+    setConfirmDelete(null);
+    try {
+      await customersService.delete(c.id);
+      setSelected(null);
+      setAlert({ type: "success", msg: `${c.name} has been deleted.` });
+      load();
+    } catch (e) {
+      setAlert({ type: "error", msg: "Failed to delete customer. " + e.message });
+    }
+  };
+
   const handleGenerateStatement = async (customer) => {
     setStmtLoading(true);
     try {
@@ -1381,6 +1581,7 @@ const Customers = () => {
 
   return (
     <div>
+      {confirmDelete && <ConfirmModal msg={`Delete ${confirmDelete.name}? This cannot be undone.`} onConfirm={handleDeleteCustomer} onCancel={() => setConfirmDelete(null)} />}
       <div style={styles.header}>
         <div>
           <div style={styles.pageTitle}>Customer Registry</div>
@@ -1452,7 +1653,12 @@ const Customers = () => {
                       {selected.date_registered && <span style={{ fontSize: "11px", color: theme.textMuted }}>Registered: {selected.date_registered}</span>}
                     </div>
                   </div>
-                  <button style={styles.btn("secondary")} onClick={() => startEdit(selected)}>Edit Details</button>
+                  <div style={{ display: "flex", gap: "8px" }}>
+                    <button style={styles.btn("secondary")} onClick={() => startEdit(selected)}>Edit Details</button>
+                    {(selected.orders?.length === 0) && (
+                      <button style={styles.btn("danger")} onClick={() => setConfirmDelete(selected)}>Delete</button>
+                    )}
+                  </div>
                 </div>
 
                 <div style={styles.grid(4)}>

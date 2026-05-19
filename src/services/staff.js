@@ -44,4 +44,8 @@ export const staffService = {
   async deactivate(id) {
     return staffService.update(id, { is_active: false })
   },
+
+  async activate(id) {
+    return staffService.update(id, { is_active: true })
+  },
 }

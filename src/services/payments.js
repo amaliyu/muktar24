@@ -54,6 +54,11 @@ export const invoicesService = {
     return data
   },
 
+  async update(id, data) {
+    const { error } = await supabase.from('invoices').update(data).eq('id', id)
+    if (error) throw error
+  },
+
   async getByOrder(orderId) {
     const { data, error } = await supabase
       .from('invoices')

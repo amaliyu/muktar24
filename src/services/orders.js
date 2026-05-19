@@ -106,6 +106,11 @@ export const customersService = {
     return data
   },
 
+  async delete(id) {
+    const { error } = await supabase.from('customers').delete().eq('id', id)
+    if (error) throw error
+  },
+
   async create(customer) {
     const { data, error } = await supabase
       .from('customers')
