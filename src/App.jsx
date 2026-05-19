@@ -1083,8 +1083,8 @@ const Waybills = () => {
         await load();
         setAlert({ type: "success", msg: `Waybill ${editTarget.waybill_number} updated.` });
       } else {
-        const count = await waybillsService.getCount();
-        const waybillNumber = `APC-WB-${String(count + 1).padStart(3, "0")}`;
+        const nextNum = await waybillsService.getNextNumber();
+        const waybillNumber = `APC-WB-${String(nextNum).padStart(3, "0")}`;
         await waybillsService.create({ ...waybillData, waybill_number: waybillNumber, receiver_name: selectedOrder?.customer?.name || null });
         if (damaged > 0) {
           await productionService.logDamage({ date: form.waybillDate, block_type: form.blockType, stage: "delivery", quantity_damaged: damaged, notes: `Transit damage on waybill ${waybillNumber}` });

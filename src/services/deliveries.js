@@ -49,12 +49,16 @@ export const waybillsService = {
     return data
   },
 
-  async getCount() {
-    const { count, error } = await supabase
+  async getNextNumber() {
+    const { data, error } = await supabase
       .from('waybills')
-      .select('*', { count: 'exact', head: true })
+      .select('waybill_number')
+      .order('created_at', { ascending: false })
+      .limit(1)
     if (error) throw error
-    return count || 0
+    if (!data || data.length === 0) return 1
+    const match = data[0].waybill_number?.match(/(\d+)$/)
+    return match ? parseInt(match[1], 10) + 1 : 1
   },
 
   async delete(id) {
