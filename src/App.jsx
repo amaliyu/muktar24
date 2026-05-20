@@ -4037,24 +4037,33 @@ const BankAccountsTab = () => {
   const [ok, setOk] = useState('');
 
   useEffect(() => {
+    // Supporting data — fail silently so they don't block the accounts tab
     expenseCategoriesService.getActive().then(setExpCategories).catch(() => {});
     accountingService.getOpenInvoices().then(setAllInvoices).catch(() => {});
     customersService.getAll().then(setAllCustomers).catch(() => {});
-    bankAccountsService.getAll().then(async (existing) => {
-      let all = [...existing];
-      // Seed any missing default accounts
-      for (const seed of SEED_ACCOUNTS) {
-        if (!existing.find(a => a.account_number === seed.account_number)) {
-          try { const created = await bankAccountsService.create(seed); all = [...all, created]; } catch {}
+    // Core accounts load
+    bankAccountsService.getAll()
+      .then(async (existing) => {
+        let all = [...existing];
+        for (const seed of SEED_ACCOUNTS) {
+          if (!existing.find(a => a.account_number === seed.account_number)) {
+            try { const created = await bankAccountsService.create(seed); all = [...all, created]; } catch {}
+          }
         }
-      }
-      // Sort: income first, then expense, by account_number
-      all.sort((a, b) => {
-        if (a.account_type !== b.account_type) return a.account_type === 'income' ? -1 : 1;
-        return a.account_number.localeCompare(b.account_number);
+        all.sort((a, b) => {
+          if (a.account_type !== b.account_type) return a.account_type === 'income' ? -1 : 1;
+          return a.account_number.localeCompare(b.account_number);
+        });
+        setAccounts(all);
+      })
+      .catch(e => {
+        const msg = e?.message || '';
+        if (msg.toLowerCase().includes('fetch') || msg.toLowerCase().includes('network')) {
+          setErr('Connection error — check your internet and refresh the page.');
+        } else {
+          setErr(msg || 'Failed to load bank accounts.');
+        }
       });
-      setAccounts(all);
-    }).catch(e => setErr(e.message));
   }, []);
 
   useEffect(() => {
@@ -4240,18 +4249,25 @@ const BankAccountsTab = () => {
     setModalErr('');
     setCreatingExp(true);
     const tx = createExpModal;
+    const basePayload = {
+      expense_date: tx.transaction_date,
+      category_id: createExpForm.category_id,
+      description: createExpForm.description || tx.description,
+      amount: tx.debit,
+      status: 'approved',
+      requested_by: 'Admin',
+    };
     try {
-      const expPayload = {
-        expense_date: tx.transaction_date,
-        category_id: createExpForm.category_id,
-        description: createExpForm.description || tx.description,
-        amount: tx.debit,
-        status: 'approved',
-        requested_by: 'Admin',
-      };
-      // Add notes only if column exists (added via SQL migration)
-      try { expPayload.notes = createExpForm.notes || `Created from bank statement: ${tx.description}`; } catch {}
-      await expensesService.create(expPayload);
+      // Try with notes first; fall back to base payload if column doesn't exist yet
+      try {
+        await expensesService.create({ ...basePayload, notes: createExpForm.notes || `Bank import: ${tx.transaction_date} ${tx.description}` });
+      } catch (e) {
+        if (e?.message?.includes('notes') || e?.message?.includes('schema cache') || e?.message?.includes('column')) {
+          await expensesService.create(basePayload);
+        } else {
+          throw e;
+        }
+      }
       await bankTransactionsService.updateMatch(tx.id, 'manual', 'expense', null, 'Created from bank import');
       setTransactions(t => t.map(x => x.id === tx.id ? { ...x, match_status: 'manual', matched_to_type: 'expense' } : x));
       setCreateExpModal(null);

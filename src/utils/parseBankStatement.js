@@ -5,12 +5,29 @@ import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl;
 
+function excelSerialToDate(serial) {
+  const excelEpoch = new Date(1899, 11, 30); // Dec 30 1899 — Excel's day-0
+  const date = new Date(excelEpoch);
+  date.setDate(excelEpoch.getDate() + Math.floor(serial));
+  return date.toISOString().split('T')[0];
+}
+
 function parseNgDate(str) {
-  if (!str && str !== 0) return null;
+  if (str === null || str === undefined || str === '') return null;
+
+  // Excel serial as a raw JS number (from xlsx raw:true) — covers years 2009-2036
+  if (typeof str === 'number') {
+    if (str > 40000 && str < 50000) return excelSerialToDate(str);
+    return null; // number outside date range — not a date
+  }
+
   const s = String(str).trim();
-  // Excel serial (integer or with decimal time component e.g. 46130.4466...)
+  if (!s) return null;
+
+  // Excel serial stringified (e.g. "46130.44667824074")
   if (/^\d{5}(\.\d+)?$/.test(s)) {
-    return new Date((Math.floor(Number(s)) - 25569) * 86400000).toISOString().split('T')[0];
+    const n = Number(s);
+    if (n > 40000 && n < 50000) return excelSerialToDate(n);
   }
   // DD/MM/YYYY or D/M/YYYY
   const m1 = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
@@ -24,7 +41,7 @@ function parseNgDate(str) {
     const mo = months[m2[2].toLowerCase()];
     if (mo) return `${m2[3]}-${String(mo).padStart(2,'0')}-${m2[1].padStart(2,'0')}`;
   }
-  // DD-Mon-YY e.g. 06-JAN-26 (TAJ Bank format — 2-digit year, assume 2000s)
+  // DD-Mon-YY e.g. 06-JAN-26 (TAJ Bank — 2-digit year, assume 2000s)
   const m3 = s.match(/^(\d{1,2})[- ]([A-Za-z]{3})[- ](\d{2})$/);
   if (m3) {
     const mo = months[m3[2].toLowerCase()];
