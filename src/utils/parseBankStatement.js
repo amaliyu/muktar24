@@ -17,12 +17,19 @@ function parseNgDate(str) {
   if (m1) return `${m1[3]}-${m1[2].padStart(2,'0')}-${m1[1].padStart(2,'0')}`;
   // YYYY-MM-DD
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-  // DD-Mon-YYYY e.g. 15-Jan-2024
   const months = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
+  // DD-Mon-YYYY e.g. 15-Jan-2024
   const m2 = s.match(/^(\d{1,2})[- ]([A-Za-z]{3})[- ](\d{4})$/);
   if (m2) {
     const mo = months[m2[2].toLowerCase()];
     if (mo) return `${m2[3]}-${String(mo).padStart(2,'0')}-${m2[1].padStart(2,'0')}`;
+  }
+  // DD-Mon-YY e.g. 06-JAN-26 (TAJ Bank format — 2-digit year, assume 2000s)
+  const m3 = s.match(/^(\d{1,2})[- ]([A-Za-z]{3})[- ](\d{2})$/);
+  if (m3) {
+    const mo = months[m3[2].toLowerCase()];
+    const yr = 2000 + parseInt(m3[3], 10);
+    if (mo) return `${yr}-${String(mo).padStart(2,'0')}-${m3[1].padStart(2,'0')}`;
   }
   return null;
 }
@@ -240,10 +247,10 @@ export function autoMatchTransactions(transactions, payments, expenses, accountT
           best = { type: 'payment', id: p.id, label: `Payment · ${customerName}`, confidence: 'high' };
           break;
         }
-        if (exactAmt && days <= 3 && best?.confidence !== 'high') {
+        if (exactAmt && days <= 5 && best?.confidence !== 'high') {
           best = { type: 'payment', id: p.id, label: `Payment · ${customerName}`, confidence: 'medium' };
         }
-        if (nearAmt && days <= 3 && !best) {
+        if (nearAmt && days <= 5 && !best) {
           best = { type: 'payment', id: p.id, label: `Payment · ${customerName} (±₦100)`, confidence: 'low' };
         }
       }
@@ -270,12 +277,20 @@ export function autoMatchTransactions(transactions, payments, expenses, accountT
           best = { type: 'expense', id: e.id, label: `Expense · ${e.description}`, confidence: 'high' };
           break;
         }
-        if (exactAmt && days <= 3 && best?.confidence !== 'high') {
+        if (exactAmt && days <= 5 && best?.confidence !== 'high') {
           best = { type: 'expense', id: e.id, label: `Expense · ${e.description}`, confidence: 'medium' };
         }
-        if (categoryMatch && days <= 3 && !best) {
-          best = { type: 'expense', id: e.id, label: `Expense · ${e.description} (keyword: ${categoryHint})`, confidence: 'low' };
+        if (exactAmt && days <= 14 && best?.confidence === 'low') {
+          best = { type: 'expense', id: e.id, label: `Expense · ${e.description}`, confidence: 'medium' };
         }
+        if (categoryMatch && days <= 5 && !best) {
+          best = { type: 'expense', id: e.id, label: `Expense · ${e.description} (keyword)`, confidence: 'low' };
+        }
+      }
+
+      // If still no match, attach keyword category so UI can suggest it
+      if (!best && categoryHint) {
+        return { ...tx, autoMatch: null, suggestedCategory: categoryHint };
       }
     }
 

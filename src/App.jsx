@@ -23,7 +23,7 @@ import { generateCostAnalysisPDF } from './utils/generateCostAnalysisPDF'
 import { generateManagementAccountsPDF } from './utils/generateManagementAccountsPDF'
 import { bankAccountsService, bankTransactionsService, bankImportBatchesService, bankReconciliationsService, receiptsService } from './services/bank'
 import { generateReconciliationPDF } from './utils/generateReconciliationPDF'
-import { parseFile, autoMapColumns, mapRowsToTransactions, autoMatchTransactions } from './utils/parseBankStatement';
+import { parseFile, autoMapColumns, mapRowsToTransactions, autoMatchTransactions, detectCategory } from './utils/parseBankStatement';
 
 const theme = {
   bg: "#0f1117", surface: "#1a1d27", card: "#21263a", border: "#2e3452",
@@ -4023,10 +4023,16 @@ const BankAccountsTab = () => {
   const [addAcctModal, setAddAcctModal] = useState(false);
   const [newAcct, setNewAcct] = useState({ bank_name: '', account_name: '', account_number: '', account_type: 'both', currency: 'NGN' });
   const [savingAcct, setSavingAcct] = useState(false);
+  const [modalErr, setModalErr] = useState('');
+  const [createExpModal, setCreateExpModal] = useState(null);
+  const [expCategories, setExpCategories] = useState([]);
+  const [creatingExp, setCreatingExp] = useState(false);
+  const [createExpForm, setCreateExpForm] = useState({ category_id: '', description: '', notes: '' });
   const [err, setErr] = useState('');
   const [ok, setOk] = useState('');
 
   useEffect(() => {
+    expenseCategoriesService.getActive().then(setExpCategories).catch(() => {});
     bankAccountsService.getAll().then(async (existing) => {
       let all = [...existing];
       // Seed any missing default accounts
@@ -4122,6 +4128,7 @@ const BankAccountsTab = () => {
 
   const handleSaveAcct = async () => {
     if (!editAcct) return;
+    setModalErr('');
     setSavingAcct(true);
     try {
       await bankAccountsService.update(editAcct.id, {
@@ -4134,21 +4141,61 @@ const BankAccountsTab = () => {
       if (selected?.id === editAcct.id) setSelected(prev => ({ ...prev, ...editAcct }));
       setEditAcct(null);
       setOk('Account updated');
-    } catch (e) { setErr(e.message); }
+    } catch (e) { setModalErr(e.message); }
     finally { setSavingAcct(false); }
   };
 
   const handleAddAcct = async () => {
-    if (!newAcct.bank_name || !newAcct.account_number) { setErr('Bank name and account number are required'); return; }
+    setModalErr('');
+    if (!newAcct.bank_name?.trim() || !newAcct.account_number?.trim()) {
+      setModalErr('Bank name and account number are required');
+      return;
+    }
     setSavingAcct(true);
     try {
-      const created = await bankAccountsService.create({ ...newAcct, current_balance: 0 });
+      const payload = {
+        bank_name: newAcct.bank_name.trim(),
+        account_name: newAcct.account_name?.trim() || newAcct.bank_name.trim(),
+        account_number: newAcct.account_number.trim(),
+        account_type: newAcct.account_type,
+        currency: newAcct.currency || 'NGN',
+        current_balance: 0,
+        is_active: true,
+      };
+      const created = await bankAccountsService.create(payload);
       setAccounts(a => [...a, created]);
       setAddAcctModal(false);
+      setModalErr('');
       setNewAcct({ bank_name: '', account_name: '', account_number: '', account_type: 'both', currency: 'NGN' });
-      setOk('Account added');
-    } catch (e) { setErr(e.message); }
+      setOk('Account added successfully');
+    } catch (e) { setModalErr(e.message || 'Failed to save. Check that the account number is unique.'); }
     finally { setSavingAcct(false); }
+  };
+
+  const handleCreateExpFromTx = async () => {
+    if (!createExpModal || !createExpForm.category_id) { setModalErr('Please select a category'); return; }
+    setModalErr('');
+    setCreatingExp(true);
+    const tx = createExpModal;
+    try {
+      await expensesService.create({
+        expense_date: tx.transaction_date,
+        category_id: createExpForm.category_id,
+        description: createExpForm.description || tx.description,
+        amount: tx.debit,
+        status: 'approved',
+        requested_by: 'Admin',
+        approved_by: 'Admin',
+        notes: createExpForm.notes || `Created from bank statement: ${tx.description}`,
+      });
+      // Mark transaction as matched
+      await bankTransactionsService.updateMatch(tx.id, 'manual', 'expense', null, 'Created from bank import');
+      setTransactions(t => t.map(x => x.id === tx.id ? { ...x, match_status: 'manual', matched_to_type: 'expense' } : x));
+      setCreateExpModal(null);
+      setCreateExpForm({ category_id: '', description: '', notes: '' });
+      setOk(`Expense record created from transaction: ${naira(tx.debit)}`);
+    } catch (e) { setModalErr(e.message); }
+    finally { setCreatingExp(false); }
   };
 
   const saveMatch = async () => {
@@ -4306,8 +4353,9 @@ const BankAccountsTab = () => {
       {/* Edit Account Modal */}
       {editAcct && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 1002, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '12px', padding: '24px', width: '360px' }}>
+          <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '12px', padding: '24px', width: '380px' }}>
             <div style={{ fontWeight: '700', fontSize: '15px', marginBottom: '16px' }}>Edit Account</div>
+            {modalErr && <div style={{ background: theme.red + '22', border: `1px solid ${theme.red}`, borderRadius: '6px', padding: '8px 12px', fontSize: '12px', color: theme.red, marginBottom: '12px' }}>{modalErr}</div>}
             {[['Bank Name', 'bank_name'], ['Account Name', 'account_name'], ['Account Number', 'account_number']].map(([lbl, key]) => (
               <div key={key} style={styles.formGroup}>
                 <label style={styles.label}>{lbl}</label>
@@ -4323,7 +4371,7 @@ const BankAccountsTab = () => {
               </select>
             </div>
             <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
-              <button style={styles.btn('secondary')} onClick={() => setEditAcct(null)}>Cancel</button>
+              <button style={styles.btn('secondary')} onClick={() => { setEditAcct(null); setModalErr(''); }}>Cancel</button>
               <button style={styles.btn('primary')} onClick={handleSaveAcct} disabled={savingAcct}>{savingAcct ? 'Saving…' : 'Save Changes'}</button>
             </div>
           </div>
@@ -4333,8 +4381,9 @@ const BankAccountsTab = () => {
       {/* Add Account Modal */}
       {addAcctModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 1002, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '12px', padding: '24px', width: '360px' }}>
+          <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '12px', padding: '24px', width: '380px' }}>
             <div style={{ fontWeight: '700', fontSize: '15px', marginBottom: '16px' }}>Add Bank Account</div>
+            {modalErr && <div style={{ background: theme.red + '22', border: `1px solid ${theme.red}`, borderRadius: '6px', padding: '8px 12px', fontSize: '12px', color: theme.red, marginBottom: '12px' }}>{modalErr}</div>}
             {[['Bank Name *', 'bank_name'], ['Account Name', 'account_name'], ['Account Number *', 'account_number']].map(([lbl, key]) => (
               <div key={key} style={styles.formGroup}>
                 <label style={styles.label}>{lbl}</label>
@@ -4350,8 +4399,46 @@ const BankAccountsTab = () => {
               </select>
             </div>
             <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
-              <button style={styles.btn('secondary')} onClick={() => setAddAcctModal(false)}>Cancel</button>
+              <button style={styles.btn('secondary')} onClick={() => { setAddAcctModal(false); setModalErr(''); }}>Cancel</button>
               <button style={styles.btn('primary')} onClick={handleAddAcct} disabled={savingAcct}>{savingAcct ? 'Saving…' : 'Add Account'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create Expense from Transaction Modal */}
+      {createExpModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1003, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '12px', padding: '24px', width: '420px' }}>
+            <div style={{ fontWeight: '700', fontSize: '15px', marginBottom: '4px' }}>Create Expense Record</div>
+            <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '16px' }}>From bank transaction: {createExpModal.transaction_date} · {naira(createExpModal.debit)}</div>
+            {modalErr && <div style={{ background: theme.red + '22', border: `1px solid ${theme.red}`, borderRadius: '6px', padding: '8px 12px', fontSize: '12px', color: theme.red, marginBottom: '12px' }}>{modalErr}</div>}
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Category *</label>
+              <select style={styles.input} value={createExpForm.category_id} onChange={e => setCreateExpForm(f => ({ ...f, category_id: e.target.value }))}>
+                <option value="">— Select category —</option>
+                {expCategories.map(c => <option key={c.id} value={c.id}>{c.parent_category ? `${c.parent_category} › ` : ''}{c.name}</option>)}
+              </select>
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Description</label>
+              <input style={styles.input} value={createExpForm.description} onChange={e => setCreateExpForm(f => ({ ...f, description: e.target.value }))} placeholder={createExpModal.description} />
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Notes</label>
+              <input style={styles.input} value={createExpForm.notes} onChange={e => setCreateExpForm(f => ({ ...f, notes: e.target.value }))} placeholder="Optional" />
+            </div>
+            <div style={{ ...styles.card, padding: '10px 14px', marginBottom: '16px', background: theme.surface2 || theme.bg }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
+                <span style={{ color: theme.textMuted }}>Date</span><span>{createExpModal.transaction_date}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', fontWeight: '700', marginTop: '4px' }}>
+                <span style={{ color: theme.textMuted }}>Amount</span><span style={{ color: theme.red }}>{naira(createExpModal.debit)}</span>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button style={styles.btn('secondary')} onClick={() => { setCreateExpModal(null); setModalErr(''); setCreateExpForm({ category_id: '', description: '', notes: '' }); }}>Cancel</button>
+              <button style={styles.btn('primary')} onClick={handleCreateExpFromTx} disabled={creatingExp}>{creatingExp ? 'Creating…' : '✓ Create Expense & Mark Matched'}</button>
             </div>
           </div>
         </div>
@@ -4404,33 +4491,57 @@ const BankAccountsTab = () => {
               <table style={styles.table}>
                 <thead>
                   <tr>
-                    {['Date','Description','Debit','Credit','Balance','Status',''].map(h => <th key={h} style={styles.th}>{h}</th>)}
+                    {['Date','Description','Debit','Credit','Balance','Status','Actions'].map(h => <th key={h} style={styles.th}>{h}</th>)}
                   </tr>
                 </thead>
                 <tbody>
                   {filtered.length === 0
                     ? <tr><td colSpan="7" style={{ ...styles.td, textAlign: 'center', color: theme.textMuted, padding: '30px' }}>No transactions. Import a statement to get started.</td></tr>
-                    : filtered.map(tx => (
-                      <tr key={tx.id}>
-                        <td style={{ ...styles.td, whiteSpace: 'nowrap' }}>{tx.transaction_date}</td>
-                        <td style={{ ...styles.td, maxWidth: '220px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={tx.description}>{tx.description}</td>
-                        <td style={{ ...styles.td, textAlign: 'right', color: theme.red, fontWeight: '600' }}>{tx.debit > 0 ? naira(tx.debit) : ''}</td>
-                        <td style={{ ...styles.td, textAlign: 'right', color: theme.green, fontWeight: '600' }}>{tx.credit > 0 ? naira(tx.credit) : ''}</td>
-                        <td style={{ ...styles.td, textAlign: 'right' }}>{tx.balance > 0 ? naira(tx.balance) : ''}</td>
-                        <td style={styles.td}>
-                          <span style={styles.badge(tx.match_status === 'matched' ? theme.green : tx.match_status === 'manual' ? theme.blue : theme.red)}>
-                            {tx.match_status || 'unmatched'}
-                          </span>
-                          {tx.matched_to_type && <div style={{ fontSize: '10px', color: theme.textMuted, marginTop: '2px' }}>{tx.matched_to_type}</div>}
-                        </td>
-                        <td style={styles.td}>
-                          {tx.match_status === 'unmatched' && (
-                            <button style={{ ...styles.btn('secondary'), padding: '3px 8px', fontSize: '11px' }}
-                              onClick={() => { setMatchModal(tx); setMatchType('other'); setMatchNotes(''); }}>Match</button>
-                          )}
-                        </td>
-                      </tr>
-                    ))
+                    : filtered.map(tx => {
+                      const suggestedCat = tx.match_status === 'unmatched' ? detectCategory(tx.description, tx.debit || tx.credit) : null;
+                      const isUnmatched = tx.match_status === 'unmatched' || !tx.match_status;
+                      return (
+                        <tr key={tx.id}>
+                          <td style={{ ...styles.td, whiteSpace: 'nowrap' }}>{tx.transaction_date}</td>
+                          <td style={{ ...styles.td, maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={tx.description}>{tx.description}</td>
+                          <td style={{ ...styles.td, textAlign: 'right', color: theme.red, fontWeight: '600' }}>{tx.debit > 0 ? naira(tx.debit) : ''}</td>
+                          <td style={{ ...styles.td, textAlign: 'right', color: theme.green, fontWeight: '600' }}>{tx.credit > 0 ? naira(tx.credit) : ''}</td>
+                          <td style={{ ...styles.td, textAlign: 'right' }}>{tx.balance > 0 ? naira(tx.balance) : ''}</td>
+                          <td style={styles.td}>
+                            <span style={styles.badge(tx.match_status === 'matched' ? theme.green : tx.match_status === 'manual' ? theme.blue : theme.yellow || '#f5a623')}>
+                              {tx.match_status || 'unmatched'}
+                            </span>
+                            {tx.matched_to_type && <div style={{ fontSize: '10px', color: theme.textMuted, marginTop: '2px' }}>{tx.matched_to_type}</div>}
+                            {isUnmatched && suggestedCat && (
+                              <div style={{ fontSize: '10px', color: theme.accent, marginTop: '3px', fontStyle: 'italic' }}>
+                                Suggested: {suggestedCat}
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ ...styles.td, whiteSpace: 'nowrap' }}>
+                            <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                              {isUnmatched && (
+                                <button style={{ ...styles.btn('secondary'), padding: '2px 7px', fontSize: '11px' }}
+                                  onClick={() => { setMatchModal(tx); setMatchType('other'); setMatchNotes(''); }}>
+                                  Match
+                                </button>
+                              )}
+                              {isUnmatched && tx.debit > 0 && (
+                                <button style={{ ...styles.btn('primary'), padding: '2px 7px', fontSize: '11px' }}
+                                  onClick={() => {
+                                    setModalErr('');
+                                    const cat = suggestedCat ? expCategories.find(c => c.name.toLowerCase().includes(suggestedCat.toLowerCase().split(' ')[0])) : null;
+                                    setCreateExpForm({ category_id: cat?.id || '', description: tx.description, notes: '' });
+                                    setCreateExpModal(tx);
+                                  }}>
+                                  + Expense
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
                   }
                 </tbody>
               </table>
