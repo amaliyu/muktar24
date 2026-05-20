@@ -3994,9 +3994,9 @@ const ManagementTab = () => {
 const CONF_COLOR = { high: '#2dd4a0', medium: '#f5a623', low: '#f06b6b', none: '#7c839e' };
 
 const SEED_ACCOUNTS = [
-  { bank_name: 'TAJ Bank PLC', account_name: 'Abuja Precast Concrete LTD', account_number: '0001732895', account_type: 'income', currency: 'NGN', current_balance: 0 },
-  { bank_name: 'Moniepoint', account_name: 'Abuja Precast Concrete LTD', account_number: '0000000000', account_type: 'expense', currency: 'NGN', current_balance: 0 },
-  { bank_name: 'TAJ Bank PLC', account_name: 'Abuja Precast Concrete LTD (Operations)', account_number: '0001733191', account_type: 'expense', currency: 'NGN', current_balance: 0 },
+  { bank_name: 'TAJ Bank PLC', account_name: 'Abuja Precast Concrete LTD', account_number: '0001732895', account_type: 'income', current_balance: 0 },
+  { bank_name: 'Moniepoint', account_name: 'Abuja Precast Concrete LTD', account_number: '0000000000', account_type: 'expense', current_balance: 0 },
+  { bank_name: 'TAJ Bank PLC', account_name: 'Abuja Precast Concrete LTD (Operations)', account_number: '0001733191', account_type: 'expense', current_balance: 0 },
 ];
 
 const BankAccountsTab = () => {
@@ -4021,7 +4021,7 @@ const BankAccountsTab = () => {
   const [matchNotes, setMatchNotes] = useState('');
   const [editAcct, setEditAcct] = useState(null);
   const [addAcctModal, setAddAcctModal] = useState(false);
-  const [newAcct, setNewAcct] = useState({ bank_name: '', account_name: '', account_number: '', account_type: 'both', currency: 'NGN' });
+  const [newAcct, setNewAcct] = useState({ bank_name: '', account_name: '', account_number: '', account_type: 'both' });
   const [savingAcct, setSavingAcct] = useState(false);
   const [modalErr, setModalErr] = useState('');
   const [createExpModal, setCreateExpModal] = useState(null);
@@ -4180,15 +4180,13 @@ const BankAccountsTab = () => {
         account_name: newAcct.account_name?.trim() || newAcct.bank_name.trim(),
         account_number: newAcct.account_number.trim(),
         account_type: newAcct.account_type,
-        currency: newAcct.currency || 'NGN',
         current_balance: 0,
-        is_active: true,
       };
       const created = await bankAccountsService.create(payload);
       setAccounts(a => [...a, created]);
       setAddAcctModal(false);
       setModalErr('');
-      setNewAcct({ bank_name: '', account_name: '', account_number: '', account_type: 'both', currency: 'NGN' });
+      setNewAcct({ bank_name: '', account_name: '', account_number: '', account_type: 'both' });
       setOk('Account added successfully');
     } catch (e) { setModalErr(e.message || 'Failed to save. Check that the account number is unique.'); }
     finally { setSavingAcct(false); }
