@@ -2,9 +2,14 @@ import { supabase } from '../lib/supabase';
 
 export const bankAccountsService = {
   async getAll() {
-    const { data, error } = await supabase.from('bank_accounts').select('*').order('bank_name');
+    const { data, error } = await supabase.from('bank_accounts').select('*').order('created_at', { ascending: true });
     if (error) throw error;
     return data || [];
+  },
+  async create(account) {
+    const { data, error } = await supabase.from('bank_accounts').insert(account).select().single();
+    if (error) throw error;
+    return data;
   },
   async update(id, updates) {
     const { error } = await supabase.from('bank_accounts').update(updates).eq('id', id);

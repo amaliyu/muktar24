@@ -3993,6 +3993,12 @@ const ManagementTab = () => {
 // ── BANK ACCOUNTS TAB ─────────────────────────────────────────
 const CONF_COLOR = { high: '#2dd4a0', medium: '#f5a623', low: '#f06b6b', none: '#7c839e' };
 
+const SEED_ACCOUNTS = [
+  { bank_name: 'TAJ Bank PLC', account_name: 'Abuja Precast Concrete LTD', account_number: '0001732895', account_type: 'income', currency: 'NGN', current_balance: 0 },
+  { bank_name: 'Moniepoint', account_name: 'Abuja Precast Concrete LTD', account_number: '0000000000', account_type: 'expense', currency: 'NGN', current_balance: 0 },
+  { bank_name: 'TAJ Bank PLC', account_name: 'Abuja Precast Concrete LTD (Operations)', account_number: '0001733191', account_type: 'expense', currency: 'NGN', current_balance: 0 },
+];
+
 const BankAccountsTab = () => {
   const [accounts, setAccounts] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -4013,11 +4019,29 @@ const BankAccountsTab = () => {
   const [matchModal, setMatchModal] = useState(null);
   const [matchType, setMatchType] = useState('other');
   const [matchNotes, setMatchNotes] = useState('');
+  const [editAcct, setEditAcct] = useState(null);
+  const [addAcctModal, setAddAcctModal] = useState(false);
+  const [newAcct, setNewAcct] = useState({ bank_name: '', account_name: '', account_number: '', account_type: 'both', currency: 'NGN' });
+  const [savingAcct, setSavingAcct] = useState(false);
   const [err, setErr] = useState('');
   const [ok, setOk] = useState('');
 
   useEffect(() => {
-    bankAccountsService.getAll().then(a => { setAccounts(a); }).catch(e => setErr(e.message));
+    bankAccountsService.getAll().then(async (existing) => {
+      let all = [...existing];
+      // Seed any missing default accounts
+      for (const seed of SEED_ACCOUNTS) {
+        if (!existing.find(a => a.account_number === seed.account_number)) {
+          try { const created = await bankAccountsService.create(seed); all = [...all, created]; } catch {}
+        }
+      }
+      // Sort: income first, then expense, by account_number
+      all.sort((a, b) => {
+        if (a.account_type !== b.account_type) return a.account_type === 'income' ? -1 : 1;
+        return a.account_number.localeCompare(b.account_number);
+      });
+      setAccounts(all);
+    }).catch(e => setErr(e.message));
   }, []);
 
   useEffect(() => {
@@ -4094,6 +4118,37 @@ const BankAccountsTab = () => {
         bankTransactionsService.getByAccount(importAcct, txFrom || null, txTo || null).then(setTransactions).catch(() => {});
       }
     } catch (e) { setErr(e.message); } finally { setImporting(false); }
+  };
+
+  const handleSaveAcct = async () => {
+    if (!editAcct) return;
+    setSavingAcct(true);
+    try {
+      await bankAccountsService.update(editAcct.id, {
+        bank_name: editAcct.bank_name,
+        account_name: editAcct.account_name,
+        account_number: editAcct.account_number,
+        account_type: editAcct.account_type,
+      });
+      setAccounts(a => a.map(x => x.id === editAcct.id ? { ...x, ...editAcct } : x));
+      if (selected?.id === editAcct.id) setSelected(prev => ({ ...prev, ...editAcct }));
+      setEditAcct(null);
+      setOk('Account updated');
+    } catch (e) { setErr(e.message); }
+    finally { setSavingAcct(false); }
+  };
+
+  const handleAddAcct = async () => {
+    if (!newAcct.bank_name || !newAcct.account_number) { setErr('Bank name and account number are required'); return; }
+    setSavingAcct(true);
+    try {
+      const created = await bankAccountsService.create({ ...newAcct, current_balance: 0 });
+      setAccounts(a => [...a, created]);
+      setAddAcctModal(false);
+      setNewAcct({ bank_name: '', account_name: '', account_number: '', account_type: 'both', currency: 'NGN' });
+      setOk('Account added');
+    } catch (e) { setErr(e.message); }
+    finally { setSavingAcct(false); }
   };
 
   const saveMatch = async () => {
@@ -4248,28 +4303,89 @@ const BankAccountsTab = () => {
         </div>
       )}
 
-      {/* Account Cards */}
-      <div style={styles.grid(accounts.length > 2 ? 3 : 2)}>
-        {accounts.map(acct => (
-          <div key={acct.id} style={{ ...styles.card, cursor: 'pointer', borderTop: `3px solid ${acct.account_type === 'income' ? theme.green : acct.account_type === 'expense' ? theme.red : theme.blue}`, outline: selected?.id === acct.id ? `2px solid ${theme.accent}` : 'none' }}
-            onClick={() => setSelected(acct)}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div>
-                <div style={{ fontWeight: '700', fontSize: '14px' }}>{acct.bank_name}</div>
-                <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '2px' }}>{acct.account_name}</div>
-                <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '2px', fontFamily: 'monospace' }}>{acct.account_number}</div>
+      {/* Edit Account Modal */}
+      {editAcct && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 1002, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '12px', padding: '24px', width: '360px' }}>
+            <div style={{ fontWeight: '700', fontSize: '15px', marginBottom: '16px' }}>Edit Account</div>
+            {[['Bank Name', 'bank_name'], ['Account Name', 'account_name'], ['Account Number', 'account_number']].map(([lbl, key]) => (
+              <div key={key} style={styles.formGroup}>
+                <label style={styles.label}>{lbl}</label>
+                <input style={styles.input} value={editAcct[key] || ''} onChange={e => setEditAcct(x => ({ ...x, [key]: e.target.value }))} />
               </div>
-              <span style={styles.badge(acct.account_type === 'income' ? theme.green : acct.account_type === 'expense' ? theme.red : theme.blue)}>{acct.account_type}</span>
+            ))}
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Account Type</label>
+              <select style={styles.input} value={editAcct.account_type} onChange={e => setEditAcct(x => ({ ...x, account_type: e.target.value }))}>
+                <option value="income">Income (receives customer payments)</option>
+                <option value="expense">Expense (pays out expenses)</option>
+                <option value="both">Both</option>
+              </select>
             </div>
-            <div style={{ marginTop: '14px' }}>
-              <div style={styles.statLabel}>Current Balance</div>
-              <div style={{ fontSize: '20px', fontWeight: '700', color: theme.accent, marginTop: '4px' }}>{naira(acct.current_balance)}</div>
-            </div>
-            <div style={{ display: 'flex', gap: '8px', marginTop: '14px' }} onClick={e => e.stopPropagation()}>
-              <button style={{ ...styles.btn('secondary'), padding: '5px 12px', fontSize: '12px', flex: 1 }} onClick={() => openImport(acct)}>↑ Import</button>
+            <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+              <button style={styles.btn('secondary')} onClick={() => setEditAcct(null)}>Cancel</button>
+              <button style={styles.btn('primary')} onClick={handleSaveAcct} disabled={savingAcct}>{savingAcct ? 'Saving…' : 'Save Changes'}</button>
             </div>
           </div>
-        ))}
+        </div>
+      )}
+
+      {/* Add Account Modal */}
+      {addAcctModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 1002, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '12px', padding: '24px', width: '360px' }}>
+            <div style={{ fontWeight: '700', fontSize: '15px', marginBottom: '16px' }}>Add Bank Account</div>
+            {[['Bank Name *', 'bank_name'], ['Account Name', 'account_name'], ['Account Number *', 'account_number']].map(([lbl, key]) => (
+              <div key={key} style={styles.formGroup}>
+                <label style={styles.label}>{lbl}</label>
+                <input style={styles.input} value={newAcct[key] || ''} onChange={e => setNewAcct(x => ({ ...x, [key]: e.target.value }))} />
+              </div>
+            ))}
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Account Type</label>
+              <select style={styles.input} value={newAcct.account_type} onChange={e => setNewAcct(x => ({ ...x, account_type: e.target.value }))}>
+                <option value="income">Income</option>
+                <option value="expense">Expense</option>
+                <option value="both">Both</option>
+              </select>
+            </div>
+            <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+              <button style={styles.btn('secondary')} onClick={() => setAddAcctModal(false)}>Cancel</button>
+              <button style={styles.btn('primary')} onClick={handleAddAcct} disabled={savingAcct}>{savingAcct ? 'Saving…' : 'Add Account'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Account Cards */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '12px' }}>
+        <button style={{ ...styles.btn('secondary'), fontSize: '12px', padding: '5px 14px' }} onClick={() => setAddAcctModal(true)}>+ Add Account</button>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(accounts.length, 3)}, 1fr)`, gap: '16px', marginBottom: '24px' }}>
+        {accounts.map(acct => {
+          const typeColor = acct.account_type === 'income' ? theme.green : acct.account_type === 'expense' ? theme.red : theme.blue;
+          return (
+            <div key={acct.id} style={{ ...styles.card, cursor: 'pointer', borderTop: `3px solid ${typeColor}`, outline: selected?.id === acct.id ? `2px solid ${theme.accent}` : 'none' }}
+              onClick={() => setSelected(acct)}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: '700', fontSize: '14px' }}>{acct.bank_name}</div>
+                  <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{acct.account_name}</div>
+                  <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '2px', fontFamily: 'monospace' }}>{acct.account_number}</div>
+                </div>
+                <span style={styles.badge(typeColor)}>{acct.account_type}</span>
+              </div>
+              <div style={{ marginTop: '14px' }}>
+                <div style={styles.statLabel}>Current Balance</div>
+                <div style={{ fontSize: '20px', fontWeight: '700', color: theme.accent, marginTop: '4px' }}>{naira(acct.current_balance)}</div>
+              </div>
+              <div style={{ display: 'flex', gap: '8px', marginTop: '14px' }} onClick={e => e.stopPropagation()}>
+                <button style={{ ...styles.btn('secondary'), padding: '5px 10px', fontSize: '12px', flex: 1 }} onClick={() => openImport(acct)}>↑ Import</button>
+                <button style={{ ...styles.btn('secondary'), padding: '5px 10px', fontSize: '12px' }} onClick={() => setEditAcct({ ...acct })} title="Edit account details">✎</button>
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       {/* Transaction History */}
