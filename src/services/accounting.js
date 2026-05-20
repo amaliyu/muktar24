@@ -128,6 +128,15 @@ export const accountingService = {
     return data || []
   },
 
+  async getOpenInvoices() {
+    const { data, error } = await supabase
+      .from('invoices')
+      .select('id, invoice_number, total_amount, issued_date, order:order_id(id, customer:customer_id(id, name, company_name)), payments(id, amount_paid, payment_date, status)')
+      .order('issued_date', { ascending: false })
+    if (error) throw error
+    return data || []
+  },
+
   async getProductionTotals(from, to) {
     let q = supabase
       .from('production_log')

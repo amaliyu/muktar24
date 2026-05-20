@@ -63,6 +63,41 @@ function cleanDescription(desc) {
   return s;
 }
 
+// Extract potential customer/company name from NIP/transfer bank descriptions
+export function extractCustomerFromDesc(desc) {
+  if (!desc) return null;
+  const s = String(desc).toUpperCase().trim();
+  // NIP/INWARD/123456789/CUSTOMERNAME/... or NIP/CUSTOMERNAME
+  const nip = s.match(/NIP[\/\s]+(?:INWARD[\/\s]+)?(?:\d+[\/\s]+)?([A-Z][A-Z0-9&\-\. ]+?)(?:\/|\s{2,}|$)/);
+  if (nip) return nip[1].trim();
+  // TRF FROM CUSTOMERNAME or TRANSFER FROM
+  const trfFrom = s.match(/(?:TRF|TRANSFER)\s+(?:FROM|FRM)\s+([A-Z][A-Z0-9&\-\. ]+?)(?:\/|\s{2,}|$)/);
+  if (trfFrom) return trfFrom[1].trim();
+  // B/O CUSTOMERNAME
+  const bo = s.match(/B\/O\s+([A-Z][A-Z0-9&\-\. ]+?)(?:\/|\s{2,}|$)/);
+  if (bo) return bo[1].trim();
+  return null;
+}
+
+// Fuzzy-match an extracted name string against a customers array
+function matchCustomerByName(extracted, customers) {
+  if (!extracted || !customers?.length) return null;
+  const norm = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const en = norm(extracted);
+  let best = null, bestScore = 0;
+  for (const c of customers) {
+    for (const raw of [c.name, c.company_name].filter(Boolean)) {
+      const cn = norm(raw);
+      if (!cn) continue;
+      if (en.includes(cn) || cn.includes(en)) {
+        const score = Math.min(en.length, cn.length) / Math.max(en.length, cn.length);
+        if (score > bestScore) { best = c; bestScore = score; }
+      }
+    }
+  }
+  return bestScore >= 0.5 ? best : null;
+}
+
 // Detect auto-category from description + amount
 export function detectCategory(desc, amount) {
   const d = String(desc || '').toLowerCase();
@@ -216,7 +251,7 @@ const EXPENSE_KEYWORDS = {
   'Bank Charges':       ['stamp', 'stampduty', 'sms alert', 'commission', 'charge'],
 };
 
-export function autoMatchTransactions(transactions, payments, expenses, accountType) {
+export function autoMatchTransactions(transactions, payments, expenses, accountType, { invoices = [], customers = [] } = {}) {
   const daysDiff = (a, b) => Math.abs(new Date(a) - new Date(b)) / 86400000;
 
   return transactions.map(tx => {
@@ -234,26 +269,63 @@ export function autoMatchTransactions(transactions, payments, expenses, accountT
 
     let best = null;
 
-    // Income account: match credits to customer payments
+    // Income account: match credits to invoices / payment records
     if ((accountType === 'income' || accountType === 'both') && tx.credit > 0) {
+      // Step 1: match against confirmed payment records (amount + date)
       for (const p of payments) {
         const pAmt = Number(p.amount_paid);
         const exactAmt = Math.abs(pAmt - tx.credit) < 0.01;
         const nearAmt = Math.abs(pAmt - tx.credit) <= 100;
         const days = daysDiff(p.payment_date, tx.transaction_date);
         const customerName = p.invoice?.order?.customer?.name || '';
+        const invoiceNumber = p.invoice?.invoice_number || '';
 
         if (exactAmt && days <= 1) {
-          best = { type: 'payment', id: p.id, label: `Payment · ${customerName}`, confidence: 'high' };
+          best = { type: 'payment', id: p.id, label: `${customerName} · ${invoiceNumber}`, confidence: 'high', customerName, invoiceNumber };
           break;
         }
         if (exactAmt && days <= 5 && best?.confidence !== 'high') {
-          best = { type: 'payment', id: p.id, label: `Payment · ${customerName}`, confidence: 'medium' };
+          best = { type: 'payment', id: p.id, label: `${customerName} · ${invoiceNumber}`, confidence: 'medium', customerName, invoiceNumber };
         }
         if (nearAmt && days <= 5 && !best) {
-          best = { type: 'payment', id: p.id, label: `Payment · ${customerName} (±₦100)`, confidence: 'low' };
+          best = { type: 'payment', id: p.id, label: `${customerName} · ${invoiceNumber} (±₦100)`, confidence: 'low', customerName, invoiceNumber };
         }
       }
+
+      // Step 2: match against invoice totals (for un-recorded payments)
+      if (!best && invoices.length) {
+        for (const inv of invoices) {
+          const totalPaid = (inv.payments || []).filter(p => p.status === 'confirmed').reduce((s, p) => s + Number(p.amount_paid), 0);
+          const remaining = Number(inv.total_amount) - totalPaid;
+          const customerName = inv.order?.customer?.name || '';
+          const days = daysDiff(inv.issued_date, tx.transaction_date);
+          // Exact match to outstanding balance
+          if (Math.abs(remaining - tx.credit) < 0.01 && days <= 30) {
+            best = { type: 'invoice', id: inv.id, label: `${customerName} · ${inv.invoice_number}`, confidence: remaining === Number(inv.total_amount) ? 'high' : 'medium', customerName, invoiceNumber: inv.invoice_number, invoiceId: inv.id, totalAmount: inv.total_amount, totalPaid, isFullPayment: totalPaid === 0 };
+            break;
+          }
+          // Full invoice amount match (already partially paid)
+          if (Math.abs(Number(inv.total_amount) - tx.credit) < 0.01 && days <= 30 && !best) {
+            best = { type: 'invoice', id: inv.id, label: `${customerName} · ${inv.invoice_number} (full)`, confidence: 'medium', customerName, invoiceNumber: inv.invoice_number, invoiceId: inv.id, totalAmount: inv.total_amount, totalPaid, isFullPayment: true };
+          }
+        }
+      }
+
+      // Step 3: customer name extraction from description
+      if (!best) {
+        const extracted = extractCustomerFromDesc(tx.description);
+        const customer = matchCustomerByName(extracted, customers);
+        if (customer) {
+          const custInvoices = invoices.filter(inv => inv.order?.customer?.id === customer.id);
+          const openInvs = custInvoices.filter(inv => {
+            const totalPaid = (inv.payments || []).filter(p => p.status === 'confirmed').reduce((s, p) => s + Number(p.amount_paid), 0);
+            return totalPaid < Number(inv.total_amount);
+          });
+          return { ...tx, autoMatch: null, suggestedCustomer: { id: customer.id, name: customer.name, openInvoices: openInvs } };
+        }
+      }
+
+      if (!best) return { ...tx, autoMatch: null };
     }
 
     // Expense account: match debits to recorded expenses

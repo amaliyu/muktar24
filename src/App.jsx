@@ -23,7 +23,7 @@ import { generateCostAnalysisPDF } from './utils/generateCostAnalysisPDF'
 import { generateManagementAccountsPDF } from './utils/generateManagementAccountsPDF'
 import { bankAccountsService, bankTransactionsService, bankImportBatchesService, bankReconciliationsService, receiptsService } from './services/bank'
 import { generateReconciliationPDF } from './utils/generateReconciliationPDF'
-import { parseFile, autoMapColumns, mapRowsToTransactions, autoMatchTransactions, detectCategory } from './utils/parseBankStatement';
+import { parseFile, autoMapColumns, mapRowsToTransactions, autoMatchTransactions, detectCategory, extractCustomerFromDesc } from './utils/parseBankStatement';
 
 const theme = {
   bg: "#0f1117", surface: "#1a1d27", card: "#21263a", border: "#2e3452",
@@ -4028,11 +4028,18 @@ const BankAccountsTab = () => {
   const [expCategories, setExpCategories] = useState([]);
   const [creatingExp, setCreatingExp] = useState(false);
   const [createExpForm, setCreateExpForm] = useState({ category_id: '', description: '', notes: '' });
+  const [createPaymentModal, setCreatePaymentModal] = useState(null);
+  const [createPaymentForm, setCreatePaymentForm] = useState({ customer_id: '', invoice_id: '', payment_method: 'bank_transfer', reference: '', notes: '' });
+  const [allInvoices, setAllInvoices] = useState([]);
+  const [allCustomers, setAllCustomers] = useState([]);
+  const [creatingPayment, setCreatingPayment] = useState(false);
   const [err, setErr] = useState('');
   const [ok, setOk] = useState('');
 
   useEffect(() => {
     expenseCategoriesService.getActive().then(setExpCategories).catch(() => {});
+    accountingService.getOpenInvoices().then(setAllInvoices).catch(() => {});
+    customersService.getAll().then(setAllCustomers).catch(() => {});
     bankAccountsService.getAll().then(async (existing) => {
       let all = [...existing];
       // Seed any missing default accounts
@@ -4078,16 +4085,22 @@ const BankAccountsTab = () => {
     const txs = mapRowsToTransactions(importRows, colMap);
     if (txs.length === 0) { setErr('No valid transactions found. Check column mapping.'); return; }
     const withDups = await bankTransactionsService.checkDuplicates(importAcct, txs).catch(() => txs.map(t => ({ ...t, isDuplicate: false })));
-    // Auto-match
     const acct = accounts.find(a => a.id === importAcct);
-    let payments = [], expenses2 = [];
+    let payments = [], expenses2 = [], invoices2 = allInvoices, customers2 = allCustomers;
     try {
       [payments, expenses2] = await Promise.all([
         accountingService.getConfirmedPayments(null, null),
         expensesService.getAll(null, null),
       ]);
+      if (!invoices2.length) invoices2 = await accountingService.getOpenInvoices().catch(() => []);
+      if (!customers2.length) customers2 = await customersService.getAll().catch(() => []);
     } catch {}
-    const matched = autoMatchTransactions(withDups.filter(t => !t.isDuplicate), payments, expenses2, acct?.account_type || 'both');
+    const matched = autoMatchTransactions(
+      withDups.filter(t => !t.isDuplicate),
+      payments, expenses2,
+      acct?.account_type || 'both',
+      { invoices: invoices2, customers: customers2 }
+    );
     setPreview(matched);
     setImportStep('preview');
   };
@@ -4170,6 +4183,46 @@ const BankAccountsTab = () => {
       setOk('Account added successfully');
     } catch (e) { setModalErr(e.message || 'Failed to save. Check that the account number is unique.'); }
     finally { setSavingAcct(false); }
+  };
+
+  const handleCreatePayment = async () => {
+    if (!createPaymentModal || !createPaymentForm.invoice_id) { setModalErr('Please select an invoice'); return; }
+    setModalErr('');
+    setCreatingPayment(true);
+    const tx = createPaymentModal;
+    try {
+      // Record the payment
+      const payment = await paymentsService.recordPayment({
+        invoice_id: createPaymentForm.invoice_id,
+        amount_paid: tx.credit,
+        payment_date: tx.transaction_date,
+        status: 'confirmed',
+        confirmed_by: 'Admin',
+        notes: createPaymentForm.notes || `Matched from bank statement: ${tx.description}`,
+        payment_method: createPaymentForm.payment_method,
+        reference: createPaymentForm.reference || '',
+      });
+      // Check if invoice is now fully paid
+      const inv = allInvoices.find(i => i.id === createPaymentForm.invoice_id);
+      if (inv) {
+        const prevPaid = (inv.payments || []).filter(p => p.status === 'confirmed').reduce((s, p) => s + Number(p.amount_paid), 0);
+        const totalNow = prevPaid + Number(tx.credit);
+        if (totalNow >= Number(inv.total_amount)) {
+          try { await invoicesService.update(inv.id, { payment_status: 'paid' }); } catch {}
+        } else {
+          try { await invoicesService.update(inv.id, { payment_status: 'partially_paid' }); } catch {}
+        }
+        // Refresh invoices
+        accountingService.getOpenInvoices().then(setAllInvoices).catch(() => {});
+      }
+      // Mark bank transaction as matched
+      await bankTransactionsService.updateMatch(tx.id, 'matched', 'payment', payment.id, `Invoice matched: ${inv?.invoice_number || ''}`);
+      setTransactions(t => t.map(x => x.id === tx.id ? { ...x, match_status: 'matched', matched_to_type: 'payment' } : x));
+      setCreatePaymentModal(null);
+      setCreatePaymentForm({ customer_id: '', invoice_id: '', payment_method: 'bank_transfer', reference: '', notes: '' });
+      setOk(`Payment recorded for ${inv?.invoice_number || 'invoice'} — ${naira(tx.credit)}`);
+    } catch (e) { setModalErr(e.message); }
+    finally { setCreatingPayment(false); }
   };
 
   const handleCreateExpFromTx = async () => {
@@ -4444,6 +4497,113 @@ const BankAccountsTab = () => {
         </div>
       )}
 
+      {/* Create Payment from Transaction Modal */}
+      {createPaymentModal && (() => {
+        const custId = createPaymentForm.customer_id;
+        const custInvoices = custId
+          ? allInvoices.filter(inv => inv.order?.customer?.id === custId)
+          : allInvoices;
+        const openInvoices = custInvoices.filter(inv => {
+          const paid = (inv.payments || []).filter(p => p.status === 'confirmed').reduce((s, p) => s + Number(p.amount_paid), 0);
+          return paid < Number(inv.total_amount);
+        });
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1003, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
+            <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '12px', padding: '24px', width: '460px', maxHeight: '90vh', overflowY: 'auto' }}>
+              <div style={{ fontWeight: '700', fontSize: '15px', marginBottom: '4px' }}>Record Customer Payment</div>
+              <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '16px' }}>
+                Bank credit: {createPaymentModal.transaction_date} · <strong style={{ color: theme.green }}>{naira(createPaymentModal.credit)}</strong>
+              </div>
+              <div style={{ fontSize: '11px', color: theme.textMuted, marginBottom: '14px', background: theme.bg, borderRadius: '6px', padding: '8px 12px', fontFamily: 'monospace' }}>
+                {createPaymentModal.description}
+              </div>
+              {modalErr && <div style={{ background: theme.red + '22', border: `1px solid ${theme.red}`, borderRadius: '6px', padding: '8px 12px', fontSize: '12px', color: theme.red, marginBottom: '12px' }}>{modalErr}</div>}
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Customer (optional — filters invoice list)</label>
+                <select style={styles.input} value={createPaymentForm.customer_id}
+                  onChange={e => setCreatePaymentForm(f => ({ ...f, customer_id: e.target.value, invoice_id: '' }))}>
+                  <option value="">— All customers —</option>
+                  {allCustomers.map(c => <option key={c.id} value={c.id}>{c.name}{c.company_name ? ` (${c.company_name})` : ''}</option>)}
+                </select>
+              </div>
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Invoice *</label>
+                <select style={styles.input} value={createPaymentForm.invoice_id}
+                  onChange={e => setCreatePaymentForm(f => ({ ...f, invoice_id: e.target.value }))}>
+                  <option value="">— Select invoice —</option>
+                  {openInvoices.map(inv => {
+                    const paid = (inv.payments || []).filter(p => p.status === 'confirmed').reduce((s, p) => s + Number(p.amount_paid), 0);
+                    const remaining = Number(inv.total_amount) - paid;
+                    return (
+                      <option key={inv.id} value={inv.id}>
+                        {inv.invoice_number} · {inv.order?.customer?.name} · Bal: {naira(remaining)}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+              <div style={{ ...styles.grid(2), gap: '8px' }}>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Payment Method</label>
+                  <select style={styles.input} value={createPaymentForm.payment_method}
+                    onChange={e => setCreatePaymentForm(f => ({ ...f, payment_method: e.target.value }))}>
+                    <option value="bank_transfer">Bank Transfer</option>
+                    <option value="cash">Cash</option>
+                    <option value="cheque">Cheque</option>
+                    <option value="pos">POS</option>
+                  </select>
+                </div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Reference</label>
+                  <input style={styles.input} value={createPaymentForm.reference}
+                    onChange={e => setCreatePaymentForm(f => ({ ...f, reference: e.target.value }))}
+                    placeholder="Optional" />
+                </div>
+              </div>
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Notes</label>
+                <input style={styles.input} value={createPaymentForm.notes}
+                  onChange={e => setCreatePaymentForm(f => ({ ...f, notes: e.target.value }))}
+                  placeholder="Optional" />
+              </div>
+              {/* Selected invoice summary */}
+              {createPaymentForm.invoice_id && (() => {
+                const inv = allInvoices.find(i => i.id === createPaymentForm.invoice_id);
+                if (!inv) return null;
+                const paid = (inv.payments || []).filter(p => p.status === 'confirmed').reduce((s, p) => s + Number(p.amount_paid), 0);
+                const remaining = Number(inv.total_amount) - paid;
+                const willComplete = Math.abs(remaining - createPaymentModal.credit) < 0.01;
+                return (
+                  <div style={{ background: (willComplete ? theme.green : theme.accent) + '18', border: `1px solid ${willComplete ? theme.green : theme.accent}44`, borderRadius: '8px', padding: '10px 14px', marginBottom: '16px', fontSize: '12px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                      <span style={{ color: theme.textMuted }}>Invoice total</span><span>{naira(inv.total_amount)}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                      <span style={{ color: theme.textMuted }}>Previously paid</span><span>{naira(paid)}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                      <span style={{ color: theme.textMuted }}>This payment</span><span style={{ color: theme.green, fontWeight: '600' }}>{naira(createPaymentModal.credit)}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: '700', borderTop: `1px solid ${theme.border}`, paddingTop: '4px', marginTop: '4px' }}>
+                      <span>Status after</span>
+                      <span style={{ color: willComplete ? theme.green : theme.accent }}>
+                        {willComplete ? '✓ FULLY PAID' : `Balance: ${naira(remaining - createPaymentModal.credit)}`}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })()}
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button style={styles.btn('secondary')} onClick={() => { setCreatePaymentModal(null); setModalErr(''); setCreatePaymentForm({ customer_id: '', invoice_id: '', payment_method: 'bank_transfer', reference: '', notes: '' }); }}>Cancel</button>
+                <button style={styles.btn('primary')} onClick={handleCreatePayment} disabled={creatingPayment}>
+                  {creatingPayment ? 'Saving…' : '✓ Record Payment & Match Transaction'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Account Cards */}
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '12px' }}>
         <button style={{ ...styles.btn('secondary'), fontSize: '12px', padding: '5px 14px' }} onClick={() => setAddAcctModal(true)}>+ Add Account</button>
@@ -4498,8 +4658,21 @@ const BankAccountsTab = () => {
                   {filtered.length === 0
                     ? <tr><td colSpan="7" style={{ ...styles.td, textAlign: 'center', color: theme.textMuted, padding: '30px' }}>No transactions. Import a statement to get started.</td></tr>
                     : filtered.map(tx => {
-                      const suggestedCat = tx.match_status === 'unmatched' ? detectCategory(tx.description, tx.debit || tx.credit) : null;
                       const isUnmatched = tx.match_status === 'unmatched' || !tx.match_status;
+                      const suggestedCat = (isUnmatched && tx.debit > 0) ? detectCategory(tx.description, tx.debit) : null;
+                      const suggestedCustomer = (isUnmatched && tx.credit > 0) ? (() => {
+                        const extracted = extractCustomerFromDesc(tx.description);
+                        if (!extracted) return null;
+                        const norm = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+                        const en = norm(extracted);
+                        return allCustomers.find(c => {
+                          for (const raw of [c.name, c.company_name].filter(Boolean)) {
+                            const cn = norm(raw);
+                            if (en.includes(cn) || cn.includes(en)) return true;
+                          }
+                          return false;
+                        }) || null;
+                      })() : null;
                       return (
                         <tr key={tx.id}>
                           <td style={{ ...styles.td, whiteSpace: 'nowrap' }}>{tx.transaction_date}</td>
@@ -4508,23 +4681,31 @@ const BankAccountsTab = () => {
                           <td style={{ ...styles.td, textAlign: 'right', color: theme.green, fontWeight: '600' }}>{tx.credit > 0 ? naira(tx.credit) : ''}</td>
                           <td style={{ ...styles.td, textAlign: 'right' }}>{tx.balance > 0 ? naira(tx.balance) : ''}</td>
                           <td style={styles.td}>
-                            <span style={styles.badge(tx.match_status === 'matched' ? theme.green : tx.match_status === 'manual' ? theme.blue : theme.yellow || '#f5a623')}>
+                            <span style={styles.badge(tx.match_status === 'matched' ? theme.green : tx.match_status === 'manual' ? theme.blue : '#f5a623')}>
                               {tx.match_status || 'unmatched'}
                             </span>
                             {tx.matched_to_type && <div style={{ fontSize: '10px', color: theme.textMuted, marginTop: '2px' }}>{tx.matched_to_type}</div>}
                             {isUnmatched && suggestedCat && (
-                              <div style={{ fontSize: '10px', color: theme.accent, marginTop: '3px', fontStyle: 'italic' }}>
-                                Suggested: {suggestedCat}
-                              </div>
+                              <div style={{ fontSize: '10px', color: theme.accent, marginTop: '3px', fontStyle: 'italic' }}>Suggested: {suggestedCat}</div>
+                            )}
+                            {isUnmatched && suggestedCustomer && (
+                              <div style={{ fontSize: '10px', color: theme.green, marginTop: '3px', fontStyle: 'italic' }}>Customer: {suggestedCustomer.name}</div>
                             )}
                           </td>
                           <td style={{ ...styles.td, whiteSpace: 'nowrap' }}>
                             <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
                               {isUnmatched && (
                                 <button style={{ ...styles.btn('secondary'), padding: '2px 7px', fontSize: '11px' }}
-                                  onClick={() => { setMatchModal(tx); setMatchType('other'); setMatchNotes(''); }}>
-                                  Match
-                                </button>
+                                  onClick={() => { setMatchModal(tx); setMatchType('other'); setMatchNotes(''); }}>Match</button>
+                              )}
+                              {isUnmatched && tx.credit > 0 && (
+                                <button style={{ ...styles.btn('primary'), padding: '2px 7px', fontSize: '11px', background: theme.green }}
+                                  onClick={() => {
+                                    setModalErr('');
+                                    const custId = suggestedCustomer?.id || '';
+                                    setCreatePaymentForm({ customer_id: custId, invoice_id: '', payment_method: 'bank_transfer', reference: '', notes: '' });
+                                    setCreatePaymentModal(tx);
+                                  }}>+ Payment</button>
                               )}
                               {isUnmatched && tx.debit > 0 && (
                                 <button style={{ ...styles.btn('primary'), padding: '2px 7px', fontSize: '11px' }}
@@ -4533,9 +4714,7 @@ const BankAccountsTab = () => {
                                     const cat = suggestedCat ? expCategories.find(c => c.name.toLowerCase().includes(suggestedCat.toLowerCase().split(' ')[0])) : null;
                                     setCreateExpForm({ category_id: cat?.id || '', description: tx.description, notes: '' });
                                     setCreateExpModal(tx);
-                                  }}>
-                                  + Expense
-                                </button>
+                                  }}>+ Expense</button>
                               )}
                             </div>
                           </td>
