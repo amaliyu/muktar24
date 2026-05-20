@@ -2973,6 +2973,9 @@ const Batches = () => {
   const [alert, setAlert] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [expandedId, setExpandedId] = useState(null);
+  const [editTarget, setEditTarget] = useState(null);
+  const [editForm, setEditForm] = useState({});
+  const [deleting, setDeleting] = useState(null);
   const today = new Date().toISOString().split("T")[0];
   const emptyForm = { blockType: "9-inch", dateCured: today, qtyAccepted: "", createdBy: "", notes: "", linkedProds: [] };
   const [form, setForm] = useState(emptyForm);
@@ -3011,6 +3014,54 @@ const Batches = () => {
     finally { setSaving(false); }
   };
 
+  const startEdit = (b) => {
+    setEditTarget(b);
+    setEditForm({ blockType: b.block_type, dateCured: b.date_cured, qtyAccepted: String(b.qty_accepted), createdBy: b.created_by || "", notes: b.notes || "" });
+    setExpandedId(null);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editForm.qtyAccepted || !editForm.dateCured) return setAlert({ type: "error", msg: "Quantity and date are required." });
+    setSaving(true);
+    try {
+      const oldQty = Number(editTarget.qty_accepted);
+      const newQty = parseInt(editForm.qtyAccepted);
+      const diff = newQty - oldQty;
+      const newRemaining = Math.max(0, Number(editTarget.qty_remaining) + diff);
+      await batchesService.update(editTarget.id, {
+        block_type: editForm.blockType,
+        date_cured: editForm.dateCured,
+        qty_accepted: newQty,
+        qty_remaining: newRemaining,
+        status: newRemaining === 0 ? "exhausted" : "active",
+        created_by: editForm.createdBy || null,
+        notes: editForm.notes || null,
+      });
+      if (diff !== 0) {
+        try {
+          if (diff > 0) await finishedGoodsService.increase(editForm.blockType, diff);
+          else await finishedGoodsService.decrease(editForm.blockType, Math.abs(diff));
+        } catch {}
+      }
+      await load();
+      setEditTarget(null);
+      setAlert({ type: "success", msg: "Batch updated." });
+    } catch (e) { setAlert({ type: "error", msg: "Failed to update: " + e.message }); }
+    finally { setSaving(false); }
+  };
+
+  const handleDelete = async (b) => {
+    if (!window.confirm(`Delete batch ${b.batch_number}? This cannot be undone.`)) return;
+    setDeleting(b.id);
+    try {
+      try { await finishedGoodsService.decrease(b.block_type, Number(b.qty_remaining)); } catch {}
+      await batchesService.delete(b.id);
+      await load();
+      setAlert({ type: "success", msg: `Batch ${b.batch_number} deleted.` });
+    } catch (e) { setAlert({ type: "error", msg: "Failed to delete: " + e.message }); }
+    finally { setDeleting(null); }
+  };
+
   const filteredProds = productions.filter(p => p.block_type === form.blockType);
   const totalInYard = batches.filter(b => b.status === "active").reduce((s, b) => s + Number(b.qty_remaining || 0), 0);
 
@@ -3021,6 +3072,31 @@ const Batches = () => {
         <button style={styles.btn("primary")} onClick={() => setShowForm(!showForm)}>+ Create Batch</button>
       </div>
       {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
+
+      {/* Edit Modal */}
+      {editTarget && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+          <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: "12px", padding: "24px", width: "100%", maxWidth: "540px" }}>
+            <div style={{ fontWeight: "700", fontSize: "15px", marginBottom: "18px" }}>Edit Batch — {editTarget.batch_number}</div>
+            <div style={styles.grid(2)}>
+              <div style={styles.formGroup}><label style={styles.label}>Block Type</label><ProductSelect value={editForm.blockType} onChange={(name) => setEditForm(f => ({ ...f, blockType: name }))} style={styles.input} /></div>
+              <div style={styles.formGroup}><label style={styles.label}>Date Cured *</label><input style={styles.input} type="date" value={editForm.dateCured} onChange={e => setEditForm(f => ({ ...f, dateCured: e.target.value }))} /></div>
+              <div style={styles.formGroup}><label style={styles.label}>Qty Accepted *</label><input style={styles.input} type="number" value={editForm.qtyAccepted} onChange={e => setEditForm(f => ({ ...f, qtyAccepted: e.target.value }))} /></div>
+              <div style={styles.formGroup}><label style={styles.label}>Created By</label><input style={styles.input} value={editForm.createdBy} onChange={e => setEditForm(f => ({ ...f, createdBy: e.target.value }))} /></div>
+              <div style={{ ...styles.formGroup, gridColumn: "span 2" }}><label style={styles.label}>Notes</label><input style={styles.input} value={editForm.notes} onChange={e => setEditForm(f => ({ ...f, notes: e.target.value }))} /></div>
+            </div>
+            {parseInt(editForm.qtyAccepted) !== editTarget.qty_accepted && (
+              <div style={{ padding: "8px 12px", background: theme.accent + "22", border: `1px solid ${theme.accent}44`, borderRadius: "6px", fontSize: "11px", color: theme.accent, marginBottom: "12px" }}>
+                Qty changing by {parseInt(editForm.qtyAccepted) - editTarget.qty_accepted > 0 ? "+" : ""}{parseInt(editForm.qtyAccepted) - editTarget.qty_accepted} — finished goods stock will be adjusted automatically.
+              </div>
+            )}
+            <div style={styles.row}>
+              <button style={styles.btn("primary")} onClick={handleSaveEdit} disabled={saving}>{saving ? "Saving…" : "Save Changes"}</button>
+              <button style={styles.btn("secondary")} onClick={() => setEditTarget(null)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div style={styles.grid(3)}>
         <StatCard label="Active Batches" value={batches.filter(b => b.status === "active").length} sub="With stock remaining" accent={theme.green} />
@@ -3077,9 +3153,15 @@ const Batches = () => {
                   <span style={styles.badge(b.status === "active" ? theme.green : theme.textMuted)}>{b.status}</span>
                   <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "3px" }}>Cured: {b.date_cured} · Created by: {b.created_by || "—"}</div>
                 </div>
-                <div style={{ textAlign: "right" }}>
-                  <div style={{ fontSize: "13px" }}>Accepted: <strong style={{ color: theme.accent }}>{Number(b.qty_accepted).toLocaleString()}</strong></div>
-                  <div style={{ fontSize: "13px" }}>Remaining: <strong style={{ color: b.status === "active" ? theme.green : theme.textMuted }}>{Number(b.qty_remaining).toLocaleString()}</strong></div>
+                <div style={{ textAlign: "right", display: "flex", gap: "8px", alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontSize: "13px" }}>Accepted: <strong style={{ color: theme.accent }}>{Number(b.qty_accepted).toLocaleString()}</strong></div>
+                    <div style={{ fontSize: "13px" }}>Remaining: <strong style={{ color: b.status === "active" ? theme.green : theme.textMuted }}>{Number(b.qty_remaining).toLocaleString()}</strong></div>
+                  </div>
+                  <div style={{ display: "flex", gap: "6px" }} onClick={e => e.stopPropagation()}>
+                    <button style={{ ...styles.btn("secondary"), padding: "5px 12px", fontSize: "12px" }} onClick={() => startEdit(b)}>Edit</button>
+                    <button style={{ ...styles.btn("danger"), padding: "5px 12px", fontSize: "12px" }} onClick={() => handleDelete(b)} disabled={deleting === b.id}>{deleting === b.id ? "…" : "Delete"}</button>
+                  </div>
                 </div>
               </div>
               {isOpen && (

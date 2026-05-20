@@ -67,4 +67,10 @@ export const batchesService = {
     const { error } = await supabase.from('batches').update(updates).eq('id', id)
     if (error) throw error
   },
+
+  async delete(id) {
+    await supabase.from('batch_production_links').delete().eq('batch_id', id)
+    const { error } = await supabase.from('batches').delete().eq('id', id)
+    if (error) throw error
+  },
 }
