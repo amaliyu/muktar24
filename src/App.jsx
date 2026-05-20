@@ -15,7 +15,12 @@ import { generateStatementPDF } from './utils/generateStatementPDF';
 import { generateInventoryReportPDF } from './utils/generateInventoryReportPDF';
 import { generateWaybillPDF } from './utils/generateWaybillPDF';
 import { generateCustomerWaybillsPDF } from './utils/generateCustomerWaybillsPDF';
-import { productsService } from './services/products';
+import { productsService } from './services/products'
+import { expenseCategoriesService, expensesService, incomeRecordsService, accountingService } from './services/accounting'
+import { generatePLStatementPDF } from './utils/generatePLStatementPDF'
+import { generateReceivablesPDF } from './utils/generateReceivablesPDF'
+import { generateCostAnalysisPDF } from './utils/generateCostAnalysisPDF'
+import { generateManagementAccountsPDF } from './utils/generateManagementAccountsPDF';
 
 const theme = {
   bg: "#0f1117", surface: "#1a1d27", card: "#21263a", border: "#2e3452",
@@ -3247,6 +3252,689 @@ const Products = () => {
   );
 };
 
+// ── ACCOUNTING ────────────────────────────────────────────────
+const BookkeepingTab = () => {
+  const today = new Date().toISOString().split('T')[0];
+  const [date, setDate] = useState(today);
+  const [payments, setPayments] = useState([]);
+  const [incomeList, setIncomeList] = useState([]);
+  const [expenses, setExpenses] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [incomeForm, setIncomeForm] = useState({ source: '', description: '', amount: '' });
+  const [expenseForm, setExpenseForm] = useState({ category_id: '', description: '', amount: '', vendor: '' });
+  const [err, setErr] = useState('');
+  const [ok, setOk] = useState('');
+
+  useEffect(() => {
+    setLoading(true);
+    Promise.all([
+      accountingService.getConfirmedPayments(date, date),
+      incomeRecordsService.getAll(date, date),
+      expensesService.getAll(date, date),
+      expenseCategoriesService.getActive(),
+    ]).then(([p, ir, ex, cats]) => { setPayments(p); setIncomeList(ir); setExpenses(ex); setCategories(cats); })
+      .catch(e => setErr(e.message)).finally(() => setLoading(false));
+  }, [date]);
+
+  const addIncome = async () => {
+    if (!incomeForm.source || !incomeForm.amount) return;
+    try {
+      const rec = await incomeRecordsService.create({ source: incomeForm.source, description: incomeForm.description, amount: Number(incomeForm.amount), record_date: date });
+      setIncomeList(p => [rec, ...p]);
+      setIncomeForm({ source: '', description: '', amount: '' });
+      setOk('Income recorded');
+    } catch (e) { setErr(e.message); }
+  };
+
+  const deleteIncome = async (id) => {
+    try { await incomeRecordsService.delete(id); setIncomeList(p => p.filter(r => r.id !== id)); }
+    catch (e) { setErr(e.message); }
+  };
+
+  const addExpense = async () => {
+    if (!expenseForm.description || !expenseForm.amount) return;
+    const amount = Number(expenseForm.amount);
+    const status = amount >= 50000 ? 'pending' : 'approved';
+    try {
+      const rec = await expensesService.create({ ...expenseForm, category_id: expenseForm.category_id || null, amount, expense_date: date, status });
+      setExpenses(p => [rec, ...p]);
+      setExpenseForm({ category_id: '', description: '', amount: '', vendor: '' });
+      setOk(status === 'pending' ? 'Submitted for MD approval (≥₦50,000)' : 'Expense recorded');
+    } catch (e) { setErr(e.message); }
+  };
+
+  const approveExpense = async (id, status) => {
+    try { await expensesService.updateStatus(id, status, 'MD'); setExpenses(p => p.map(e => e.id === id ? { ...e, status } : e)); }
+    catch (e) { setErr(e.message); }
+  };
+
+  const deleteExpense = async (id) => {
+    try { await expensesService.delete(id); setExpenses(p => p.filter(e => e.id !== id)); }
+    catch (e) { setErr(e.message); }
+  };
+
+  const totalPaymentsAmt = payments.reduce((s, p) => s + Number(p.amount_paid || 0), 0);
+  const totalOtherIncome = incomeList.reduce((s, r) => s + Number(r.amount || 0), 0);
+  const totalIncome = totalPaymentsAmt + totalOtherIncome;
+  const totalExpenses = expenses.filter(e => e.status !== 'rejected').reduce((s, e) => s + Number(e.amount || 0), 0);
+  const net = totalIncome - totalExpenses;
+
+  return (
+    <div>
+      <div style={{ ...styles.row, alignItems: 'flex-end', marginBottom: '20px', flexWrap: 'wrap', gap: '16px' }}>
+        <div>
+          <label style={styles.label}>Date</label>
+          <input type="date" style={{ ...styles.input, width: '160px' }} value={date} onChange={e => setDate(e.target.value)} />
+        </div>
+        <div style={{ display: 'flex', gap: '12px', flex: 1 }}>
+          {[
+            { label: 'Total Income', val: totalIncome, color: theme.green },
+            { label: 'Total Expenses', val: totalExpenses, color: theme.red },
+            { label: 'Net', val: net, color: net >= 0 ? theme.green : theme.red },
+          ].map(({ label, val, color }) => (
+            <div key={label} style={{ ...styles.statCard(color), flex: 1, padding: '14px 16px' }}>
+              <div style={styles.statLabel}>{label}</div>
+              <div style={{ ...styles.statValue, fontSize: '17px', color }}>{naira(val)}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {err && <Alert msg={err} onClose={() => setErr('')} />}
+      {ok && <Alert msg={ok} type="success" onClose={() => setOk('')} />}
+      {loading && <Spinner />}
+
+      <div style={styles.row}>
+        <div style={{ flex: 1 }}>
+          <div style={styles.sectionTitle}>Income</div>
+          {payments.length > 0 && (
+            <div style={{ ...styles.card, marginBottom: '12px' }}>
+              <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Customer Payments</div>
+              {payments.map(p => (
+                <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: `1px solid ${theme.border}22`, fontSize: '12px' }}>
+                  <span style={{ color: theme.textMuted }}>{p.invoice?.order?.customer?.name || 'Customer'}{p.payment_method ? ` · ${p.payment_method}` : ''}</span>
+                  <span style={{ fontWeight: '600', color: theme.green }}>{naira(p.amount_paid)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={styles.card}>
+            <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Add Other Income</div>
+            <div style={styles.formGroup}><label style={styles.label}>Source *</label><input style={styles.input} placeholder="e.g. Equipment rental, Scrap sale" value={incomeForm.source} onChange={e => setIncomeForm(f => ({ ...f, source: e.target.value }))} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Description</label><input style={styles.input} placeholder="Optional details" value={incomeForm.description} onChange={e => setIncomeForm(f => ({ ...f, description: e.target.value }))} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Amount (₦) *</label><input type="number" style={styles.input} placeholder="0" value={incomeForm.amount} onChange={e => setIncomeForm(f => ({ ...f, amount: e.target.value }))} /></div>
+            <button style={styles.btn('primary')} onClick={addIncome}>+ Add Income</button>
+          </div>
+          {incomeList.length > 0 && (
+            <div style={{ ...styles.card, marginTop: '12px' }}>
+              <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Other Income Today</div>
+              {incomeList.map(r => (
+                <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: `1px solid ${theme.border}22` }}>
+                  <div>
+                    <div style={{ fontSize: '12px', fontWeight: '600' }}>{r.source}</div>
+                    {r.description && <div style={{ fontSize: '11px', color: theme.textMuted }}>{r.description}</div>}
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <span style={{ fontSize: '13px', fontWeight: '600', color: theme.green }}>{naira(r.amount)}</span>
+                    <button style={{ ...styles.btn('danger'), padding: '2px 8px', fontSize: '10px' }} onClick={() => deleteIncome(r.id)}>✕</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div style={{ flex: 1 }}>
+          <div style={styles.sectionTitle}>Expenses</div>
+          <div style={styles.card}>
+            <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Record Expense</div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Category</label>
+              <select style={styles.input} value={expenseForm.category_id} onChange={e => setExpenseForm(f => ({ ...f, category_id: e.target.value }))}>
+                <option value="">— Select category —</option>
+                {categories.map(c => <option key={c.id} value={c.id}>{c.parent_category ? `${c.parent_category} › ` : ''}{c.name}</option>)}
+              </select>
+            </div>
+            <div style={styles.formGroup}><label style={styles.label}>Description *</label><input style={styles.input} placeholder="What was purchased / paid for?" value={expenseForm.description} onChange={e => setExpenseForm(f => ({ ...f, description: e.target.value }))} /></div>
+            <div style={styles.row}>
+              <div style={{ flex: 1, ...styles.formGroup }}>
+                <label style={styles.label}>Amount (₦) *</label>
+                <input type="number" style={styles.input} placeholder="0" value={expenseForm.amount} onChange={e => setExpenseForm(f => ({ ...f, amount: e.target.value }))} />
+              </div>
+              <div style={{ flex: 1, ...styles.formGroup }}>
+                <label style={styles.label}>Vendor / Payee</label>
+                <input style={styles.input} placeholder="Optional" value={expenseForm.vendor} onChange={e => setExpenseForm(f => ({ ...f, vendor: e.target.value }))} />
+              </div>
+            </div>
+            {Number(expenseForm.amount) >= 50000 && (
+              <div style={{ padding: '8px 12px', background: theme.accent + '22', border: `1px solid ${theme.accent}44`, borderRadius: '6px', fontSize: '11px', color: theme.accent, marginBottom: '10px' }}>
+                ⚠ Amount ≥ ₦50,000 — will be submitted for MD approval
+              </div>
+            )}
+            <button style={styles.btn('primary')} onClick={addExpense}>+ Record Expense</button>
+          </div>
+          {expenses.length > 0 && (
+            <div style={{ ...styles.card, marginTop: '12px' }}>
+              <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Expenses Today</div>
+              {expenses.map(e => (
+                <div key={e.id} style={{ padding: '8px 0', borderBottom: `1px solid ${theme.border}22` }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: '12px', fontWeight: '600' }}>{e.description}</div>
+                      <div style={{ fontSize: '11px', color: theme.textMuted }}>{e.category?.name || 'Uncategorised'}{e.vendor ? ` · ${e.vendor}` : ''}</div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                      <span style={{ fontSize: '13px', fontWeight: '600', color: theme.red }}>{naira(e.amount)}</span>
+                      <span style={styles.badge(e.status === 'approved' ? theme.green : e.status === 'pending' ? theme.accent : theme.red)}>{e.status}</span>
+                    </div>
+                  </div>
+                  {e.status === 'pending' && (
+                    <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
+                      <button style={{ ...styles.btn('primary'), padding: '3px 10px', fontSize: '11px' }} onClick={() => approveExpense(e.id, 'approved')}>✓ Approve</button>
+                      <button style={{ ...styles.btn('danger'), padding: '3px 10px', fontSize: '11px' }} onClick={() => approveExpense(e.id, 'rejected')}>✕ Reject</button>
+                    </div>
+                  )}
+                  {e.status !== 'pending' && (
+                    <button style={{ ...styles.btn('danger'), padding: '2px 8px', fontSize: '10px', marginTop: '4px' }} onClick={() => deleteExpense(e.id)}>Delete</button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const PLTab = () => {
+  const now = new Date();
+  const firstOfMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+  const [from, setFrom] = useState(firstOfMonth);
+  const [to, setTo] = useState(now.toISOString().split('T')[0]);
+  const [payments, setPayments] = useState([]);
+  const [incomeRecords, setIncomeRecords] = useState([]);
+  const [expenses, setExpenses] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState('');
+  const [pdfLoading, setPdfLoading] = useState(false);
+
+  const load = () => {
+    setLoading(true);
+    Promise.all([
+      accountingService.getConfirmedPayments(from, to),
+      incomeRecordsService.getAll(from, to),
+      expensesService.getAll(from, to),
+    ]).then(([p, ir, ex]) => { setPayments(p); setIncomeRecords(ir); setExpenses(ex); })
+      .catch(e => setErr(e.message)).finally(() => setLoading(false));
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const totalPaymentsAmt = payments.reduce((s, p) => s + Number(p.amount_paid || 0), 0);
+  const totalOtherIncome = incomeRecords.reduce((s, r) => s + Number(r.amount || 0), 0);
+  const totalRevenue = totalPaymentsAmt + totalOtherIncome;
+  const approvedExpenses = expenses.filter(e => e.status !== 'rejected');
+  const totalExpenses = approvedExpenses.reduce((s, e) => s + Number(e.amount || 0), 0);
+  const netProfit = totalRevenue - totalExpenses;
+
+  const expensesByGroup = {};
+  for (const e of approvedExpenses) {
+    const group = e.category?.parent_category || 'General';
+    const cat = e.category?.name || 'Uncategorised';
+    if (!expensesByGroup[group]) expensesByGroup[group] = {};
+    expensesByGroup[group][cat] = (expensesByGroup[group][cat] || 0) + Number(e.amount || 0);
+  }
+
+  const downloadPdf = async () => {
+    setPdfLoading(true);
+    try { await generatePLStatementPDF({ fromDate: from || null, toDate: to || null, payments, incomeRecords, expenses: approvedExpenses }); }
+    catch (e) { setErr(e.message); } finally { setPdfLoading(false); }
+  };
+
+  return (
+    <div>
+      <div style={{ ...styles.row, alignItems: 'flex-end', marginBottom: '20px', gap: '12px' }}>
+        <div><label style={styles.label}>From</label><input type="date" style={{ ...styles.input, width: '150px' }} value={from} onChange={e => setFrom(e.target.value)} /></div>
+        <div><label style={styles.label}>To</label><input type="date" style={{ ...styles.input, width: '150px' }} value={to} onChange={e => setTo(e.target.value)} /></div>
+        <button style={styles.btn('secondary')} onClick={load}>Load</button>
+        <button style={{ ...styles.btn('primary'), marginLeft: 'auto' }} onClick={downloadPdf} disabled={pdfLoading}>{pdfLoading ? 'Generating…' : '↓ Download PDF'}</button>
+      </div>
+      {err && <Alert msg={err} onClose={() => setErr('')} />}
+      {loading ? <Spinner /> : (
+        <div style={styles.row}>
+          <div style={{ flex: 1 }}>
+            <div style={{ ...styles.card, borderTop: `3px solid ${theme.green}`, marginBottom: '16px' }}>
+              <div style={{ ...styles.sectionTitle, color: theme.green }}>Revenue</div>
+              <table style={styles.table}>
+                <tbody>
+                  <tr><td style={styles.td}>Customer Payments</td><td style={{ ...styles.td, textAlign: 'right', fontWeight: '600', color: theme.green }}>{naira(totalPaymentsAmt)}</td></tr>
+                  <tr><td style={styles.td}>Other Income</td><td style={{ ...styles.td, textAlign: 'right', fontWeight: '600', color: theme.green }}>{naira(totalOtherIncome)}</td></tr>
+                  <tr>
+                    <td style={{ ...styles.td, fontWeight: '700', color: theme.green }}>TOTAL REVENUE</td>
+                    <td style={{ ...styles.td, textAlign: 'right', fontWeight: '700', fontSize: '15px', color: theme.green }}>{naira(totalRevenue)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div style={{ ...styles.card, borderTop: `3px solid ${theme.red}`, marginBottom: '16px' }}>
+              <div style={{ ...styles.sectionTitle, color: theme.red }}>Expenses</div>
+              <table style={styles.table}>
+                <tbody>
+                  {Object.entries(expensesByGroup).map(([group, cats]) => {
+                    const groupTotal = Object.values(cats).reduce((a, v) => a + v, 0);
+                    return [
+                      <tr key={`g-${group}`} style={{ background: theme.surface }}>
+                        <td style={{ ...styles.td, fontWeight: '700', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{group}</td>
+                        <td style={{ ...styles.td, textAlign: 'right', fontWeight: '700' }}>{naira(groupTotal)}</td>
+                      </tr>,
+                      ...Object.entries(cats).map(([cat, amt]) => (
+                        <tr key={`c-${cat}`}>
+                          <td style={{ ...styles.td, paddingLeft: '24px', color: theme.textMuted, fontSize: '12px' }}>{cat}</td>
+                          <td style={{ ...styles.td, textAlign: 'right', fontSize: '12px' }}>{naira(amt)}</td>
+                        </tr>
+                      )),
+                    ];
+                  })}
+                  <tr>
+                    <td style={{ ...styles.td, fontWeight: '700', color: theme.red }}>TOTAL EXPENSES</td>
+                    <td style={{ ...styles.td, textAlign: 'right', fontWeight: '700', fontSize: '15px', color: theme.red }}>{naira(totalExpenses)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div style={{ ...styles.card, background: netProfit >= 0 ? theme.green + '11' : theme.red + '11', border: `1px solid ${netProfit >= 0 ? theme.green : theme.red}44` }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontWeight: '700', fontSize: '14px', color: netProfit >= 0 ? theme.green : theme.red }}>{netProfit >= 0 ? 'NET PROFIT' : 'NET LOSS'}</span>
+                <span style={{ fontWeight: '700', fontSize: '22px', color: netProfit >= 0 ? theme.green : theme.red }}>{naira(Math.abs(netProfit))}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const CostTab = () => {
+  const now = new Date();
+  const firstOfMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+  const [from, setFrom] = useState(firstOfMonth);
+  const [to, setTo] = useState(now.toISOString().split('T')[0]);
+  const [expenses, setExpenses] = useState([]);
+  const [productionLogs, setProductionLogs] = useState([]);
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState('');
+  const [pdfLoading, setPdfLoading] = useState(false);
+
+  const load = () => {
+    setLoading(true);
+    Promise.all([
+      expensesService.getAll(from, to),
+      accountingService.getProductionTotals(from, to),
+      productsService.getActive().catch(() => []),
+    ]).then(([ex, pl, pr]) => { setExpenses(ex); setProductionLogs(pl); setProducts(pr); })
+      .catch(e => setErr(e.message)).finally(() => setLoading(false));
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const totalExpenses = expenses.filter(e => e.status !== 'rejected').reduce((s, e) => s + Number(e.amount || 0), 0);
+  const productTotals = {};
+  for (const log of productionLogs) {
+    productTotals[log.block_type] = (productTotals[log.block_type] || 0) + Number(log.quantity_produced || 0);
+  }
+  const totalQty = Object.values(productTotals).reduce((s, v) => s + v, 0);
+  const productMap = Object.fromEntries(products.map(p => [p.name, p]));
+
+  const downloadPdf = async () => {
+    setPdfLoading(true);
+    try { await generateCostAnalysisPDF({ fromDate: from || null, toDate: to || null, productTotals, totalExpenses, products }); }
+    catch (e) { setErr(e.message); } finally { setPdfLoading(false); }
+  };
+
+  return (
+    <div>
+      <div style={{ ...styles.row, alignItems: 'flex-end', marginBottom: '20px', gap: '12px' }}>
+        <div><label style={styles.label}>From</label><input type="date" style={{ ...styles.input, width: '150px' }} value={from} onChange={e => setFrom(e.target.value)} /></div>
+        <div><label style={styles.label}>To</label><input type="date" style={{ ...styles.input, width: '150px' }} value={to} onChange={e => setTo(e.target.value)} /></div>
+        <button style={styles.btn('secondary')} onClick={load}>Load</button>
+        <button style={{ ...styles.btn('primary'), marginLeft: 'auto' }} onClick={downloadPdf} disabled={pdfLoading}>{pdfLoading ? 'Generating…' : '↓ Download PDF'}</button>
+      </div>
+      {err && <Alert msg={err} onClose={() => setErr('')} />}
+      {loading ? <Spinner /> : (
+        <>
+          <div style={{ ...styles.grid(3), marginBottom: '20px' }}>
+            <div style={styles.statCard(theme.blue)}><div style={styles.statLabel}>Total Units Produced</div><div style={{ ...styles.statValue, fontSize: '20px' }}>{fmt(totalQty)}</div></div>
+            <div style={styles.statCard(theme.red)}><div style={styles.statLabel}>Total Expenses (Period)</div><div style={{ ...styles.statValue, fontSize: '20px', color: theme.red }}>{naira(totalExpenses)}</div></div>
+            <div style={styles.statCard(theme.accent)}><div style={styles.statLabel}>Avg Cost / Unit</div><div style={{ ...styles.statValue, fontSize: '20px', color: theme.accent }}>{totalQty > 0 ? naira(Math.round(totalExpenses / totalQty)) : '—'}</div></div>
+          </div>
+          <div style={styles.card}>
+            <div style={styles.sectionTitle}>Cost per Product</div>
+            <table style={styles.table}>
+              <thead>
+                <tr>
+                  {['Product', 'Units Produced', 'Allocated Cost', 'Cost / Unit', 'Selling Price', 'Gross Profit / Unit', 'Margin'].map(h => (
+                    <th key={h} style={{ ...styles.th, textAlign: h === 'Product' ? 'left' : 'right' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(productTotals).length === 0 ? (
+                  <tr><td colSpan="7" style={{ ...styles.td, textAlign: 'center', color: theme.textMuted }}>No production data for this period</td></tr>
+                ) : Object.entries(productTotals).map(([name, qty]) => {
+                  const share = totalQty > 0 ? qty / totalQty : 0;
+                  const allocated = totalExpenses * share;
+                  const costPerUnit = qty > 0 ? allocated / qty : 0;
+                  const sellingPrice = productMap[name]?.unit_price || 0;
+                  const profit = sellingPrice - costPerUnit;
+                  const margin = sellingPrice > 0 ? (profit / sellingPrice) * 100 : 0;
+                  const unit = productMap[name]?.unit || 'pcs';
+                  return (
+                    <tr key={name}>
+                      <td style={styles.td}><strong>{name}</strong></td>
+                      <td style={{ ...styles.td, textAlign: 'right' }}>{fmt(qty)} {unit}</td>
+                      <td style={{ ...styles.td, textAlign: 'right' }}>{naira(Math.round(allocated))}</td>
+                      <td style={{ ...styles.td, textAlign: 'right' }}>{naira(Math.round(costPerUnit))}</td>
+                      <td style={{ ...styles.td, textAlign: 'right' }}>{sellingPrice > 0 ? naira(sellingPrice) : <span style={{ color: theme.textMuted }}>—</span>}</td>
+                      <td style={{ ...styles.td, textAlign: 'right', fontWeight: '600', color: profit >= 0 ? theme.green : theme.red }}>{sellingPrice > 0 ? naira(Math.round(profit)) : '—'}</td>
+                      <td style={{ ...styles.td, textAlign: 'right', fontWeight: '600', color: margin >= 0 ? theme.green : theme.red }}>{sellingPrice > 0 ? `${margin.toFixed(1)}%` : '—'}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
+
+const ReceivablesTab = () => {
+  const [receivables, setReceivables] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState('');
+  const [pdfLoading, setPdfLoading] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    accountingService.getReceivables()
+      .then(setReceivables).catch(e => setErr(e.message)).finally(() => setLoading(false));
+  }, []);
+
+  const rows = [];
+  const bucketTotals = { '0–30': 0, '31–60': 0, '61–90': 0, '90+': 0 };
+  let grandTotal = 0;
+
+  for (const order of receivables) {
+    for (const inv of order.invoices || []) {
+      const invoiced = Number(inv.total_amount || 0);
+      const paid = (inv.payments || []).filter(p => p.status === 'confirmed').reduce((s, p) => s + Number(p.amount_paid || 0), 0);
+      const outstanding = invoiced - paid;
+      if (outstanding <= 0) continue;
+      const days = inv.issued_date ? Math.floor((Date.now() - new Date(inv.issued_date).getTime()) / 86400000) : 999;
+      const bucket = days <= 30 ? '0–30' : days <= 60 ? '31–60' : days <= 90 ? '61–90' : '90+';
+      bucketTotals[bucket] += outstanding;
+      grandTotal += outstanding;
+      rows.push({ customer: order.customer?.name || '—', invoice: inv.invoice_number || '—', issuedDate: inv.issued_date, days, bucket, invoiced, paid, outstanding });
+    }
+  }
+
+  const bucketColor = (b) => b === '0–30' ? theme.green : b === '31–60' ? '#c8a000' : b === '61–90' ? '#d06400' : theme.red;
+
+  const downloadPdf = async () => {
+    setPdfLoading(true);
+    try { await generateReceivablesPDF(receivables); }
+    catch (e) { setErr(e.message); } finally { setPdfLoading(false); }
+  };
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '20px' }}>
+        <button style={styles.btn('primary')} onClick={downloadPdf} disabled={pdfLoading}>{pdfLoading ? 'Generating…' : '↓ Download PDF'}</button>
+      </div>
+      {err && <Alert msg={err} onClose={() => setErr('')} />}
+
+      <div style={{ ...styles.grid(5), marginBottom: '20px' }}>
+        {[
+          { label: '0–30 Days', val: bucketTotals['0–30'], color: theme.green },
+          { label: '31–60 Days', val: bucketTotals['31–60'], color: '#c8a000' },
+          { label: '61–90 Days', val: bucketTotals['61–90'], color: '#d06400' },
+          { label: '90+ Days', val: bucketTotals['90+'], color: theme.red },
+          { label: 'Total Outstanding', val: grandTotal, color: theme.blue },
+        ].map(({ label, val, color }) => (
+          <div key={label} style={styles.statCard(color)}>
+            <div style={styles.statLabel}>{label}</div>
+            <div style={{ ...styles.statValue, fontSize: '16px', color }}>{naira(val)}</div>
+          </div>
+        ))}
+      </div>
+
+      {loading ? <Spinner /> : (
+        <div style={styles.card}>
+          <table style={styles.table}>
+            <thead>
+              <tr>
+                {['Customer', 'Invoice No.', 'Invoice Date', 'Age', 'Bucket', 'Invoiced', 'Paid', 'Outstanding'].map(h => (
+                  <th key={h} style={styles.th}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.length === 0 ? (
+                <tr><td colSpan="8" style={{ ...styles.td, textAlign: 'center', color: theme.textMuted, padding: '30px' }}>No outstanding receivables</td></tr>
+              ) : rows.map((r, i) => (
+                <tr key={i}>
+                  <td style={{ ...styles.td, fontWeight: '600' }}>{r.customer}</td>
+                  <td style={styles.td}>{r.invoice}</td>
+                  <td style={styles.td}>{r.issuedDate ? new Date(r.issuedDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</td>
+                  <td style={styles.td}>{r.days === 999 ? '—' : `${r.days}d`}</td>
+                  <td style={{ ...styles.td, fontWeight: '700', color: bucketColor(r.bucket) }}>{r.bucket}</td>
+                  <td style={{ ...styles.td, textAlign: 'right' }}>{naira(r.invoiced)}</td>
+                  <td style={{ ...styles.td, textAlign: 'right', color: theme.green }}>{naira(r.paid)}</td>
+                  <td style={{ ...styles.td, textAlign: 'right', fontWeight: '700', color: theme.red }}>{naira(r.outstanding)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const ManagementTab = () => {
+  const now = new Date();
+  const defaultMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const [month, setMonth] = useState(defaultMonth);
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState('');
+  const [pdfLoading, setPdfLoading] = useState(false);
+
+  const load = async (m) => {
+    setLoading(true);
+    const [y, mo] = m.split('-').map(Number);
+    const currFrom = `${y}-${String(mo).padStart(2, '0')}-01`;
+    const currTo = new Date(y, mo, 0).toISOString().split('T')[0];
+    const prevMo = mo === 1 ? 12 : mo - 1;
+    const prevY = mo === 1 ? y - 1 : y;
+    const prevFrom = `${prevY}-${String(prevMo).padStart(2, '0')}-01`;
+    const prevTo = new Date(prevY, prevMo, 0).toISOString().split('T')[0];
+
+    try {
+      const [cp, ci, ce, pp, pi, pe] = await Promise.all([
+        accountingService.getConfirmedPayments(currFrom, currTo),
+        incomeRecordsService.getAll(currFrom, currTo),
+        expensesService.getAll(currFrom, currTo),
+        accountingService.getConfirmedPayments(prevFrom, prevTo),
+        incomeRecordsService.getAll(prevFrom, prevTo),
+        expensesService.getAll(prevFrom, prevTo),
+      ]);
+
+      const summarise = (payments, incomeRecs, exps) => {
+        const revenue = payments.reduce((s, p) => s + Number(p.amount_paid || 0), 0) + incomeRecs.reduce((s, r) => s + Number(r.amount || 0), 0);
+        const expenses = exps.filter(e => e.status !== 'rejected').reduce((s, e) => s + Number(e.amount || 0), 0);
+        const customerAmts = {};
+        for (const p of payments) {
+          const name = p.invoice?.order?.customer?.name || 'Unknown';
+          customerAmts[name] = (customerAmts[name] || 0) + Number(p.amount_paid || 0);
+        }
+        const topCustomers = Object.entries(customerAmts).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([name, amount]) => ({ name, amount }));
+        const catAmts = {};
+        for (const e of exps.filter(ex => ex.status !== 'rejected')) {
+          const name = e.category?.name || 'Uncategorised';
+          catAmts[name] = (catAmts[name] || 0) + Number(e.amount || 0);
+        }
+        const topExpenses = Object.entries(catAmts).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([name, amount]) => ({ name, amount }));
+        return { revenue, expenses, transactions: payments.length + incomeRecs.length, topCustomers, topExpenses };
+      };
+
+      setData({ current: summarise(cp, ci, ce), previous: summarise(pp, pi, pe) });
+    } catch (e) { setErr(e.message); } finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(month); }, []);
+
+  const monthLabel = (m) => {
+    const [y, mo] = m.split('-');
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return `${months[parseInt(mo, 10) - 1]} ${y}`;
+  };
+
+  const prevMonth = (m) => {
+    const [y, mo] = m.split('-').map(Number);
+    const pm = mo === 1 ? 12 : mo - 1;
+    const py = mo === 1 ? y - 1 : y;
+    return `${py}-${String(pm).padStart(2, '0')}`;
+  };
+
+  const changeVal = (curr, prev) => {
+    if (!prev) return { label: '—', color: theme.textMuted };
+    const diff = curr - prev;
+    const pct = ((diff / prev) * 100).toFixed(1);
+    return { label: `${diff >= 0 ? '+' : ''}${pct}%`, color: diff >= 0 ? theme.green : theme.red };
+  };
+
+  const downloadPdf = async () => {
+    if (!data) return;
+    setPdfLoading(true);
+    try {
+      await generateManagementAccountsPDF({ monthLabel: monthLabel(month), prevMonthLabel: monthLabel(prevMonth(month)), current: data.current, previous: data.previous });
+    } catch (e) { setErr(e.message); } finally { setPdfLoading(false); }
+  };
+
+  return (
+    <div>
+      <div style={{ ...styles.row, alignItems: 'flex-end', marginBottom: '20px', gap: '12px' }}>
+        <div>
+          <label style={styles.label}>Month</label>
+          <input type="month" style={{ ...styles.input, width: '160px' }} value={month} onChange={e => setMonth(e.target.value)} />
+        </div>
+        <button style={styles.btn('secondary')} onClick={() => load(month)}>Load</button>
+        <button style={{ ...styles.btn('primary'), marginLeft: 'auto' }} onClick={downloadPdf} disabled={pdfLoading || !data}>{pdfLoading ? 'Generating…' : '↓ Download PDF'}</button>
+      </div>
+      {err && <Alert msg={err} onClose={() => setErr('')} />}
+      {loading ? <Spinner /> : !data ? null : (
+        <>
+          <div style={{ ...styles.grid(4), marginBottom: '20px' }}>
+            {[
+              { label: 'Revenue', curr: data.current.revenue, prev: data.previous.revenue, color: theme.green, better: 'higher' },
+              { label: 'Expenses', curr: data.current.expenses, prev: data.previous.expenses, color: theme.red, better: 'lower' },
+              { label: 'Net Profit', curr: data.current.revenue - data.current.expenses, prev: data.previous.revenue - data.previous.expenses, color: theme.blue, better: 'higher' },
+              { label: 'Transactions', curr: data.current.transactions, prev: data.previous.transactions, color: theme.accent, better: 'higher' },
+            ].map(({ label, curr, prev, color, better }) => {
+              const cv = changeVal(curr, prev);
+              const isPositive = better === 'higher' ? curr >= prev : curr <= prev;
+              return (
+                <div key={label} style={styles.statCard(color)}>
+                  <div style={styles.statLabel}>{label}</div>
+                  <div style={{ ...styles.statValue, fontSize: '18px', color }}>{label === 'Transactions' ? fmt(curr) : naira(curr)}</div>
+                  <div style={{ fontSize: '11px', marginTop: '4px', color: isPositive ? theme.green : theme.red, fontWeight: '600' }}>{cv.label} vs {monthLabel(prevMonth(month))}</div>
+                </div>
+              );
+            })}
+          </div>
+          <div style={styles.row}>
+            <div style={{ flex: 1, ...styles.card }}>
+              <div style={styles.sectionTitle}>Top 5 Customers — {monthLabel(month)}</div>
+              <table style={styles.table}>
+                <tbody>
+                  {data.current.topCustomers.length === 0
+                    ? <tr><td style={{ ...styles.td, color: theme.textMuted }}>No data</td></tr>
+                    : data.current.topCustomers.map((c, i) => (
+                      <tr key={i}>
+                        <td style={{ ...styles.td, width: '28px', color: theme.textMuted, fontSize: '11px' }}>#{i + 1}</td>
+                        <td style={{ ...styles.td, fontWeight: '600' }}>{c.name}</td>
+                        <td style={{ ...styles.td, textAlign: 'right', fontWeight: '700', color: theme.green }}>{naira(c.amount)}</td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ flex: 1, ...styles.card }}>
+              <div style={styles.sectionTitle}>Top 5 Expenses — {monthLabel(month)}</div>
+              <table style={styles.table}>
+                <tbody>
+                  {data.current.topExpenses.length === 0
+                    ? <tr><td style={{ ...styles.td, color: theme.textMuted }}>No data</td></tr>
+                    : data.current.topExpenses.map((e, i) => (
+                      <tr key={i}>
+                        <td style={{ ...styles.td, width: '28px', color: theme.textMuted, fontSize: '11px' }}>#{i + 1}</td>
+                        <td style={{ ...styles.td, fontWeight: '600' }}>{e.name}</td>
+                        <td style={{ ...styles.td, textAlign: 'right', fontWeight: '700', color: theme.red }}>{naira(e.amount)}</td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
+
+const Accounting = () => {
+  const [tab, setTab] = useState('bookkeeping');
+  const TABS = [
+    { id: 'bookkeeping', label: 'Daily Bookkeeping' },
+    { id: 'pl', label: 'P&L Statement' },
+    { id: 'cost', label: 'Cost Analysis' },
+    { id: 'receivables', label: 'Accounts Receivable' },
+    { id: 'management', label: 'Management Accounts' },
+  ];
+  return (
+    <div>
+      <div style={styles.header}>
+        <div>
+          <div style={styles.pageTitle}>Accounting</div>
+          <div style={styles.pageSubtitle}>Financial records, P&L, cost analysis and management accounts</div>
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: '2px', marginBottom: '24px', borderBottom: `1px solid ${theme.border}` }}>
+        {TABS.map(t => (
+          <button key={t.id} onClick={() => setTab(t.id)} style={{
+            padding: '9px 16px', fontSize: '13px', fontWeight: tab === t.id ? '600' : '400',
+            color: tab === t.id ? theme.accent : theme.textMuted,
+            background: 'transparent', border: 'none', cursor: 'pointer',
+            borderBottom: tab === t.id ? `2px solid ${theme.accent}` : '2px solid transparent',
+            marginBottom: '-1px', transition: 'all 0.15s',
+          }}>{t.label}</button>
+        ))}
+      </div>
+      {tab === 'bookkeeping' && <BookkeepingTab />}
+      {tab === 'pl' && <PLTab />}
+      {tab === 'cost' && <CostTab />}
+      {tab === 'receivables' && <ReceivablesTab />}
+      {tab === 'management' && <ManagementTab />}
+    </div>
+  );
+};
+
 // ── NAV ───────────────────────────────────────────────────────
 const navItems = [
   { section: "Overview", items: [{ id: "dashboard", label: "Dashboard", icon: "dashboard" }] },
@@ -3267,6 +3955,7 @@ const navItems = [
     { id: "schedule_approvals", label: "Schedule Approvals", icon: "approve" },
   ]},
   { section: "Analytics", items: [{ id: "reports", label: "Reports", icon: "reports" }] },
+  { section: "Finance", items: [{ id: "accounting", label: "Accounting", icon: "orders" }] },
   { section: "Settings", items: [{ id: "products", label: "Products", icon: "products" }] },
 ];
 
@@ -3292,6 +3981,7 @@ export default function App() {
     schedule_approvals: <ScheduleApprovals />,
     reports: <Reports />,
     products: <Products />,
+    accounting: <Accounting />,
   };
 
   // Load approval badge counts on mount
