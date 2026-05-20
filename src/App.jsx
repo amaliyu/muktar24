@@ -842,7 +842,7 @@ const Orders = ({ onNavigate }) => {
         customerId = customer.id;
       }
       const newOrder = await ordersService.create({
-        order: { customer_id: customerId, marketer_id: form.marketerId || null, status: form.isLpo ? "lpo_pending" : "pending", is_lpo: form.isLpo || false },
+        order: { customer_id: customerId, marketer_id: form.marketerId || null, status: "pending", is_lpo: form.isLpo || false },
         items: form.items.map(i => ({ block_type: i.blockType, quantity: parseInt(i.quantity), unit_price: parseFloat(i.unitPrice) })),
       });
       if (form.isLpo) {
