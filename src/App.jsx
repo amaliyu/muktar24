@@ -4536,12 +4536,13 @@ const ReconciliationTab = () => {
 const ReceiptsTab = () => {
   const today = new Date().toISOString().split('T')[0];
   const [receipts, setReceipts] = useState([]);
+  const [approvedExpenses, setApprovedExpenses] = useState([]);
   const [loading, setLoading] = useState(false);
   const [rfrom, setRfrom] = useState('');
   const [rto, setRto] = useState('');
   const [rsearch, setRsearch] = useState('');
   const [uploadFile, setUploadFile] = useState(null);
-  const [uploadForm, setUploadForm] = useState({ receipt_date: today, vendor_name: '', amount: '', tax_category: '', notes: '' });
+  const [uploadForm, setUploadForm] = useState({ receipt_date: today, vendor_name: '', amount: '', tax_category: '', notes: '', expense_id: '' });
   const [uploading, setUploading] = useState(false);
   const [viewUrl, setViewUrl] = useState(null);
   const [missingCount, setMissingCount] = useState(0);
@@ -4556,7 +4557,11 @@ const ReceiptsTab = () => {
       .then(setReceipts).catch(e => setErr(e.message)).finally(() => setLoading(false));
   };
 
-  useEffect(() => { loadReceipts(); receiptsService.getMissingReceiptExpenses().then(setMissingCount).catch(() => {}); }, []);
+  useEffect(() => {
+    loadReceipts();
+    receiptsService.getMissingReceiptExpenses().then(setMissingCount).catch(() => {});
+    expensesService.getAll().then(all => setApprovedExpenses(all.filter(e => e.status === 'approved'))).catch(() => {});
+  }, []);
 
   const handleUpload = async () => {
     if (!uploadFile) { setErr('Please select a file'); return; }
@@ -4566,7 +4571,7 @@ const ReceiptsTab = () => {
       const rec = await receiptsService.upload(uploadFile, uploadForm);
       setReceipts(r => [rec, ...r]);
       setUploadFile(null);
-      setUploadForm({ receipt_date: today, vendor_name: '', amount: '', tax_category: '', notes: '' });
+      setUploadForm({ receipt_date: today, vendor_name: '', amount: '', tax_category: '', notes: '', expense_id: '' });
       setOk(`Receipt ${rec.receipt_number} uploaded`);
       receiptsService.getMissingReceiptExpenses().then(setMissingCount).catch(() => {});
     } catch (e) { setErr(e.message); }
@@ -4640,6 +4645,26 @@ const ReceiptsTab = () => {
             <div style={styles.formGroup}><label style={styles.label}>Date *</label><input type="date" style={styles.input} value={uploadForm.receipt_date} onChange={e => setUploadForm(f => ({ ...f, receipt_date: e.target.value }))} /></div>
             <div style={styles.formGroup}><label style={styles.label}>Vendor *</label><input style={styles.input} placeholder="Supplier name" value={uploadForm.vendor_name} onChange={e => setUploadForm(f => ({ ...f, vendor_name: e.target.value }))} /></div>
             <div style={styles.formGroup}><label style={styles.label}>Amount (₦) *</label><input type="number" style={styles.input} placeholder="0" value={uploadForm.amount} onChange={e => setUploadForm(f => ({ ...f, amount: e.target.value }))} /></div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Link to Expense (optional)</label>
+              <select style={styles.input} value={uploadForm.expense_id} onChange={e => {
+                const sel = approvedExpenses.find(x => x.id === e.target.value);
+                setUploadForm(f => ({
+                  ...f,
+                  expense_id: e.target.value,
+                  vendor_name: sel ? (f.vendor_name || sel.description) : f.vendor_name,
+                  amount: sel ? (f.amount || String(sel.amount)) : f.amount,
+                  receipt_date: sel ? (f.receipt_date || sel.expense_date) : f.receipt_date,
+                }));
+              }}>
+                <option value="">— None —</option>
+                {approvedExpenses.map(e => (
+                  <option key={e.id} value={e.id}>
+                    {e.expense_date} · {e.description} · ₦{Number(e.amount).toLocaleString()}
+                  </option>
+                ))}
+              </select>
+            </div>
             <div style={styles.formGroup}><label style={styles.label}>Tax Category</label>
               <input style={styles.input} placeholder="e.g. Fuel, Labour, Materials" value={uploadForm.tax_category} onChange={e => setUploadForm(f => ({ ...f, tax_category: e.target.value }))} />
             </div>
