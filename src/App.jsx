@@ -1505,18 +1505,25 @@ const Waybills = () => {
               <label style={styles.label}>Quantity Damaged in Transit</label>
               <input style={styles.input} type="number" placeholder="0" value={form.quantityDamaged} onChange={e => setForm({ ...form, quantityDamaged: e.target.value })} />
             </div>
-            <div style={styles.formGroup}>
-              <label style={styles.label}>Receiver (Customer with Active Invoice) *</label>
-              <select style={{ ...styles.input, borderColor: !selectedOrderId ? theme.red + "88" : theme.border }} value={selectedOrderId} onChange={e => setSelectedOrderId(e.target.value)}>
-                <option value="">— Select customer —</option>
-                {activeOrders.map(o => (
-                  <option key={o.id} value={o.id}>
-                    {o.customer?.name}{o.customer?.location ? ` · ${o.customer.location}` : ""} — {o.invoices?.[0]?.invoice_number || "Invoice"}
-                  </option>
-                ))}
-              </select>
-              {activeOrders.length === 0 && <div style={{ fontSize: "11px", color: theme.red, marginTop: "4px" }}>No customers with active invoices. Generate an invoice first.</div>}
-            </div>
+            {editTarget ? (
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Receiver</label>
+                <input style={{ ...styles.input, color: theme.textMuted }} value={editTarget.receiver_name || "—"} readOnly />
+              </div>
+            ) : (
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Receiver (Customer with Active Invoice) *</label>
+                <select style={{ ...styles.input, borderColor: !selectedOrderId ? theme.red + "88" : theme.border }} value={selectedOrderId} onChange={e => setSelectedOrderId(e.target.value)}>
+                  <option value="">— Select customer —</option>
+                  {activeOrders.map(o => (
+                    <option key={o.id} value={o.id}>
+                      {o.customer?.name}{o.customer?.location ? ` · ${o.customer.location}` : ""} — {o.invoices?.[0]?.invoice_number || "Invoice"}
+                    </option>
+                  ))}
+                </select>
+                {activeOrders.length === 0 && <div style={{ fontSize: "11px", color: theme.red, marginTop: "4px" }}>No customers with active invoices. Generate an invoice first.</div>}
+              </div>
+            )}
             <div style={styles.formGroup}>
               <label style={styles.label}>Notes</label>
               <input style={styles.input} placeholder="Optional notes" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
