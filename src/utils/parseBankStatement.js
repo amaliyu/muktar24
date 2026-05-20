@@ -8,9 +8,9 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl;
 function parseNgDate(str) {
   if (!str && str !== 0) return null;
   const s = String(str).trim();
-  // Excel serial
-  if (/^\d{5}$/.test(s)) {
-    return new Date((Number(s) - 25569) * 86400000).toISOString().split('T')[0];
+  // Excel serial (integer or with decimal time component e.g. 46130.4466...)
+  if (/^\d{5}(\.\d+)?$/.test(s)) {
+    return new Date((Math.floor(Number(s)) - 25569) * 86400000).toISOString().split('T')[0];
   }
   // DD/MM/YYYY or D/M/YYYY
   const m1 = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
