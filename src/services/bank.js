@@ -107,7 +107,7 @@ export const receiptsService = {
   async getAll(from, to, search) {
     let q = supabase
       .from('receipts')
-      .select('*, expense:expense_id(description, amount, expense_date, category:category_id(name))')
+      .select('*')
       .order('uploaded_at', { ascending: false });
     if (from) q = q.gte('receipt_date', from);
     if (to)   q = q.lte('receipt_date', to);
@@ -149,7 +149,7 @@ export const receiptsService = {
       uploaded_at: new Date().toISOString(),
       tax_category: metadata.tax_category || '',
       notes: metadata.notes || '',
-    }).select('*, expense:expense_id(description, amount, expense_date, category:category_id(name))').single();
+    }).select('*').single();
     if (error) throw error;
     return data;
   },
@@ -164,11 +164,11 @@ export const receiptsService = {
   },
 
   async getMissingReceiptExpenses() {
-    const { data: linked } = await supabase.from('receipts').select('expense_id').not('expense_id', 'is', null);
-    const linkedIds = (linked || []).map(r => r.expense_id).filter(Boolean);
-    let q = supabase.from('expenses').select('id', { count: 'exact', head: true }).eq('status', 'approved');
-    if (linkedIds.length > 0) q = q.not('id', 'in', `(${linkedIds.map(id => `"${id}"`).join(',')})`);
-    const { count } = await q;
-    return count || 0;
+    const [{ data: linked }, { data: allExp }] = await Promise.all([
+      supabase.from('receipts').select('expense_id').not('expense_id', 'is', null),
+      supabase.from('expenses').select('id').eq('status', 'approved'),
+    ]);
+    const linkedSet = new Set((linked || []).map(r => r.expense_id).filter(Boolean));
+    return (allExp || []).filter(e => !linkedSet.has(e.id)).length;
   },
 };
