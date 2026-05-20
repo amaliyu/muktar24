@@ -798,6 +798,8 @@ const Orders = ({ onNavigate }) => {
   const [allCustomers, setAllCustomers] = useState([]);
   const [custSearch, setCustSearch] = useState("");
   const [pickedCustomer, setPickedCustomer] = useState(null);
+  const [customerSites, setCustomerSites] = useState([]);
+  const [pickedSiteId, setPickedSiteId] = useState("");
   const emptyForm = { customerName: "", customerPhone: "", customerLocation: "", marketerId: "", items: [emptyItem()], isLpo: false, lpoSubmittedBy: "" };
   const [form, setForm] = useState(emptyForm);
   const [payForm, setPayForm] = useState({ amount: "", date: "" });
@@ -822,6 +824,15 @@ const Orders = ({ onNavigate }) => {
 
   useEffect(() => { load(); }, []);
 
+  useEffect(() => {
+    if (!pickedCustomer) { setCustomerSites([]); setPickedSiteId(""); return; }
+    customerSitesService.getByCustomer(pickedCustomer.id).then(ss => {
+      setCustomerSites(ss);
+      if (ss.length === 1) setPickedSiteId(ss[0].id);
+      else setPickedSiteId("");
+    }).catch(() => { setCustomerSites([]); setPickedSiteId(""); });
+  }, [pickedCustomer?.id]);
+
   const orderTotal = (order) => (order.order_items || []).reduce((s, i) => s + (i.subtotal || i.quantity * i.unit_price), 0);
   const orderPaid = (order) => (order.invoices || []).flatMap(inv => inv.payments || []).filter(p => p.status === "confirmed").reduce((s, p) => s + p.amount_paid, 0);
   const orderQty = (order) => (order.order_items || []).reduce((s, i) => s + i.quantity, 0);
@@ -840,14 +851,19 @@ const Orders = ({ onNavigate }) => {
     setAlert(null);
     try {
       let customerId;
+      let siteId = pickedSiteId || null;
       if (customerMode === "existing") {
         customerId = pickedCustomer.id;
       } else {
         const customer = await customersService.create({ name: form.customerName, phone: form.customerPhone || null, location: form.customerLocation || null });
         customerId = customer.id;
+        try {
+          const site = await customerSitesService.create({ customer_id: customerId, site_name: 'Main Site', site_address: form.customerLocation || null, is_active: true });
+          siteId = site.id;
+        } catch { /* site creation optional */ }
       }
       const newOrder = await ordersService.create({
-        order: { customer_id: customerId, marketer_id: form.marketerId || null, status: "pending", is_lpo: form.isLpo || false },
+        order: { customer_id: customerId, marketer_id: form.marketerId || null, status: "pending", is_lpo: form.isLpo || false, site_id: siteId },
         items: form.items.map(i => ({ block_type: i.blockType, quantity: parseInt(i.quantity), unit_price: parseFloat(i.unitPrice) })),
       });
       if (form.isLpo) {
@@ -858,6 +874,8 @@ const Orders = ({ onNavigate }) => {
       await load();
       setForm(emptyForm);
       setPickedCustomer(null);
+      setPickedSiteId("");
+      setCustomerSites([]);
       setCustSearch("");
       setCustomerMode("new");
       setShowForm(false);
@@ -1084,6 +1102,17 @@ const Orders = ({ onNavigate }) => {
                     <div style={{ fontSize: "11px", color: theme.textMuted, marginTop: "2px" }}>{pickedCustomer.phone} · {pickedCustomer.location}</div>
                   </div>
                 )}
+                {pickedCustomer && customerSites.length > 0 && (
+                  <div style={{ marginTop: "10px" }}>
+                    <label style={styles.label}>Delivery Site</label>
+                    <select style={styles.input} value={pickedSiteId} onChange={e => setPickedSiteId(e.target.value)}>
+                      <option value="">— Select site —</option>
+                      {customerSites.map(s => (
+                        <option key={s.id} value={s.id}>{s.site_name}{s.site_address ? ` · ${s.site_address}` : ""}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
             ) : (
               <>
@@ -1178,7 +1207,7 @@ const Orders = ({ onNavigate }) => {
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <div>
                       <div style={{ fontWeight: "600", fontSize: "14px" }}>{o.customer?.name || "—"}</div>
-                      <div style={{ fontSize: "12px", color: theme.textMuted }}>{o.customer?.location} · {o.marketer?.full_name || "No marketer"}</div>
+                      <div style={{ fontSize: "12px", color: theme.textMuted }}>{o.site?.site_name || o.customer?.location || "—"} · {o.marketer?.full_name || "No marketer"}</div>
                     </div>
                     <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
                       {o.is_lpo && <span style={styles.badge(theme.blue)}>LPO</span>}
@@ -1787,8 +1816,19 @@ const Customers = () => {
     if (!form.name || !form.phone) return setAlert({ type: "error", msg: "Name and phone are required." });
     setSaving(true);
     try {
-      const payload = { name: form.name, company_name: form.company_name || null, phone: form.phone, email: form.email || null, location: form.location || null, how_heard: form.how_heard || null, added_by: form.added_by || null, date_registered: form.date_registered || today };
+      const siteAddr = form.site_address === '__other__' ? '' : (form.site_address || null);
+      const payload = { name: form.name, company_name: form.company_name || null, phone: form.phone, email: form.email || null, location: siteAddr, how_heard: form.how_heard || null, added_by: form.added_by || null, date_registered: form.date_registered || today };
       const saved = await customersService.create(payload);
+      try {
+        await customerSitesService.create({
+          customer_id: saved.id,
+          site_name: form.site_name || 'Main Site',
+          site_address: siteAddr,
+          site_contact_name: form.site_contact_name || null,
+          site_contact_phone: form.site_contact_phone || null,
+          is_active: true,
+        });
+      } catch { /* site creation optional */ }
       const newList = await load();
       setShowForm(false);
       setForm(emptyForm);
@@ -1817,6 +1857,30 @@ const Customers = () => {
     }
   };
 
+  const handleAddSite = async () => {
+    if (!siteForm.site_name) return setAlert({ type: "error", msg: "Site name is required." });
+    setSavingSite(true);
+    try {
+      const addr = siteForm.site_address === '__other__' ? '' : (siteForm.site_address || null);
+      await customerSitesService.create({
+        customer_id: selected.id,
+        site_name: siteForm.site_name,
+        site_address: addr,
+        site_contact_name: siteForm.site_contact_name || null,
+        site_contact_phone: siteForm.site_contact_phone || null,
+        is_active: true,
+      });
+      setSites(await customerSitesService.getByCustomer(selected.id));
+      setSiteForm({ site_name: "", site_address: "", site_contact_name: "", site_contact_phone: "" });
+      setShowAddSite(false);
+      setAlert({ type: "success", msg: "Site added!" });
+    } catch (e) {
+      setAlert({ type: "error", msg: "Failed to add site: " + e.message });
+    } finally {
+      setSavingSite(false);
+    }
+  };
+
   const howHeardLabel = (v) => HOW_HEARD.find(h => h.value === v)?.label || v || "—";
 
   const handleDeleteCustomer = async () => {
@@ -1836,10 +1900,11 @@ const Customers = () => {
     setStmtLoading(true);
     try {
       const [orders, prods] = await Promise.all([
-        customersService.getStatement(customer.id),
+        customersService.getStatement(customer.id, stmtSiteId || null),
         productsService.getActive().catch(() => []),
       ]);
-      await generateStatementPDF(customer, orders, stmtFrom || null, stmtTo || null, prods);
+      const site = stmtSiteId ? sites.find(s => s.id === stmtSiteId) : null;
+      await generateStatementPDF(customer, orders, stmtFrom || null, stmtTo || null, prods, site);
     } catch (e) {
       setAlert({ type: "error", msg: "Failed to generate statement. " + e.message });
     } finally {
@@ -1949,6 +2014,57 @@ const Customers = () => {
                   <StatCard label="Outstanding" value={naira(outstanding)} sub="Balance due" accent={outstanding > 0 ? theme.red : theme.green} />
                 </div>
 
+                {/* ── SITES ── */}
+                <div style={{ marginTop: "16px", paddingTop: "14px", borderTop: `1px solid ${theme.border}` }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+                    <div style={styles.sectionTitle}>Delivery Sites</div>
+                    <button style={{ ...styles.btn("secondary"), padding: "5px 12px", fontSize: "12px" }} onClick={() => setShowAddSite(!showAddSite)}>+ Add Site</button>
+                  </div>
+                  {sitesLoading ? <Spinner /> : (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", marginBottom: "12px" }}>
+                      {sites.map(s => {
+                        const siteOrderCount = (selected.orders || []).filter(o => o.site_id === s.id).length;
+                        return (
+                          <div key={s.id} style={{ background: theme.surface, borderRadius: "8px", padding: "10px 14px", border: `1px solid ${theme.border}`, minWidth: "180px", flex: "1" }}>
+                            <div style={{ fontWeight: "700", fontSize: "13px", color: theme.accent }}>{s.site_name}</div>
+                            {s.site_address && <div style={{ fontSize: "12px", color: theme.text, marginTop: "2px" }}>📍 {s.site_address}</div>}
+                            {s.site_contact_name && <div style={{ fontSize: "11px", color: theme.textMuted, marginTop: "2px" }}>👤 {s.site_contact_name}{s.site_contact_phone ? ` · ${s.site_contact_phone}` : ""}</div>}
+                            <div style={{ fontSize: "11px", color: theme.textMuted, marginTop: "4px" }}>{siteOrderCount} order{siteOrderCount !== 1 ? "s" : ""}</div>
+                          </div>
+                        );
+                      })}
+                      {sites.length === 0 && !sitesLoading && <div style={{ fontSize: "13px", color: theme.textMuted }}>No sites recorded yet.</div>}
+                    </div>
+                  )}
+                  {showAddSite && (
+                    <div style={{ background: theme.surface, borderRadius: "8px", padding: "14px", border: `1px solid ${theme.border}`, marginBottom: "12px" }}>
+                      <div style={{ fontSize: "12px", fontWeight: "700", color: theme.textMuted, marginBottom: "10px" }}>NEW SITE</div>
+                      <div style={styles.grid(2)}>
+                        <div style={styles.formGroup}>
+                          <label style={styles.label}>Site Name *</label>
+                          <input style={styles.input} placeholder="e.g. Katampe Site" value={siteForm.site_name} onChange={e => setSiteForm({ ...siteForm, site_name: e.target.value })} />
+                        </div>
+                        <div style={styles.formGroup}>
+                          <label style={styles.label}>Delivery Address</label>
+                          <SiteAddressSelect value={siteForm.site_address} onChange={v => setSiteForm({ ...siteForm, site_address: v })} inputStyle={styles.input} />
+                        </div>
+                        <div style={styles.formGroup}>
+                          <label style={styles.label}>Site Contact Name</label>
+                          <input style={styles.input} placeholder="Person at this site" value={siteForm.site_contact_name} onChange={e => setSiteForm({ ...siteForm, site_contact_name: e.target.value })} />
+                        </div>
+                        <div style={styles.formGroup}>
+                          <label style={styles.label}>Site Contact Phone</label>
+                          <input style={styles.input} placeholder="+234…" value={siteForm.site_contact_phone} onChange={e => setSiteForm({ ...siteForm, site_contact_phone: e.target.value })} />
+                        </div>
+                      </div>
+                      <div style={styles.row}>
+                        <button style={styles.btn("primary")} onClick={handleAddSite} disabled={savingSite}>{savingSite ? "Saving…" : "Save Site"}</button>
+                        <button style={styles.btn("secondary")} onClick={() => { setShowAddSite(false); setSiteForm({ site_name: "", site_address: "", site_contact_name: "", site_contact_phone: "" }); }}>Cancel</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 <div style={{ ...styles.sectionTitle, marginBottom: "10px" }}>Order History</div>
                 {orders.length === 0 ? (
                   <div style={{ textAlign: "center", padding: "20px", color: theme.textMuted, fontSize: "13px" }}>No orders yet.</div>
@@ -2038,6 +2154,15 @@ const Customers = () => {
                 <div style={{ marginTop: "20px", paddingTop: "16px", borderTop: `1px solid ${theme.border}` }}>
                   <div style={{ ...styles.sectionTitle, marginBottom: "10px" }}>Download Statement</div>
                   <div style={{ display: "flex", gap: "10px", alignItems: "flex-end", flexWrap: "wrap" }}>
+                    {sites.length > 1 && (
+                      <div>
+                        <label style={styles.label}>Site Filter</label>
+                        <select style={{ ...styles.input, minWidth: "160px" }} value={stmtSiteId} onChange={e => setStmtSiteId(e.target.value)}>
+                          <option value="">All Sites (company total)</option>
+                          {sites.map(s => <option key={s.id} value={s.id}>{s.site_name}</option>)}
+                        </select>
+                      </div>
+                    )}
                     <div>
                       <label style={styles.label}>From Date</label>
                       <input style={{ ...styles.input, width: "140px" }} type="date" value={stmtFrom} onChange={e => setStmtFrom(e.target.value)} />
