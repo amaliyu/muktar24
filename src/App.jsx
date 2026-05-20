@@ -20,7 +20,10 @@ import { expenseCategoriesService, expensesService, incomeRecordsService, accoun
 import { generatePLStatementPDF } from './utils/generatePLStatementPDF'
 import { generateReceivablesPDF } from './utils/generateReceivablesPDF'
 import { generateCostAnalysisPDF } from './utils/generateCostAnalysisPDF'
-import { generateManagementAccountsPDF } from './utils/generateManagementAccountsPDF';
+import { generateManagementAccountsPDF } from './utils/generateManagementAccountsPDF'
+import { bankAccountsService, bankTransactionsService, bankImportBatchesService, bankReconciliationsService, receiptsService } from './services/bank'
+import { generateReconciliationPDF } from './utils/generateReconciliationPDF'
+import { parseFile, autoMapColumns, mapRowsToTransactions, autoMatchTransactions } from './utils/parseBankStatement';
 
 const theme = {
   bg: "#0f1117", surface: "#1a1d27", card: "#21263a", border: "#2e3452",
@@ -3898,6 +3901,709 @@ const ManagementTab = () => {
   );
 };
 
+// ── BANK ACCOUNTS TAB ─────────────────────────────────────────
+const CONF_COLOR = { high: '#2dd4a0', medium: '#f5a623', low: '#f06b6b', none: '#7c839e' };
+
+const BankAccountsTab = () => {
+  const [accounts, setAccounts] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [transactions, setTransactions] = useState([]);
+  const [txLoading, setTxLoading] = useState(false);
+  const [txFrom, setTxFrom] = useState('');
+  const [txTo, setTxTo] = useState('');
+  const [txSearch, setTxSearch] = useState('');
+  const [importStep, setImportStep] = useState(null);
+  const [importAcct, setImportAcct] = useState('');
+  const [importFile, setImportFile] = useState(null);
+  const [importParsing, setImportParsing] = useState(false);
+  const [importHeaders, setImportHeaders] = useState([]);
+  const [importRows, setImportRows] = useState([]);
+  const [colMap, setColMap] = useState({ date: -1, description: -1, debit: -1, credit: -1, balance: -1 });
+  const [preview, setPreview] = useState([]);
+  const [importing, setImporting] = useState(false);
+  const [matchModal, setMatchModal] = useState(null);
+  const [matchType, setMatchType] = useState('other');
+  const [matchNotes, setMatchNotes] = useState('');
+  const [err, setErr] = useState('');
+  const [ok, setOk] = useState('');
+
+  useEffect(() => {
+    bankAccountsService.getAll().then(a => { setAccounts(a); }).catch(e => setErr(e.message));
+  }, []);
+
+  useEffect(() => {
+    if (!selected) return;
+    setTxLoading(true);
+    bankTransactionsService.getByAccount(selected.id, txFrom || null, txTo || null)
+      .then(setTransactions).catch(e => setErr(e.message)).finally(() => setTxLoading(false));
+  }, [selected?.id, txFrom, txTo]);
+
+  const openImport = (acct) => { setImportAcct(acct.id); setImportFile(null); setImportStep('upload'); setErr(''); setOk(''); };
+  const closeImport = () => setImportStep(null);
+
+  const handleFileSelect = async (file) => {
+    if (!file) return;
+    setImportFile(file);
+    setImportParsing(true);
+    try {
+      const { headers, dataRows } = await parseFile(file);
+      setImportHeaders(headers);
+      setImportRows(dataRows);
+      setColMap(autoMapColumns(headers));
+      setImportStep('mapping');
+    } catch (e) { setErr('Could not parse file: ' + e.message); }
+    finally { setImportParsing(false); }
+  };
+
+  const buildPreview = async () => {
+    const txs = mapRowsToTransactions(importRows, colMap);
+    if (txs.length === 0) { setErr('No valid transactions found. Check column mapping.'); return; }
+    const withDups = await bankTransactionsService.checkDuplicates(importAcct, txs).catch(() => txs.map(t => ({ ...t, isDuplicate: false })));
+    // Auto-match
+    const acct = accounts.find(a => a.id === importAcct);
+    let payments = [], expenses2 = [];
+    try {
+      [payments, expenses2] = await Promise.all([
+        accountingService.getConfirmedPayments(null, null),
+        expensesService.getAll(null, null),
+      ]);
+    } catch {}
+    const matched = autoMatchTransactions(withDups.filter(t => !t.isDuplicate), payments, expenses2, acct?.account_type || 'both');
+    setPreview(matched);
+    setImportStep('preview');
+  };
+
+  const confirmImport = async () => {
+    setImporting(true);
+    try {
+      const acct = accounts.find(a => a.id === importAcct);
+      const batch = await bankImportBatchesService.create({
+        bank_account_id: importAcct,
+        import_date: new Date().toISOString().split('T')[0],
+        file_name: importFile?.name || '',
+        file_type: importFile?.name?.toLowerCase().endsWith('.pdf') ? 'pdf' : 'excel',
+        total_transactions: preview.length,
+        matched_count: preview.filter(t => t.autoMatch).length,
+        unmatched_count: preview.filter(t => !t.autoMatch).length,
+        imported_by: 'Admin',
+        period_from: preview[preview.length - 1]?.transaction_date || null,
+        period_to: preview[0]?.transaction_date || null,
+      });
+      const toInsert = preview.map(t => ({
+        ...t,
+        matchedTo: t.autoMatch ? { type: t.autoMatch.type, id: t.autoMatch.id } : null,
+      }));
+      await bankTransactionsService.insertBatch(importAcct, toInsert, batch.id);
+      // Update account balance
+      if (preview.length > 0 && preview[0].balance > 0) {
+        await bankAccountsService.update(importAcct, { current_balance: preview[0].balance });
+        setAccounts(a => a.map(ac => ac.id === importAcct ? { ...ac, current_balance: preview[0].balance } : ac));
+      }
+      setOk(`Imported ${preview.length} transactions (${preview.filter(t => t.autoMatch).length} auto-matched)`);
+      setImportStep(null);
+      if (selected?.id === importAcct) {
+        bankTransactionsService.getByAccount(importAcct, txFrom || null, txTo || null).then(setTransactions).catch(() => {});
+      }
+    } catch (e) { setErr(e.message); } finally { setImporting(false); }
+  };
+
+  const saveMatch = async () => {
+    if (!matchModal) return;
+    try {
+      await bankTransactionsService.updateMatch(matchModal.id, matchType === 'other' ? 'manual' : 'matched', matchType, null, matchNotes);
+      setTransactions(t => t.map(tx => tx.id === matchModal.id ? { ...tx, match_status: matchType === 'other' ? 'manual' : 'matched', matched_to_type: matchType, notes: matchNotes } : tx));
+      setMatchModal(null);
+    } catch (e) { setErr(e.message); }
+  };
+
+  const filtered = transactions.filter(t => {
+    if (!txSearch) return true;
+    const s = txSearch.toLowerCase();
+    return t.description?.toLowerCase().includes(s) || String(t.debit).includes(s) || String(t.credit).includes(s);
+  });
+
+  return (
+    <div>
+      {err && <Alert msg={err} onClose={() => setErr('')} />}
+      {ok && <Alert msg={ok} type="success" onClose={() => setOk('')} />}
+
+      {/* Import Modal */}
+      {importStep && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
+          <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '12px', padding: '24px', width: '100%', maxWidth: '700px', maxHeight: '85vh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <div style={{ fontWeight: '700', fontSize: '15px' }}>
+                {importStep === 'upload' && 'Import Bank Statement'}
+                {importStep === 'mapping' && 'Map Columns'}
+                {importStep === 'preview' && `Preview — ${preview.length} transactions`}
+              </div>
+              <button style={{ background: 'none', border: 'none', color: theme.textMuted, cursor: 'pointer', fontSize: '18px' }} onClick={closeImport}>✕</button>
+            </div>
+
+            {importStep === 'upload' && (
+              <div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Bank Account</label>
+                  <select style={styles.input} value={importAcct} onChange={e => setImportAcct(e.target.value)}>
+                    {accounts.map(a => <option key={a.id} value={a.id}>{a.bank_name} — {a.account_number}</option>)}
+                  </select>
+                </div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Statement File (CSV, Excel or PDF)</label>
+                  <input type="file" accept=".csv,.xlsx,.xls,.pdf,.txt" style={{ ...styles.input, padding: '8px' }}
+                    onChange={e => handleFileSelect(e.target.files?.[0])} />
+                </div>
+                {importParsing && <Spinner />}
+              </div>
+            )}
+
+            {importStep === 'mapping' && (
+              <div>
+                <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '14px' }}>File: <strong>{importFile?.name}</strong> — {importRows.length} data rows detected. Map the columns below:</div>
+                <div style={{ ...styles.grid(5), gap: '8px', marginBottom: '16px' }}>
+                  {['date','description','debit','credit','balance'].map(col => (
+                    <div key={col}>
+                      <label style={{ ...styles.label, textTransform: 'capitalize' }}>{col} *</label>
+                      <select style={{ ...styles.input, fontSize: '12px' }} value={colMap[col]} onChange={e => setColMap(m => ({ ...m, [col]: Number(e.target.value) }))}>
+                        <option value={-1}>— none —</option>
+                        {importHeaders.map((h, i) => <option key={i} value={i}>{h || `Col ${i+1}`}</option>)}
+                      </select>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ ...styles.card, marginBottom: '16px', padding: '12px', overflowX: 'auto' }}>
+                  <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, marginBottom: '6px' }}>PREVIEW (first 4 rows)</div>
+                  <table style={{ ...styles.table, fontSize: '11px' }}>
+                    <thead><tr>{['date','description','debit','credit','balance'].map(c => <th key={c} style={{ ...styles.th, fontSize: '10px' }}>{c}</th>)}</tr></thead>
+                    <tbody>
+                      {importRows.slice(0, 4).map((row, ri) => (
+                        <tr key={ri}>
+                          {['date','description','debit','credit','balance'].map(c => (
+                            <td key={c} style={{ ...styles.td, fontSize: '11px' }}>{colMap[c] >= 0 ? String(row[colMap[c]] ?? '') : <span style={{ color: theme.textDim }}>—</span>}</td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <button style={styles.btn('secondary')} onClick={() => setImportStep('upload')}>← Back</button>
+                  <button style={styles.btn('primary')} onClick={buildPreview}>Check Duplicates & Auto-Match →</button>
+                </div>
+              </div>
+            )}
+
+            {importStep === 'preview' && (
+              <div>
+                <div style={{ ...styles.grid(3), marginBottom: '16px' }}>
+                  <div style={styles.statCard(theme.blue)}><div style={styles.statLabel}>Total</div><div style={{ ...styles.statValue, fontSize: '18px' }}>{preview.length}</div></div>
+                  <div style={styles.statCard(theme.green)}><div style={styles.statLabel}>Auto-Matched</div><div style={{ ...styles.statValue, fontSize: '18px', color: theme.green }}>{preview.filter(t => t.autoMatch).length}</div></div>
+                  <div style={styles.statCard(theme.red)}><div style={styles.statLabel}>Unmatched</div><div style={{ ...styles.statValue, fontSize: '18px', color: theme.red }}>{preview.filter(t => !t.autoMatch).length}</div></div>
+                </div>
+                <div style={{ maxHeight: '350px', overflowY: 'auto', ...styles.card, padding: '0' }}>
+                  <table style={{ ...styles.table, fontSize: '11px' }}>
+                    <thead style={{ position: 'sticky', top: 0, background: theme.card }}>
+                      <tr>{['Date','Description','Debit','Credit','Match'].map(h => <th key={h} style={{ ...styles.th, fontSize: '10px' }}>{h}</th>)}</tr>
+                    </thead>
+                    <tbody>
+                      {preview.map((t, i) => (
+                        <tr key={i} style={{ opacity: t.isDuplicate ? 0.4 : 1 }}>
+                          <td style={styles.td}>{t.transaction_date}</td>
+                          <td style={{ ...styles.td, maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.description}</td>
+                          <td style={{ ...styles.td, textAlign: 'right', color: theme.red }}>{t.debit > 0 ? naira(t.debit) : ''}</td>
+                          <td style={{ ...styles.td, textAlign: 'right', color: theme.green }}>{t.credit > 0 ? naira(t.credit) : ''}</td>
+                          <td style={styles.td}>
+                            {t.autoMatch
+                              ? <span style={{ fontSize: '10px', fontWeight: '600', color: CONF_COLOR[t.autoMatch.confidence], background: CONF_COLOR[t.autoMatch.confidence] + '22', padding: '2px 6px', borderRadius: '4px' }}>{t.autoMatch.confidence} · {t.autoMatch.type}</span>
+                              : <span style={{ fontSize: '10px', color: theme.textDim }}>unmatched</span>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
+                  <button style={styles.btn('secondary')} onClick={() => setImportStep('mapping')}>← Back</button>
+                  <button style={{ ...styles.btn('primary'), marginLeft: 'auto' }} onClick={confirmImport} disabled={importing}>{importing ? 'Importing…' : `✓ Import ${preview.length} Transactions`}</button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Match Modal */}
+      {matchModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1001, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '10px', padding: '20px', width: '360px' }}>
+            <div style={{ fontWeight: '700', marginBottom: '14px' }}>Classify Transaction</div>
+            <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '12px' }}>{matchModal.description} · {matchModal.debit > 0 ? naira(matchModal.debit) + ' debit' : naira(matchModal.credit) + ' credit'}</div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Type</label>
+              <select style={styles.input} value={matchType} onChange={e => setMatchType(e.target.value)}>
+                <option value="payment">Customer Payment</option>
+                <option value="expense">Expense</option>
+                <option value="transfer">Inter-account Transfer</option>
+                <option value="other">Other / Bank Charge</option>
+              </select>
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Notes</label>
+              <input style={styles.input} placeholder="Optional" value={matchNotes} onChange={e => setMatchNotes(e.target.value)} />
+            </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button style={styles.btn('secondary')} onClick={() => setMatchModal(null)}>Cancel</button>
+              <button style={styles.btn('primary')} onClick={saveMatch}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Account Cards */}
+      <div style={styles.grid(accounts.length > 2 ? 3 : 2)}>
+        {accounts.map(acct => (
+          <div key={acct.id} style={{ ...styles.card, cursor: 'pointer', borderTop: `3px solid ${acct.account_type === 'income' ? theme.green : acct.account_type === 'expense' ? theme.red : theme.blue}`, outline: selected?.id === acct.id ? `2px solid ${theme.accent}` : 'none' }}
+            onClick={() => setSelected(acct)}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div>
+                <div style={{ fontWeight: '700', fontSize: '14px' }}>{acct.bank_name}</div>
+                <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '2px' }}>{acct.account_name}</div>
+                <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '2px', fontFamily: 'monospace' }}>{acct.account_number}</div>
+              </div>
+              <span style={styles.badge(acct.account_type === 'income' ? theme.green : acct.account_type === 'expense' ? theme.red : theme.blue)}>{acct.account_type}</span>
+            </div>
+            <div style={{ marginTop: '14px' }}>
+              <div style={styles.statLabel}>Current Balance</div>
+              <div style={{ fontSize: '20px', fontWeight: '700', color: theme.accent, marginTop: '4px' }}>{naira(acct.current_balance)}</div>
+            </div>
+            <div style={{ display: 'flex', gap: '8px', marginTop: '14px' }} onClick={e => e.stopPropagation()}>
+              <button style={{ ...styles.btn('secondary'), padding: '5px 12px', fontSize: '12px', flex: 1 }} onClick={() => openImport(acct)}>↑ Import</button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Transaction History */}
+      {selected && (
+        <div style={{ marginTop: '24px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
+            <div style={styles.sectionTitle}>{selected.bank_name} — Transactions</div>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <input type="date" style={{ ...styles.input, width: '140px' }} placeholder="From" value={txFrom} onChange={e => setTxFrom(e.target.value)} />
+              <input type="date" style={{ ...styles.input, width: '140px' }} placeholder="To" value={txTo} onChange={e => setTxTo(e.target.value)} />
+              <input style={{ ...styles.input, width: '180px' }} placeholder="Search description / amount…" value={txSearch} onChange={e => setTxSearch(e.target.value)} />
+            </div>
+          </div>
+          {txLoading ? <Spinner /> : (
+            <div style={styles.card}>
+              <table style={styles.table}>
+                <thead>
+                  <tr>
+                    {['Date','Description','Debit','Credit','Balance','Status',''].map(h => <th key={h} style={styles.th}>{h}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.length === 0
+                    ? <tr><td colSpan="7" style={{ ...styles.td, textAlign: 'center', color: theme.textMuted, padding: '30px' }}>No transactions. Import a statement to get started.</td></tr>
+                    : filtered.map(tx => (
+                      <tr key={tx.id}>
+                        <td style={{ ...styles.td, whiteSpace: 'nowrap' }}>{tx.transaction_date}</td>
+                        <td style={{ ...styles.td, maxWidth: '220px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={tx.description}>{tx.description}</td>
+                        <td style={{ ...styles.td, textAlign: 'right', color: theme.red, fontWeight: '600' }}>{tx.debit > 0 ? naira(tx.debit) : ''}</td>
+                        <td style={{ ...styles.td, textAlign: 'right', color: theme.green, fontWeight: '600' }}>{tx.credit > 0 ? naira(tx.credit) : ''}</td>
+                        <td style={{ ...styles.td, textAlign: 'right' }}>{tx.balance > 0 ? naira(tx.balance) : ''}</td>
+                        <td style={styles.td}>
+                          <span style={styles.badge(tx.match_status === 'matched' ? theme.green : tx.match_status === 'manual' ? theme.blue : theme.red)}>
+                            {tx.match_status || 'unmatched'}
+                          </span>
+                          {tx.matched_to_type && <div style={{ fontSize: '10px', color: theme.textMuted, marginTop: '2px' }}>{tx.matched_to_type}</div>}
+                        </td>
+                        <td style={styles.td}>
+                          {tx.match_status === 'unmatched' && (
+                            <button style={{ ...styles.btn('secondary'), padding: '3px 8px', fontSize: '11px' }}
+                              onClick={() => { setMatchModal(tx); setMatchType('other'); setMatchNotes(''); }}>Match</button>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  }
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ── RECONCILIATION TAB ────────────────────────────────────────
+const ReconciliationTab = () => {
+  const [accounts, setAccounts] = useState([]);
+  const [accountId, setAccountId] = useState('');
+  const [periodFrom, setPeriodFrom] = useState('');
+  const [periodTo, setPeriodTo] = useState('');
+  const [result, setResult] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [reconciledBy, setReconciledBy] = useState('');
+  const [reconNotes, setReconNotes] = useState('');
+  const [history, setHistory] = useState([]);
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const [err, setErr] = useState('');
+  const [ok, setOk] = useState('');
+
+  useEffect(() => {
+    bankAccountsService.getAll().then(a => {
+      setAccounts(a);
+      if (a.length > 0) setAccountId(a[0].id);
+    }).catch(e => setErr(e.message));
+  }, []);
+
+  useEffect(() => {
+    if (!accountId) return;
+    bankReconciliationsService.getByAccount(accountId).then(setHistory).catch(() => {});
+  }, [accountId]);
+
+  const runReconciliation = async () => {
+    if (!accountId || !periodFrom || !periodTo) { setErr('Select account and period'); return; }
+    setLoading(true);
+    try {
+      const [bankTxs, payments, expenses2] = await Promise.all([
+        bankTransactionsService.getByAccount(accountId, periodFrom, periodTo),
+        accountingService.getConfirmedPayments(periodFrom, periodTo),
+        expensesService.getAll(periodFrom, periodTo),
+      ]);
+
+      const bankCredits = bankTxs.reduce((s, t) => s + Number(t.credit || 0), 0);
+      const bankDebits = bankTxs.reduce((s, t) => s + Number(t.debit || 0), 0);
+      const bankOpen = bankTxs.length > 0 ? (bankTxs[bankTxs.length - 1].balance - bankTxs[bankTxs.length - 1].credit + bankTxs[bankTxs.length - 1].debit) : 0;
+      const bankClose = bankTxs.length > 0 ? bankTxs[0].balance : 0;
+
+      const sysCredits = payments.reduce((s, p) => s + Number(p.amount_paid || 0), 0);
+      const sysDebits = expenses2.filter(e => e.status !== 'rejected').reduce((s, e) => s + Number(e.amount || 0), 0);
+      const sysOpen = 0;
+      const sysClose = sysCredits - sysDebits;
+
+      const diff = bankClose - sysClose;
+
+      const reconItems = [];
+      // Unmatched bank transactions
+      bankTxs.filter(t => t.match_status === 'unmatched').forEach(t => {
+        reconItems.push({ description: t.description || 'Unmatched bank transaction', type: t.credit > 0 ? 'Credit in bank, not in system' : 'Debit in bank, not in system', amount: t.credit > 0 ? t.credit : t.debit });
+      });
+
+      setResult({ bankTxs, payments, expenses: expenses2, bank: { openingBalance: bankOpen, totalCredits: bankCredits, totalDebits: bankDebits, closingBalance: bankClose }, system: { openingBalance: sysOpen, totalCredits: sysCredits, totalDebits: sysDebits, closingBalance: sysClose }, difference: diff, reconItems });
+    } catch (e) { setErr(e.message); }
+    finally { setLoading(false); }
+  };
+
+  const saveReconciliation = async () => {
+    if (!result) return;
+    setSaving(true);
+    try {
+      const acct = accounts.find(a => a.id === accountId);
+      const rec = await bankReconciliationsService.create({
+        bank_account_id: accountId,
+        reconciliation_date: new Date().toISOString().split('T')[0],
+        period_from: periodFrom,
+        period_to: periodTo,
+        opening_balance_system: result.system.openingBalance,
+        opening_balance_bank: result.bank.openingBalance,
+        closing_balance_system: result.system.closingBalance,
+        closing_balance_bank: result.bank.closingBalance,
+        difference: result.difference,
+        status: Math.abs(result.difference) < 0.01 ? 'completed' : 'draft',
+        reconciled_by: reconciledBy,
+        notes: reconNotes,
+      });
+      setHistory(h => [{ ...rec }, ...h]);
+      setOk(Math.abs(result.difference) < 0.01 ? 'Reconciliation completed and saved!' : 'Reconciliation saved as draft (difference exists)');
+    } catch (e) { setErr(e.message); }
+    finally { setSaving(false); }
+  };
+
+  const downloadPdf = async () => {
+    if (!result) return;
+    const acct = accounts.find(a => a.id === accountId);
+    setPdfLoading(true);
+    try {
+      await generateReconciliationPDF({
+        account: acct,
+        period: { from: periodFrom, to: periodTo },
+        system: result.system,
+        bank: result.bank,
+        reconcilingItems: result.reconItems,
+        difference: result.difference,
+        reconciledBy,
+        notes: reconNotes,
+      });
+    } catch (e) { setErr(e.message); }
+    finally { setPdfLoading(false); }
+  };
+
+  return (
+    <div>
+      {err && <Alert msg={err} onClose={() => setErr('')} />}
+      {ok && <Alert msg={ok} type="success" onClose={() => setOk('')} />}
+
+      <div style={{ ...styles.row, alignItems: 'flex-end', marginBottom: '20px', gap: '12px', flexWrap: 'wrap' }}>
+        <div>
+          <label style={styles.label}>Bank Account</label>
+          <select style={{ ...styles.input, width: '220px' }} value={accountId} onChange={e => setAccountId(e.target.value)}>
+            {accounts.map(a => <option key={a.id} value={a.id}>{a.bank_name}</option>)}
+          </select>
+        </div>
+        <div><label style={styles.label}>From</label><input type="date" style={{ ...styles.input, width: '150px' }} value={periodFrom} onChange={e => setPeriodFrom(e.target.value)} /></div>
+        <div><label style={styles.label}>To</label><input type="date" style={{ ...styles.input, width: '150px' }} value={periodTo} onChange={e => setPeriodTo(e.target.value)} /></div>
+        <button style={styles.btn('secondary')} onClick={runReconciliation} disabled={loading}>{loading ? 'Loading…' : 'Run Reconciliation'}</button>
+        {result && <button style={{ ...styles.btn('primary'), marginLeft: 'auto' }} onClick={downloadPdf} disabled={pdfLoading}>{pdfLoading ? 'Generating…' : '↓ PDF'}</button>}
+      </div>
+
+      {result && (
+        <>
+          <div style={styles.row}>
+            <div style={{ flex: 1, ...styles.card, borderTop: `3px solid ${theme.blue}` }}>
+              <div style={{ ...styles.sectionTitle, color: theme.blue }}>System Records</div>
+              <table style={styles.table}>
+                <tbody>
+                  <tr><td style={styles.td}>Opening Balance</td><td style={{ ...styles.td, textAlign: 'right' }}>{naira(result.system.openingBalance)}</td></tr>
+                  <tr><td style={styles.td}>Total Receipts (Credits)</td><td style={{ ...styles.td, textAlign: 'right', color: theme.green }}>{naira(result.system.totalCredits)}</td></tr>
+                  <tr><td style={styles.td}>Total Expenses (Debits)</td><td style={{ ...styles.td, textAlign: 'right', color: theme.red }}>({naira(result.system.totalDebits)})</td></tr>
+                  <tr><td style={{ ...styles.td, fontWeight: '700' }}>Closing Balance</td><td style={{ ...styles.td, textAlign: 'right', fontWeight: '700', fontSize: '15px' }}>{naira(result.system.closingBalance)}</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div style={{ flex: 1, ...styles.card, borderTop: `3px solid ${theme.accent}` }}>
+              <div style={{ ...styles.sectionTitle, color: theme.accent }}>Bank Statement</div>
+              <table style={styles.table}>
+                <tbody>
+                  <tr><td style={styles.td}>Opening Balance</td><td style={{ ...styles.td, textAlign: 'right' }}>{naira(result.bank.openingBalance)}</td></tr>
+                  <tr><td style={styles.td}>Total Credits</td><td style={{ ...styles.td, textAlign: 'right', color: theme.green }}>{naira(result.bank.totalCredits)}</td></tr>
+                  <tr><td style={styles.td}>Total Debits</td><td style={{ ...styles.td, textAlign: 'right', color: theme.red }}>({naira(result.bank.totalDebits)})</td></tr>
+                  <tr><td style={{ ...styles.td, fontWeight: '700' }}>Closing Balance</td><td style={{ ...styles.td, textAlign: 'right', fontWeight: '700', fontSize: '15px' }}>{naira(result.bank.closingBalance)}</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {result.reconItems.length > 0 && (
+            <div style={{ ...styles.card, marginTop: '16px' }}>
+              <div style={styles.sectionTitle}>Reconciling Items</div>
+              <table style={styles.table}>
+                <thead><tr><th style={styles.th}>Description</th><th style={styles.th}>Type</th><th style={{ ...styles.th, textAlign: 'right' }}>Amount</th></tr></thead>
+                <tbody>
+                  {result.reconItems.map((item, i) => (
+                    <tr key={i}>
+                      <td style={styles.td}>{item.description}</td>
+                      <td style={{ ...styles.td, color: theme.textMuted, fontSize: '11px' }}>{item.type}</td>
+                      <td style={{ ...styles.td, textAlign: 'right' }}>{naira(item.amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <div style={{ ...styles.card, marginTop: '16px', background: Math.abs(result.difference) < 0.01 ? theme.green + '11' : theme.red + '11', border: `1px solid ${Math.abs(result.difference) < 0.01 ? theme.green : theme.red}44` }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+              <span style={{ fontWeight: '700', fontSize: '14px', color: Math.abs(result.difference) < 0.01 ? theme.green : theme.red }}>
+                {Math.abs(result.difference) < 0.01 ? '✓ RECONCILED — Difference is ₦0' : `⚠ UNRECONCILED — Difference: ${naira(Math.abs(result.difference))}`}
+              </span>
+            </div>
+            <div style={styles.row}>
+              <div style={{ flex: 1 }}><label style={styles.label}>Reconciled By</label><input style={styles.input} placeholder="Accountant name" value={reconciledBy} onChange={e => setReconciledBy(e.target.value)} /></div>
+              <div style={{ flex: 2 }}><label style={styles.label}>Notes</label><input style={styles.input} placeholder="Optional notes" value={reconNotes} onChange={e => setReconNotes(e.target.value)} /></div>
+            </div>
+            <button style={{ ...styles.btn('primary'), marginTop: '12px' }} onClick={saveReconciliation} disabled={saving}>{saving ? 'Saving…' : 'Save Reconciliation'}</button>
+          </div>
+        </>
+      )}
+
+      {history.length > 0 && (
+        <div style={{ ...styles.card, marginTop: '24px' }}>
+          <div style={styles.sectionTitle}>Reconciliation History</div>
+          <table style={styles.table}>
+            <thead><tr>{['Period','Date','Difference','Status','By'].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
+            <tbody>
+              {history.map(r => (
+                <tr key={r.id}>
+                  <td style={styles.td}>{r.period_from} — {r.period_to}</td>
+                  <td style={styles.td}>{r.reconciliation_date}</td>
+                  <td style={{ ...styles.td, color: Math.abs(r.difference) < 0.01 ? theme.green : theme.red, fontWeight: '600' }}>{naira(Math.abs(r.difference || 0))}</td>
+                  <td style={styles.td}><span style={styles.badge(r.status === 'completed' ? theme.green : theme.accent)}>{r.status}</span></td>
+                  <td style={{ ...styles.td, color: theme.textMuted }}>{r.reconciled_by || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ── RECEIPTS TAB ──────────────────────────────────────────────
+const ReceiptsTab = () => {
+  const today = new Date().toISOString().split('T')[0];
+  const [receipts, setReceipts] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [rfrom, setRfrom] = useState('');
+  const [rto, setRto] = useState('');
+  const [rsearch, setRsearch] = useState('');
+  const [uploadFile, setUploadFile] = useState(null);
+  const [uploadForm, setUploadForm] = useState({ receipt_date: today, vendor_name: '', amount: '', tax_category: '', notes: '' });
+  const [uploading, setUploading] = useState(false);
+  const [viewUrl, setViewUrl] = useState(null);
+  const [missingCount, setMissingCount] = useState(0);
+  const [showMissing, setShowMissing] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
+  const [err, setErr] = useState('');
+  const [ok, setOk] = useState('');
+
+  const loadReceipts = () => {
+    setLoading(true);
+    receiptsService.getAll(rfrom || null, rto || null, rsearch || null)
+      .then(setReceipts).catch(e => setErr(e.message)).finally(() => setLoading(false));
+  };
+
+  useEffect(() => { loadReceipts(); receiptsService.getMissingReceiptExpenses().then(setMissingCount).catch(() => {}); }, []);
+
+  const handleUpload = async () => {
+    if (!uploadFile) { setErr('Please select a file'); return; }
+    if (!uploadForm.receipt_date || !uploadForm.vendor_name || !uploadForm.amount) { setErr('Date, vendor and amount are required'); return; }
+    setUploading(true);
+    try {
+      const rec = await receiptsService.upload(uploadFile, uploadForm);
+      setReceipts(r => [rec, ...r]);
+      setUploadFile(null);
+      setUploadForm({ receipt_date: today, vendor_name: '', amount: '', tax_category: '', notes: '' });
+      setOk(`Receipt ${rec.receipt_number} uploaded`);
+      receiptsService.getMissingReceiptExpenses().then(setMissingCount).catch(() => {});
+    } catch (e) { setErr(e.message); }
+    finally { setUploading(false); }
+  };
+
+  const handleDelete = async (r) => {
+    try {
+      await receiptsService.delete(r.id, r.file_url);
+      setReceipts(rs => rs.filter(x => x.id !== r.id));
+    } catch (e) { setErr(e.message); }
+  };
+
+  const exportTaxPackage = async () => {
+    setExportLoading(true);
+    try {
+      const { default: JSZip } = await import('jszip');
+      const zip = new JSZip();
+      const folder = zip.folder('receipts');
+
+      let csvRows = 'Receipt Number,Date,Vendor,Category,Amount,File Name\n';
+
+      await Promise.all(receipts.map(async (r) => {
+        try {
+          const res = await fetch(r.file_url);
+          if (res.ok) {
+            const blob = await res.blob();
+            folder.file(r.file_name || `${r.receipt_number}.file`, blob);
+          }
+        } catch {}
+        const cat = r.expense?.category?.name || r.tax_category || '';
+        csvRows += `"${r.receipt_number}","${r.receipt_date}","${r.vendor_name}","${cat}","${r.amount}","${r.file_name || ''}"\n`;
+      }));
+
+      zip.file('summary.csv', csvRows);
+      const content = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(content);
+      const a = document.createElement('a');
+      a.href = url; a.download = `TaxPackage_${today}.zip`; a.click();
+      URL.revokeObjectURL(url);
+      setOk('Tax package downloaded');
+    } catch (e) { setErr('Export failed: ' + e.message); }
+    finally { setExportLoading(false); }
+  };
+
+  const filteredReceipts = showMissing ? [] : receipts;
+
+  return (
+    <div>
+      {err && <Alert msg={err} onClose={() => setErr('')} />}
+      {ok && <Alert msg={ok} type="success" onClose={() => setOk('')} />}
+
+      {/* Image viewer */}
+      {viewUrl && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          onClick={() => setViewUrl(null)}>
+          {viewUrl.endsWith('.pdf') || viewUrl.includes('/pdf')
+            ? <iframe src={viewUrl} style={{ width: '80vw', height: '80vh', border: 'none' }} onClick={e => e.stopPropagation()} />
+            : <img src={viewUrl} style={{ maxWidth: '90vw', maxHeight: '90vh', objectFit: 'contain' }} />}
+        </div>
+      )}
+
+      <div style={styles.row}>
+        <div style={{ width: '300px', flexShrink: 0 }}>
+          <div style={{ ...styles.card, marginBottom: '16px' }}>
+            <div style={styles.sectionTitle}>Upload Receipt</div>
+            <div style={styles.formGroup}><label style={styles.label}>File (JPG / PNG / PDF)</label>
+              <input type="file" accept="image/*,.pdf" style={{ ...styles.input, padding: '7px' }} onChange={e => setUploadFile(e.target.files?.[0])} />
+            </div>
+            {uploadFile && <div style={{ fontSize: '11px', color: theme.textMuted, marginBottom: '8px' }}>Selected: {uploadFile.name}</div>}
+            <div style={styles.formGroup}><label style={styles.label}>Date *</label><input type="date" style={styles.input} value={uploadForm.receipt_date} onChange={e => setUploadForm(f => ({ ...f, receipt_date: e.target.value }))} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Vendor *</label><input style={styles.input} placeholder="Supplier name" value={uploadForm.vendor_name} onChange={e => setUploadForm(f => ({ ...f, vendor_name: e.target.value }))} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Amount (₦) *</label><input type="number" style={styles.input} placeholder="0" value={uploadForm.amount} onChange={e => setUploadForm(f => ({ ...f, amount: e.target.value }))} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Tax Category</label>
+              <input style={styles.input} placeholder="e.g. Fuel, Labour, Materials" value={uploadForm.tax_category} onChange={e => setUploadForm(f => ({ ...f, tax_category: e.target.value }))} />
+            </div>
+            <button style={{ ...styles.btn('primary'), width: '100%' }} onClick={handleUpload} disabled={uploading}>{uploading ? 'Uploading…' : '↑ Upload Receipt'}</button>
+          </div>
+
+          {missingCount > 0 && (
+            <div style={{ ...styles.card, background: theme.red + '11', border: `1px solid ${theme.red}33` }}>
+              <div style={{ color: theme.red, fontWeight: '700', fontSize: '13px' }}>⚠ {missingCount} expenses without receipts</div>
+              <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '4px' }}>Upload receipts for approved expenses to maintain complete records.</div>
+            </div>
+          )}
+        </div>
+
+        <div style={{ flex: 1 }}>
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+            <div><label style={styles.label}>From</label><input type="date" style={{ ...styles.input, width: '140px' }} value={rfrom} onChange={e => setRfrom(e.target.value)} /></div>
+            <div><label style={styles.label}>To</label><input type="date" style={{ ...styles.input, width: '140px' }} value={rto} onChange={e => setRto(e.target.value)} /></div>
+            <div style={{ flex: 1 }}><label style={styles.label}>Search vendor</label><input style={styles.input} placeholder="Search…" value={rsearch} onChange={e => setRsearch(e.target.value)} /></div>
+            <button style={styles.btn('secondary')} onClick={loadReceipts}>Search</button>
+            <button style={styles.btn('primary')} onClick={exportTaxPackage} disabled={exportLoading || receipts.length === 0}>{exportLoading ? 'Exporting…' : '↓ Tax ZIP'}</button>
+          </div>
+          {loading ? <Spinner /> : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '12px' }}>
+              {receipts.length === 0
+                ? <div style={{ ...styles.card, gridColumn: '1/-1', textAlign: 'center', color: theme.textMuted, padding: '30px' }}>No receipts found. Upload your first receipt.</div>
+                : receipts.map(r => (
+                  <div key={r.id} style={{ ...styles.card, padding: '12px', position: 'relative' }}>
+                    <div style={{ height: '100px', background: theme.surface, borderRadius: '6px', marginBottom: '8px', overflow: 'hidden', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                      onClick={() => setViewUrl(r.file_url)}>
+                      {r.receipt_type === 'photo'
+                        ? <img src={r.file_url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => e.target.style.display = 'none'} />
+                        : <div style={{ fontSize: '32px', textAlign: 'center' }}>📄</div>}
+                    </div>
+                    <div style={{ fontSize: '11px', fontWeight: '700', color: theme.accent }}>{r.receipt_number}</div>
+                    <div style={{ fontSize: '11px', fontWeight: '600', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.vendor_name}</div>
+                    <div style={{ fontSize: '11px', color: theme.green, fontWeight: '600' }}>{naira(r.amount)}</div>
+                    <div style={{ fontSize: '10px', color: theme.textMuted }}>{r.receipt_date}</div>
+                    <div style={{ display: 'flex', gap: '4px', marginTop: '8px' }}>
+                      <a href={r.file_url} target="_blank" rel="noreferrer" style={{ ...styles.btn('secondary'), padding: '3px 8px', fontSize: '10px', textDecoration: 'none', display: 'inline-block' }}>↓</a>
+                      <button style={{ ...styles.btn('danger'), padding: '3px 8px', fontSize: '10px' }} onClick={() => handleDelete(r)}>✕</button>
+                    </div>
+                  </div>
+                ))
+              }
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const Accounting = () => {
   const [tab, setTab] = useState('bookkeeping');
   const TABS = [
@@ -3906,6 +4612,9 @@ const Accounting = () => {
     { id: 'cost', label: 'Cost Analysis' },
     { id: 'receivables', label: 'Accounts Receivable' },
     { id: 'management', label: 'Management Accounts' },
+    { id: 'bank', label: 'Bank Accounts' },
+    { id: 'reconciliation', label: 'Reconciliation' },
+    { id: 'receipts', label: 'Receipts' },
   ];
   return (
     <div>
@@ -3931,6 +4640,9 @@ const Accounting = () => {
       {tab === 'cost' && <CostTab />}
       {tab === 'receivables' && <ReceivablesTab />}
       {tab === 'management' && <ManagementTab />}
+      {tab === 'bank' && <BankAccountsTab />}
+      {tab === 'reconciliation' && <ReconciliationTab />}
+      {tab === 'receipts' && <ReceiptsTab />}
     </div>
   );
 };
