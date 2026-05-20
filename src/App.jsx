@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { productionService } from './services/production';
 import { staffService } from './services/staff';
-import { ordersService, customersService } from './services/orders';
+import { ordersService, customersService, customerSitesService } from './services/orders';
 import { waybillsService } from './services/deliveries';
 import { invoicesService, paymentsService } from './services/payments';
 import { inventoryService } from './services/inventory';
@@ -66,6 +66,11 @@ const styles = {
 };
 
 const BLOCK_TYPES = ["9-inch", "6-inch", "Interlock"];
+const ABUJA_AREAS = [
+  "Katampe","Maitama","Gwarinpa","Kubwa","Karsana","Lugbe","Jahi",
+  "Lifecamp","Galadimawa","Apo","Wuse","Wuse 2","Asokoro","Garki",
+  "Central Area","Dutse","Bwari","Gwagwalada","Kuje","Abaji","Kwali",
+];
 const ROLES = ["Driver", "Labourer", "Marketer", "Supervisor", "Other"];
 const HOW_HEARD = [
   { value: "referral", label: "Referral" },
@@ -1588,17 +1593,59 @@ const Waybills = () => {
   );
 };
 
+// ── SITE ADDRESS SELECT ───────────────────────────────────────
+const SiteAddressSelect = ({ value, onChange, inputStyle }) => {
+  const isCustom = value !== '' && !ABUJA_AREAS.includes(value);
+  const selectVal = isCustom ? '__other__' : (value || '');
+  return (
+    <div>
+      <select
+        style={inputStyle}
+        value={selectVal}
+        onChange={e => {
+          if (e.target.value === '__other__') onChange('__other__');
+          else onChange(e.target.value);
+        }}
+      >
+        <option value="">— Select area —</option>
+        {ABUJA_AREAS.map(a => <option key={a} value={a}>{a}, Abuja</option>)}
+        <option value="__other__">Other (type manually)</option>
+      </select>
+      {(selectVal === '__other__' || isCustom) && (
+        <input
+          style={{ ...inputStyle, marginTop: '6px' }}
+          placeholder="Type full delivery address…"
+          value={value === '__other__' ? '' : value}
+          onChange={e => onChange(e.target.value)}
+        />
+      )}
+    </div>
+  );
+};
+
 // ── CUSTOMER FORM (top-level to avoid focus loss on re-render) ────
 const CustomerForm = ({ form, setForm, staff, saving, onSubmit, onCancel, submitLabel }) => (
   <div style={{ ...styles.card, marginBottom: "24px", borderColor: theme.accent + "44" }}>
     <div style={styles.sectionTitle}>{submitLabel === "Register" ? "Register New Customer" : "Edit Customer"}</div>
+
+    <div style={{ fontSize: "11px", fontWeight: "700", color: theme.textMuted, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: "10px" }}>Company Details</div>
     <div style={styles.grid(3)}>
-      {[{ label: "Full Name *", key: "name", placeholder: "e.g. Emeka Okafor" }, { label: "Company Name", key: "company_name", placeholder: "Optional" }, { label: "Phone *", key: "phone", placeholder: "+234…" }, { label: "Email", key: "email", placeholder: "Optional" }, { label: "Site Location / Delivery Address", key: "location", placeholder: "e.g. Gwarinpa, Abuja" }].map(f => (
-        <div key={f.key} style={styles.formGroup}>
-          <label style={styles.label}>{f.label}</label>
-          <input style={styles.input} placeholder={f.placeholder} value={form[f.key]} onChange={e => setForm({ ...form, [f.key]: e.target.value })} />
-        </div>
-      ))}
+      <div style={styles.formGroup}>
+        <label style={styles.label}>Contact Name *</label>
+        <input style={styles.input} placeholder="e.g. Emeka Okafor" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
+      </div>
+      <div style={styles.formGroup}>
+        <label style={styles.label}>Company Name</label>
+        <input style={styles.input} placeholder="e.g. MACC Projects Limited" value={form.company_name} onChange={e => setForm({ ...form, company_name: e.target.value })} />
+      </div>
+      <div style={styles.formGroup}>
+        <label style={styles.label}>Phone *</label>
+        <input style={styles.input} placeholder="+234…" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} />
+      </div>
+      <div style={styles.formGroup}>
+        <label style={styles.label}>Email</label>
+        <input style={styles.input} placeholder="Optional" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} />
+      </div>
       <div style={styles.formGroup}>
         <label style={styles.label}>How They Heard About Us</label>
         <select style={styles.input} value={form.how_heard} onChange={e => setForm({ ...form, how_heard: e.target.value })}>
@@ -1618,6 +1665,32 @@ const CustomerForm = ({ form, setForm, staff, saving, onSubmit, onCancel, submit
         <input style={styles.input} type="date" value={form.date_registered} onChange={e => setForm({ ...form, date_registered: e.target.value })} />
       </div>
     </div>
+
+    {submitLabel === "Register" && (
+      <>
+        <div style={{ borderTop: `1px solid ${theme.border}`, margin: "16px 0 12px" }} />
+        <div style={{ fontSize: "11px", fontWeight: "700", color: theme.textMuted, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: "10px" }}>First Delivery Site</div>
+        <div style={styles.grid(2)}>
+          <div style={styles.formGroup}>
+            <label style={styles.label}>Site Name</label>
+            <input style={styles.input} placeholder="e.g. Katampe Site" value={form.site_name} onChange={e => setForm({ ...form, site_name: e.target.value })} />
+          </div>
+          <div style={styles.formGroup}>
+            <label style={styles.label}>Delivery Address</label>
+            <SiteAddressSelect value={form.site_address} onChange={v => setForm({ ...form, site_address: v })} inputStyle={styles.input} />
+          </div>
+          <div style={styles.formGroup}>
+            <label style={styles.label}>Site Contact Name</label>
+            <input style={styles.input} placeholder="Person at this site" value={form.site_contact_name} onChange={e => setForm({ ...form, site_contact_name: e.target.value })} />
+          </div>
+          <div style={styles.formGroup}>
+            <label style={styles.label}>Site Contact Phone</label>
+            <input style={styles.input} placeholder="+234…" value={form.site_contact_phone} onChange={e => setForm({ ...form, site_contact_phone: e.target.value })} />
+          </div>
+        </div>
+      </>
+    )}
+
     <div style={styles.row}>
       <button style={styles.btn("primary")} onClick={onSubmit} disabled={saving}>{saving ? "Saving…" : submitLabel}</button>
       <button style={styles.btn("secondary")} onClick={onCancel}>Cancel</button>
@@ -1637,7 +1710,7 @@ const Customers = () => {
   const [saving, setSaving] = useState(false);
   const [alert, setAlert] = useState(null);
   const today = new Date().toISOString().split("T")[0];
-  const emptyForm = { name: "", company_name: "", phone: "", email: "", location: "", how_heard: "", added_by: "", date_registered: today };
+  const emptyForm = { name: "", company_name: "", phone: "", email: "", location: "", how_heard: "", added_by: "", date_registered: today, site_name: "Main Site", site_address: "", site_contact_name: "", site_contact_phone: "" };
   const [form, setForm] = useState(emptyForm);
   const [stmtFrom, setStmtFrom] = useState("");
   const [stmtTo, setStmtTo] = useState("");
@@ -1648,6 +1721,12 @@ const Customers = () => {
   const [waybillFrom, setWaybillFrom] = useState("");
   const [waybillTo, setWaybillTo] = useState("");
   const [waybillPdfLoading, setWaybillPdfLoading] = useState(false);
+  const [sites, setSites] = useState([]);
+  const [sitesLoading, setSitesLoading] = useState(false);
+  const [showAddSite, setShowAddSite] = useState(false);
+  const [siteForm, setSiteForm] = useState({ site_name: "", site_address: "", site_contact_name: "", site_contact_phone: "" });
+  const [savingSite, setSavingSite] = useState(false);
+  const [stmtSiteId, setStmtSiteId] = useState("");
 
   const load = async () => {
     setLoading(true);
@@ -1676,6 +1755,15 @@ const Customers = () => {
       setCustWaybills(wbs.map(w => ({ ...w, batch_number: batchMap[w.batch_id] || null })));
     }).catch(() => setCustWaybills([]))
       .finally(() => setWaybillsLoading(false));
+  }, [selected?.id]);
+
+  useEffect(() => {
+    if (!selected) { setSites([]); setShowAddSite(false); setStmtSiteId(""); return; }
+    setSitesLoading(true);
+    customerSitesService.getByCustomer(selected.id)
+      .then(setSites)
+      .catch(() => setSites([]))
+      .finally(() => setSitesLoading(false));
   }, [selected?.id]);
 
   const filtered = customers.filter(c => {

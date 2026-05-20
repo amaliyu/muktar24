@@ -8,6 +8,7 @@ export const ordersService = {
         *,
         customer:customer_id(*),
         marketer:marketer_id(id, full_name),
+        site:site_id(id, site_name, site_address),
         order_items(*),
         invoices(id, invoice_number, total_amount, issued_date, due_date, payments(id, amount_paid, payment_date, status))
       `)
@@ -96,7 +97,7 @@ export const customersService = {
         *,
         marketer:added_by(id, full_name),
         orders(
-          id, status, created_at,
+          id, status, created_at, site_id,
           order_items(quantity, unit_price, subtotal),
           invoices(id, payments(amount_paid, status))
         )
@@ -132,11 +133,11 @@ export const customersService = {
     return data
   },
 
-  async getStatement(customerId) {
-    const { data, error } = await supabase
+  async getStatement(customerId, siteId = null) {
+    let q = supabase
       .from('orders')
       .select(`
-        id, created_at,
+        id, created_at, site_id,
         order_items(block_type, quantity, unit_price, subtotal),
         invoices(
           id, invoice_number, total_amount, issued_date,
@@ -144,8 +145,39 @@ export const customersService = {
         )
       `)
       .eq('customer_id', customerId)
-      .order('created_at', { ascending: true })
-    if (error) throw error
-    return data || []
+      .order('created_at', { ascending: true });
+    if (siteId) q = q.eq('site_id', siteId);
+    const { data, error } = await q;
+    if (error) throw error;
+    return data || [];
   },
 }
+
+export const customerSitesService = {
+  async getByCustomer(customerId) {
+    const { data, error } = await supabase
+      .from('customer_sites')
+      .select('*')
+      .eq('customer_id', customerId)
+      .eq('is_active', true)
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+    return data || [];
+  },
+  async create(site) {
+    const { data, error } = await supabase
+      .from('customer_sites')
+      .insert(site)
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  },
+  async update(id, updates) {
+    const { error } = await supabase
+      .from('customer_sites')
+      .update(updates)
+      .eq('id', id);
+    if (error) throw error;
+  },
+};

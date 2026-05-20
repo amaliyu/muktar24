@@ -77,7 +77,7 @@ function buildRows(orders, fromDate, toDate, productMap = {}) {
 const N = (n) => `N${Number(n || 0).toLocaleString()}`;
 const qty = (n) => Number(n || 0).toLocaleString();
 
-export async function generateStatementPDF(customer, orders, fromDate, toDate, products = []) {
+export async function generateStatementPDF(customer, orders, fromDate, toDate, products = [], site = null) {
   const productMap = Object.fromEntries(products.map(p => [p.name, p.unit]));
   const rows = buildRows(orders, fromDate, toDate, productMap);
 
@@ -146,10 +146,18 @@ export async function generateStatementPDF(customer, orders, fromDate, toDate, p
   doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(100);
+  const siteLabel = site ? site.site_name : (customer.location || '—');
+  const siteAddr = site?.site_address || '';
   doc.text('SITE:', mr - 4, 33, { align: 'right' });
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(20);
-  doc.text((customer.location || '—').toUpperCase(), mr, 33, { align: 'right' });
+  doc.text(siteLabel.toUpperCase(), mr, 33, { align: 'right' });
+  if (siteAddr) {
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100);
+    doc.text(siteAddr, mr, 38, { align: 'right' });
+  }
 
   if (customer.phone) {
     doc.setFontSize(8.5);
@@ -288,6 +296,7 @@ export async function generateStatementPDF(customer, orders, fromDate, toDate, p
     W / 2, footerY + 6, { align: 'center' }
   );
 
-  const fname = `Statement_${(customer.name || 'customer').replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`;
+  const siteSuffix = site ? `_${site.site_name.replace(/\s+/g, '_')}` : '';
+  const fname = `Statement_${(customer.name || 'customer').replace(/\s+/g, '_')}${siteSuffix}_${new Date().toISOString().split('T')[0]}.pdf`;
   doc.save(fname);
 }
