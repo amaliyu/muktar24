@@ -14,6 +14,7 @@ import { generateInvoicePDF } from './utils/generateInvoicePDF';
 import { generateStatementPDF } from './utils/generateStatementPDF';
 import { generateInventoryReportPDF } from './utils/generateInventoryReportPDF';
 import { generateWaybillPDF } from './utils/generateWaybillPDF';
+import { generateCustomerWaybillsPDF } from './utils/generateCustomerWaybillsPDF';
 import { productsService } from './services/products';
 
 const theme = {
@@ -1627,6 +1628,11 @@ const Customers = () => {
   const [stmtTo, setStmtTo] = useState("");
   const [stmtLoading, setStmtLoading] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [custWaybills, setCustWaybills] = useState([]);
+  const [waybillsLoading, setWaybillsLoading] = useState(false);
+  const [waybillFrom, setWaybillFrom] = useState("");
+  const [waybillTo, setWaybillTo] = useState("");
+  const [waybillPdfLoading, setWaybillPdfLoading] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -1643,6 +1649,21 @@ const Customers = () => {
   };
 
   useEffect(() => { load(); }, []);
+
+  useEffect(() => {
+    setWaybillFrom("");
+    setWaybillTo("");
+    if (!selected) { setCustWaybills([]); return; }
+    setWaybillsLoading(true);
+    Promise.all([
+      waybillsService.getByReceiverName(selected.name),
+      batchesService.getAll().catch(() => []),
+    ]).then(([wbs, batches]) => {
+      const batchMap = Object.fromEntries(batches.map(b => [b.id, b.batch_number]));
+      setCustWaybills(wbs.map(w => ({ ...w, batch_number: batchMap[w.batch_id] || null })));
+    }).catch(() => setCustWaybills([]))
+      .finally(() => setWaybillsLoading(false));
+  }, [selected?.id]);
 
   const filtered = customers.filter(c => {
     const q = search.toLowerCase();
@@ -1726,6 +1747,17 @@ const Customers = () => {
   };
   const statusColor = (s) => s === "completed" ? theme.green : s === "invoiced" ? theme.blue : s === "cancelled" ? theme.red : theme.accent;
 
+  const filteredWaybills = custWaybills.filter(w => {
+    if (waybillFrom && w.waybill_date < waybillFrom) return false;
+    if (waybillTo && w.waybill_date > waybillTo) return false;
+    return true;
+  });
+  const waybillSummary = {
+    trips: filteredWaybills.length,
+    loaded: filteredWaybills.reduce((s, w) => s + (w.quantity_loaded || 0), 0),
+    received: filteredWaybills.reduce((s, w) => s + (w.quantity_received || 0), 0),
+    damaged: filteredWaybills.reduce((s, w) => s + (w.quantity_damaged || 0), 0),
+  };
 
   return (
     <div>
@@ -1841,6 +1873,66 @@ const Customers = () => {
                     </tbody>
                   </table>
                 )}
+
+                {/* ── DELIVERY WAYBILLS ── */}
+                <div style={{ marginTop: "20px", paddingTop: "16px", borderTop: `1px solid ${theme.border}` }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
+                    <div style={styles.sectionTitle}>Delivery Waybills</div>
+                    <button style={{ ...styles.btn("primary"), padding: "6px 14px", fontSize: "12px" }} disabled={waybillPdfLoading || filteredWaybills.length === 0} onClick={async () => {
+                      setWaybillPdfLoading(true);
+                      try { await generateCustomerWaybillsPDF(selected, filteredWaybills, waybillFrom || null, waybillTo || null); }
+                      catch (e) { setAlert({ type: "error", msg: "PDF error: " + e.message }); }
+                      finally { setWaybillPdfLoading(false); }
+                    }}>{waybillPdfLoading ? "Generating…" : "Download PDF"}</button>
+                  </div>
+                  <div style={{ display: "flex", gap: "10px", marginBottom: "12px", alignItems: "flex-end", flexWrap: "wrap" }}>
+                    <div>
+                      <label style={styles.label}>From</label>
+                      <input style={{ ...styles.input, width: "130px" }} type="date" value={waybillFrom} onChange={e => setWaybillFrom(e.target.value)} />
+                    </div>
+                    <div>
+                      <label style={styles.label}>To</label>
+                      <input style={{ ...styles.input, width: "130px" }} type="date" value={waybillTo} onChange={e => setWaybillTo(e.target.value)} />
+                    </div>
+                    {(waybillFrom || waybillTo) && <button style={{ ...styles.btn("secondary"), padding: "8px 12px", fontSize: "12px", alignSelf: "flex-end" }} onClick={() => { setWaybillFrom(""); setWaybillTo(""); }}>Clear</button>}
+                  </div>
+                  {waybillsLoading ? <Spinner /> : filteredWaybills.length === 0 ? (
+                    <div style={{ padding: "20px", textAlign: "center", color: theme.textMuted, fontSize: "13px" }}>No waybills recorded for this customer{(waybillFrom || waybillTo) ? " in the selected period" : ""}.</div>
+                  ) : (
+                    <>
+                      <div style={{ overflowX: "auto" }}>
+                        <table style={{ ...styles.table, minWidth: "700px" }}>
+                          <thead>
+                            <tr>{["Waybill No", "Date", "Block Type", "Loaded", "Received", "Damaged", "Driver", "Truck", "Batch No"].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
+                          </thead>
+                          <tbody>
+                            {filteredWaybills.map(w => (
+                              <tr key={w.id}>
+                                <td style={styles.td}><span style={{ color: theme.accent, fontWeight: "600" }}>{w.waybill_number}</span></td>
+                                <td style={styles.td}>{w.waybill_date}</td>
+                                <td style={styles.td}><span style={styles.badge(theme.blue)}>{w.block_type}</span></td>
+                                <td style={styles.td}>{fmt(w.quantity_loaded)}</td>
+                                <td style={styles.td}><strong style={{ color: theme.green }}>{fmt(w.quantity_received)}</strong></td>
+                                <td style={styles.td}><span style={styles.badge((w.quantity_damaged || 0) > 0 ? theme.red : theme.textDim)}>{w.quantity_damaged || 0}</span></td>
+                                <td style={styles.td}>{w.driver?.full_name || "—"}</td>
+                                <td style={styles.td}>{w.truck_number || "—"}</td>
+                                <td style={styles.td}>{w.batch_number || "—"}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div style={{ display: "flex", gap: "10px", marginTop: "12px", flexWrap: "wrap" }}>
+                        {[["Total Trips", String(waybillSummary.trips), theme.blue], ["Total Loaded", fmt(waybillSummary.loaded) + " blocks", theme.accent], ["Total Received", fmt(waybillSummary.received) + " blocks", theme.green], ["Transit Damaged", fmt(waybillSummary.damaged) + " blocks", waybillSummary.damaged > 0 ? theme.red : theme.textMuted]].map(([label, val, color]) => (
+                          <div key={label} style={{ background: theme.surface, borderRadius: "8px", padding: "10px 14px", flex: 1, minWidth: "120px" }}>
+                            <div style={{ fontSize: "11px", color: theme.textMuted }}>{label}</div>
+                            <div style={{ fontSize: "16px", fontWeight: "700", color, marginTop: "3px" }}>{val}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
 
                 <div style={{ marginTop: "20px", paddingTop: "16px", borderTop: `1px solid ${theme.border}` }}>
                   <div style={{ ...styles.sectionTitle, marginBottom: "10px" }}>Download Statement</div>

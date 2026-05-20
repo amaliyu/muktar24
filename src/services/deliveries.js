@@ -49,6 +49,16 @@ export const waybillsService = {
     return data
   },
 
+  async getByReceiverName(name) {
+    const { data, error } = await supabase
+      .from('waybills')
+      .select('*, driver:driver_id(id, full_name)')
+      .eq('receiver_name', name)
+      .order('waybill_date', { ascending: false })
+    if (error) throw error
+    return data || []
+  },
+
   async getNextNumber() {
     const { data, error } = await supabase
       .from('waybills')
