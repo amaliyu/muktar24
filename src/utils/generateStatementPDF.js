@@ -8,22 +8,15 @@ function fmtDate(dateStr) {
   return `${d}-${months[parseInt(m, 10) - 1]}-${y}`;
 }
 
-function blockDesc(type) {
-  if (!type) return 'HOLLOW CONCRETE BLOCKS';
-  const t = type.toLowerCase();
-  if (t.includes('9'))         return '9 INCH HOLLOW CONCRETE BLOCKS';
-  if (t.includes('6'))         return '6 INCH HOLLOW CONCRETE BLOCKS';
-  if (t.includes('interlock')) return 'INTERLOCK BLOCKS';
-  return type.toUpperCase() + ' BLOCKS';
-}
-
-function buildRows(orders, fromDate, toDate) {
+function buildRows(orders, fromDate, toDate, productMap = {}) {
   const rows = [];
 
   for (const order of orders) {
-    const totalQty = (order.order_items || []).reduce((s, i) => s + i.quantity, 0);
-    const blockTypes = [...new Set((order.order_items || []).map(i => i.block_type))];
-    const description = blockTypes.map(blockDesc).join(' & ');
+    const items = order.order_items || [];
+    const totalQty = items.reduce((s, i) => s + i.quantity, 0);
+    const uniqueTypes = [...new Set(items.map(i => i.block_type).filter(Boolean))];
+    const description = uniqueTypes.map(t => t.toUpperCase()).join(' & ') || 'SUPPLY OF CONCRETE PRODUCTS';
+    const unitLabel = uniqueTypes.length === 1 && productMap[uniqueTypes[0]] ? productMap[uniqueTypes[0]] : '';
 
     for (const invoice of order.invoices || []) {
       const d = invoice.issued_date;
@@ -35,6 +28,7 @@ function buildRows(orders, fromDate, toDate) {
         type: 'debit',
         date: d,
         qty: totalQty,
+        unitLabel,
         description,
         ref: invoice.invoice_number || '',
         debit: Number(invoice.total_amount || 0),
@@ -55,6 +49,7 @@ function buildRows(orders, fromDate, toDate) {
           type: 'credit',
           date: d,
           qty: 0,
+          unitLabel: '',
           description: 'PAYMENT',
           ref: '',
           debit: 0,
@@ -82,8 +77,9 @@ function buildRows(orders, fromDate, toDate) {
 const N = (n) => `N${Number(n || 0).toLocaleString()}`;
 const qty = (n) => Number(n || 0).toLocaleString();
 
-export async function generateStatementPDF(customer, orders, fromDate, toDate) {
-  const rows = buildRows(orders, fromDate, toDate);
+export async function generateStatementPDF(customer, orders, fromDate, toDate, products = []) {
+  const productMap = Object.fromEntries(products.map(p => [p.name, p.unit]));
+  const rows = buildRows(orders, fromDate, toDate, productMap);
 
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const W  = doc.internal.pageSize.getWidth();
@@ -174,7 +170,7 @@ export async function generateStatementPDF(customer, orders, fromDate, toDate) {
   const tableBody = rows.length > 0
     ? rows.map(row => [
         fmtDate(row.date),
-        row.qty > 0 ? qty(row.qty) : '—',
+        row.qty > 0 ? (row.unitLabel ? `${qty(row.qty)} ${row.unitLabel}` : qty(row.qty)) : '—',
         row.description,
         row.ref || '—',
         row.debit  > 0 ? N(row.debit)  : '—',

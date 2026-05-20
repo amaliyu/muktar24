@@ -266,14 +266,16 @@ const Dashboard = () => {
         // show zeros on error
       }
       try {
-        const [lpos, scheds, pendReg, fg] = await Promise.all([
+        const [lpos, scheds, pendReg, fg, prods] = await Promise.all([
           lpoService.getPending(),
           schedulesService.getSubmitted(),
           pendingDeliveryService.getAll(),
           finishedGoodsService.getAll(),
+          productsService.getActive().catch(() => []),
         ]);
+        const productUnitMap = Object.fromEntries(prods.map(p => [p.name, p.unit]));
         setStats(s => ({ ...s, lpoQueue: lpos.length, scheduleQueue: scheds.length, pendingRegister: pendReg.length }));
-        setFinishedGoods(fg);
+        setFinishedGoods(fg.map(f => ({ ...f, unit: productUnitMap[f.block_type] || 'pieces' })));
       } catch { /* workflow tables may not exist yet */ } finally {
         setLoading(false);
       }
@@ -339,7 +341,7 @@ const Dashboard = () => {
                   <div key={fg.id} style={{ background: theme.surface, borderRadius: "8px", padding: "12px 18px", flex: 1, minWidth: "120px", textAlign: "center" }}>
                     <div style={{ fontSize: "11px", color: theme.textMuted, marginBottom: "4px" }}>{fg.block_type}</div>
                     <div style={{ fontSize: "24px", fontWeight: "700", color: theme.accent }}>{Number(fg.quantity_in_yard || 0).toLocaleString()}</div>
-                    <div style={{ fontSize: "11px", color: theme.textMuted }}>blocks</div>
+                    <div style={{ fontSize: "11px", color: theme.textMuted }}>{fg.unit || 'pieces'}</div>
                   </div>
                 ))}
               </div>
@@ -1711,8 +1713,11 @@ const Customers = () => {
   const handleGenerateStatement = async (customer) => {
     setStmtLoading(true);
     try {
-      const orders = await customersService.getStatement(customer.id);
-      await generateStatementPDF(customer, orders, stmtFrom || null, stmtTo || null);
+      const [orders, prods] = await Promise.all([
+        customersService.getStatement(customer.id),
+        productsService.getActive().catch(() => []),
+      ]);
+      await generateStatementPDF(customer, orders, stmtFrom || null, stmtTo || null, prods);
     } catch (e) {
       setAlert({ type: "error", msg: "Failed to generate statement. " + e.message });
     } finally {
@@ -3091,15 +3096,17 @@ const Products = () => {
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Category</label>
-              <select style={styles.input} value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}>
-                {CATEGORIES.map(c => <option key={c}>{c}</option>)}
-              </select>
+              <input list="product-categories" style={styles.input} value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} placeholder="Select or type…" />
+              <datalist id="product-categories">
+                {CATEGORIES.map(c => <option key={c} value={c} />)}
+              </datalist>
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Unit of Measure</label>
-              <select style={styles.input} value={form.unit} onChange={e => setForm({ ...form, unit: e.target.value })}>
-                {UNITS.map(u => <option key={u}>{u}</option>)}
-              </select>
+              <input list="product-units" style={styles.input} value={form.unit} onChange={e => setForm({ ...form, unit: e.target.value })} placeholder="Select or type…" />
+              <datalist id="product-units">
+                {UNITS.map(u => <option key={u} value={u} />)}
+              </datalist>
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Default Unit Price (₦)</label>
