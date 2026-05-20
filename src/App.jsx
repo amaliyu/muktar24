@@ -1651,8 +1651,6 @@ const Customers = () => {
   useEffect(() => { load(); }, []);
 
   useEffect(() => {
-    setWaybillFrom("");
-    setWaybillTo("");
     if (!selected) { setCustWaybills([]); return; }
     setWaybillsLoading(true);
     Promise.all([
