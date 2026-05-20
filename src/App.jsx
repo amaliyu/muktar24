@@ -3353,7 +3353,7 @@ const BookkeepingTab = () => {
               <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Customer Payments</div>
               {payments.map(p => (
                 <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: `1px solid ${theme.border}22`, fontSize: '12px' }}>
-                  <span style={{ color: theme.textMuted }}>{p.invoice?.order?.customer?.name || 'Customer'}{p.payment_method ? ` · ${p.payment_method}` : ''}</span>
+                  <span style={{ color: theme.textMuted }}>{p.invoice?.order?.customer?.name || 'Customer'}</span>
                   <span style={{ fontWeight: '600', color: theme.green }}>{naira(p.amount_paid)}</span>
                 </div>
               ))}

@@ -103,7 +103,7 @@ export const accountingService = {
   async getConfirmedPayments(from, to) {
     let q = supabase
       .from('payments')
-      .select('id, amount_paid, payment_date, payment_method, invoice:invoice_id(invoice_number, order:order_id(customer:customer_id(name)))')
+      .select('id, amount_paid, payment_date, invoice:invoice_id(invoice_number, order:order_id(customer:customer_id(name)))')
       .eq('status', 'confirmed')
       .order('payment_date', { ascending: false })
     if (from) q = q.gte('payment_date', from)
@@ -130,10 +130,10 @@ export const accountingService = {
 
   async getProductionTotals(from, to) {
     let q = supabase
-      .from('production_logs')
-      .select('block_type, quantity_produced, production_date')
-    if (from) q = q.gte('production_date', from)
-    if (to) q = q.lte('production_date', to)
+      .from('production_log')
+      .select('block_type, quantity_produced, date')
+    if (from) q = q.gte('date', from)
+    if (to) q = q.lte('date', to)
     const { data, error } = await q
     if (error) throw error
     return data || []
