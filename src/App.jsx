@@ -501,11 +501,17 @@ const Production = () => {
     }
   };
 
-  const handleDelete = async (id) => {
+  const handleDelete = async (record) => {
     try {
-      await productionService.deleteEntry(id);
-      setRecords(prev => prev.filter(r => r.id !== id));
-      setAlert({ type: "success", msg: "Entry deleted." });
+      // Reverse raw material stock movements first
+      try {
+        const ref = `PROD-${record.id.slice(0, 8)}`;
+        await inventoryService.reverseProductionMovements(ref);
+      } catch { /* inventory may not exist */ }
+      // Delete the production entry (also cascades damage_log + batch_production_links)
+      await productionService.deleteEntry(record.id);
+      setRecords(prev => prev.filter(r => r.id !== record.id));
+      setAlert({ type: "success", msg: "Production entry deleted and raw material stock restored." });
     } catch (e) {
       setAlert({ type: "error", msg: "Failed to delete. " + e.message });
     } finally {
@@ -520,7 +526,21 @@ const Production = () => {
 
   return (
     <div>
-      {confirmDelete && <ConfirmModal msg={`Delete production entry for ${confirmDelete.date}? This will also remove any linked damage records.`} onConfirm={() => handleDelete(confirmDelete.id)} onCancel={() => setConfirmDelete(null)} />}
+      {confirmDelete && <ConfirmModal
+        msg={<div>
+          <div style={{ fontWeight: "700", marginBottom: "8px" }}>Delete production entry for {confirmDelete.date}?</div>
+          <div style={{ fontSize: "12px", color: theme.textMuted, marginBottom: "10px" }}>This will:</div>
+          <ul style={{ fontSize: "12px", color: theme.textMuted, paddingLeft: "18px", lineHeight: "1.9", margin: 0 }}>
+            {(confirmDelete.cement_bags > 0) && <li>Restore <strong style={{ color: theme.text }}>{confirmDelete.cement_bags}</strong> bags of cement to inventory</li>}
+            {(confirmDelete.granite_dust_kg > 0) && <li>Restore <strong style={{ color: theme.text }}>{confirmDelete.granite_dust_kg} kg</strong> of granite dust to inventory</li>}
+            {(confirmDelete.diesel_litres > 0) && <li>Restore <strong style={{ color: theme.text }}>{confirmDelete.diesel_litres} L</strong> of diesel to inventory</li>}
+            {((confirmDelete.damaged?.production || 0) + (confirmDelete.damaged?.stacking || 0) > 0) && <li>Reverse <strong style={{ color: theme.red }}>{(confirmDelete.damaged?.production || 0) + (confirmDelete.damaged?.stacking || 0)}</strong> damage records</li>}
+          </ul>
+          <div style={{ fontSize: "11px", color: theme.red, marginTop: "10px" }}>This action cannot be undone.</div>
+        </div>}
+        onConfirm={() => handleDelete(confirmDelete)}
+        onCancel={() => setConfirmDelete(null)}
+      />}
       <div style={styles.header}>
         <div>
           <div style={styles.pageTitle}>Production Log</div>
@@ -1322,9 +1342,32 @@ const Waybills = () => {
       };
 
       if (editTarget) {
-        await waybillsService.update(editTarget.id, { ...waybillData, batch_id: form.batchId || null });
+        const oldLoaded = Number(editTarget.quantity_loaded) || 0;
+        const newLoaded = parseInt(form.quantityLoaded) || 0;
+        // Reverse old effects
+        try {
+          await finishedGoodsService.increase(editTarget.block_type, oldLoaded);
+          if (editTarget.batch_id) await batchesService.restoreStock(editTarget.batch_id, oldLoaded);
+          await productionService.deleteTransitDamage(editTarget.waybill_number);
+        } catch { /* non-blocking */ }
+        // Save updated waybill
+        await waybillsService.update(editTarget.id, { ...waybillData, batch_id: form.batchId || editTarget.batch_id || null });
+        // Apply new effects
+        try {
+          await finishedGoodsService.decrease(form.blockType, newLoaded);
+          if (form.batchId) await batchesService.reduceStock(form.batchId, newLoaded);
+          if (damaged > 0) {
+            await productionService.logDamage({ date: form.waybillDate, block_type: form.blockType, stage: "delivery", quantity_damaged: damaged, notes: `Transit damage on waybill ${editTarget.waybill_number}` });
+          }
+          if (editTarget.order_id) {
+            const pending = await pendingDeliveryService.getByOrder(editTarget.order_id);
+            for (const entry of pending) {
+              if (entry.block_type === form.blockType) await pendingDeliveryService.resyncFromWaybills(entry);
+            }
+          }
+        } catch { /* non-blocking */ }
         await load();
-        setAlert({ type: "success", msg: `Waybill ${editTarget.waybill_number} updated.` });
+        setAlert({ type: "success", msg: `Waybill ${editTarget.waybill_number} updated and stock adjusted.` });
       } else {
         const nextNum = await waybillsService.getNextNumber();
         const waybillNumber = `APC-WB-${String(nextNum).padStart(3, "0")}`;
@@ -1361,11 +1404,27 @@ const Waybills = () => {
     }
   };
 
-  const handleDeleteWaybill = async (id) => {
+  const handleDeleteWaybill = async (waybill) => {
     try {
-      await waybillsService.delete(id);
-      setWaybills(prev => prev.filter(w => w.id !== id));
-      setAlert({ type: "success", msg: "Waybill deleted." });
+      // Step 1 — Restore finished goods stock
+      try { await finishedGoodsService.increase(waybill.block_type, waybill.quantity_loaded); } catch {}
+      // Step 2 — Restore batch stock
+      try { if (waybill.batch_id) await batchesService.restoreStock(waybill.batch_id, waybill.quantity_loaded); } catch {}
+      // Step 3 — Reverse transit damage log entry
+      try { await productionService.deleteTransitDamage(waybill.waybill_number); } catch {}
+      // Step 4 — Delete the waybill record
+      await waybillsService.delete(waybill.id);
+      // Step 5 — Resync pending delivery register (waybill is now gone so recount is accurate)
+      try {
+        if (waybill.order_id) {
+          const pending = await pendingDeliveryService.getByOrder(waybill.order_id);
+          for (const entry of pending) {
+            if (entry.block_type === waybill.block_type) await pendingDeliveryService.resyncFromWaybills(entry);
+          }
+        }
+      } catch {}
+      await load();
+      setAlert({ type: "success", msg: `Waybill ${waybill.waybill_number} deleted — finished goods, batch and pending delivery register all reversed.` });
     } catch (e) {
       setAlert({ type: "error", msg: "Failed to delete waybill. " + e.message });
     } finally {
@@ -1379,7 +1438,21 @@ const Waybills = () => {
 
   return (
     <div>
-      {confirmDelete && <ConfirmModal msg={`Delete waybill ${confirmDelete.waybill_number}? This cannot be undone.`} onConfirm={() => handleDeleteWaybill(confirmDelete.id)} onCancel={() => setConfirmDelete(null)} />}
+      {confirmDelete && <ConfirmModal
+        msg={<div>
+          <div style={{ fontWeight: "700", marginBottom: "8px" }}>Delete Waybill {confirmDelete.waybill_number}?</div>
+          <div style={{ fontSize: "12px", color: theme.textMuted, marginBottom: "10px" }}>This will:</div>
+          <ul style={{ fontSize: "12px", color: theme.textMuted, paddingLeft: "18px", lineHeight: "1.9", margin: 0 }}>
+            <li>Restore <strong style={{ color: theme.text }}>{Number(confirmDelete.quantity_loaded).toLocaleString()} {confirmDelete.block_type}</strong> blocks to finished goods stock</li>
+            {confirmDelete.batch_id && <li>Restore <strong style={{ color: theme.text }}>{Number(confirmDelete.quantity_loaded).toLocaleString()}</strong> blocks to batch <strong style={{ color: theme.text }}>{batchMap[confirmDelete.batch_id] || "—"}</strong></li>}
+            <li>Remove <strong style={{ color: theme.text }}>{Number(confirmDelete.quantity_received).toLocaleString()}</strong> blocks from {confirmDelete.receiver_name || "customer"}'s delivered count</li>
+            {(confirmDelete.quantity_damaged > 0) && <li>Reverse <strong style={{ color: theme.red }}>{confirmDelete.quantity_damaged}</strong> transit damage record</li>}
+          </ul>
+          <div style={{ fontSize: "11px", color: theme.red, marginTop: "10px" }}>This action cannot be undone.</div>
+        </div>}
+        onConfirm={() => handleDeleteWaybill(confirmDelete)}
+        onCancel={() => setConfirmDelete(null)}
+      />}
       <div style={styles.header}>
         <div>
           <div style={styles.pageTitle}>Waybill Records</div>

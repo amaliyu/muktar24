@@ -48,6 +48,12 @@ export const batchesService = {
     return data
   },
 
+  async restoreStock(id, qty) {
+    const { data } = await supabase.from('batches').select('qty_remaining').eq('id', id).single()
+    const newQty = (Number(data?.qty_remaining) || 0) + qty
+    await supabase.from('batches').update({ qty_remaining: newQty, status: 'active' }).eq('id', id)
+  },
+
   async reduceStock(id, qty) {
     const { data, error } = await supabase
       .from('batches')
