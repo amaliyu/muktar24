@@ -3352,9 +3352,27 @@ const PendingDeliveryRegister = () => {
     finally { setSaving(false); }
   };
 
+  const handleMarkDone = async (id) => {
+    setSaving(true);
+    try {
+      await pendingDeliveryService.markDone(id);
+      setAlert({ type: "success", msg: "Entry marked as completed and removed from register." });
+      await load();
+    } catch (e) { setAlert({ type: "error", msg: "Failed: " + e.message }); }
+    finally { setSaving(false); }
+  };
+
   const daysSince = (iso) => Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
   const statusColor = (s) => s === "completed" ? theme.green : s === "partially_delivered" ? theme.blue : s === "scheduled" ? theme.accent : theme.textMuted;
   const totalRemaining = entries.reduce((s, e) => s + (Number(e.remaining_qty) || 0), 0);
+
+  // Group entries by customer_id
+  const grouped = entries.reduce((acc, e) => {
+    const key = e.customer_id;
+    if (!acc[key]) acc[key] = { customer: e.customer, entries: [] };
+    acc[key].entries.push(e);
+    return acc;
+  }, {});
 
   return (
     <div>
@@ -3366,7 +3384,7 @@ const PendingDeliveryRegister = () => {
       </div>
       {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
       <div style={styles.grid(3)}>
-        <StatCard label="Customers Waiting" value={entries.length} sub="Non-completed entries" accent={theme.blue} />
+        <StatCard label="Customers Waiting" value={Object.keys(grouped).length} sub="Unique customers" accent={theme.blue} />
         <StatCard label="Total Blocks Remaining" value={fmt(totalRemaining)} sub="Still to be delivered" accent={theme.accent} />
         <StatCard label="Longest Wait" value={entries.length > 0 ? `${Math.max(...entries.map(e => daysSince(e.added_at)))} days` : "—"} sub="Days in register" accent={theme.red} />
       </div>
@@ -3376,57 +3394,76 @@ const PendingDeliveryRegister = () => {
         <div style={styles.card}>
           <table style={styles.table}>
             <thead>
-              <tr>{["Customer", "Location", "Block Type", "Total Qty", "Delivered", "Remaining", "Days Waiting", "Added", "Status", ""].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
+              <tr>{["Customer / Block Type", "Location", "Total Qty", "Delivered", "Remaining", "Days Waiting", "Added", "Status", "Actions"].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
             </thead>
             <tbody>
-              {entries.map(e => {
-                const days = daysSince(e.added_at);
-                const pct = e.total_qty > 0 ? Math.round((e.delivered_qty / e.total_qty) * 100) : 0;
-                const isEditing = editingId === e.id;
-                return (
-                  <tr key={e.id} style={{ background: days > 14 ? "rgba(240,107,107,0.04)" : "transparent" }}>
-                    <td style={styles.td}><strong>{e.customer?.name || "—"}</strong>{e.customer?.company_name && <div style={{ fontSize: "11px", color: theme.textMuted }}>{e.customer.company_name}</div>}</td>
-                    <td style={styles.td}>{e.customer?.location || "—"}</td>
-                    <td style={styles.td}><span style={styles.badge(theme.blue)}>{e.block_type}</span></td>
-                    <td style={styles.td}>{Number(e.total_qty).toLocaleString()}</td>
-                    <td style={styles.td}>
-                      {isEditing ? (
-                        <input
-                          type="number"
-                          value={editDelivered}
-                          onChange={ev => setEditDelivered(ev.target.value)}
-                          style={{ ...styles.input, width: "80px", padding: "4px 6px", fontSize: "12px" }}
-                          min="0"
-                          max={e.total_qty}
-                          autoFocus
-                        />
-                      ) : (
-                        <span style={{ color: theme.green }}>{Number(e.delivered_qty).toLocaleString()}</span>
-                      )}
-                    </td>
-                    <td style={styles.td}><strong style={{ color: Number(e.remaining_qty) > 0 ? theme.accent : theme.green }}>{Number(e.remaining_qty).toLocaleString()}</strong></td>
-                    <td style={styles.td}><span style={{ color: days > 14 ? theme.red : theme.textMuted, fontWeight: days > 14 ? "700" : "400" }}>{days}d</span></td>
-                    <td style={styles.td}>{e.added_at?.split("T")[0]}</td>
-                    <td style={styles.td}>
-                      <div>
-                        <span style={styles.badge(statusColor(e.status))}>{e.status?.replace(/_/g, " ")}</span>
-                        <div style={{ ...styles.progressBar(), marginTop: "4px" }}><div style={styles.progressFill(pct, theme.green)} /></div>
-                        <div style={{ fontSize: "10px", color: theme.textMuted, marginTop: "2px" }}>{pct}%</div>
-                      </div>
-                    </td>
-                    <td style={styles.td}>
-                      {isEditing ? (
-                        <div style={{ display: "flex", gap: "4px" }}>
-                          <button style={{ ...styles.btn("primary"), padding: "4px 8px", fontSize: "11px" }} onClick={() => saveDelivered(e.id)} disabled={saving}>Save</button>
-                          <button style={{ ...styles.btn("secondary"), padding: "4px 8px", fontSize: "11px" }} onClick={cancelEdit}>Cancel</button>
-                        </div>
-                      ) : (
-                        <button style={{ ...styles.btn("secondary"), padding: "4px 8px", fontSize: "11px" }} onClick={() => startEdit(e)}>Edit Delivered</button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
+              {Object.values(grouped).map(({ customer, entries: custEntries }) => (
+                <>
+                  {custEntries.length > 1 && (
+                    <tr key={`hdr-${customer?.id}`} style={{ background: "rgba(255,255,255,0.04)" }}>
+                      <td colSpan={9} style={{ ...styles.td, fontWeight: "700", fontSize: "13px", color: theme.accent, paddingTop: "10px", paddingBottom: "4px" }}>
+                        {customer?.name || "—"}{customer?.company_name ? ` — ${customer.company_name}` : ""}
+                        <span style={{ fontSize: "11px", color: theme.textMuted, fontWeight: "400", marginLeft: "8px" }}>
+                          ({custEntries.length} pending orders)
+                        </span>
+                      </td>
+                    </tr>
+                  )}
+                  {custEntries.map(e => {
+                    const days = daysSince(e.added_at);
+                    const pct = e.total_qty > 0 ? Math.round((e.delivered_qty / e.total_qty) * 100) : 0;
+                    const isEditing = editingId === e.id;
+                    const indent = custEntries.length > 1;
+                    return (
+                      <tr key={e.id} style={{ background: days > 14 ? "rgba(240,107,107,0.04)" : "transparent" }}>
+                        <td style={styles.td}>
+                          <div style={{ paddingLeft: indent ? "16px" : "0" }}>
+                            {!indent && <strong>{e.customer?.name || "—"}</strong>}
+                            {indent && <span style={{ color: theme.textMuted, fontSize: "11px" }}>↳ </span>}
+                            <span style={styles.badge(theme.blue)}>{e.block_type}</span>
+                            {indent && e.customer?.company_name && <div style={{ fontSize: "11px", color: theme.textMuted }}>{e.customer.company_name}</div>}
+                            {!indent && e.customer?.company_name && <div style={{ fontSize: "11px", color: theme.textMuted }}>{e.customer.company_name}</div>}
+                          </div>
+                        </td>
+                        <td style={styles.td}>{e.customer?.location || "—"}</td>
+                        <td style={styles.td}>{Number(e.total_qty).toLocaleString()}</td>
+                        <td style={styles.td}>
+                          {isEditing ? (
+                            <input type="number" value={editDelivered} onChange={ev => setEditDelivered(ev.target.value)}
+                              style={{ ...styles.input, width: "80px", padding: "4px 6px", fontSize: "12px" }}
+                              min="0" max={e.total_qty} autoFocus />
+                          ) : (
+                            <span style={{ color: theme.green }}>{Number(e.delivered_qty).toLocaleString()}</span>
+                          )}
+                        </td>
+                        <td style={styles.td}><strong style={{ color: Number(e.remaining_qty) > 0 ? theme.accent : theme.green }}>{Number(e.remaining_qty).toLocaleString()}</strong></td>
+                        <td style={styles.td}><span style={{ color: days > 14 ? theme.red : theme.textMuted, fontWeight: days > 14 ? "700" : "400" }}>{days}d</span></td>
+                        <td style={styles.td}>{e.added_at?.split("T")[0]}</td>
+                        <td style={styles.td}>
+                          <div>
+                            <span style={styles.badge(statusColor(e.status))}>{e.status?.replace(/_/g, " ")}</span>
+                            <div style={{ ...styles.progressBar(), marginTop: "4px" }}><div style={styles.progressFill(pct, theme.green)} /></div>
+                            <div style={{ fontSize: "10px", color: theme.textMuted, marginTop: "2px" }}>{pct}%</div>
+                          </div>
+                        </td>
+                        <td style={styles.td}>
+                          {isEditing ? (
+                            <div style={{ display: "flex", gap: "4px" }}>
+                              <button style={{ ...styles.btn("primary"), padding: "4px 8px", fontSize: "11px" }} onClick={() => saveDelivered(e.id)} disabled={saving}>Save</button>
+                              <button style={{ ...styles.btn("secondary"), padding: "4px 8px", fontSize: "11px" }} onClick={cancelEdit}>Cancel</button>
+                            </div>
+                          ) : (
+                            <div style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>
+                              <button style={{ ...styles.btn("secondary"), padding: "4px 8px", fontSize: "11px" }} onClick={() => startEdit(e)}>Edit Delivered</button>
+                              <button style={{ ...styles.btn("danger"), padding: "4px 8px", fontSize: "11px" }} onClick={() => handleMarkDone(e.id)} disabled={saving}>Mark Done</button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </>
+              ))}
             </tbody>
           </table>
         </div>
