@@ -28,6 +28,8 @@ import { generatePaymentReceiptPDF } from './utils/generatePaymentReceiptPDF'
 import { parseFile, autoMapColumns, mapRowsToTransactions, autoMatchTransactions, detectCategory, extractCustomerFromDesc } from './utils/parseBankStatement';
 import VehicleRegistry from './components/VehicleRegistry'
 import { vehiclesService, fuelLogService } from './services/vehicles'
+import SupplierRegistry from './components/SupplierRegistry'
+import { suppliersService, supplierTransactionsService } from './services/suppliers'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 
@@ -217,7 +219,7 @@ const ConfirmModal = ({ msg, onConfirm, onCancel }) => (
 );
 
 const Icon = ({ name, size = 16 }) => {
-  const icons = { dashboard: "⊞", production: "🏭", orders: "📋", staff: "👥", waybill: "📄", reports: "📊", inventory: "📦", batches: "🗂", pending: "⏳", schedule: "📅", lpo: "📝", approve: "✓", settings: "⚙", products: "🧱", truck: "🚛", logout: "→" };
+  const icons = { dashboard: "⊞", production: "🏭", orders: "📋", staff: "👥", waybill: "📄", reports: "📊", inventory: "📦", batches: "🗂", pending: "⏳", schedule: "📅", lpo: "📝", approve: "✓", settings: "⚙", products: "🧱", truck: "🚛", supplier: "🏢", logout: "→" };
   return <span style={{ fontSize: size }}>{icons[name] || "•"}</span>;
 };
 
@@ -2240,6 +2242,56 @@ const Customers = () => {
 const Reports = () => {
   const [fleetReport, setFleetReport] = useState(null);
   const [fleetLoading, setFleetLoading] = useState(false);
+  const [supplierReport, setSupplierReport] = useState(null);
+  const [supplierReportLoading, setSupplierReportLoading] = useState(false);
+  const [supRptFrom, setSupRptFrom] = useState('');
+  const [supRptTo, setSupRptTo] = useState('');
+
+  const generateSupplierReport = async () => {
+    setSupplierReportLoading(true);
+    try {
+      const [suppliers, allTxns] = await Promise.all([
+        suppliersService.getAll(),
+        (async () => {
+          let q = supabase.from('supplier_transactions').select('supplier_id, transaction_type, amount, transaction_date');
+          if (supRptFrom) q = q.gte('transaction_date', supRptFrom);
+          if (supRptTo) q = q.lte('transaction_date', supRptTo);
+          const { data } = await q;
+          return data || [];
+        })(),
+      ]);
+      const rows = suppliers.map(s => {
+        const txns = allTxns.filter(t => t.supplier_id === s.id);
+        const purchased = txns.filter(t => t.transaction_type === 'purchase').reduce((sum, t) => sum + Number(t.amount), 0);
+        const paid = txns.filter(t => t.transaction_type === 'payment').reduce((sum, t) => sum + Number(t.amount), 0);
+        return { id: s.id, company: s.company_name, number: s.supplier_number, rating: s.rating || 0, purchased, paid, outstanding: purchased - paid };
+      }).sort((a, b) => b.outstanding - a.outstanding);
+      setSupplierReport(rows);
+    } catch (e) { alert('Could not load supplier data: ' + e.message); }
+    finally { setSupplierReportLoading(false); }
+  };
+
+  const downloadSupplierReportPDF = () => {
+    if (!supplierReport) return;
+    const doc = new jsPDF();
+    doc.setFontSize(16); doc.setFont(undefined, 'bold');
+    doc.text('Supplier Performance Report', 14, 18);
+    doc.setFontSize(10); doc.setFont(undefined, 'normal');
+    doc.text(`Generated: ${new Date().toLocaleDateString('en-NG')}${supRptFrom ? `   Period: ${supRptFrom} → ${supRptTo || 'present'}` : ''}`, 14, 26);
+    autoTable(doc, {
+      startY: 32,
+      head: [['Supplier', 'Number', 'Total Purchased', 'Total Paid', 'Outstanding', 'Rating']],
+      body: supplierReport.map(r => [r.company, r.number, `₦${r.purchased.toLocaleString()}`, `₦${r.paid.toLocaleString()}`, `₦${Math.max(0, r.outstanding).toLocaleString()}`, '★'.repeat(r.rating)]),
+      styles: { fontSize: 9 },
+      headStyles: { fillColor: [245, 166, 35], textColor: 0 },
+      didParseCell: (data) => {
+        if (data.section === 'body' && data.column.index === 4) {
+          if (supplierReport[data.row.index]?.outstanding > 0) data.cell.styles.textColor = [240, 107, 107];
+        }
+      },
+    });
+    doc.save(`Supplier-Report-${new Date().toISOString().split('T')[0]}.pdf`);
+  };
 
   const generateFleetDamageReport = async () => {
     setFleetLoading(true);
@@ -2353,6 +2405,36 @@ const Reports = () => {
             </div>
           )}
         </div>
+
+        {/* Supplier Performance Report — live */}
+        <div style={{ ...styles.card, borderTop: `3px solid ${theme.blue}`, gridColumn: "span 2" }}>
+          <div style={{ fontSize: "24px", marginBottom: "10px" }}>🏢</div>
+          <div style={{ fontWeight: "700", fontSize: "14px", marginBottom: "6px" }}>Supplier Performance Report</div>
+          <div style={{ fontSize: "12px", color: theme.textMuted, marginBottom: "16px" }}>All suppliers ranked by outstanding balance. Highlights unpaid balances in red. Filter by date range.</div>
+          <div style={{ ...styles.row, marginBottom: "12px", flexWrap: "wrap" }}>
+            <div><label style={{ ...styles.label, display: "inline", marginRight: "6px" }}>From</label><input style={{ ...styles.input, width: "140px" }} type="date" value={supRptFrom} onChange={e => setSupRptFrom(e.target.value)} /></div>
+            <div><label style={{ ...styles.label, display: "inline", marginRight: "6px" }}>To</label><input style={{ ...styles.input, width: "140px" }} type="date" value={supRptTo} onChange={e => setSupRptTo(e.target.value)} /></div>
+            <button style={styles.btn("primary")} onClick={generateSupplierReport} disabled={supplierReportLoading}>{supplierReportLoading ? "Loading…" : "Generate Report"}</button>
+            {supplierReport && <button style={styles.btn("secondary")} onClick={downloadSupplierReportPDF}>Download PDF</button>}
+          </div>
+          {supplierReport && (
+            <table style={styles.table}>
+              <thead><tr>{["Supplier", "Number", "Total Purchased", "Total Paid", "Outstanding", "Rating"].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
+              <tbody>
+                {supplierReport.map((r, i) => (
+                  <tr key={i}>
+                    <td style={styles.td}><span style={{ fontWeight: "600" }}>{r.company}</span></td>
+                    <td style={styles.td}>{r.number}</td>
+                    <td style={styles.td}>{naira(r.purchased)}</td>
+                    <td style={styles.td}><span style={{ color: theme.green }}>{naira(r.paid)}</span></td>
+                    <td style={styles.td}><strong style={{ color: r.outstanding > 0 ? theme.red : theme.green }}>{naira(Math.max(0, r.outstanding))}{r.outstanding > 0 ? " ⚠" : ""}</strong></td>
+                    <td style={styles.td}>{"★".repeat(r.rating)}{"☆".repeat(5 - r.rating)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -2367,6 +2449,7 @@ const Inventory = ({ onLowStockChange }) => {
   const [items, setItems] = useState([]);
   const [movements, setMovements] = useState([]);
   const [staff, setStaff] = useState([]);
+  const [suppliersList, setSuppliersList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [alert, setAlert] = useState(null);
@@ -2382,7 +2465,7 @@ const Inventory = ({ onLowStockChange }) => {
 
   const today = new Date().toISOString().split("T")[0];
   const emptyItem = { name: "", unit: "bags", current_stock: "", reorder_level: "", unit_cost: "", supplier: "", date_added: today };
-  const emptyIn  = { itemId: "", quantity: "", unitCost: "", supplier: "", staffName: "", date: today, notes: "" };
+  const emptyIn  = { itemId: "", quantity: "", unitCost: "", supplierId: "", supplier: "", staffName: "", date: today, notes: "" };
   const emptyOut = { itemId: "", quantity: "", issuedTo: "Production", staffName: "", reference: "", date: today, notes: "" };
 
   const [itemForm, setItemForm]   = useState(emptyItem);
@@ -2392,9 +2475,10 @@ const Inventory = ({ onLowStockChange }) => {
   const load = async () => {
     setLoading(true);
     try {
-      const [its, s] = await Promise.all([inventoryService.getAllItems(), staffService.getActive()]);
+      const [its, s, sups] = await Promise.all([inventoryService.getAllItems(), staffService.getActive(), suppliersService.getActive().catch(() => [])]);
       setItems(its);
       setStaff(s);
+      setSuppliersList(sups);
       if (onLowStockChange) onLowStockChange(its.filter(i => Number(i.current_stock) <= Number(i.reorder_level)).length);
     } catch (e) {
       setAlert({ type: "error", msg: "Could not load inventory: " + e.message });
@@ -2465,11 +2549,21 @@ const Inventory = ({ onLowStockChange }) => {
     if (!inForm.itemId || !inForm.quantity || !inForm.date) return setAlert({ type: "error", msg: "Item, quantity, and date are required." });
     setSaving(true);
     try {
-      await inventoryService.stockIn({ itemId: inForm.itemId, quantity: Number(inForm.quantity), unitCost: Number(inForm.unitCost) || 0, supplier: inForm.supplier, staffName: inForm.staffName, date: inForm.date, notes: inForm.notes });
+      const supplierName = inForm.supplierId ? (suppliersList.find(s => s.id === inForm.supplierId)?.company_name || inForm.supplier) : inForm.supplier;
+      const movement = await inventoryService.stockIn({ itemId: inForm.itemId, quantity: Number(inForm.quantity), unitCost: Number(inForm.unitCost) || 0, supplier: supplierName, staffName: inForm.staffName, date: inForm.date, notes: inForm.notes });
+      if (inForm.supplierId && Number(inForm.quantity) > 0) {
+        const totalCost = Number(inForm.quantity) * (Number(inForm.unitCost) || 0);
+        if (totalCost > 0) {
+          const item = items.find(i => i.id === inForm.itemId);
+          try {
+            await supplierTransactionsService.create({ supplier_id: inForm.supplierId, transaction_date: inForm.date, transaction_type: 'purchase', amount: totalCost, description: `Stock in: ${item?.name || 'item'} × ${inForm.quantity}`, linked_stock_movement_id: movement?.id || null });
+          } catch { /* non-blocking */ }
+        }
+      }
       await load();
       if (tab === "movements") await loadMovements();
       setInForm(emptyIn);
-      setAlert({ type: "success", msg: "Stock received and inventory updated!" });
+      setAlert({ type: "success", msg: `Stock received${inForm.supplierId ? ' and supplier transaction recorded.' : '!'}` });
     } catch (e) {
       setAlert({ type: "error", msg: "Failed to record stock in. " + e.message });
     } finally {
@@ -2715,8 +2809,18 @@ const Inventory = ({ onLowStockChange }) => {
               <input style={{ ...styles.input, background: "transparent", color: theme.accent, fontWeight: "700" }} readOnly value={inForm.quantity && inForm.unitCost ? `₦${Math.round(Number(inForm.quantity) * Number(inForm.unitCost)).toLocaleString()}` : "—"} />
             </div>
             <div style={styles.formGroup}>
-              <label style={styles.label}>Supplier Name</label>
-              <input style={styles.input} placeholder="Optional" value={inForm.supplier} onChange={e => setInForm({ ...inForm, supplier: e.target.value })} />
+              <label style={styles.label}>Supplier</label>
+              {suppliersList.length > 0 ? (
+                <select style={styles.input} value={inForm.supplierId} onChange={e => {
+                  const sup = suppliersList.find(s => s.id === e.target.value)
+                  setInForm({ ...inForm, supplierId: e.target.value, supplier: sup?.company_name || '' })
+                }}>
+                  <option value="">— Select supplier (optional) —</option>
+                  {suppliersList.map(s => <option key={s.id} value={s.id}>{s.company_name}</option>)}
+                </select>
+              ) : (
+                <input style={styles.input} placeholder="Supplier name (optional)" value={inForm.supplier} onChange={e => setInForm({ ...inForm, supplier: e.target.value })} />
+              )}
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Received By</label>
@@ -5853,7 +5957,10 @@ const navItems = [
   ]},
   { section: "Analytics", items: [{ id: "reports", label: "Reports", icon: "reports" }] },
   { section: "Finance", items: [{ id: "accounting", label: "Accounting", icon: "orders" }] },
-  { section: "Settings", items: [{ id: "products", label: "Products", icon: "products" }] },
+  { section: "Settings", items: [
+    { id: "products", label: "Products", icon: "products" },
+    { id: "suppliers", label: "Suppliers", icon: "supplier" },
+  ]},
 ];
 
 // ── APP ───────────────────────────────────────────────────────
@@ -5879,6 +5986,7 @@ export default function App() {
     schedule_approvals: <ScheduleApprovals />,
     reports: <Reports />,
     products: <Products />,
+    suppliers: <SupplierRegistry />,
     accounting: <Accounting />,
   };
 
