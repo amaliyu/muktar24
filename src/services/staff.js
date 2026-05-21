@@ -4,7 +4,7 @@ export const staffService = {
   async getAll() {
     const { data, error } = await supabase
       .from('staff')
-      .select('*')
+      .select('*, role:role_id(id, role_name, department)')
       .order('full_name')
     if (error) throw error
     return data
@@ -13,7 +13,7 @@ export const staffService = {
   async getActive() {
     const { data, error } = await supabase
       .from('staff')
-      .select('*')
+      .select('*, role:role_id(id, role_name, department)')
       .eq('is_active', true)
       .order('full_name')
     if (error) throw error
