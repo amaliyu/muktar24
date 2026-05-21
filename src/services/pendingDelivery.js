@@ -71,6 +71,14 @@ export const pendingDeliveryService = {
     return data
   },
 
+  async markDone(id) {
+    const { error } = await supabase
+      .from('pending_delivery_register')
+      .update({ status: 'completed', remaining_qty: 0 })
+      .eq('id', id);
+    if (error) throw error;
+  },
+
   async resyncFromWaybills(entry) {
     // Recompute delivered_qty from actual waybills linked to this order
     const waybills = await waybillsService.getByOrder(entry.order_id)

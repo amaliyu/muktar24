@@ -1897,6 +1897,7 @@ const Waybills = () => {
   const handleSave = async () => {
     if (!editTarget && !selectedOrderId) return setAlert({ type: "error", msg: "Select a customer with an active invoice before recording a waybill." });
     if (!form.waybillDate || !form.quantityLoaded) return setAlert({ type: "error", msg: "Date and quantity loaded are required." });
+    if (!editTarget && !form.batchId) return setAlert({ type: "error", msg: "Batch selection is required before recording a waybill." });
     setSaving(true);
     setAlert(null);
     try {
@@ -2092,7 +2093,7 @@ const Waybills = () => {
                     <div style={{ display: "flex", gap: "6px" }}>
                       <button style={{ ...styles.btn("secondary"), padding: "4px 10px", fontSize: "11px" }} onClick={() => {
                         const driver = staff.find(s => s.id === w.driver_id);
-                        generateWaybillPDF({ waybill_number: w.waybill_number, date: w.waybill_date, customer_name: w.receiver_name, customer_location: "", block_type: w.block_type, quantity_loaded: w.quantity_loaded, batch_number: w.batch_id || "", driver_name: driver?.full_name || "", truck_number: w.truck_number || "", notes: w.notes || "" });
+                        generateWaybillPDF({ waybill_number: w.waybill_number, date: w.waybill_date, customer_name: w.receiver_name, customer_location: "", block_type: w.block_type, quantity_loaded: w.quantity_loaded, batch_number: w.batch?.batch_number || "", driver_name: driver?.full_name || "", truck_number: w.truck_number || "", notes: w.notes || "" });
                       }}>PDF</button>
                       <button style={{ ...styles.btn("secondary"), padding: "4px 10px", fontSize: "11px" }} onClick={() => startEditWaybill(w)}>Edit</button>
                       <button style={{ ...styles.btn("danger"), padding: "4px 10px", fontSize: "11px" }} onClick={() => setConfirmDelete(w)}>Delete</button>
@@ -2385,12 +2386,12 @@ const Customers = () => {
   const handleGenerateStatement = async (customer) => {
     setStmtLoading(true);
     try {
-      const [orders, prods] = await Promise.all([
+      const [stmtData, prods] = await Promise.all([
         customersService.getStatement(customer.id, stmtSiteId || null),
         productsService.getActive().catch(() => []),
       ]);
       const site = stmtSiteId ? sites.find(s => s.id === stmtSiteId) : null;
-      await generateStatementPDF(customer, orders, stmtFrom || null, stmtTo || null, prods, site);
+      await generateStatementPDF(customer, stmtData.orders, stmtData.waybills, stmtFrom || null, stmtTo || null, prods, site);
     } catch (e) {
       setAlert({ type: "error", msg: "Failed to generate statement. " + e.message });
     } finally {

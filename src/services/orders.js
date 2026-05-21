@@ -147,9 +147,23 @@ export const customersService = {
       .eq('customer_id', customerId)
       .order('created_at', { ascending: true });
     if (siteId) q = q.eq('site_id', siteId);
-    const { data, error } = await q;
+    const { data: orders, error } = await q;
     if (error) throw error;
-    return data || [];
+
+    const { data: cust } = await supabase
+      .from('customers').select('name').eq('id', customerId).single();
+
+    let waybills = [];
+    if (cust?.name) {
+      const { data: wbs } = await supabase
+        .from('waybills')
+        .select('*')
+        .eq('receiver_name', cust.name)
+        .order('waybill_date', { ascending: true });
+      waybills = wbs || [];
+    }
+
+    return { orders: orders || [], waybills };
   },
 }
 

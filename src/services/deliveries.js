@@ -32,7 +32,8 @@ export const waybillsService = {
       .from('waybills')
       .select(`
         *,
-        driver:driver_id(id, full_name)
+        driver:driver_id(id, full_name),
+        batch:batch_id(id, batch_number)
       `)
       .order('waybill_date', { ascending: false })
     if (error) throw error

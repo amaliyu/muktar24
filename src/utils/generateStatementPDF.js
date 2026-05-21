@@ -8,35 +8,48 @@ function fmtDate(dateStr) {
   return `${d}-${months[parseInt(m, 10) - 1]}-${y}`;
 }
 
-function buildRows(orders, fromDate, toDate, productMap = {}) {
+function buildRows(orders, waybills, fromDate, toDate, productMap = {}) {
+  // Build unit price map: block_type → unit_price from order items
+  const unitPriceMap = {};
+  for (const order of orders) {
+    for (const item of (order.order_items || [])) {
+      if (item.block_type && item.unit_price) {
+        unitPriceMap[item.block_type] = Number(item.unit_price);
+      }
+    }
+  }
+
   const rows = [];
 
+  // Debit rows: one per waybill delivery trip
+  for (const wb of waybills) {
+    const d = wb.waybill_date;
+    if (!d) continue;
+    if (fromDate && d < fromDate) continue;
+    if (toDate   && d > toDate)   continue;
+
+    const qty = Number(wb.quantity_received || 0);
+    if (qty <= 0) continue;
+
+    const blockType = wb.block_type || '';
+    const unitPrice = unitPriceMap[blockType] || 0;
+    const unitLabel = productMap[blockType] || '';
+
+    rows.push({
+      type: 'debit',
+      date: d,
+      qty,
+      unitLabel,
+      description: blockType ? `${blockType.toUpperCase()} BLOCKS DELIVERY` : 'SUPPLY OF CONCRETE PRODUCTS',
+      ref: wb.waybill_number || '',
+      debit: qty * unitPrice,
+      credit: 0,
+      balance: 0,
+    });
+  }
+
+  // Credit rows: from confirmed payments on invoices
   for (const order of orders) {
-    const items = order.order_items || [];
-    const totalQty = items.reduce((s, i) => s + i.quantity, 0);
-    const uniqueTypes = [...new Set(items.map(i => i.block_type).filter(Boolean))];
-    const description = uniqueTypes.map(t => t.toUpperCase()).join(' & ') || 'SUPPLY OF CONCRETE PRODUCTS';
-    const unitLabel = uniqueTypes.length === 1 && productMap[uniqueTypes[0]] ? productMap[uniqueTypes[0]] : '';
-
-    for (const invoice of order.invoices || []) {
-      const d = invoice.issued_date;
-      if (!d) continue;
-      if (fromDate && d < fromDate) continue;
-      if (toDate   && d > toDate)   continue;
-
-      rows.push({
-        type: 'debit',
-        date: d,
-        qty: totalQty,
-        unitLabel,
-        description,
-        ref: invoice.invoice_number || '',
-        debit: Number(invoice.total_amount || 0),
-        credit: 0,
-        balance: 0,
-      });
-    }
-
     for (const invoice of order.invoices || []) {
       for (const pay of invoice.payments || []) {
         if (pay.status !== 'confirmed') continue;
@@ -77,9 +90,9 @@ function buildRows(orders, fromDate, toDate, productMap = {}) {
 const N = (n) => `N${Number(n || 0).toLocaleString()}`;
 const qty = (n) => Number(n || 0).toLocaleString();
 
-export async function generateStatementPDF(customer, orders, fromDate, toDate, products = [], site = null) {
+export async function generateStatementPDF(customer, orders, waybills, fromDate, toDate, products = [], site = null) {
   const productMap = Object.fromEntries(products.map(p => [p.name, p.unit]));
-  const rows = buildRows(orders, fromDate, toDate, productMap);
+  const rows = buildRows(orders, waybills, fromDate, toDate, productMap);
 
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const W  = doc.internal.pageSize.getWidth();
