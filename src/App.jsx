@@ -26,6 +26,8 @@ import { bankAccountsService, bankTransactionsService, bankImportBatchesService,
 import { generateReconciliationPDF } from './utils/generateReconciliationPDF'
 import { generatePaymentReceiptPDF } from './utils/generatePaymentReceiptPDF'
 import { parseFile, autoMapColumns, mapRowsToTransactions, autoMatchTransactions, detectCategory, extractCustomerFromDesc } from './utils/parseBankStatement';
+import VehicleRegistry from './components/VehicleRegistry'
+import { vehiclesService } from './services/vehicles'
 
 const theme = {
   bg: "#0f1117", surface: "#1a1d27", card: "#21263a", border: "#2e3452",
@@ -213,7 +215,7 @@ const ConfirmModal = ({ msg, onConfirm, onCancel }) => (
 );
 
 const Icon = ({ name, size = 16 }) => {
-  const icons = { dashboard: "⊞", production: "🏭", orders: "📋", staff: "👥", waybill: "📄", reports: "📊", inventory: "📦", batches: "🗂", pending: "⏳", schedule: "📅", lpo: "📝", approve: "✓", settings: "⚙", products: "🧱", logout: "→" };
+  const icons = { dashboard: "⊞", production: "🏭", orders: "📋", staff: "👥", waybill: "📄", reports: "📊", inventory: "📦", batches: "🗂", pending: "⏳", schedule: "📅", lpo: "📝", approve: "✓", settings: "⚙", products: "🧱", truck: "🚛", logout: "→" };
   return <span style={{ fontSize: size }}>{icons[name] || "•"}</span>;
 };
 
@@ -260,6 +262,7 @@ const Dashboard = () => {
   const [stats, setStats] = useState({ staff: 0, produced: 0, orders: 0, revenue: 0, pending: 0, waybills: 0, damages: 0, lpoQueue: 0, scheduleQueue: 0, pendingRegister: 0 });
   const [finishedGoods, setFinishedGoods] = useState([]);
   const [recent, setRecent] = useState([]);
+  const [vehicleAlerts, setVehicleAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -282,16 +285,18 @@ const Dashboard = () => {
         // show zeros on error
       }
       try {
-        const [lpos, scheds, pendReg, fg, prods] = await Promise.all([
+        const [lpos, scheds, pendReg, fg, prods, expiring] = await Promise.all([
           lpoService.getPending(),
           schedulesService.getSubmitted(),
           pendingDeliveryService.getAll(),
           finishedGoodsService.getAll(),
           productsService.getActive().catch(() => []),
+          vehiclesService.getExpiringOrExpired(30).catch(() => []),
         ]);
         const productUnitMap = Object.fromEntries(prods.map(p => [p.name, p.unit]));
         setStats(s => ({ ...s, lpoQueue: lpos.length, scheduleQueue: scheds.length, pendingRegister: pendReg.length }));
         setFinishedGoods(fg.map(f => ({ ...f, unit: productUnitMap[f.block_type] || 'pieces' })));
+        setVehicleAlerts(expiring);
       } catch { /* workflow tables may not exist yet */ } finally {
         setLoading(false);
       }
@@ -347,6 +352,30 @@ const Dashboard = () => {
                   <div style={{ fontSize: "12px", color: theme.textMuted }}>Customers awaiting delivery</div>
                 </div>
               )}
+            </div>
+          )}
+          {vehicleAlerts.length > 0 && (
+            <div style={{ ...styles.card, marginBottom: "16px", borderColor: theme.red + "55", borderLeft: `4px solid ${theme.red}` }}>
+              <div style={{ fontSize: "13px", fontWeight: "700", color: theme.red, marginBottom: "10px" }}>🚛 Vehicle Document Alerts ({vehicleAlerts.length})</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                {vehicleAlerts.map(v => {
+                  const today = new Date().toISOString().split('T')[0];
+                  const insExpired = v.insurance_expiry_date && v.insurance_expiry_date < today;
+                  const rwExpired = v.road_worthiness_expiry_date && v.road_worthiness_expiry_date < today;
+                  const insDue = v.insurance_expiry_date && !insExpired;
+                  const rwDue = v.road_worthiness_expiry_date && !rwExpired;
+                  return (
+                    <div key={v.id} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "8px 10px", background: theme.surface, borderRadius: "8px" }}>
+                      <span style={{ fontWeight: "600", color: theme.text, minWidth: "120px" }}>{v.vehicle_number}</span>
+                      <span style={{ color: theme.textMuted, fontSize: "12px", flex: 1 }}>{v.vehicle_name || ""}</span>
+                      {insExpired && <span style={{ fontSize: "11px", background: theme.red + "22", color: theme.red, padding: "2px 8px", borderRadius: "12px", fontWeight: "600" }}>Insurance EXPIRED</span>}
+                      {insDue && <span style={{ fontSize: "11px", background: theme.accent + "22", color: theme.accent, padding: "2px 8px", borderRadius: "12px", fontWeight: "600" }}>Insurance due {v.insurance_expiry_date}</span>}
+                      {rwExpired && <span style={{ fontSize: "11px", background: theme.red + "22", color: theme.red, padding: "2px 8px", borderRadius: "12px", fontWeight: "600" }}>Road Worthiness EXPIRED</span>}
+                      {rwDue && <span style={{ fontSize: "11px", background: theme.accent + "22", color: theme.accent, padding: "2px 8px", borderRadius: "12px", fontWeight: "600" }}>Road Worthiness due {v.road_worthiness_expiry_date}</span>}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
           {finishedGoods.length > 0 && (
@@ -1266,6 +1295,7 @@ const Orders = ({ onNavigate }) => {
 const Waybills = () => {
   const [waybills, setWaybills] = useState([]);
   const [staff, setStaff] = useState([]);
+  const [vehicles, setVehicles] = useState([]);
   const [activeBatches, setActiveBatches] = useState([]);
   const [batchMap, setBatchMap] = useState({});
   const [activeOrders, setActiveOrders] = useState([]);
@@ -1276,15 +1306,16 @@ const Waybills = () => {
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [editTarget, setEditTarget] = useState(null);
   const [selectedOrderId, setSelectedOrderId] = useState("");
-  const emptyForm = { waybillDate: "", driverId: "", truckNumber: "", blockType: "9-inch", quantityLoaded: "", quantityReceived: "", quantityDamaged: "0", batchId: "", notes: "" };
+  const emptyForm = { waybillDate: "", vehicleId: "", driverId: "", truckNumber: "", blockType: "9-inch", quantityLoaded: "", quantityReceived: "", quantityDamaged: "0", batchId: "", notes: "" };
   const [form, setForm] = useState(emptyForm);
 
   const load = async () => {
     setLoading(true);
     try {
-      const [w, s] = await Promise.all([waybillsService.getAll(), staffService.getActive()]);
+      const [w, s, v] = await Promise.all([waybillsService.getAll(), staffService.getActive(), vehiclesService.getActive().catch(() => [])]);
       setWaybills(w);
       setStaff(s);
+      setVehicles(v);
     } catch {
       setAlert({ type: "error", msg: "Could not load waybills." });
     }
@@ -1310,7 +1341,7 @@ const Waybills = () => {
   const startEditWaybill = (w) => {
     setEditTarget(w);
     setForm({
-      waybillDate: w.waybill_date, driverId: w.driver_id || "",
+      waybillDate: w.waybill_date, vehicleId: w.vehicle_id || "", driverId: w.driver_id || "",
       truckNumber: w.truck_number || "", blockType: w.block_type || "9-inch",
       quantityLoaded: String(w.quantity_loaded || ""),
       quantityReceived: String(w.quantity_received || ""),
@@ -1331,6 +1362,7 @@ const Waybills = () => {
     try {
       const damaged = parseInt(form.quantityDamaged) || 0;
       const waybillData = {
+        vehicle_id: form.vehicleId || null,
         driver_id: form.driverId || null,
         truck_number: form.truckNumber || null,
         block_type: form.blockType,
@@ -1472,6 +1504,16 @@ const Waybills = () => {
               <input style={styles.input} type="date" value={form.waybillDate} onChange={e => setForm({ ...form, waybillDate: e.target.value })} />
             </div>
             <div style={styles.formGroup}>
+              <label style={styles.label}>Vehicle</label>
+              <select style={styles.input} value={form.vehicleId} onChange={e => {
+                const v = vehicles.find(v => v.id === e.target.value);
+                setForm({ ...form, vehicleId: e.target.value, truckNumber: v?.vehicle_number || form.truckNumber, driverId: v?.assigned_driver_id || form.driverId });
+              }}>
+                <option value="">— Select vehicle (optional) —</option>
+                {vehicles.map(v => <option key={v.id} value={v.id}>{v.vehicle_number}{v.vehicle_name ? ` — ${v.vehicle_name}` : ""}</option>)}
+              </select>
+            </div>
+            <div style={styles.formGroup}>
               <label style={styles.label}>Driver</label>
               <select style={styles.input} value={form.driverId} onChange={e => setForm({ ...form, driverId: e.target.value })}>
                 <option value="">— Select driver —</option>
@@ -1479,7 +1521,7 @@ const Waybills = () => {
               </select>
             </div>
             <div style={styles.formGroup}>
-              <label style={styles.label}>Truck Number</label>
+              <label style={styles.label}>Truck / Plate Number</label>
               <input style={styles.input} placeholder="e.g. ABC-123-AA" value={form.truckNumber} onChange={e => setForm({ ...form, truckNumber: e.target.value })} />
             </div>
             <div style={styles.formGroup}>
@@ -2177,6 +2219,7 @@ const Reports = () => (
         { title: "Customer Statement", desc: "Per-customer order history, payments received, and delivery records", color: theme.blue, icon: "📋" },
         { title: "Staff & Payroll Report", desc: "Attendance, wages for daily workers, and permanent staff costs", color: theme.green, icon: "👥" },
         { title: "Delivery & Logistics Report", desc: "Diesel usage, distances covered, loading/offloading costs by driver", color: theme.accentDim, icon: "🚛" },
+        { title: "Vehicle Cost Report", desc: "Per-vehicle maintenance costs, fuel consumption, downtime days, and total operating cost", color: theme.red, icon: "🔧" },
         { title: "Board Summary Report", desc: "High-level overview of revenue, costs, production, and KPIs for board review", color: theme.blue, icon: "📊" },
       ].map((r, i) => (
         <div key={i} style={{ ...styles.card, borderTop: `3px solid ${r.color}`, cursor: "pointer" }}>
@@ -5674,6 +5717,7 @@ const navItems = [
     { id: "inventory", label: "Inventory", icon: "inventory" },
     { id: "batches", label: "Batches", icon: "batches" },
     { id: "waybills", label: "Waybills", icon: "waybill" },
+    { id: "vehicles", label: "Vehicles", icon: "truck" },
     { id: "staff", label: "Staff", icon: "staff" },
   ]},
   { section: "Deliveries", items: [
@@ -5703,6 +5747,7 @@ export default function App() {
     inventory: <Inventory onLowStockChange={setLowStockCount} />,
     batches: <Batches />,
     waybills: <Waybills />,
+    vehicles: <VehicleRegistry />,
     staff: <Staff />,
     customers: <Customers />,
     orders: <Orders onNavigate={setActive} />,
