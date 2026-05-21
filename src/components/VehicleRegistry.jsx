@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import { vehiclesService, maintenanceService, fuelLogService, vehicleDocumentsService } from '../services/vehicles'
 import { staffService } from '../services/staff'
 import { expensesService } from '../services/accounting'
+import { suppliersService, supplierTransactionsService } from '../services/suppliers'
 import { supabase } from '../lib/supabase'
 
 const theme = {
@@ -147,8 +148,9 @@ const MaintenanceTab = ({ vehicleId, vehicleNumber, vehicleName }) => {
   const [editTarget, setEditTarget] = useState(null)
   const [saving, setSaving] = useState(false)
   const [alert, setAlert] = useState(null)
+  const [suppliers, setSuppliers] = useState([])
   const today = todayStr()
-  const emptyForm = { maintenance_date: today, maintenance_type: 'Routine', description: '', cost: '', vendor_name: '', vendor_phone: '', downtime_days: '', next_maintenance_date: '', recorded_by: '', notes: '' }
+  const emptyForm = { maintenance_date: today, maintenance_type: 'Routine', description: '', cost: '', supplierId: '', vendor_name: '', vendor_phone: '', downtime_days: '', next_maintenance_date: '', recorded_by: '', notes: '' }
   const [form, setForm] = useState(emptyForm)
   const [uploading, setUploading] = useState(false)
   const [receiptUrl, setReceiptUrl] = useState('')
@@ -160,11 +162,12 @@ const MaintenanceTab = ({ vehicleId, vehicleNumber, vehicleName }) => {
     finally { setLoading(false) }
   }
   useEffect(() => { load() }, [vehicleId])
+  useEffect(() => { suppliersService.getActive().then(setSuppliers).catch(() => {}) }, [])
 
   const openCreate = () => { setEditTarget(null); setForm(emptyForm); setReceiptUrl(''); setShowForm(true) }
   const openEdit = (r) => {
     setEditTarget(r)
-    setForm({ maintenance_date: r.maintenance_date, maintenance_type: r.maintenance_type, description: r.description || '', cost: String(r.cost || ''), vendor_name: r.vendor_name || '', vendor_phone: r.vendor_phone || '', downtime_days: String(r.downtime_days || ''), next_maintenance_date: r.next_maintenance_date || '', recorded_by: r.recorded_by || '', notes: r.notes || '' })
+    setForm({ maintenance_date: r.maintenance_date, maintenance_type: r.maintenance_type, description: r.description || '', cost: String(r.cost || ''), supplierId: r.supplier_id || '', vendor_name: r.vendor_name || '', vendor_phone: r.vendor_phone || '', downtime_days: String(r.downtime_days || ''), next_maintenance_date: r.next_maintenance_date || '', recorded_by: r.recorded_by || '', notes: r.notes || '' })
     setReceiptUrl(r.receipt_url || '')
     setShowForm(true)
   }
@@ -181,20 +184,37 @@ const MaintenanceTab = ({ vehicleId, vehicleNumber, vehicleName }) => {
     setSaving(true)
     try {
       const cost = Number(form.cost) || 0
-      const payload = { ...form, vehicle_id: vehicleId, cost, downtime_days: Number(form.downtime_days) || 0, receipt_url: receiptUrl || null, next_maintenance_date: form.next_maintenance_date || null }
+      const supplierObj = form.supplierId ? suppliers.find(s => s.id === form.supplierId) : null
+      const vendorName = supplierObj?.company_name || form.vendor_name || null
+      const { supplierId: _sid, ...formRest } = form
+      const payload = { ...formRest, vehicle_id: vehicleId, supplier_id: form.supplierId || null, vendor_name: vendorName, cost, downtime_days: Number(form.downtime_days) || 0, receipt_url: receiptUrl || null, next_maintenance_date: form.next_maintenance_date || null }
+      const expDesc = `${vehicleNumber || 'Vehicle'}${vehicleName ? ` (${vehicleName})` : ''} — ${form.maintenance_type}${form.description ? ': ' + form.description : ''}`
+
+      const upsertSupplierTxn = async (expId, amount) => {
+        if (!form.supplierId || amount <= 0) return
+        const existing = await supabase.from('supplier_transactions').select('id').eq('linked_expense_id', expId).maybeSingle()
+        if (existing.data?.id) {
+          await supplierTransactionsService.update ? null : null
+          await supabase.from('supplier_transactions').update({ amount, description: expDesc, transaction_date: form.maintenance_date }).eq('id', existing.data.id)
+        } else {
+          await supplierTransactionsService.create({ supplier_id: form.supplierId, transaction_date: form.maintenance_date, transaction_type: 'purchase', amount, description: expDesc, linked_expense_id: expId })
+        }
+      }
 
       if (editTarget) {
         await maintenanceService.update(editTarget.id, payload)
         if (cost > 0) {
-          const expDesc = `${vehicleNumber || 'Vehicle'}${vehicleName ? ` (${vehicleName})` : ''} — ${form.maintenance_type}${form.description ? ': ' + form.description : ''}`
           if (editTarget.linked_expense_id) {
-            await expensesService.update(editTarget.linked_expense_id, { expense_date: form.maintenance_date, description: expDesc, amount: cost, vendor: form.vendor_name || null })
+            await expensesService.update(editTarget.linked_expense_id, { expense_date: form.maintenance_date, description: expDesc, amount: cost, vendor: vendorName, supplier_id: form.supplierId || null })
+            await upsertSupplierTxn(editTarget.linked_expense_id, cost)
           } else {
             const catId = await getOrCreateVehicleMaintenanceCategoryId()
-            const exp = await expensesService.create({ expense_date: form.maintenance_date, description: expDesc, amount: cost, vendor: form.vendor_name || null, category_id: catId, status: 'approved', notes: `vehicle-maintenance:${editTarget.id}` })
+            const exp = await expensesService.create({ expense_date: form.maintenance_date, description: expDesc, amount: cost, vendor: vendorName, supplier_id: form.supplierId || null, category_id: catId, status: 'approved', notes: `vehicle-maintenance:${editTarget.id}` })
             await maintenanceService.update(editTarget.id, { linked_expense_id: exp.id })
+            await upsertSupplierTxn(exp.id, cost)
           }
         } else if (editTarget.linked_expense_id) {
+          await supabase.from('supplier_transactions').delete().eq('linked_expense_id', editTarget.linked_expense_id)
           await expensesService.delete(editTarget.linked_expense_id)
           await maintenanceService.update(editTarget.id, { linked_expense_id: null })
         }
@@ -203,9 +223,9 @@ const MaintenanceTab = ({ vehicleId, vehicleNumber, vehicleName }) => {
         const record = await maintenanceService.create(payload)
         if (cost > 0) {
           const catId = await getOrCreateVehicleMaintenanceCategoryId()
-          const expDesc = `${vehicleNumber || 'Vehicle'}${vehicleName ? ` (${vehicleName})` : ''} — ${form.maintenance_type}${form.description ? ': ' + form.description : ''}`
-          const exp = await expensesService.create({ expense_date: form.maintenance_date, description: expDesc, amount: cost, vendor: form.vendor_name || null, category_id: catId, status: 'approved', notes: `vehicle-maintenance:${record.id}` })
+          const exp = await expensesService.create({ expense_date: form.maintenance_date, description: expDesc, amount: cost, vendor: vendorName, supplier_id: form.supplierId || null, category_id: catId, status: 'approved', notes: `vehicle-maintenance:${record.id}` })
           await maintenanceService.update(record.id, { linked_expense_id: exp.id })
+          await upsertSupplierTxn(exp.id, cost)
         }
         setAlert({ type: 'success', msg: 'Maintenance record saved and expense logged to P&L.' })
       }
@@ -216,12 +236,15 @@ const MaintenanceTab = ({ vehicleId, vehicleNumber, vehicleName }) => {
   }
 
   const handleDelete = async (r) => {
-    if (!window.confirm('Delete this maintenance record? This will also remove the linked P&L expense.')) return
+    if (!window.confirm('Delete this maintenance record? This will also remove the linked P&L expense and supplier transaction.')) return
     try {
-      if (r.linked_expense_id) { try { await expensesService.delete(r.linked_expense_id) } catch {} }
+      if (r.linked_expense_id) {
+        try { await supabase.from('supplier_transactions').delete().eq('linked_expense_id', r.linked_expense_id) } catch {}
+        try { await expensesService.delete(r.linked_expense_id) } catch {}
+      }
       await maintenanceService.delete(r.id)
       await load()
-      setAlert({ type: 'success', msg: 'Record and linked expense deleted.' })
+      setAlert({ type: 'success', msg: 'Record, linked expense, and supplier transaction deleted.' })
     } catch (e) { setAlert({ type: 'error', msg: e.message }) }
   }
 
@@ -257,7 +280,19 @@ const MaintenanceTab = ({ vehicleId, vehicleNumber, vehicleName }) => {
               </select></div>
             <div style={styles.formGroup}><label style={styles.label}>Cost (₦)</label><input style={styles.input} type="number" value={form.cost} onChange={e => setForm(f => ({ ...f, cost: e.target.value }))} /></div>
             <div style={{ ...styles.formGroup, gridColumn: 'span 3' }}><label style={styles.label}>Description</label><input style={styles.input} placeholder="What was done?" value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} /></div>
-            <div style={styles.formGroup}><label style={styles.label}>Vendor Name</label><input style={styles.input} value={form.vendor_name} onChange={e => setForm(f => ({ ...f, vendor_name: e.target.value }))} /></div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Vendor / Supplier</label>
+              {suppliers.length > 0 ? (
+                <select style={styles.input} value={form.supplierId} onChange={e => {
+                  const sup = suppliers.find(s => s.id === e.target.value)
+                  setForm(f => ({ ...f, supplierId: e.target.value, vendor_name: sup?.company_name || f.vendor_name }))
+                }}>
+                  <option value="">— Select supplier or type below —</option>
+                  {suppliers.map(s => <option key={s.id} value={s.id}>{s.company_name}</option>)}
+                </select>
+              ) : null}
+              {!form.supplierId && <input style={{ ...styles.input, marginTop: suppliers.length > 0 ? '6px' : '0' }} placeholder="Or enter vendor name manually" value={form.vendor_name} onChange={e => setForm(f => ({ ...f, vendor_name: e.target.value }))} />}
+            </div>
             <div style={styles.formGroup}><label style={styles.label}>Vendor Phone</label><input style={styles.input} value={form.vendor_phone} onChange={e => setForm(f => ({ ...f, vendor_phone: e.target.value }))} /></div>
             <div style={styles.formGroup}><label style={styles.label}>Downtime (days)</label><input style={styles.input} type="number" value={form.downtime_days} onChange={e => setForm(f => ({ ...f, downtime_days: e.target.value }))} /></div>
             <div style={styles.formGroup}><label style={styles.label}>Next Maintenance Date</label><input style={styles.input} type="date" value={form.next_maintenance_date} onChange={e => setForm(f => ({ ...f, next_maintenance_date: e.target.value }))} /></div>
@@ -277,7 +312,7 @@ const MaintenanceTab = ({ vehicleId, vehicleNumber, vehicleName }) => {
             </div>
             <div style={{ ...styles.formGroup, gridColumn: 'span 2' }}><label style={styles.label}>Notes</label><input style={styles.input} value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} /></div>
           </div>
-          {Number(form.cost) > 0 && <div style={{ fontSize: '12px', color: theme.green, marginBottom: '10px' }}>✓ Cost will be automatically recorded as a Vehicle Maintenance expense in P&L</div>}
+          {Number(form.cost) > 0 && <div style={{ fontSize: '12px', color: theme.green, marginBottom: '10px' }}>✓ Cost will be logged to P&L{form.supplierId ? ' and recorded as supplier purchase' : ''}</div>}
           <div style={styles.row}>
             <button style={styles.btn('primary')} onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : editTarget ? 'Update Record' : 'Save Record'}</button>
             <button style={styles.btn()} onClick={() => { setShowForm(false); setEditTarget(null) }}>Cancel</button>

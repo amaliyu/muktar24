@@ -1303,6 +1303,7 @@ const Waybills = () => {
   const [activeBatches, setActiveBatches] = useState([]);
   const [batchMap, setBatchMap] = useState({});
   const [activeOrders, setActiveOrders] = useState([]);
+  const [scheduleItems, setScheduleItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -1310,7 +1311,7 @@ const Waybills = () => {
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [editTarget, setEditTarget] = useState(null);
   const [selectedOrderId, setSelectedOrderId] = useState("");
-  const emptyForm = { waybillDate: "", vehicleId: "", driverId: "", truckNumber: "", blockType: "9 Inch 3 Hole Block", quantityLoaded: "", quantityReceived: "", quantityDamaged: "0", batchId: "", dieselLitres: "", storeOfficer: "", notes: "" };
+  const emptyForm = { waybillDate: "", vehicleId: "", driverId: "", truckNumber: "", blockType: "9 Inch 3 Hole Block", quantityLoaded: "", quantityReceived: "", quantityDamaged: "0", batchId: "", scheduleItemId: "", dieselLitres: "", storeOfficer: "", notes: "" };
   const [form, setForm] = useState(emptyForm);
 
   const load = async () => {
@@ -1324,14 +1325,18 @@ const Waybills = () => {
       setAlert({ type: "error", msg: "Could not load waybills." });
     }
     try {
-      const [orders, activeBatches, allBatches] = await Promise.all([
+      const [orders, activeBatches, allBatches, approvedScheds] = await Promise.all([
         ordersService.getAll(),
         batchesService.getActive().catch(() => []),
         batchesService.getAll().catch(() => []),
+        schedulesService.getApproved().catch(() => []),
       ]);
       setActiveOrders(orders.filter(o => ["invoiced", "in_progress", "lpo_approved"].includes(o.status)));
       setActiveBatches(activeBatches);
       setBatchMap(Object.fromEntries(allBatches.map(b => [b.id, b.batch_number])));
+      const today = new Date().toISOString().split("T")[0];
+      const items = approvedScheds.filter(s => s.schedule_date === today).flatMap(s => (s.items || []).map(it => ({ ...it, scheduleDate: s.schedule_date, scheduleId: s.id })));
+      setScheduleItems(items);
     } catch {
       // silently fail — waybills still display, dropdown will be empty
     }
@@ -1351,6 +1356,7 @@ const Waybills = () => {
       quantityReceived: String(w.quantity_received || ""),
       quantityDamaged: String(w.quantity_damaged || 0),
       batchId: w.batch_id || "",
+      scheduleItemId: w.schedule_item_id || "",
       dieselLitres: String(w.diesel_given_litres || ""),
       storeOfficer: w.store_officer || "",
       notes: w.notes || "",
@@ -1377,6 +1383,7 @@ const Waybills = () => {
         quantity_received: parseInt(form.quantityReceived) || 0,
         quantity_damaged: damaged,
         waybill_date: form.waybillDate,
+        schedule_item_id: form.scheduleItemId || null,
         diesel_given_litres: dieselLitres || null,
         store_officer: form.storeOfficer || null,
         notes: form.notes || null,
@@ -1568,6 +1575,18 @@ const Waybills = () => {
                 ))}
               </select>
             </div>
+            {scheduleItems.length > 0 && (
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Link to Schedule Item (today)</label>
+                <select style={styles.input} value={form.scheduleItemId} onChange={e => {
+                  const item = scheduleItems.find(i => i.id === e.target.value);
+                  setForm(f => ({ ...f, scheduleItemId: e.target.value, ...(item ? { blockType: item.block_type, quantityLoaded: String(item.qty_scheduled) } : {}) }));
+                }}>
+                  <option value="">— Optional: link to today's approved schedule —</option>
+                  {scheduleItems.map(i => <option key={i.id} value={i.id}>{i.customer?.name || "Customer"} · {i.block_type} · {Number(i.qty_scheduled).toLocaleString()} blocks</option>)}
+                </select>
+              </div>
+            )}
             <div style={styles.formGroup}>
               <label style={styles.label}>Quantity Damaged in Transit</label>
               <input style={styles.input} type="number" placeholder="0" value={form.quantityDamaged} onChange={e => setForm({ ...form, quantityDamaged: e.target.value })} />
@@ -1646,7 +1665,7 @@ const Waybills = () => {
                   <td style={styles.td}>{fmt(w.quantity_loaded)}</td>
                   <td style={styles.td}><strong style={{ color: theme.green }}>{fmt(w.quantity_received)}</strong></td>
                   <td style={styles.td}><span style={styles.badge(w.quantity_damaged > 0 ? theme.red : theme.green)}>{w.quantity_damaged}</span></td>
-                  <td style={styles.td}>{w.receiver_name || "—"}</td>
+                  <td style={styles.td}>{w.receiver_name || "—"}{w.schedule_item_id && <div style={{ fontSize: "10px", color: theme.green, marginTop: "2px" }}>✓ Scheduled</div>}</td>
                   <td style={styles.td}>
                     <div style={{ display: "flex", gap: "6px" }}>
                       <button style={{ ...styles.btn("secondary"), padding: "4px 10px", fontSize: "11px" }} onClick={() => {
@@ -2547,6 +2566,7 @@ const Inventory = ({ onLowStockChange }) => {
 
   const handleStockIn = async () => {
     if (!inForm.itemId || !inForm.quantity || !inForm.date) return setAlert({ type: "error", msg: "Item, quantity, and date are required." });
+    if (suppliersList.length > 0 && !inForm.supplierId) return setAlert({ type: "error", msg: "Please select a supplier from the list." });
     setSaving(true);
     try {
       const supplierName = inForm.supplierId ? (suppliersList.find(s => s.id === inForm.supplierId)?.company_name || inForm.supplier) : inForm.supplier;
@@ -2622,6 +2642,9 @@ const Inventory = ({ onLowStockChange }) => {
     const m = movConfirmDelete;
     setMovConfirmDelete(null);
     try {
+      if (m.movement_type === "in") {
+        try { await supabase.from('supplier_transactions').delete().eq('linked_stock_movement_id', m.id); } catch {}
+      }
       await inventoryService.deleteMovement(m.id, m);
       await load();
       await loadMovements();
@@ -2809,17 +2832,17 @@ const Inventory = ({ onLowStockChange }) => {
               <input style={{ ...styles.input, background: "transparent", color: theme.accent, fontWeight: "700" }} readOnly value={inForm.quantity && inForm.unitCost ? `₦${Math.round(Number(inForm.quantity) * Number(inForm.unitCost)).toLocaleString()}` : "—"} />
             </div>
             <div style={styles.formGroup}>
-              <label style={styles.label}>Supplier</label>
+              <label style={styles.label}>Supplier *</label>
               {suppliersList.length > 0 ? (
-                <select style={styles.input} value={inForm.supplierId} onChange={e => {
+                <select style={{ ...styles.input, borderColor: !inForm.supplierId ? theme.red + "88" : theme.border }} value={inForm.supplierId} onChange={e => {
                   const sup = suppliersList.find(s => s.id === e.target.value)
                   setInForm({ ...inForm, supplierId: e.target.value, supplier: sup?.company_name || '' })
                 }}>
-                  <option value="">— Select supplier (optional) —</option>
+                  <option value="">— Select supplier —</option>
                   {suppliersList.map(s => <option key={s.id} value={s.id}>{s.company_name}</option>)}
                 </select>
               ) : (
-                <input style={styles.input} placeholder="Supplier name (optional)" value={inForm.supplier} onChange={e => setInForm({ ...inForm, supplier: e.target.value })} />
+                <input style={styles.input} placeholder="Supplier name" value={inForm.supplier} onChange={e => setInForm({ ...inForm, supplier: e.target.value })} />
               )}
             </div>
             <div style={styles.formGroup}>
@@ -3096,7 +3119,7 @@ const LPOApprovals = () => {
     try {
       await lpoService.decide(lpo.id, decision, note.trim() || null);
       if (decision === "approved") {
-        await ordersService.updateStatus(lpo.order.id, "lpo_approved");
+        await ordersService.updateStatus(lpo.order.id, "in_progress");
         // Auto-create invoice if none exists
         const existing = await invoicesService.getByOrder(lpo.order.id);
         if (existing.length === 0) {
@@ -3360,6 +3383,7 @@ const DailySchedule = () => {
   const [schedDate, setSchedDate] = useState(new Date().toISOString().split("T")[0]);
   const [createdBy, setCreatedBy] = useState("");
   const [expandedId, setExpandedId] = useState(null);
+  const [statusFilter, setStatusFilter] = useState("all");
 
   const load = async () => {
     setLoading(true);
@@ -3465,10 +3489,22 @@ const DailySchedule = () => {
       )}
 
       <div style={styles.card}>
-        <div style={styles.sectionTitle}>All Schedules ({schedules.length})</div>
-        {loading ? <Spinner /> : schedules.length === 0 ? (
-          <div style={{ textAlign: "center", padding: "40px", color: theme.textMuted }}>No schedules yet.</div>
-        ) : schedules.map(s => (
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px", flexWrap: "wrap", gap: "8px" }}>
+          <div style={styles.sectionTitle}>Schedules</div>
+          <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+            {[["all","All"],["draft","Draft"],["submitted","Pending ICO Approval"],["ico_approved","Approved"],["rejected","Rejected"]].map(([val, label]) => (
+              <button key={val} onClick={() => setStatusFilter(val)} style={{ padding: "5px 12px", fontSize: "11px", fontWeight: "600", borderRadius: "6px", border: `1px solid ${statusFilter === val ? theme.accent : theme.border}`, background: statusFilter === val ? theme.accent + "22" : "transparent", color: statusFilter === val ? theme.accent : theme.textMuted, cursor: "pointer" }}>{label}</button>
+            ))}
+          </div>
+        </div>
+        {(() => {
+          const filtered = statusFilter === "all" ? schedules : schedules.filter(s => {
+            if (statusFilter === "ico_approved") return ["ico_approved", "store_notified", "in_progress"].includes(s.status);
+            return s.status === statusFilter;
+          });
+          return loading ? <Spinner /> : filtered.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "40px", color: theme.textMuted }}>No schedules{statusFilter !== "all" ? ` with status "${statusFilter.replace(/_/g," ")}"` : ""} yet.</div>
+          ) : filtered.map(s => (
           <div key={s.id} style={{ borderRadius: "8px", border: `1px solid ${theme.border}`, marginBottom: "10px", overflow: "hidden" }}>
             <div style={{ padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", background: expandedId === s.id ? "rgba(245,166,35,0.06)" : "transparent" }} onClick={() => setExpandedId(expandedId === s.id ? null : s.id)}>
               <div>
@@ -3501,7 +3537,8 @@ const DailySchedule = () => {
               </div>
             )}
           </div>
-        ))}
+        ));
+        })()}
       </div>
     </div>
   );
@@ -4014,9 +4051,10 @@ const BookkeepingTab = () => {
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(false);
   const [incomeForm, setIncomeForm] = useState({ source: '', description: '', amount: '' });
-  const [expenseForm, setExpenseForm] = useState({ category_id: '', description: '', amount: '', vendor: '' });
+  const [expenseForm, setExpenseForm] = useState({ category_id: '', description: '', amount: '', vendor: '', supplierId: '' });
   const [err, setErr] = useState('');
   const [ok, setOk] = useState('');
+  const [acctSuppliers, setAcctSuppliers] = useState([]);
 
   useEffect(() => {
     setLoading(true);
@@ -4028,6 +4066,8 @@ const BookkeepingTab = () => {
     ]).then(([p, ir, ex, cats]) => { setPayments(p); setIncomeList(ir); setExpenses(ex); setCategories(cats); })
       .catch(e => setErr(e.message)).finally(() => setLoading(false));
   }, [date]);
+
+  useEffect(() => { suppliersService.getActive().then(setAcctSuppliers).catch(() => {}); }, []);
 
   const addIncome = async () => {
     if (!incomeForm.source || !incomeForm.amount) return;
@@ -4049,9 +4089,15 @@ const BookkeepingTab = () => {
     const amount = Number(expenseForm.amount);
     const status = amount >= 50000 ? 'pending' : 'approved';
     try {
-      const rec = await expensesService.create({ ...expenseForm, category_id: expenseForm.category_id || null, amount, expense_date: date, status });
+      const { supplierId: sid, ...formRest } = expenseForm;
+      const rec = await expensesService.create({ ...formRest, supplier_id: sid || null, category_id: expenseForm.category_id || null, amount, expense_date: date, status });
       setExpenses(p => [rec, ...p]);
-      setExpenseForm({ category_id: '', description: '', amount: '', vendor: '' });
+      if (sid && amount > 0) {
+        try {
+          await supplierTransactionsService.create({ supplier_id: sid, transaction_date: date, transaction_type: 'purchase', amount, description: expenseForm.description, linked_expense_id: rec.id });
+        } catch { /* non-blocking */ }
+      }
+      setExpenseForm({ category_id: '', description: '', amount: '', vendor: '', supplierId: '' });
       setOk(status === 'pending' ? 'Submitted for MD approval (≥₦50,000)' : 'Expense recorded');
     } catch (e) { setErr(e.message); }
   };
@@ -4165,7 +4211,19 @@ const BookkeepingTab = () => {
               </div>
               <div style={{ flex: 1, ...styles.formGroup }}>
                 <label style={styles.label}>Vendor / Payee</label>
-                <input style={styles.input} placeholder="Optional" value={expenseForm.vendor} onChange={e => setExpenseForm(f => ({ ...f, vendor: e.target.value }))} />
+                {acctSuppliers.length > 0 ? (
+                  <select style={styles.input} value={expenseForm.supplierId || '__other__'} onChange={e => {
+                    if (e.target.value === '__other__') { setExpenseForm(f => ({ ...f, supplierId: '', vendor: f.vendor })); }
+                    else { const sup = acctSuppliers.find(s => s.id === e.target.value); setExpenseForm(f => ({ ...f, supplierId: e.target.value, vendor: sup?.company_name || '' })); }
+                  }}>
+                    <option value="">— Select supplier —</option>
+                    {acctSuppliers.map(s => <option key={s.id} value={s.id}>{s.company_name}</option>)}
+                    <option value="__other__">Other (type manually)</option>
+                  </select>
+                ) : null}
+                {(!expenseForm.supplierId || expenseForm.supplierId === '__other__') && (
+                  <input style={{ ...styles.input, marginTop: acctSuppliers.length > 0 ? '6px' : '0' }} placeholder="Vendor / payee name" value={expenseForm.vendor} onChange={e => setExpenseForm(f => ({ ...f, vendor: e.target.value, supplierId: '' }))} />
+                )}
               </div>
             </div>
             {Number(expenseForm.amount) >= 50000 && (
