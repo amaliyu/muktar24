@@ -59,6 +59,15 @@ export const waybillsService = {
     return data || []
   },
 
+  async getByOrder(orderId) {
+    const { data, error } = await supabase
+      .from('waybills')
+      .select('quantity_received, block_type')
+      .eq('order_id', orderId)
+    if (error) throw error
+    return data || []
+  },
+
   async getNextNumber() {
     const { data, error } = await supabase
       .from('waybills')

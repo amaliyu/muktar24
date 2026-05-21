@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase'
+import { waybillsService } from './deliveries'
 
 export const pendingDeliveryService = {
   async getAll() {
@@ -49,6 +50,35 @@ export const pendingDeliveryService = {
       .single()
     if (error) throw error
     return data
+  },
+
+  async setDelivered(id, deliveredQty) {
+    const { data: current } = await supabase
+      .from('pending_delivery_register')
+      .select('total_qty')
+      .eq('id', id)
+      .single()
+    const delivered = Math.max(0, Number(deliveredQty) || 0)
+    const remaining = Math.max(0, (Number(current?.total_qty) || 0) - delivered)
+    const status = remaining === 0 ? 'completed' : delivered > 0 ? 'partially_delivered' : 'awaiting_schedule'
+    const { data, error } = await supabase
+      .from('pending_delivery_register')
+      .update({ delivered_qty: delivered, remaining_qty: remaining, status })
+      .eq('id', id)
+      .select()
+      .single()
+    if (error) throw error
+    return data
+  },
+
+  async resyncFromWaybills(entry) {
+    // Recompute delivered_qty from actual waybills linked to this order
+    const waybills = await waybillsService.getByOrder(entry.order_id)
+    const delivered = waybills
+      .filter(w => w.block_type === entry.block_type)
+      .reduce((s, w) => s + (Number(w.quantity_received) || 0), 0)
+    if (delivered === 0) return null // nothing linked, skip
+    return pendingDeliveryService.setDelivered(entry.id, delivered)
   },
 
   async addFromOrder(order) {

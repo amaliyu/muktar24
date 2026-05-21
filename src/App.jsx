@@ -1921,7 +1921,7 @@ const Waybills = () => {
         const waybillNumber = `APC-WB-${String(nextNum).padStart(3, "0")}`;
         const qtyLoaded = parseInt(form.quantityLoaded) || 0;
         const qtyReceived = parseInt(form.quantityReceived) || 0;
-        await waybillsService.create({ ...waybillData, batch_id: form.batchId || null, waybill_number: waybillNumber, receiver_name: selectedOrder?.customer?.name || null });
+        await waybillsService.create({ ...waybillData, batch_id: form.batchId || null, waybill_number: waybillNumber, receiver_name: selectedOrder?.customer?.name || null, order_id: selectedOrder?.id || null });
         if (damaged > 0) {
           await productionService.logDamage({ date: form.waybillDate, block_type: form.blockType, stage: "delivery", quantity_damaged: damaged, notes: `Transit damage on waybill ${waybillNumber}` });
         }
@@ -1932,7 +1932,10 @@ const Waybills = () => {
           if (qtyReceived > 0 && selectedOrder) {
             const pending = await pendingDeliveryService.getByOrder(selectedOrder.id);
             const match = pending.find(p => p.block_type === form.blockType);
-            if (match) await pendingDeliveryService.updateDelivered(match.id, qtyReceived);
+            if (match) {
+              const synced = await pendingDeliveryService.resyncFromWaybills(match);
+              if (!synced) await pendingDeliveryService.updateDelivered(match.id, qtyReceived);
+            }
           }
         } catch { /* side effects optional */ }
         await load();
@@ -3321,6 +3324,9 @@ const PendingDeliveryRegister = () => {
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [alert, setAlert] = useState(null);
+  const [editingId, setEditingId] = useState(null);
+  const [editDelivered, setEditDelivered] = useState("");
+  const [saving, setSaving] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -3330,6 +3336,20 @@ const PendingDeliveryRegister = () => {
   };
 
   useEffect(() => { load(); }, []);
+
+  const startEdit = (e) => { setEditingId(e.id); setEditDelivered(String(e.delivered_qty || 0)); };
+  const cancelEdit = () => { setEditingId(null); setEditDelivered(""); };
+
+  const saveDelivered = async (id) => {
+    setSaving(true);
+    try {
+      await pendingDeliveryService.setDelivered(id, parseInt(editDelivered) || 0);
+      setAlert({ type: "success", msg: "Delivered quantity updated." });
+      cancelEdit();
+      await load();
+    } catch (e) { setAlert({ type: "error", msg: "Failed to update: " + e.message }); }
+    finally { setSaving(false); }
+  };
 
   const daysSince = (iso) => Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
   const statusColor = (s) => s === "completed" ? theme.green : s === "partially_delivered" ? theme.blue : s === "scheduled" ? theme.accent : theme.textMuted;
@@ -3355,19 +3375,34 @@ const PendingDeliveryRegister = () => {
         <div style={styles.card}>
           <table style={styles.table}>
             <thead>
-              <tr>{["Customer", "Location", "Block Type", "Total Qty", "Delivered", "Remaining", "Days Waiting", "Added", "Status"].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
+              <tr>{["Customer", "Location", "Block Type", "Total Qty", "Delivered", "Remaining", "Days Waiting", "Added", "Status", ""].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
             </thead>
             <tbody>
               {entries.map(e => {
                 const days = daysSince(e.added_at);
                 const pct = e.total_qty > 0 ? Math.round((e.delivered_qty / e.total_qty) * 100) : 0;
+                const isEditing = editingId === e.id;
                 return (
                   <tr key={e.id} style={{ background: days > 14 ? "rgba(240,107,107,0.04)" : "transparent" }}>
                     <td style={styles.td}><strong>{e.customer?.name || "—"}</strong>{e.customer?.company_name && <div style={{ fontSize: "11px", color: theme.textMuted }}>{e.customer.company_name}</div>}</td>
                     <td style={styles.td}>{e.customer?.location || "—"}</td>
                     <td style={styles.td}><span style={styles.badge(theme.blue)}>{e.block_type}</span></td>
                     <td style={styles.td}>{Number(e.total_qty).toLocaleString()}</td>
-                    <td style={styles.td}><span style={{ color: theme.green }}>{Number(e.delivered_qty).toLocaleString()}</span></td>
+                    <td style={styles.td}>
+                      {isEditing ? (
+                        <input
+                          type="number"
+                          value={editDelivered}
+                          onChange={ev => setEditDelivered(ev.target.value)}
+                          style={{ ...styles.input, width: "80px", padding: "4px 6px", fontSize: "12px" }}
+                          min="0"
+                          max={e.total_qty}
+                          autoFocus
+                        />
+                      ) : (
+                        <span style={{ color: theme.green }}>{Number(e.delivered_qty).toLocaleString()}</span>
+                      )}
+                    </td>
                     <td style={styles.td}><strong style={{ color: Number(e.remaining_qty) > 0 ? theme.accent : theme.green }}>{Number(e.remaining_qty).toLocaleString()}</strong></td>
                     <td style={styles.td}><span style={{ color: days > 14 ? theme.red : theme.textMuted, fontWeight: days > 14 ? "700" : "400" }}>{days}d</span></td>
                     <td style={styles.td}>{e.added_at?.split("T")[0]}</td>
@@ -3377,6 +3412,16 @@ const PendingDeliveryRegister = () => {
                         <div style={{ ...styles.progressBar(), marginTop: "4px" }}><div style={styles.progressFill(pct, theme.green)} /></div>
                         <div style={{ fontSize: "10px", color: theme.textMuted, marginTop: "2px" }}>{pct}%</div>
                       </div>
+                    </td>
+                    <td style={styles.td}>
+                      {isEditing ? (
+                        <div style={{ display: "flex", gap: "4px" }}>
+                          <button style={{ ...styles.btn("primary"), padding: "4px 8px", fontSize: "11px" }} onClick={() => saveDelivered(e.id)} disabled={saving}>Save</button>
+                          <button style={{ ...styles.btn("secondary"), padding: "4px 8px", fontSize: "11px" }} onClick={cancelEdit}>Cancel</button>
+                        </div>
+                      ) : (
+                        <button style={{ ...styles.btn("secondary"), padding: "4px 8px", fontSize: "11px" }} onClick={() => startEdit(e)}>Edit Delivered</button>
+                      )}
                     </td>
                   </tr>
                 );
