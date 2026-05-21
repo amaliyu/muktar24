@@ -27,6 +27,7 @@ import { generateReconciliationPDF } from './utils/generateReconciliationPDF'
 import { generatePaymentReceiptPDF } from './utils/generatePaymentReceiptPDF'
 import { parseFile, autoMapColumns, mapRowsToTransactions, autoMatchTransactions, detectCategory, extractCustomerFromDesc } from './utils/parseBankStatement';
 import VehicleRegistry from './components/VehicleRegistry'
+import KPIDashboard from './components/KPIDashboard'
 import { vehiclesService, fuelLogService } from './services/vehicles'
 import SupplierRegistry from './components/SupplierRegistry'
 import { suppliersService, supplierTransactionsService } from './services/suppliers'
@@ -6013,7 +6014,10 @@ const navItems = [
     { id: "lpo_approvals", label: "LPO Approvals", icon: "lpo" },
     { id: "schedule_approvals", label: "Schedule Approvals", icon: "approve" },
   ]},
-  { section: "Analytics", items: [{ id: "reports", label: "Reports", icon: "reports" }] },
+  { section: "Analytics", items: [
+    { id: "reports", label: "Reports", icon: "reports" },
+    { id: "kpi_dashboard", label: "KPI Dashboard", icon: "reports" },
+  ]},
   { section: "Finance", items: [{ id: "accounting", label: "Accounting", icon: "orders" }] },
   { section: "Settings", items: [
     { id: "products", label: "Products", icon: "products" },
@@ -6043,6 +6047,7 @@ export default function App() {
     lpo_approvals: <LPOApprovals />,
     schedule_approvals: <ScheduleApprovals />,
     reports: <Reports />,
+    kpi_dashboard: <KPIDashboard />,
     products: <Products />,
     suppliers: <SupplierRegistry />,
     accounting: <Accounting />,
