@@ -461,8 +461,19 @@ const Production = () => {
         await productionService.clearDamages(editTarget.id);
         if (dmgProd > 0) await productionService.logDamage({ date: form.date, block_type: form.blockType, stage: "production", quantity_damaged: dmgProd, production_log_id: editTarget.id });
         if (dmgStack > 0) await productionService.logDamage({ date: form.date, block_type: form.blockType, stage: "stacking", quantity_damaged: dmgStack, production_log_id: editTarget.id });
+        try {
+          const ref = `PROD-${editTarget.id.slice(0, 8)}`;
+          await inventoryService.reverseProductionMovements(ref);
+          await inventoryService.autoDeductProduction({
+            cementBags: entryData.cement_bags,
+            graniteDustKg: entryData.granite_dust_kg,
+            dieselLitres: entryData.diesel_litres,
+            date: entryData.date,
+            reference: ref,
+          });
+        } catch { /* don't block save if inventory tables missing */ }
         await load();
-        setAlert({ type: "success", msg: "Production entry updated." });
+        setAlert({ type: "success", msg: "Production entry updated and movement log adjusted." });
       } else {
         const entry = await productionService.create(entryData);
         if (dmgProd > 0) await productionService.logDamage({ date: form.date, block_type: form.blockType, stage: "production", quantity_damaged: dmgProd, production_log_id: entry.id });

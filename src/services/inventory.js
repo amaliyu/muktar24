@@ -135,4 +135,25 @@ export const inventoryService = {
       })
     }
   },
+
+  async reverseProductionMovements(reference) {
+    const { data: movements } = await supabase
+      .from('stock_movements')
+      .select('item_id, quantity, movement_type')
+      .eq('reference', reference)
+    if (!movements?.length) return
+
+    for (const m of movements) {
+      if (m.movement_type === 'out') {
+        const { data: item } = await supabase
+          .from('inventory_items').select('current_stock').eq('id', m.item_id).single()
+        const restored = (Number(item?.current_stock) || 0) + Number(m.quantity)
+        await supabase.from('inventory_items')
+          .update({ current_stock: restored, updated_at: new Date().toISOString() })
+          .eq('id', m.item_id)
+      }
+    }
+
+    await supabase.from('stock_movements').delete().eq('reference', reference)
+  },
 }
