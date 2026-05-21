@@ -116,7 +116,7 @@ export const hrStaffService = {
   async getById(id) {
     const { data, error } = await supabase
       .from('staff')
-      .select('*, role:role_id(id, role_name, department)')
+      .select('*, staffRole:role_id(id, role_name, department)')
       .eq('id', id)
       .single()
     if (error) throw error

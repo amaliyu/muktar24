@@ -579,8 +579,8 @@ const StaffProfile = ({ staffId, onBack, onUpdated, roles }) => {
   if (loading) return <Spinner />;
   if (!staff) return <div style={{ color: theme.textMuted }}>Staff not found.</div>;
 
-  const roleName = staff.role?.role_name || "—";
-  const deptName = staff.role?.department || staff.department || "—";
+  const roleName = staff.staffRole?.role_name || "—";
+  const deptName = staff.staffRole?.department || staff.department || "—";
   const initials = (staff.full_name || "").split(" ").slice(0, 2).map(w => w[0]).join("").toUpperCase();
   const statusColors = { active: theme.green, terminated: theme.red, suspended: theme.accent, resigned: theme.textMuted };
   const statusColor = statusColors[staff.employment_status] || theme.textMuted;
@@ -1015,7 +1015,7 @@ const AttendanceTab = () => {
       const existingMap = Object.fromEntries(existing.map(r => [r.staff_id, r]));
       setRows(activeStaff.map(s => {
         const ex = existingMap[s.id];
-        return { staff_id: s.id, full_name: s.full_name, role: s.role || s.role?.role_name || "—", staff_type: s.staff_type, daily_rate: s.daily_rate, present: ex ? ex.present : true, hours_worked: ex ? (ex.hours_worked || "") : "", notes: ex ? (ex.notes || "") : "" };
+        return { staff_id: s.id, full_name: s.full_name, role: s.staffRole?.role_name || s.role || "—", staff_type: s.staff_type, daily_rate: s.daily_rate, present: ex ? ex.present : true, hours_worked: ex ? (ex.hours_worked || "") : "", notes: ex ? (ex.notes || "") : "" };
       }));
     }).catch(() => {});
   }, [attendanceDate, activeStaff]);
@@ -1223,7 +1223,7 @@ const PayrollTab = () => {
           const daysInPeriod = Math.round((to - from) / 86400000) + 1;
           amountDue = ((s.monthly_salary || 0) / daysInMonth) * daysInPeriod;
         }
-        return { staff_id: s.id, full_name: s.full_name, role: s.role || s.role?.role_name || "—", staff_type: s.staff_type, days_present: daysPresent, daily_rate: s.daily_rate || 0, monthly_salary: s.monthly_salary || 0, amount_due: Math.round(amountDue) };
+        return { staff_id: s.id, full_name: s.full_name, role: s.staffRole?.role_name || s.role || "—", staff_type: s.staff_type, days_present: daysPresent, daily_rate: s.daily_rate || 0, monthly_salary: s.monthly_salary || 0, amount_due: Math.round(amountDue) };
       });
       setCalcLines(lines);
       setStep(2);
