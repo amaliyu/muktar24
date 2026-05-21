@@ -639,6 +639,10 @@ const Orders = ({ onNavigate }) => {
   const [pickedSiteId, setPickedSiteId] = useState("");
   const emptyForm = { customerName: "", customerPhone: "", customerLocation: "", marketerId: "", items: [emptyItem()], isLpo: false, lpoSubmittedBy: "" };
   const [form, setForm] = useState(emptyForm);
+  const [lpoDocUrl, setLpoDocUrl] = useState("");
+  const [lpoDocName, setLpoDocName] = useState("");
+  const [lpoDocSize, setLpoDocSize] = useState(0);
+  const [lpoDocUploading, setLpoDocUploading] = useState(false);
   const [payForm, setPayForm] = useState({ amount: "", date: "" });
   const [orderEditMode, setOrderEditMode] = useState(false);
   const [orderEditItems, setOrderEditItems] = useState([]);
@@ -680,10 +684,26 @@ const Orders = ({ onNavigate }) => {
     setForm({ ...form, items });
   };
 
+  const handleLpoFileSelect = async (file) => {
+    if (!file) return;
+    setLpoDocUploading(true);
+    try {
+      const url = await lpoService.uploadDocument(file);
+      setLpoDocUrl(url);
+      setLpoDocName(file.name);
+      setLpoDocSize(file.size);
+    } catch (e) {
+      setAlert({ type: "error", msg: "LPO document upload failed: " + e.message });
+    } finally {
+      setLpoDocUploading(false);
+    }
+  };
+
   const handleSave = async () => {
     if (customerMode === "existing" && !pickedCustomer) return setAlert({ type: "error", msg: "Please select a customer." });
     if (customerMode === "new" && !form.customerName) return setAlert({ type: "error", msg: "Customer name is required." });
     if (form.items.some(i => !i.quantity || !i.unitPrice)) return setAlert({ type: "error", msg: "All items need quantity and unit price." });
+    if (form.isLpo && !lpoDocUrl) return setAlert({ type: "error", msg: "Please upload the LPO document before submitting." });
     setSaving(true);
     setAlert(null);
     try {
@@ -705,11 +725,12 @@ const Orders = ({ onNavigate }) => {
       });
       if (form.isLpo) {
         try {
-          await lpoService.create({ order_id: newOrder.id, submitted_by: form.lpoSubmittedBy || "BDM" });
+          await lpoService.create({ order_id: newOrder.id, submitted_by: form.lpoSubmittedBy || "BDM", document_url: lpoDocUrl || null });
         } catch { /* LPO table may not exist yet */ }
       }
       await load();
       setForm(emptyForm);
+      setLpoDocUrl(""); setLpoDocName(""); setLpoDocSize(0);
       setPickedCustomer(null);
       setPickedSiteId("");
       setCustomerSites([]);
@@ -1008,18 +1029,41 @@ const Orders = ({ onNavigate }) => {
               <button style={styles.btn("secondary")} onClick={() => setForm({ ...form, items: [...form.items, emptyItem()] })}>+ Add Item</button>
             )}
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: "12px", padding: "12px 0", borderTop: `1px solid ${theme.border}22`, marginBottom: "4px" }}>
-            <input type="checkbox" id="lpo_flag" checked={form.isLpo} onChange={e => setForm({ ...form, isLpo: e.target.checked })} style={{ width: "16px", height: "16px", cursor: "pointer", accentColor: theme.accent }} />
-            <label htmlFor="lpo_flag" style={{ ...styles.label, marginBottom: 0, cursor: "pointer", color: form.isLpo ? theme.accent : theme.textMuted, fontWeight: form.isLpo ? "700" : "400" }}>
-              This is an LPO order (requires MD approval before delivery)
-            </label>
+          <div style={{ padding: "12px 0", borderTop: `1px solid ${theme.border}22`, marginBottom: "4px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+              <input type="checkbox" id="lpo_flag" checked={form.isLpo} onChange={e => setForm({ ...form, isLpo: e.target.checked })} style={{ width: "16px", height: "16px", cursor: "pointer", accentColor: theme.accent }} />
+              <label htmlFor="lpo_flag" style={{ ...styles.label, marginBottom: 0, cursor: "pointer", color: form.isLpo ? theme.accent : theme.textMuted, fontWeight: form.isLpo ? "700" : "400" }}>
+                This is an LPO order (requires MD approval before delivery)
+              </label>
+              {form.isLpo && (
+                <input style={{ ...styles.input, maxWidth: "220px", marginLeft: "8px" }} placeholder="Submitted by (BDM name)" value={form.lpoSubmittedBy} onChange={e => setForm({ ...form, lpoSubmittedBy: e.target.value })} />
+              )}
+            </div>
             {form.isLpo && (
-              <input style={{ ...styles.input, maxWidth: "220px", marginLeft: "8px" }} placeholder="Submitted by (BDM name)" value={form.lpoSubmittedBy} onChange={e => setForm({ ...form, lpoSubmittedBy: e.target.value })} />
+              <div style={{ marginTop: "14px", padding: "14px", background: theme.surface, borderRadius: "8px", border: `1px dashed ${lpoDocUrl ? theme.green : theme.accent}` }}>
+                <div style={{ fontSize: "11px", fontWeight: "700", color: theme.textMuted, marginBottom: "10px", textTransform: "uppercase", letterSpacing: "0.06em" }}>Upload LPO Document <span style={{ color: theme.red }}>*</span></div>
+                {lpoDocUrl ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+                    <span style={{ fontSize: "12px", color: theme.green }}>✓ {lpoDocName}</span>
+                    <span style={{ fontSize: "11px", color: theme.textMuted }}>({(lpoDocSize / 1024).toFixed(1)} KB)</span>
+                    <a href={lpoDocUrl} target="_blank" rel="noreferrer" style={{ fontSize: "11px", color: theme.blue, textDecoration: "underline" }}>Preview</a>
+                    <button style={{ ...styles.btn("danger"), padding: "2px 8px", fontSize: "11px" }} onClick={() => { setLpoDocUrl(""); setLpoDocName(""); setLpoDocSize(0); }}>Remove</button>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    <label style={{ cursor: "pointer", display: "inline-block" }}>
+                      <span style={{ ...styles.btn("secondary"), display: "inline-block", cursor: "pointer" }}>{lpoDocUploading ? "Uploading…" : "Choose File (PDF / JPG / PNG)"}</span>
+                      <input type="file" accept=".pdf,.jpg,.jpeg,.png" style={{ display: "none" }} disabled={lpoDocUploading} onChange={e => e.target.files[0] && handleLpoFileSelect(e.target.files[0])} />
+                    </label>
+                    <span style={{ fontSize: "11px", color: theme.textMuted }}>Required — MD must see this document before approving</span>
+                  </div>
+                )}
+              </div>
             )}
           </div>
           <div style={styles.row}>
-            <button style={styles.btn(form.isLpo ? "secondary" : "primary")} onClick={handleSave} disabled={saving}>{saving ? "Saving…" : form.isLpo ? "Submit LPO for MD Approval" : "Create Order"}</button>
-            <button style={styles.btn("secondary")} onClick={() => { setShowForm(false); setForm(emptyForm); }}>Cancel</button>
+            <button style={styles.btn(form.isLpo ? "secondary" : "primary")} onClick={handleSave} disabled={saving || lpoDocUploading}>{saving ? "Saving…" : form.isLpo ? "Submit LPO for MD Approval" : "Create Order"}</button>
+            <button style={styles.btn("secondary")} onClick={() => { setShowForm(false); setForm(emptyForm); setLpoDocUrl(""); setLpoDocName(""); setLpoDocSize(0); }}>Cancel</button>
           </div>
         </div>
       )}
@@ -2094,6 +2138,9 @@ const Inventory = ({ onLowStockChange }) => {
   const [movFilter, setMovFilter] = useState({ from: "", to: "", itemId: "" });
   const [reportDates, setReportDates] = useState({ from: "", to: "" });
   const [reportLoading, setReportLoading] = useState(false);
+  const [movEditTarget, setMovEditTarget] = useState(null);
+  const [movEditForm, setMovEditForm] = useState({});
+  const [movConfirmDelete, setMovConfirmDelete] = useState(null);
 
   const today = new Date().toISOString().split("T")[0];
   const emptyItem = { name: "", unit: "bags", current_stock: "", reorder_level: "", unit_cost: "", supplier: "", date_added: today };
@@ -2205,6 +2252,50 @@ const Inventory = ({ onLowStockChange }) => {
       setAlert({ type: "error", msg: "Failed to record stock out. " + e.message });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const startEditMovement = (m) => {
+    setMovEditTarget(m);
+    setMovEditForm({
+      date: m.date,
+      quantity: String(m.quantity),
+      ...(m.movement_type === "in"
+        ? { unitCost: String(m.unit_cost || ""), supplier: m.supplier || "", staffName: m.staff_name || "" }
+        : { issuedTo: m.issued_to || "", staffName: m.staff_name || "" }),
+      notes: m.notes || "",
+    });
+  };
+
+  const handleSaveMovementEdit = async () => {
+    if (!movEditForm.quantity || !movEditForm.date) return setAlert({ type: "error", msg: "Date and quantity are required." });
+    setSaving(true);
+    try {
+      const newData = movEditTarget.movement_type === "in"
+        ? { date: movEditForm.date, quantity: Number(movEditForm.quantity), unit_cost: Number(movEditForm.unitCost) || null, total_cost: Number(movEditForm.quantity) * (Number(movEditForm.unitCost) || 0) || null, supplier: movEditForm.supplier || null, staff_name: movEditForm.staffName || null, notes: movEditForm.notes || null }
+        : { date: movEditForm.date, quantity: Number(movEditForm.quantity), issued_to: movEditForm.issuedTo || null, staff_name: movEditForm.staffName || null, notes: movEditForm.notes || null };
+      await inventoryService.editMovement(movEditTarget.id, movEditTarget, newData);
+      await load();
+      await loadMovements();
+      setMovEditTarget(null);
+      setAlert({ type: "success", msg: "Movement updated and stock adjusted." });
+    } catch (e) {
+      setAlert({ type: "error", msg: e.message });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteMovement = async () => {
+    const m = movConfirmDelete;
+    setMovConfirmDelete(null);
+    try {
+      await inventoryService.deleteMovement(m.id, m);
+      await load();
+      await loadMovements();
+      setAlert({ type: "success", msg: "Movement deleted and stock reversed." });
+    } catch (e) {
+      setAlert({ type: "error", msg: e.message });
     }
   };
 
@@ -2483,6 +2574,69 @@ const Inventory = ({ onLowStockChange }) => {
             </div>
           </div>
 
+          {/* ── EDIT MOVEMENT MODAL ── */}
+          {movEditTarget && (
+            <div style={{ ...styles.card, marginBottom: "16px", borderLeft: `4px solid ${theme.accent}` }}>
+              <div style={styles.sectionTitle}>Edit Movement — {movEditTarget.item?.name} ({movEditTarget.movement_type === "in" ? "Stock In" : "Stock Out"})</div>
+              <div style={styles.grid(3)}>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Date</label>
+                  <input style={styles.input} type="date" value={movEditForm.date} onChange={e => setMovEditForm({ ...movEditForm, date: e.target.value })} />
+                </div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Quantity</label>
+                  <input style={styles.input} type="number" value={movEditForm.quantity} onChange={e => setMovEditForm({ ...movEditForm, quantity: e.target.value })} />
+                </div>
+                {movEditTarget.movement_type === "in" ? (
+                  <>
+                    <div style={styles.formGroup}>
+                      <label style={styles.label}>Unit Cost (₦)</label>
+                      <input style={styles.input} type="number" value={movEditForm.unitCost} onChange={e => setMovEditForm({ ...movEditForm, unitCost: e.target.value })} />
+                    </div>
+                    <div style={styles.formGroup}>
+                      <label style={styles.label}>Supplier</label>
+                      <input style={styles.input} value={movEditForm.supplier} onChange={e => setMovEditForm({ ...movEditForm, supplier: e.target.value })} />
+                    </div>
+                  </>
+                ) : (
+                  <div style={styles.formGroup}>
+                    <label style={styles.label}>Issued To</label>
+                    <input style={styles.input} value={movEditForm.issuedTo} onChange={e => setMovEditForm({ ...movEditForm, issuedTo: e.target.value })} />
+                  </div>
+                )}
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Staff / Received By</label>
+                  <select style={styles.input} value={movEditForm.staffName} onChange={e => setMovEditForm({ ...movEditForm, staffName: e.target.value })}>
+                    <option value="">— Select —</option>
+                    {staff.map(s => <option key={s.id} value={s.full_name}>{s.full_name}</option>)}
+                  </select>
+                </div>
+                <div style={{ ...styles.formGroup, gridColumn: "span 3" }}>
+                  <label style={styles.label}>Notes</label>
+                  <input style={styles.input} value={movEditForm.notes} onChange={e => setMovEditForm({ ...movEditForm, notes: e.target.value })} />
+                </div>
+              </div>
+              <div style={styles.row}>
+                <button style={styles.btn("primary")} onClick={handleSaveMovementEdit} disabled={saving}>{saving ? "Saving…" : "Save Changes"}</button>
+                <button style={styles.btn("secondary")} onClick={() => setMovEditTarget(null)}>Cancel</button>
+              </div>
+            </div>
+          )}
+
+          {/* ── DELETE CONFIRMATION ── */}
+          {movConfirmDelete && (
+            <div style={{ ...styles.card, marginBottom: "16px", borderLeft: `4px solid ${theme.red}` }}>
+              <div style={{ fontWeight: "700", marginBottom: "8px" }}>Delete this movement?</div>
+              <div style={{ fontSize: "13px", color: theme.textMuted, marginBottom: "14px" }}>
+                {movConfirmDelete.movement_type === "in" ? "+" : "-"}{Number(movConfirmDelete.quantity).toLocaleString()} {movConfirmDelete.item?.name} on {movConfirmDelete.date} will be reversed from current stock.
+              </div>
+              <div style={styles.row}>
+                <button style={styles.btn("danger")} onClick={handleDeleteMovement}>Yes, Delete & Reverse Stock</button>
+                <button style={styles.btn("secondary")} onClick={() => setMovConfirmDelete(null)}>Cancel</button>
+              </div>
+            </div>
+          )}
+
           <div style={styles.card}>
             <div style={styles.sectionTitle}>Stock Movement Log ({movements.length} records)</div>
             {movements.length === 0 ? (
@@ -2490,27 +2644,40 @@ const Inventory = ({ onLowStockChange }) => {
             ) : (
               <table style={styles.table}>
                 <thead>
-                  <tr>{["Date", "Type", "Item", "Qty", "Unit", "Unit Cost", "Total Cost", "From / To", "Staff", "Notes"].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
+                  <tr>{["Date", "Type", "Item", "Qty", "Unit", "Unit Cost", "Total Cost", "From / To", "Staff", "Notes", ""].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
                 </thead>
                 <tbody>
-                  {movements.map(m => (
-                    <tr key={m.id}>
-                      <td style={styles.td}>{m.date}</td>
-                      <td style={styles.td}>
-                        <span style={styles.badge(m.movement_type === "in" ? theme.green : theme.red)}>
-                          {m.movement_type === "in" ? "IN" : "OUT"}
-                        </span>
-                      </td>
-                      <td style={styles.td}><strong>{m.item?.name || "—"}</strong></td>
-                      <td style={styles.td}><strong style={{ color: m.movement_type === "in" ? theme.green : theme.red }}>{m.movement_type === "in" ? "+" : "-"}{Number(m.quantity).toLocaleString()}</strong></td>
-                      <td style={styles.td}>{m.item?.unit || "—"}</td>
-                      <td style={styles.td}>{m.unit_cost ? `₦${Number(m.unit_cost).toLocaleString()}` : "—"}</td>
-                      <td style={styles.td}>{m.total_cost ? <strong style={{ color: theme.accent }}>₦{Math.round(m.total_cost).toLocaleString()}</strong> : "—"}</td>
-                      <td style={styles.td}>{m.movement_type === "in" ? (m.supplier || "—") : (m.issued_to || "—")}</td>
-                      <td style={styles.td}>{m.staff_name || "—"}</td>
-                      <td style={styles.td}><span style={{ fontSize: "11px", color: theme.textMuted }}>{m.notes || ""}</span></td>
-                    </tr>
-                  ))}
+                  {movements.map(m => {
+                    const isAuto = m.reference?.startsWith("PROD-") || m.staff_name === "Auto";
+                    return (
+                      <tr key={m.id}>
+                        <td style={styles.td}>{m.date}</td>
+                        <td style={styles.td}>
+                          <span style={styles.badge(m.movement_type === "in" ? theme.green : theme.red)}>
+                            {m.movement_type === "in" ? "IN" : "OUT"}
+                          </span>
+                        </td>
+                        <td style={styles.td}><strong>{m.item?.name || "—"}</strong></td>
+                        <td style={styles.td}><strong style={{ color: m.movement_type === "in" ? theme.green : theme.red }}>{m.movement_type === "in" ? "+" : "-"}{Number(m.quantity).toLocaleString()}</strong></td>
+                        <td style={styles.td}>{m.item?.unit || "—"}</td>
+                        <td style={styles.td}>{m.unit_cost ? `₦${Number(m.unit_cost).toLocaleString()}` : "—"}</td>
+                        <td style={styles.td}>{m.total_cost ? <strong style={{ color: theme.accent }}>₦{Math.round(m.total_cost).toLocaleString()}</strong> : "—"}</td>
+                        <td style={styles.td}>{m.movement_type === "in" ? (m.supplier || "—") : (m.issued_to || "—")}</td>
+                        <td style={styles.td}>{m.staff_name || "—"}</td>
+                        <td style={styles.td}><span style={{ fontSize: "11px", color: theme.textMuted }}>{m.notes || ""}</span></td>
+                        <td style={styles.td}>
+                          {isAuto ? (
+                            <span style={{ fontSize: "10px", color: theme.textMuted, fontStyle: "italic" }}>Auto — edit via Production Log</span>
+                          ) : (
+                            <div style={{ display: "flex", gap: "4px" }}>
+                              <button style={{ ...styles.btn("secondary"), padding: "3px 8px", fontSize: "11px" }} onClick={() => startEditMovement(m)}>Edit</button>
+                              <button style={{ ...styles.btn("danger"), padding: "3px 8px", fontSize: "11px" }} onClick={() => setMovConfirmDelete(m)}>Delete</button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             )}
@@ -2635,11 +2802,14 @@ const LPOApprovals = () => {
                   <div>
                     <div style={{ fontWeight: "700", fontSize: "15px" }}>{order.customer?.name || "—"}</div>
                     <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "3px" }}>{order.customer?.location} · Submitted by: {lpo.submitted_by || "—"} · {lpo.submitted_at?.split("T")[0]}</div>
-                    <div style={{ marginTop: "8px", display: "flex", gap: "12px", fontSize: "13px" }}>
+                    <div style={{ marginTop: "8px", display: "flex", gap: "12px", fontSize: "13px", flexWrap: "wrap", alignItems: "center" }}>
                       {(order.order_items || []).map((it, i) => (
                         <span key={i} style={styles.badge(theme.blue)}>{it.quantity?.toLocaleString()} {it.block_type}</span>
                       ))}
                       <span style={{ color: theme.accent, fontWeight: "700" }}>{naira(total)}</span>
+                      {lpo.document_url && (
+                        <a href={lpo.document_url} target="_blank" rel="noreferrer" style={{ ...styles.btn("primary"), fontSize: "11px", padding: "3px 10px", textDecoration: "none", display: "inline-block" }}>📄 View LPO Document</a>
+                      )}
                     </div>
                   </div>
                   <button style={styles.btn("secondary")} onClick={() => { setSelected(isOpen ? null : lpo); setNote(""); }}>{isOpen ? "Hide" : "Review"}</button>

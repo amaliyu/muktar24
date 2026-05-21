@@ -136,6 +136,46 @@ export const inventoryService = {
     }
   },
 
+  async deleteMovement(id, movement) {
+    const { data: item, error: fetchErr } = await supabase
+      .from('inventory_items').select('current_stock').eq('id', movement.item_id).single()
+    if (fetchErr) throw fetchErr
+    const currentStock = Number(item?.current_stock) || 0
+    const stockAfter = movement.movement_type === 'in'
+      ? currentStock - Number(movement.quantity)
+      : currentStock + Number(movement.quantity)
+    if (stockAfter < 0) throw new Error(`Cannot delete — would result in negative stock of ${Math.abs(stockAfter)} units`)
+    await supabase.from('inventory_items')
+      .update({ current_stock: stockAfter, updated_at: new Date().toISOString() })
+      .eq('id', movement.item_id)
+    const { error } = await supabase.from('stock_movements').delete().eq('id', id)
+    if (error) throw error
+  },
+
+  async editMovement(id, oldMovement, newData) {
+    const { data: item, error: fetchErr } = await supabase
+      .from('inventory_items').select('current_stock').eq('id', oldMovement.item_id).single()
+    if (fetchErr) throw fetchErr
+    const currentStock = Number(item?.current_stock) || 0
+    const afterUndo = oldMovement.movement_type === 'in'
+      ? currentStock - Number(oldMovement.quantity)
+      : currentStock + Number(oldMovement.quantity)
+    const newStock = newData.movement_type === 'in'
+      ? afterUndo + Number(newData.quantity)
+      : afterUndo - Number(newData.quantity)
+    if (newStock < 0) throw new Error(`Cannot edit — would result in negative stock of ${Math.abs(newStock)} units`)
+    await supabase.from('inventory_items')
+      .update({ current_stock: newStock, updated_at: new Date().toISOString() })
+      .eq('id', oldMovement.item_id)
+    const { data, error } = await supabase.from('stock_movements')
+      .update(newData)
+      .eq('id', id)
+      .select('*, item:item_id(name, unit)')
+      .single()
+    if (error) throw error
+    return data
+  },
+
   async reverseProductionMovements(reference) {
     const { data: movements } = await supabase
       .from('stock_movements')
