@@ -122,6 +122,22 @@ export const fuelLogService = {
     const { error } = await supabase.from('vehicle_fuel_log').delete().eq('id', id)
     if (error) throw error
   },
+
+  async deleteByWaybill(waybillId) {
+    const { error } = await supabase.from('vehicle_fuel_log').delete().eq('waybill_id', waybillId)
+    if (error) throw error
+  },
+
+  async upsertForWaybill(vehicleId, waybillId, date, litres, dispensedBy) {
+    await supabase.from('vehicle_fuel_log').delete().eq('waybill_id', waybillId)
+    if (!litres || litres <= 0) return
+    const { error } = await supabase.from('vehicle_fuel_log').insert({
+      vehicle_id: vehicleId, waybill_id: waybillId,
+      date, litres_dispensed: litres,
+      purpose: 'delivery', dispensed_by: dispensedBy || null,
+    })
+    if (error) throw error
+  },
 }
 
 export const vehicleDocumentsService = {

@@ -64,9 +64,23 @@ export const expensesService = {
     if (error) throw error
   },
 
+  async update(id, updates) {
+    const { error } = await supabase.from('expenses').update(updates).eq('id', id)
+    if (error) throw error
+  },
+
   async delete(id) {
     const { error } = await supabase.from('expenses').delete().eq('id', id)
     if (error) throw error
+  },
+
+  async getVehicleMaintenanceCategoryId() {
+    const { data } = await supabase
+      .from('expense_categories')
+      .select('id')
+      .ilike('name', 'vehicle maintenance')
+      .limit(1)
+    return data?.[0]?.id || null
   },
 }
 

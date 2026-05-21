@@ -27,7 +27,9 @@ import { generateReconciliationPDF } from './utils/generateReconciliationPDF'
 import { generatePaymentReceiptPDF } from './utils/generatePaymentReceiptPDF'
 import { parseFile, autoMapColumns, mapRowsToTransactions, autoMatchTransactions, detectCategory, extractCustomerFromDesc } from './utils/parseBankStatement';
 import VehicleRegistry from './components/VehicleRegistry'
-import { vehiclesService } from './services/vehicles'
+import { vehiclesService, fuelLogService } from './services/vehicles'
+import jsPDF from 'jspdf'
+import autoTable from 'jspdf-autotable'
 
 const theme = {
   bg: "#0f1117", surface: "#1a1d27", card: "#21263a", border: "#2e3452",
@@ -1306,7 +1308,7 @@ const Waybills = () => {
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [editTarget, setEditTarget] = useState(null);
   const [selectedOrderId, setSelectedOrderId] = useState("");
-  const emptyForm = { waybillDate: "", vehicleId: "", driverId: "", truckNumber: "", blockType: "9-inch", quantityLoaded: "", quantityReceived: "", quantityDamaged: "0", batchId: "", notes: "" };
+  const emptyForm = { waybillDate: "", vehicleId: "", driverId: "", truckNumber: "", blockType: "9-inch", quantityLoaded: "", quantityReceived: "", quantityDamaged: "0", batchId: "", dieselLitres: "", storeOfficer: "", notes: "" };
   const [form, setForm] = useState(emptyForm);
 
   const load = async () => {
@@ -1347,6 +1349,8 @@ const Waybills = () => {
       quantityReceived: String(w.quantity_received || ""),
       quantityDamaged: String(w.quantity_damaged || 0),
       batchId: w.batch_id || "",
+      dieselLitres: String(w.diesel_given_litres || ""),
+      storeOfficer: w.store_officer || "",
       notes: w.notes || "",
     });
     setSelectedOrderId("");
@@ -1361,6 +1365,7 @@ const Waybills = () => {
     setAlert(null);
     try {
       const damaged = parseInt(form.quantityDamaged) || 0;
+      const dieselLitres = parseFloat(form.dieselLitres) || 0;
       const waybillData = {
         vehicle_id: form.vehicleId || null,
         driver_id: form.driverId || null,
@@ -1370,6 +1375,8 @@ const Waybills = () => {
         quantity_received: parseInt(form.quantityReceived) || 0,
         quantity_damaged: damaged,
         waybill_date: form.waybillDate,
+        diesel_given_litres: dieselLitres || null,
+        store_officer: form.storeOfficer || null,
         notes: form.notes || null,
       };
 
@@ -1384,6 +1391,12 @@ const Waybills = () => {
         } catch { /* non-blocking */ }
         // Save updated waybill
         await waybillsService.update(editTarget.id, { ...waybillData, batch_id: form.batchId || editTarget.batch_id || null });
+        // Sync fuel log for this waybill
+        try {
+          if (form.vehicleId || editTarget.vehicle_id) {
+            await fuelLogService.upsertForWaybill(form.vehicleId || editTarget.vehicle_id, editTarget.id, form.waybillDate, dieselLitres, form.storeOfficer);
+          }
+        } catch { /* non-blocking */ }
         // Apply new effects
         try {
           await finishedGoodsService.decrease(form.blockType, newLoaded);
@@ -1405,10 +1418,16 @@ const Waybills = () => {
         const waybillNumber = `APC-WB-${String(nextNum).padStart(3, "0")}`;
         const qtyLoaded = parseInt(form.quantityLoaded) || 0;
         const qtyReceived = parseInt(form.quantityReceived) || 0;
-        await waybillsService.create({ ...waybillData, batch_id: form.batchId || null, waybill_number: waybillNumber, receiver_name: selectedOrder?.customer?.name || null, order_id: selectedOrder?.id || null });
+        const created = await waybillsService.create({ ...waybillData, batch_id: form.batchId || null, waybill_number: waybillNumber, receiver_name: selectedOrder?.customer?.name || null, order_id: selectedOrder?.id || null });
         if (damaged > 0) {
           await productionService.logDamage({ date: form.waybillDate, block_type: form.blockType, stage: "delivery", quantity_damaged: damaged, notes: `Transit damage on waybill ${waybillNumber}` });
         }
+        // Auto-create fuel log entry if diesel was given
+        try {
+          if (form.vehicleId && dieselLitres > 0) {
+            await fuelLogService.upsertForWaybill(form.vehicleId, created.id, form.waybillDate, dieselLitres, form.storeOfficer);
+          }
+        } catch { /* non-blocking */ }
         // Side effects (non-blocking)
         try {
           if (qtyLoaded > 0) await finishedGoodsService.decrease(form.blockType, qtyLoaded);
@@ -1423,7 +1442,7 @@ const Waybills = () => {
           }
         } catch { /* side effects optional */ }
         await load();
-        setAlert({ type: "success", msg: `Waybill ${waybillNumber} recorded for ${selectedOrder?.customer?.name}${damaged > 0 ? " — transit damage logged automatically." : "."}` });
+        setAlert({ type: "success", msg: `Waybill ${waybillNumber} recorded for ${selectedOrder?.customer?.name}${damaged > 0 ? " — transit damage logged automatically." : ""}${form.vehicleId && dieselLitres > 0 ? ` · ${dieselLitres}L fuel logged to vehicle.` : "."}` });
       }
       setForm(emptyForm);
       setSelectedOrderId("");
@@ -1444,6 +1463,8 @@ const Waybills = () => {
       try { if (waybill.batch_id) await batchesService.restoreStock(waybill.batch_id, waybill.quantity_loaded); } catch {}
       // Step 3 — Reverse transit damage log entry
       try { await productionService.deleteTransitDamage(waybill.waybill_number); } catch {}
+      // Step 3b — Delete linked fuel log entry
+      try { await fuelLogService.deleteByWaybill(waybill.id); } catch {}
       // Step 4 — Delete the waybill record
       await waybillsService.delete(waybill.id);
       // Step 5 — Resync pending delivery register (waybill is now gone so recount is accurate)
@@ -1549,6 +1570,18 @@ const Waybills = () => {
               <label style={styles.label}>Quantity Damaged in Transit</label>
               <input style={styles.input} type="number" placeholder="0" value={form.quantityDamaged} onChange={e => setForm({ ...form, quantityDamaged: e.target.value })} />
             </div>
+            {form.vehicleId && (
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Diesel Given to Driver (litres)</label>
+                <input style={styles.input} type="number" placeholder="e.g. 80" value={form.dieselLitres} onChange={e => setForm({ ...form, dieselLitres: e.target.value })} />
+              </div>
+            )}
+            {form.vehicleId && parseFloat(form.dieselLitres) > 0 && (
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Dispensed By (Store Officer)</label>
+                <input style={styles.input} placeholder="Name of store officer" value={form.storeOfficer} onChange={e => setForm({ ...form, storeOfficer: e.target.value })} />
+              </div>
+            )}
             {editTarget ? (
               <div style={styles.formGroup}>
                 <label style={styles.label}>Receiver</label>
@@ -2204,37 +2237,126 @@ const Customers = () => {
 };
 
 // ── REPORTS ───────────────────────────────────────────────────
-const Reports = () => (
-  <div>
-    <div style={styles.header}>
-      <div>
-        <div style={styles.pageTitle}>Reports</div>
-        <div style={styles.pageSubtitle}>Generate staff, production, and board-level reports</div>
+const Reports = () => {
+  const [fleetReport, setFleetReport] = useState(null);
+  const [fleetLoading, setFleetLoading] = useState(false);
+
+  const generateFleetDamageReport = async () => {
+    setFleetLoading(true);
+    try {
+      const [waybills, vehicles] = await Promise.all([
+        waybillsService.getAll(),
+        vehiclesService.getAll(),
+      ]);
+      const vehicleMap = Object.fromEntries(vehicles.map(v => [v.id, v]));
+      const grouped = {};
+      waybills.forEach(w => {
+        const key = w.vehicle_id || '__unknown__';
+        if (!grouped[key]) grouped[key] = { loaded: 0, damaged: 0, trips: 0 };
+        grouped[key].loaded += w.quantity_loaded || 0;
+        grouped[key].damaged += w.quantity_damaged || 0;
+        grouped[key].trips += 1;
+      });
+      const totalLoaded = Object.values(grouped).reduce((s, g) => s + g.loaded, 0);
+      const totalDamaged = Object.values(grouped).reduce((s, g) => s + g.damaged, 0);
+      const fleetRate = totalLoaded > 0 ? (totalDamaged / totalLoaded) * 100 : 0;
+      const rows = Object.entries(grouped)
+        .map(([vId, g]) => {
+          const v = vehicleMap[vId];
+          return { vehicleNumber: v?.vehicle_number || '—', vehicleName: v?.vehicle_name || '', trips: g.trips, loaded: g.loaded, damaged: g.damaged, rate: g.loaded > 0 ? (g.damaged / g.loaded) * 100 : 0 };
+        })
+        .sort((a, b) => b.rate - a.rate);
+      setFleetReport({ rows, fleetRate, totalLoaded, totalDamaged });
+    } catch (e) { alert('Could not load fleet data: ' + e.message); }
+    finally { setFleetLoading(false); }
+  };
+
+  const downloadFleetPDF = () => {
+    if (!fleetReport) return;
+    const doc = new jsPDF();
+    doc.setFontSize(16); doc.setFont(undefined, 'bold');
+    doc.text('Fleet Damage Analysis Report', 14, 18);
+    doc.setFontSize(10); doc.setFont(undefined, 'normal');
+    doc.text(`Generated: ${new Date().toLocaleDateString('en-NG')}   Fleet Average Damage Rate: ${fleetReport.fleetRate.toFixed(2)}%`, 14, 26);
+    autoTable(doc, {
+      startY: 32,
+      head: [['Vehicle', 'Name', 'Trips', 'Loaded', 'Damaged', 'Damage Rate']],
+      body: fleetReport.rows.map(r => [r.vehicleNumber, r.vehicleName, r.trips, r.loaded.toLocaleString(), r.damaged.toLocaleString(), `${r.rate.toFixed(2)}%`]),
+      styles: { fontSize: 10 },
+      headStyles: { fillColor: [245, 166, 35], textColor: 0 },
+      didParseCell: (data) => {
+        if (data.section === 'body' && data.column.index === 5) {
+          const rate = fleetReport.rows[data.row.index]?.rate || 0;
+          if (rate > fleetReport.fleetRate) data.cell.styles.textColor = [240, 107, 107];
+        }
+      },
+    });
+    doc.save(`Fleet-Damage-Report-${new Date().toISOString().split('T')[0]}.pdf`);
+  };
+
+  return (
+    <div>
+      <div style={styles.header}>
+        <div>
+          <div style={styles.pageTitle}>Reports</div>
+          <div style={styles.pageSubtitle}>Generate staff, production, and board-level reports</div>
+        </div>
+      </div>
+      <div style={styles.grid(2)}>
+        {[
+          { title: "Production Report", desc: "Daily/weekly/monthly production volumes, material usage, and cost per block", color: theme.accent, icon: "🏭" },
+          { title: "Damage & Waste Report", desc: "Breakages by stage — production, stacking, loading, and delivery", color: theme.red, icon: "⚠️" },
+          { title: "Customer Statement", desc: "Per-customer order history, payments received, and delivery records", color: theme.blue, icon: "📋" },
+          { title: "Staff & Payroll Report", desc: "Attendance, wages for daily workers, and permanent staff costs", color: theme.green, icon: "👥" },
+          { title: "Delivery & Logistics Report", desc: "Diesel usage, distances covered, loading/offloading costs by driver", color: theme.accentDim, icon: "🚛" },
+          { title: "Board Summary Report", desc: "High-level overview of revenue, costs, production, and KPIs for board review", color: theme.blue, icon: "📊" },
+        ].map((r, i) => (
+          <div key={i} style={{ ...styles.card, borderTop: `3px solid ${r.color}`, cursor: "pointer" }}>
+            <div style={{ fontSize: "24px", marginBottom: "10px" }}>{r.icon}</div>
+            <div style={{ fontWeight: "700", fontSize: "14px", marginBottom: "6px" }}>{r.title}</div>
+            <div style={{ fontSize: "12px", color: theme.textMuted, marginBottom: "16px" }}>{r.desc}</div>
+            <div style={styles.row}>
+              <button style={styles.btn("primary")}>Generate PDF</button>
+              <button style={styles.btn("secondary")}>Export Excel</button>
+            </div>
+          </div>
+        ))}
+
+        {/* Fleet Damage Report — live */}
+        <div style={{ ...styles.card, borderTop: `3px solid ${theme.red}`, gridColumn: "span 2" }}>
+          <div style={{ fontSize: "24px", marginBottom: "10px" }}>🚛</div>
+          <div style={{ fontWeight: "700", fontSize: "14px", marginBottom: "6px" }}>Fleet Damage Analysis Report</div>
+          <div style={{ fontSize: "12px", color: theme.textMuted, marginBottom: "16px" }}>Per-vehicle damage rates ranked worst-to-best. Vehicles above fleet average highlighted in red. Downloadable as PDF.</div>
+          <div style={styles.row}>
+            <button style={styles.btn("primary")} onClick={generateFleetDamageReport} disabled={fleetLoading}>{fleetLoading ? "Loading…" : "Generate Report"}</button>
+            {fleetReport && <button style={styles.btn("secondary")} onClick={downloadFleetPDF}>Download PDF</button>}
+          </div>
+          {fleetReport && (
+            <div style={{ marginTop: "16px" }}>
+              <div style={{ fontSize: "12px", color: theme.textMuted, marginBottom: "10px" }}>Fleet average damage rate: <strong style={{ color: theme.accent }}>{fleetReport.fleetRate.toFixed(2)}%</strong> &nbsp;|&nbsp; Total loaded: <strong>{fleetReport.totalLoaded.toLocaleString()}</strong> &nbsp;|&nbsp; Total damaged: <strong style={{ color: theme.red }}>{fleetReport.totalDamaged.toLocaleString()}</strong></div>
+              <table style={styles.table}>
+                <thead><tr>{["Rank", "Vehicle", "Name", "Trips", "Blocks Loaded", "Blocks Damaged", "Damage Rate"].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {fleetReport.rows.map((r, i) => (
+                    <tr key={i}>
+                      <td style={styles.td}><span style={{ fontWeight: "700", color: i === 0 ? theme.red : theme.textMuted }}>#{i + 1}</span></td>
+                      <td style={styles.td}><span style={{ color: theme.accent, fontWeight: "600" }}>{r.vehicleNumber}</span></td>
+                      <td style={styles.td}>{r.vehicleName || "—"}</td>
+                      <td style={styles.td}>{r.trips}</td>
+                      <td style={styles.td}>{r.loaded.toLocaleString()}</td>
+                      <td style={styles.td}><strong style={{ color: r.damaged > 0 ? theme.red : theme.textMuted }}>{r.damaged.toLocaleString()}</strong></td>
+                      <td style={styles.td}><span style={{ fontWeight: "700", color: r.rate > fleetReport.fleetRate ? theme.red : theme.green }}>{r.rate.toFixed(2)}%{r.rate > fleetReport.fleetRate ? " ⚠" : ""}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </div>
     </div>
-    <div style={styles.grid(2)}>
-      {[
-        { title: "Production Report", desc: "Daily/weekly/monthly production volumes, material usage, and cost per block", color: theme.accent, icon: "🏭" },
-        { title: "Damage & Waste Report", desc: "Breakages by stage — production, stacking, loading, and delivery", color: theme.red, icon: "⚠️" },
-        { title: "Customer Statement", desc: "Per-customer order history, payments received, and delivery records", color: theme.blue, icon: "📋" },
-        { title: "Staff & Payroll Report", desc: "Attendance, wages for daily workers, and permanent staff costs", color: theme.green, icon: "👥" },
-        { title: "Delivery & Logistics Report", desc: "Diesel usage, distances covered, loading/offloading costs by driver", color: theme.accentDim, icon: "🚛" },
-        { title: "Vehicle Cost Report", desc: "Per-vehicle maintenance costs, fuel consumption, downtime days, and total operating cost", color: theme.red, icon: "🔧" },
-        { title: "Board Summary Report", desc: "High-level overview of revenue, costs, production, and KPIs for board review", color: theme.blue, icon: "📊" },
-      ].map((r, i) => (
-        <div key={i} style={{ ...styles.card, borderTop: `3px solid ${r.color}`, cursor: "pointer" }}>
-          <div style={{ fontSize: "24px", marginBottom: "10px" }}>{r.icon}</div>
-          <div style={{ fontWeight: "700", fontSize: "14px", marginBottom: "6px" }}>{r.title}</div>
-          <div style={{ fontSize: "12px", color: theme.textMuted, marginBottom: "16px" }}>{r.desc}</div>
-          <div style={styles.row}>
-            <button style={styles.btn("primary")}>Generate PDF</button>
-            <button style={styles.btn("secondary")}>Export Excel</button>
-          </div>
-        </div>
-      ))}
-    </div>
-  </div>
-);
+  );
+};
 
 // ── INVENTORY ─────────────────────────────────────────────────
 const UNITS = ["bags", "kg", "litres", "units", "tonnes", "metres", "packs"];

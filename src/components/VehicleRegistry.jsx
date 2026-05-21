@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { vehiclesService, maintenanceService, fuelLogService, vehicleDocumentsService } from '../services/vehicles'
 import { staffService } from '../services/staff'
+import { expensesService } from '../services/accounting'
 import { supabase } from '../lib/supabase'
 
 const theme = {
@@ -139,10 +140,11 @@ const VehicleForm = ({ vehicle, staff, onSave, onCancel }) => {
 }
 
 // ── MAINTENANCE TAB ───────────────────────────────────────────────
-const MaintenanceTab = ({ vehicleId }) => {
+const MaintenanceTab = ({ vehicleId, vehicleNumber, vehicleName }) => {
   const [records, setRecords] = useState([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
+  const [editTarget, setEditTarget] = useState(null)
   const [saving, setSaving] = useState(false)
   const [alert, setAlert] = useState(null)
   const today = todayStr()
@@ -159,22 +161,68 @@ const MaintenanceTab = ({ vehicleId }) => {
   }
   useEffect(() => { load() }, [vehicleId])
 
+  const openCreate = () => { setEditTarget(null); setForm(emptyForm); setReceiptUrl(''); setShowForm(true) }
+  const openEdit = (r) => {
+    setEditTarget(r)
+    setForm({ maintenance_date: r.maintenance_date, maintenance_type: r.maintenance_type, description: r.description || '', cost: String(r.cost || ''), vendor_name: r.vendor_name || '', vendor_phone: r.vendor_phone || '', downtime_days: String(r.downtime_days || ''), next_maintenance_date: r.next_maintenance_date || '', recorded_by: r.recorded_by || '', notes: r.notes || '' })
+    setReceiptUrl(r.receipt_url || '')
+    setShowForm(true)
+  }
+
+  const getOrCreateVehicleMaintenanceCategoryId = async () => {
+    const { data } = await supabase.from('expense_categories').select('id').ilike('name', 'vehicle maintenance').limit(1)
+    if (data?.[0]?.id) return data[0].id
+    const { data: newCat } = await supabase.from('expense_categories').insert({ name: 'Vehicle Maintenance', parent_category: 'Operations', is_active: true }).select('id').single()
+    return newCat?.id || null
+  }
+
   const handleSave = async () => {
     if (!form.maintenance_date || !form.maintenance_type) return setAlert({ type: 'error', msg: 'Date and type are required.' })
     setSaving(true)
     try {
-      await maintenanceService.create({ ...form, vehicle_id: vehicleId, cost: Number(form.cost) || 0, downtime_days: Number(form.downtime_days) || 0, receipt_url: receiptUrl || null, next_maintenance_date: form.next_maintenance_date || null })
-      setForm(emptyForm); setReceiptUrl(''); setShowForm(false)
-      setAlert({ type: 'success', msg: 'Maintenance record saved.' })
+      const cost = Number(form.cost) || 0
+      const payload = { ...form, vehicle_id: vehicleId, cost, downtime_days: Number(form.downtime_days) || 0, receipt_url: receiptUrl || null, next_maintenance_date: form.next_maintenance_date || null }
+
+      if (editTarget) {
+        await maintenanceService.update(editTarget.id, payload)
+        if (cost > 0) {
+          const expDesc = `${vehicleNumber || 'Vehicle'}${vehicleName ? ` (${vehicleName})` : ''} — ${form.maintenance_type}${form.description ? ': ' + form.description : ''}`
+          if (editTarget.linked_expense_id) {
+            await expensesService.update(editTarget.linked_expense_id, { expense_date: form.maintenance_date, description: expDesc, amount: cost, vendor: form.vendor_name || null })
+          } else {
+            const catId = await getOrCreateVehicleMaintenanceCategoryId()
+            const exp = await expensesService.create({ expense_date: form.maintenance_date, description: expDesc, amount: cost, vendor: form.vendor_name || null, category_id: catId, status: 'approved', notes: `vehicle-maintenance:${editTarget.id}` })
+            await maintenanceService.update(editTarget.id, { linked_expense_id: exp.id })
+          }
+        } else if (editTarget.linked_expense_id) {
+          await expensesService.delete(editTarget.linked_expense_id)
+          await maintenanceService.update(editTarget.id, { linked_expense_id: null })
+        }
+        setAlert({ type: 'success', msg: 'Maintenance record updated.' })
+      } else {
+        const record = await maintenanceService.create(payload)
+        if (cost > 0) {
+          const catId = await getOrCreateVehicleMaintenanceCategoryId()
+          const expDesc = `${vehicleNumber || 'Vehicle'}${vehicleName ? ` (${vehicleName})` : ''} — ${form.maintenance_type}${form.description ? ': ' + form.description : ''}`
+          const exp = await expensesService.create({ expense_date: form.maintenance_date, description: expDesc, amount: cost, vendor: form.vendor_name || null, category_id: catId, status: 'approved', notes: `vehicle-maintenance:${record.id}` })
+          await maintenanceService.update(record.id, { linked_expense_id: exp.id })
+        }
+        setAlert({ type: 'success', msg: 'Maintenance record saved and expense logged to P&L.' })
+      }
+      setForm(emptyForm); setReceiptUrl(''); setShowForm(false); setEditTarget(null)
       await load()
     } catch (e) { setAlert({ type: 'error', msg: e.message }) }
     finally { setSaving(false) }
   }
 
-  const handleDelete = async (id) => {
-    if (!window.confirm('Delete this maintenance record?')) return
-    try { await maintenanceService.delete(id); await load(); setAlert({ type: 'success', msg: 'Record deleted.' }) }
-    catch (e) { setAlert({ type: 'error', msg: e.message }) }
+  const handleDelete = async (r) => {
+    if (!window.confirm('Delete this maintenance record? This will also remove the linked P&L expense.')) return
+    try {
+      if (r.linked_expense_id) { try { await expensesService.delete(r.linked_expense_id) } catch {} }
+      await maintenanceService.delete(r.id)
+      await load()
+      setAlert({ type: 'success', msg: 'Record and linked expense deleted.' })
+    } catch (e) { setAlert({ type: 'error', msg: e.message }) }
   }
 
   const handleReceiptUpload = async (file) => {
@@ -196,10 +244,11 @@ const MaintenanceTab = ({ vehicleId }) => {
           <span style={{ fontSize: '13px', color: theme.textMuted }}>Total maintenance cost: </span>
           <strong style={{ color: theme.accent }}>{naira(totalCost)}</strong>
         </div>
-        <button style={styles.btn('primary')} onClick={() => setShowForm(v => !v)}>+ Add Maintenance Record</button>
+        <button style={styles.btn('primary')} onClick={openCreate}>+ Add Maintenance Record</button>
       </div>
       {showForm && (
         <div style={{ ...styles.card, borderLeft: `4px solid ${theme.accent}`, marginBottom: '16px' }}>
+          <div style={{ fontWeight: '700', marginBottom: '12px', color: theme.text }}>{editTarget ? 'Edit Maintenance Record' : 'New Maintenance Record'}</div>
           <div style={styles.grid(3)}>
             <div style={styles.formGroup}><label style={styles.label}>Date</label><input style={styles.input} type="date" value={form.maintenance_date} onChange={e => setForm(f => ({ ...f, maintenance_date: e.target.value }))} /></div>
             <div style={styles.formGroup}><label style={styles.label}>Type</label>
@@ -228,9 +277,10 @@ const MaintenanceTab = ({ vehicleId }) => {
             </div>
             <div style={{ ...styles.formGroup, gridColumn: 'span 2' }}><label style={styles.label}>Notes</label><input style={styles.input} value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} /></div>
           </div>
+          {Number(form.cost) > 0 && <div style={{ fontSize: '12px', color: theme.green, marginBottom: '10px' }}>✓ Cost will be automatically recorded as a Vehicle Maintenance expense in P&L</div>}
           <div style={styles.row}>
-            <button style={styles.btn('primary')} onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : 'Save Record'}</button>
-            <button style={styles.btn()} onClick={() => setShowForm(false)}>Cancel</button>
+            <button style={styles.btn('primary')} onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : editTarget ? 'Update Record' : 'Save Record'}</button>
+            <button style={styles.btn()} onClick={() => { setShowForm(false); setEditTarget(null) }}>Cancel</button>
           </div>
         </div>
       )}
@@ -245,14 +295,18 @@ const MaintenanceTab = ({ vehicleId }) => {
                 <td style={styles.td}>{r.maintenance_date}</td>
                 <td style={styles.td}><span style={styles.badge(theme.blue)}>{r.maintenance_type}</span></td>
                 <td style={styles.td}>{r.description || '—'}</td>
-                <td style={styles.td}><strong style={{ color: theme.accent }}>{naira(r.cost)}</strong></td>
+                <td style={styles.td}>
+                  <strong style={{ color: theme.accent }}>{naira(r.cost)}</strong>
+                  {r.linked_expense_id && <div style={{ fontSize: '10px', color: theme.green }}>✓ in P&L</div>}
+                </td>
                 <td style={styles.td}>{r.vendor_name || '—'}{r.vendor_phone && <div style={{ fontSize: '11px', color: theme.textMuted }}>{r.vendor_phone}</div>}</td>
                 <td style={styles.td}>{r.downtime_days ? `${r.downtime_days}d` : '—'}</td>
                 <td style={styles.td}>{r.next_maintenance_date ? <span style={{ color: expiryColor(r.next_maintenance_date) }}>{r.next_maintenance_date}</span> : '—'}</td>
                 <td style={styles.td}>
                   <div style={styles.row}>
                     {r.receipt_url && <a href={r.receipt_url} target="_blank" rel="noreferrer" style={{ fontSize: '11px', color: theme.blue }}>Receipt</a>}
-                    <button style={{ ...styles.btn('danger'), padding: '3px 8px', fontSize: '11px' }} onClick={() => handleDelete(r.id)}>Delete</button>
+                    <button style={{ ...styles.btn(), padding: '3px 8px', fontSize: '11px' }} onClick={() => openEdit(r)}>Edit</button>
+                    <button style={{ ...styles.btn('danger'), padding: '3px 8px', fontSize: '11px' }} onClick={() => handleDelete(r)}>Delete</button>
                   </div>
                 </td>
               </tr>
@@ -458,13 +512,22 @@ const VehicleProfile = ({ vehicle: initialVehicle, staff, staffMap, onBack, onUp
   const TABS = [
     { id: 'details', label: 'Details' },
     { id: 'deliveries', label: 'Delivery History' },
+    { id: 'damage', label: 'Damage Analysis' },
     { id: 'maintenance', label: 'Maintenance Log' },
     { id: 'fuel', label: 'Fuel Log' },
     { id: 'documents', label: 'Documents' },
   ]
 
+  const [dmgFrom, setDmgFrom] = useState('')
+  const [dmgTo, setDmgTo] = useState('')
+  const [fleetAvgRate, setFleetAvgRate] = useState(null)
+
   useEffect(() => {
-    if (tab === 'deliveries') loadDeliveries()
+    if (tab === 'deliveries' || tab === 'damage') loadDeliveries()
+  }, [tab])
+
+  useEffect(() => {
+    if (tab === 'damage' && fleetAvgRate === null) loadFleetAvg()
   }, [tab])
 
   const loadDeliveries = async () => {
@@ -479,6 +542,16 @@ const VehicleProfile = ({ vehicle: initialVehicle, staff, staffMap, onBack, onUp
       setDeliveries(data || [])
     } catch { setDeliveries([]) }
     finally { setDelvLoading(false) }
+  }
+
+  const loadFleetAvg = async () => {
+    try {
+      const { data } = await supabase.from('waybills').select('quantity_loaded, quantity_damaged')
+      if (!data || data.length === 0) { setFleetAvgRate(0); return }
+      const tl = data.reduce((s, w) => s + (w.quantity_loaded || 0), 0)
+      const td = data.reduce((s, w) => s + (w.quantity_damaged || 0), 0)
+      setFleetAvgRate(tl > 0 ? (td / tl) * 100 : 0)
+    } catch { setFleetAvgRate(0) }
   }
 
   const handleUpdate = async () => {
@@ -609,7 +682,84 @@ const VehicleProfile = ({ vehicle: initialVehicle, staff, staffMap, onBack, onUp
         </div>
       )}
 
-      {tab === 'maintenance' && <MaintenanceTab vehicleId={vehicle.id} />}
+      {tab === 'damage' && (() => {
+        const filtered = deliveries.filter(d => {
+          if (dmgFrom && d.waybill_date < dmgFrom) return false
+          if (dmgTo && d.waybill_date > dmgTo) return false
+          return true
+        })
+        const tLoaded = filtered.reduce((s, d) => s + (d.quantity_loaded || 0), 0)
+        const tDamaged = filtered.reduce((s, d) => s + (d.quantity_damaged || 0), 0)
+        const rate = tLoaded > 0 ? (tDamaged / tLoaded) * 100 : 0
+        const aboveAvg = fleetAvgRate !== null && rate > fleetAvgRate
+        const damagedTrips = filtered.filter(d => d.quantity_damaged > 0)
+        return (
+          <div>
+            {delvLoading ? <Spinner /> : (
+              <>
+                <div style={{ ...styles.row, marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
+                  <div style={styles.formGroup}>
+                    <label style={styles.label}>From</label>
+                    <input style={{ ...styles.input, width: '150px' }} type="date" value={dmgFrom} onChange={e => setDmgFrom(e.target.value)} />
+                  </div>
+                  <div style={styles.formGroup}>
+                    <label style={styles.label}>To</label>
+                    <input style={{ ...styles.input, width: '150px' }} type="date" value={dmgTo} onChange={e => setDmgTo(e.target.value)} />
+                  </div>
+                  {(dmgFrom || dmgTo) && <button style={{ ...styles.btn(), alignSelf: 'flex-end', marginBottom: '14px' }} onClick={() => { setDmgFrom(''); setDmgTo('') }}>Clear</button>}
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginBottom: '20px' }}>
+                  {[
+                    { label: 'Total Trips', value: filtered.length, color: theme.blue },
+                    { label: 'Blocks Loaded', value: fmt(tLoaded), color: theme.accent },
+                    { label: 'Blocks Damaged', value: fmt(tDamaged), color: theme.red },
+                    { label: 'Damage Rate', value: `${rate.toFixed(2)}%`, color: aboveAvg ? theme.red : theme.green },
+                  ].map(({ label, value, color }) => (
+                    <div key={label} style={{ background: theme.surface, borderRadius: '8px', padding: '14px', borderTop: `3px solid ${color}` }}>
+                      <div style={{ fontSize: '11px', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{label}</div>
+                      <div style={{ fontSize: '22px', fontWeight: '700', color, marginTop: '6px' }}>{value}</div>
+                    </div>
+                  ))}
+                </div>
+                {fleetAvgRate !== null && (
+                  <div style={{ padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', background: aboveAvg ? theme.red + '15' : theme.green + '15', border: `1px solid ${aboveAvg ? theme.red : theme.green}44` }}>
+                    <span style={{ fontSize: '13px', color: aboveAvg ? theme.red : theme.green, fontWeight: '600' }}>
+                      {aboveAvg ? '⚠ Above fleet average' : '✓ Below fleet average'}: fleet avg is {fleetAvgRate.toFixed(2)}%, this vehicle is {rate.toFixed(2)}%
+                    </span>
+                  </div>
+                )}
+                {damagedTrips.length > 0 ? (
+                  <>
+                    <div style={styles.sectionTitle}>Trips with Transit Damage</div>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead><tr>{['Date', 'Waybill', 'Customer', 'Block Type', 'Loaded', 'Damaged', 'Rate'].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
+                      <tbody>
+                        {damagedTrips.map(d => {
+                          const r = d.quantity_loaded > 0 ? (d.quantity_damaged / d.quantity_loaded * 100).toFixed(1) : '0.0'
+                          return (
+                            <tr key={d.id}>
+                              <td style={styles.td}>{d.waybill_date}</td>
+                              <td style={styles.td}><span style={{ color: theme.accent, fontWeight: '600' }}>{d.waybill_number}</span></td>
+                              <td style={styles.td}>{d.receiver_name || '—'}</td>
+                              <td style={styles.td}><span style={styles.badge(theme.blue)}>{d.block_type}</span></td>
+                              <td style={styles.td}>{fmt(d.quantity_loaded)}</td>
+                              <td style={styles.td}><strong style={{ color: theme.red }}>{fmt(d.quantity_damaged)}</strong></td>
+                              <td style={styles.td}><span style={{ color: Number(r) > 5 ? theme.red : theme.accent }}>{r}%</span></td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </>
+                ) : (
+                  <div style={{ textAlign: 'center', padding: '32px', color: theme.textMuted }}>No transit damage recorded{(dmgFrom || dmgTo) ? ' in this period.' : '.'}</div>
+                )}
+              </>
+            )}
+          </div>
+        )
+      })()}
+      {tab === 'maintenance' && <MaintenanceTab vehicleId={vehicle.id} vehicleNumber={vehicle.vehicle_number} vehicleName={vehicle.vehicle_name} />}
       {tab === 'fuel' && <FuelLogTab vehicleId={vehicle.id} />}
       {tab === 'documents' && <DocumentsTab vehicleId={vehicle.id} />}
     </div>
