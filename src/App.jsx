@@ -2728,7 +2728,7 @@ const Inventory = ({ onLowStockChange }) => {
   const [reportLoading, setReportLoading] = useState(false);
 
   const today = new Date().toISOString().split("T")[0];
-  const emptyItem = { name: "", unit: "bags", current_stock: "", reorder_level: "", unit_cost: "", supplier: "" };
+  const emptyItem = { name: "", unit: "bags", current_stock: "", reorder_level: "", unit_cost: "", supplier: "", date_added: today };
   const emptyIn  = { itemId: "", quantity: "", unitCost: "", supplier: "", staffName: "", date: today, notes: "" };
   const emptyOut = { itemId: "", quantity: "", issuedTo: "Production", staffName: "", reference: "", date: today, notes: "" };
 
@@ -2769,7 +2769,7 @@ const Inventory = ({ onLowStockChange }) => {
   const lowStockItems = items.filter(i => Number(i.current_stock) <= Number(i.reorder_level));
 
   const startEditItem = (item) => {
-    setItemForm({ name: item.name, unit: item.unit, current_stock: String(item.current_stock), reorder_level: String(item.reorder_level), unit_cost: String(item.unit_cost || ""), supplier: item.supplier || "" });
+    setItemForm({ name: item.name, unit: item.unit, current_stock: String(item.current_stock), reorder_level: String(item.reorder_level), unit_cost: String(item.unit_cost || ""), supplier: item.supplier || "", date_added: item.date_added || item.created_at?.split("T")[0] || today });
     setEditItem(item);
     setShowItemForm(true);
   };
@@ -2778,7 +2778,7 @@ const Inventory = ({ onLowStockChange }) => {
     if (!itemForm.name || !itemForm.unit) return setAlert({ type: "error", msg: "Item name and unit are required." });
     setSaving(true);
     try {
-      const payload = { name: itemForm.name, unit: itemForm.unit, current_stock: Number(itemForm.current_stock) || 0, reorder_level: Number(itemForm.reorder_level) || 0, unit_cost: Number(itemForm.unit_cost) || 0, supplier: itemForm.supplier || null };
+      const payload = { name: itemForm.name, unit: itemForm.unit, current_stock: Number(itemForm.current_stock) || 0, reorder_level: Number(itemForm.reorder_level) || 0, unit_cost: Number(itemForm.unit_cost) || 0, supplier: itemForm.supplier || null, date_added: itemForm.date_added || today };
       if (editItem) {
         await inventoryService.updateItem(editItem.id, payload);
       } else {
@@ -2934,6 +2934,10 @@ const Inventory = ({ onLowStockChange }) => {
                   <label style={styles.label}>Supplier Name</label>
                   <input style={styles.input} placeholder="Optional" value={itemForm.supplier} onChange={e => setItemForm({ ...itemForm, supplier: e.target.value })} />
                 </div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Date Added</label>
+                  <input style={styles.input} type="date" value={itemForm.date_added} onChange={e => setItemForm({ ...itemForm, date_added: e.target.value })} />
+                </div>
               </div>
               <div style={styles.row}>
                 <button style={styles.btn("primary")} onClick={handleSaveItem} disabled={saving}>{saving ? "Saving…" : editItem ? "Update Item" : "Add to Registry"}</button>
@@ -2949,7 +2953,7 @@ const Inventory = ({ onLowStockChange }) => {
             ) : (
               <table style={styles.table}>
                 <thead>
-                  <tr>{["Item", "Unit", "On Hand", "Reorder Level", "Unit Cost", "Stock Value", "Supplier", "Last Updated", ""].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
+                  <tr>{["Item", "Unit", "On Hand", "Reorder Level", "Unit Cost", "Stock Value", "Supplier", "Date Added", "Last Updated", ""].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
                 </thead>
                 <tbody>
                   {items.map(item => {
@@ -2967,6 +2971,7 @@ const Inventory = ({ onLowStockChange }) => {
                         <td style={styles.td}>₦{Number(item.unit_cost || 0).toLocaleString()}</td>
                         <td style={styles.td}><strong style={{ color: theme.accent }}>₦{Math.round(value).toLocaleString()}</strong></td>
                         <td style={styles.td}>{item.supplier || "—"}</td>
+                        <td style={styles.td}>{item.date_added || item.created_at?.split("T")[0] || "—"}</td>
                         <td style={styles.td}>{item.updated_at ? item.updated_at.split("T")[0] : "—"}</td>
                         <td style={styles.td}>
                           <div style={{ display: "flex", gap: "6px" }}>
