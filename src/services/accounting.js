@@ -103,7 +103,7 @@ export const accountingService = {
   async getConfirmedPayments(from, to) {
     let q = supabase
       .from('payments')
-      .select('id, amount_paid, payment_date, invoice:invoice_id(invoice_number, order:order_id(customer:customer_id(name)))')
+      .select('id, amount_paid, payment_date, invoice:invoice_id(invoice_number, total_amount, order:order_id(customer:customer_id(name, location, phone)))')
       .eq('status', 'confirmed')
       .order('payment_date', { ascending: false })
     if (from) q = q.gte('payment_date', from)

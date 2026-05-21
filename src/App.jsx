@@ -24,6 +24,7 @@ import { generateCostAnalysisPDF } from './utils/generateCostAnalysisPDF'
 import { generateManagementAccountsPDF } from './utils/generateManagementAccountsPDF'
 import { bankAccountsService, bankTransactionsService, bankImportBatchesService, bankReconciliationsService, receiptsService } from './services/bank'
 import { generateReconciliationPDF } from './utils/generateReconciliationPDF'
+import { generatePaymentReceiptPDF } from './utils/generatePaymentReceiptPDF'
 import { parseFile, autoMapColumns, mapRowsToTransactions, autoMatchTransactions, detectCategory, extractCustomerFromDesc } from './utils/parseBankStatement';
 
 const theme = {
@@ -1128,7 +1129,8 @@ const Orders = ({ onNavigate }) => {
                     ))}
                   </div>
                   {(() => {
-                    const allPayments = (selected.invoices || []).flatMap(inv => (inv.payments || []).map(p => ({ ...p })));
+                    const allPayments = (selected.invoices || []).flatMap(inv => (inv.payments || []).map(p => ({ ...p, _invoiceTotal: inv.total_amount, _invoiceNumber: inv.invoice_number })));
+                    const totalConfirmed = allPayments.filter(pp => pp.status === "confirmed").reduce((s, pp) => s + Number(pp.amount_paid), 0);
                     return allPayments.length > 0 ? (
                       <div style={{ marginTop: "16px", marginBottom: "4px" }}>
                         <div style={{ fontSize: "11px", fontWeight: "700", color: theme.textMuted, marginBottom: "8px", textTransform: "uppercase", letterSpacing: "0.06em" }}>Payment History</div>
@@ -1138,6 +1140,9 @@ const Orders = ({ onNavigate }) => {
                             <span style={{ color: theme.green, fontWeight: "600" }}>{naira(p.amount_paid)}</span>
                             <span style={styles.badge(p.status === "confirmed" ? theme.green : theme.accent)}>{p.status}</span>
                             <div style={{ display: "flex", gap: "6px" }}>
+                              {p.status === "confirmed" && (
+                                <button style={{ ...styles.btn("primary"), padding: "3px 8px", fontSize: "11px" }} onClick={() => generatePaymentReceiptPDF({ payment: p, customer: selected.customer, invoiceNumber: p._invoiceNumber, invoiceTotal: p._invoiceTotal || null, totalPaidSoFar: totalConfirmed })}>Receipt</button>
+                              )}
                               <button style={{ ...styles.btn("secondary"), padding: "3px 8px", fontSize: "11px" }} onClick={() => { setEditPayment(p); setPayForm({ amount: String(p.amount_paid), date: p.payment_date }); setShowPayForm(true); }}>Edit</button>
                               <button style={{ ...styles.btn("danger"), padding: "3px 8px", fontSize: "11px" }} onClick={() => setConfirmDelete({ ...p, type: "payment" })}>Remove</button>
                             </div>
@@ -3581,9 +3586,18 @@ const BookkeepingTab = () => {
             <div style={{ ...styles.card, marginBottom: '12px' }}>
               <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Customer Payments</div>
               {payments.map(p => (
-                <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: `1px solid ${theme.border}22`, fontSize: '12px' }}>
-                  <span style={{ color: theme.textMuted }}>{p.invoice?.order?.customer?.name || 'Customer'}</span>
-                  <span style={{ fontWeight: '600', color: theme.green }}>{naira(p.amount_paid)}</span>
+                <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: `1px solid ${theme.border}22`, fontSize: '12px' }}>
+                  <div>
+                    <div style={{ fontWeight: '600' }}>{p.invoice?.order?.customer?.name || 'Customer'}</div>
+                    {p.invoice?.invoice_number && <div style={{ fontSize: '11px', color: theme.textMuted }}>{p.invoice.invoice_number}</div>}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span style={{ fontWeight: '600', color: theme.green }}>{naira(p.amount_paid)}</span>
+                    <button
+                      style={{ ...styles.btn('primary'), padding: '2px 8px', fontSize: '10px' }}
+                      onClick={() => generatePaymentReceiptPDF({ payment: p, customer: p.invoice?.order?.customer, invoiceNumber: p.invoice?.invoice_number, invoiceTotal: p.invoice?.total_amount || null, totalPaidSoFar: null })}
+                    >Receipt</button>
+                  </div>
                 </div>
               ))}
             </div>
