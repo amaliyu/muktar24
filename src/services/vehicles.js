@@ -7,7 +7,7 @@ export const vehiclesService = {
   async getAll() {
     const { data, error } = await supabase
       .from('vehicles')
-      .select('*, driver:assigned_driver_id(id, full_name)')
+      .select('*')
       .order('vehicle_number')
     if (error) throw error
     return data || []
@@ -16,7 +16,7 @@ export const vehiclesService = {
   async getActive() {
     const { data, error } = await supabase
       .from('vehicles')
-      .select('*, driver:assigned_driver_id(id, full_name)')
+      .select('*')
       .eq('status', 'active')
       .order('vehicle_number')
     if (error) throw error
@@ -26,7 +26,7 @@ export const vehiclesService = {
   async getById(id) {
     const { data, error } = await supabase
       .from('vehicles')
-      .select('*, driver:assigned_driver_id(id, full_name)')
+      .select('*')
       .eq('id', id)
       .single()
     if (error) throw error

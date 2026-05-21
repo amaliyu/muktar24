@@ -447,7 +447,7 @@ const DocumentsTab = ({ vehicleId }) => {
 }
 
 // ── VEHICLE PROFILE ───────────────────────────────────────────────
-const VehicleProfile = ({ vehicle: initialVehicle, staff, onBack, onUpdate }) => {
+const VehicleProfile = ({ vehicle: initialVehicle, staff, staffMap, onBack, onUpdate }) => {
   const [vehicle, setVehicle] = useState(initialVehicle)
   const [tab, setTab] = useState('details')
   const [editing, setEditing] = useState(false)
@@ -523,7 +523,7 @@ const VehicleProfile = ({ vehicle: initialVehicle, staff, onBack, onUpdate }) =>
           </div>
           <div style={{ textAlign: 'right' }}>
             <div style={{ fontSize: '12px', color: theme.textMuted }}>Assigned Driver</div>
-            <div style={{ fontWeight: '700', color: theme.text }}>{vehicle.driver?.full_name || '— Not assigned —'}</div>
+            <div style={{ fontWeight: '700', color: theme.text }}>{staffMap?.[vehicle.assigned_driver_id]?.full_name || '— Not assigned —'}</div>
             <button style={{ ...styles.btn('primary'), marginTop: '10px' }} onClick={() => setEditing(true)}>Edit Vehicle</button>
           </div>
         </div>
@@ -563,7 +563,7 @@ const VehicleProfile = ({ vehicle: initialVehicle, staff, onBack, onUpdate }) =>
             ['Capacity', vehicle.capacity_blocks ? `${fmt(vehicle.capacity_blocks)} blocks/trip` : '—'],
             ['Ownership', vehicle.ownership === 'company_owned' ? 'Company Owned' : 'Hired'],
             ['Status', vehicle.status],
-            ['Assigned Driver', vehicle.driver?.full_name || '—'],
+            ['Assigned Driver', staffMap?.[vehicle.assigned_driver_id]?.full_name || '—'],
             ['Purchase Date', vehicle.purchase_date || '—'],
             ['Purchase Price', vehicle.purchase_price ? naira(vehicle.purchase_price) : '—'],
             ['Insurance Expiry', vehicle.insurance_expiry_date || '—'],
@@ -638,8 +638,10 @@ const VehicleRegistry = () => {
   }
   useEffect(() => { load() }, [])
 
+  const staffMap = Object.fromEntries(staff.map(s => [s.id, s]))
+
   if (selectedVehicle) {
-    return <VehicleProfile vehicle={selectedVehicle} staff={staff} onBack={() => setSelectedVehicle(null)} onUpdate={load} />
+    return <VehicleProfile vehicle={selectedVehicle} staff={staff} staffMap={staffMap} onBack={() => setSelectedVehicle(null)} onUpdate={load} />
   }
 
   const today = todayStr()
@@ -726,7 +728,7 @@ const VehicleRegistry = () => {
                   <span style={styles.badge(statusColor[v.status] || theme.textMuted)}>{v.status}</span>
                 </div>
                 <div style={{ ...styles.row, marginTop: '12px', fontSize: '12px', gap: '14px' }}>
-                  <span style={{ color: theme.textMuted }}>👤 {v.driver?.full_name || '— No driver —'}</span>
+                  <span style={{ color: theme.textMuted }}>👤 {staffMap[v.assigned_driver_id]?.full_name || '— No driver —'}</span>
                   {v.capacity_blocks && <span style={{ color: theme.textMuted }}>📦 {fmt(v.capacity_blocks)} blocks/trip</span>}
                 </div>
                 {(insExpired || insExpiring || rwExpired || rwExpiring) && (
