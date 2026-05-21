@@ -73,7 +73,7 @@ const styles = {
   alert: (type) => ({ padding: "10px 14px", borderRadius: "8px", marginBottom: "16px", background: (type === "success" ? theme.green : theme.red) + "22", border: `1px solid ${(type === "success" ? theme.green : theme.red)}44`, color: type === "success" ? theme.green : theme.red, fontSize: "13px", display: "flex", justifyContent: "space-between", alignItems: "center" }),
 };
 
-const BLOCK_TYPES = ["9-inch", "6-inch", "Interlock"];
+const BLOCK_TYPES = ["9 Inch 3 Hole Block", "6 Inch Block", "4 Inch Block", "Standard Interlock", "Standard Kerb Stone", "Garden Kerb"];
 const ABUJA_AREAS = [
   "Katampe","Maitama","Gwarinpa","Kubwa","Karsana","Lugbe","Jahi",
   "Lifecamp","Galadimawa","Apo","Wuse","Wuse 2","Asokoro","Garki",
@@ -236,7 +236,7 @@ const ProductSelect = ({ value, onChange, style, showEmpty = false }) => {
     }}>
       {showEmpty && <option value="">— Select product —</option>}
       {value && !products.find(p => p.name === value) && <option value={value}>{value}</option>}
-      {categories.length === 0 && !value && <option value="9-inch">9-inch</option>}
+      {categories.length === 0 && !value && <option value="9 Inch 3 Hole Block">9 Inch 3 Hole Block</option>}
       {categories.map(cat => (
         <optgroup key={cat} label={cat}>
           {products.filter(p => p.category === cat).map(p => (
@@ -435,7 +435,7 @@ const Production = () => {
   const [alert, setAlert] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [editTarget, setEditTarget] = useState(null);
-  const emptyForm = { date: "", blockType: "9-inch", produced: "", cement: "", granite: "", diesel: "", dmgProd: "0", dmgStack: "0" };
+  const emptyForm = { date: "", blockType: "9 Inch 3 Hole Block", produced: "", cement: "", granite: "", diesel: "", dmgProd: "0", dmgStack: "0" };
   const [form, setForm] = useState(emptyForm);
 
   const load = async () => {
@@ -669,7 +669,7 @@ const Production = () => {
 };
 
 // ── ORDERS ────────────────────────────────────────────────────
-const emptyItem = () => ({ blockType: "9-inch", quantity: "", unitPrice: "", unit: "pieces" });
+const emptyItem = () => ({ blockType: "9 Inch 3 Hole Block", quantity: "", unitPrice: "", unit: "pieces" });
 
 const Orders = ({ onNavigate }) => {
   const [orders, setOrders] = useState([]);
@@ -1310,7 +1310,7 @@ const Waybills = () => {
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [editTarget, setEditTarget] = useState(null);
   const [selectedOrderId, setSelectedOrderId] = useState("");
-  const emptyForm = { waybillDate: "", vehicleId: "", driverId: "", truckNumber: "", blockType: "9-inch", quantityLoaded: "", quantityReceived: "", quantityDamaged: "0", batchId: "", dieselLitres: "", storeOfficer: "", notes: "" };
+  const emptyForm = { waybillDate: "", vehicleId: "", driverId: "", truckNumber: "", blockType: "9 Inch 3 Hole Block", quantityLoaded: "", quantityReceived: "", quantityDamaged: "0", batchId: "", dieselLitres: "", storeOfficer: "", notes: "" };
   const [form, setForm] = useState(emptyForm);
 
   const load = async () => {
@@ -1346,7 +1346,7 @@ const Waybills = () => {
     setEditTarget(w);
     setForm({
       waybillDate: w.waybill_date, vehicleId: w.vehicle_id || "", driverId: w.driver_id || "",
-      truckNumber: w.truck_number || "", blockType: w.block_type || "9-inch",
+      truckNumber: w.truck_number || "", blockType: w.block_type || "9 Inch 3 Hole Block",
       quantityLoaded: String(w.quantity_loaded || ""),
       quantityReceived: String(w.quantity_received || ""),
       quantityDamaged: String(w.quantity_damaged || 0),
@@ -3644,7 +3644,7 @@ const Batches = () => {
   const [editForm, setEditForm] = useState({});
   const [deleting, setDeleting] = useState(null);
   const today = new Date().toISOString().split("T")[0];
-  const emptyForm = { blockType: "9-inch", dateCured: today, qtyAccepted: "", createdBy: "", notes: "", linkedProds: [] };
+  const emptyForm = { blockType: "9 Inch 3 Hole Block", dateCured: today, qtyAccepted: "", createdBy: "", notes: "", linkedProds: [] };
   const [form, setForm] = useState(emptyForm);
 
   const load = async () => {
