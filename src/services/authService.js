@@ -128,4 +128,12 @@ export const authService = {
     const { error } = await supabase.auth.resetPasswordForEmail(email)
     if (error) throw error
   },
+
+  /**
+   * Change the current user's own password (must be logged in).
+   */
+  async changePassword(newPassword) {
+    const { error } = await supabase.auth.updateUser({ password: newPassword })
+    if (error) throw error
+  },
 }

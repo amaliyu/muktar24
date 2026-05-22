@@ -6106,6 +6106,54 @@ const Accounting = ({ userProfile }) => {
   );
 };
 
+// ── CHANGE PASSWORD MODAL ─────────────────────────────────────
+const ChangePasswordModal = ({ onClose }) => {
+  const [newPwd, setNewPwd]       = useState('');
+  const [confirmPwd, setConfirmPwd] = useState('');
+  const [saving, setSaving]       = useState(false);
+  const [err, setErr]             = useState('');
+  const [ok, setOk]               = useState('');
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (newPwd.length < 6)          { setErr('Password must be at least 6 characters.'); return; }
+    if (newPwd !== confirmPwd)       { setErr('Passwords do not match.'); return; }
+    setSaving(true); setErr('');
+    try {
+      await authService.changePassword(newPwd);
+      setOk('Password changed successfully.');
+      setNewPwd(''); setConfirmPwd('');
+      setTimeout(onClose, 1500);
+    } catch(e) { setErr(e.message); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center' }}>
+      <div style={{ background:theme.surface, borderRadius:'12px', padding:'28px', width:'100%', maxWidth:'360px', boxShadow:'0 16px 48px rgba(0,0,0,0.5)' }}>
+        <div style={{ fontWeight:'700', fontSize:'15px', marginBottom:'18px' }}>Change Password</div>
+        {err && <Alert msg={err} onClose={() => setErr('')} />}
+        {ok  && <Alert msg={ok} type="success" onClose={() => setOk('')} />}
+        <form onSubmit={handleSubmit}>
+          <div style={{ marginBottom:'12px' }}>
+            <label style={{ display:'block', fontSize:'11px', color:theme.textMuted, marginBottom:'4px', textTransform:'uppercase', letterSpacing:'0.06em' }}>New Password</label>
+            <input style={styles.input} type="password" value={newPwd} onChange={e => setNewPwd(e.target.value)} placeholder="Min. 6 characters" required minLength={6} autoFocus />
+          </div>
+          <div style={{ marginBottom:'18px' }}>
+            <label style={{ display:'block', fontSize:'11px', color:theme.textMuted, marginBottom:'4px', textTransform:'uppercase', letterSpacing:'0.06em' }}>Confirm New Password</label>
+            <input style={{ ...styles.input, ...(confirmPwd && confirmPwd !== newPwd ? { borderColor:theme.red } : {}) }} type="password" value={confirmPwd} onChange={e => setConfirmPwd(e.target.value)} placeholder="Repeat password" required />
+            {confirmPwd && confirmPwd !== newPwd && <div style={{ fontSize:'11px', color:theme.red, marginTop:'4px' }}>Passwords do not match.</div>}
+          </div>
+          <div style={{ display:'flex', gap:'10px' }}>
+            <button type="submit" style={styles.btn('primary')} disabled={saving}>{saving ? 'Saving…' : 'Change Password'}</button>
+            <button type="button" style={styles.btn('secondary')} onClick={onClose}>Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
 // ── NAV ───────────────────────────────────────────────────────
 const navItems = [
   { section: "Overview", items: [{ id: "dashboard", label: "Dashboard", icon: "dashboard" }] },
@@ -6433,6 +6481,7 @@ export default function App() {
   const [lowStockCount, setLowStockCount] = useState(0);
   const [lpoCount, setLpoCount] = useState(0);
   const [scheduleCount, setScheduleCount] = useState(0);
+  const [showChangePwd, setShowChangePwd] = useState(false);
 
   // ── Auth ──────────────────────────────────────────────────
   useEffect(() => {
@@ -6552,9 +6601,13 @@ export default function App() {
           <div>📍 1, Dutse Alhaji, Behind Tipper Garage, Off Bwari Expressway, Abuja.</div>
           <div>📞 +234 905 554 4433</div>
           <div style={{ wordBreak: "break-all" }}>✉️ abujaprecastconcreteltd@gmail.com</div>
-          <button onClick={handleLogout} style={{ marginTop: "10px", width: "100%", padding: "6px", background: "transparent", border: `1px solid ${theme.border}`, borderRadius: "6px", color: theme.textMuted, fontSize: "11px", cursor: "pointer", fontWeight: "600" }}>Sign Out</button>
+          <div style={{ display:"flex", gap:"6px", marginTop:"10px" }}>
+            <button onClick={() => setShowChangePwd(true)} style={{ flex:1, padding:"6px", background:"transparent", border:`1px solid ${theme.border}`, borderRadius:"6px", color:theme.textMuted, fontSize:"11px", cursor:"pointer", fontWeight:"600" }}>Change Password</button>
+            <button onClick={handleLogout} style={{ flex:1, padding:"6px", background:"transparent", border:`1px solid ${theme.border}`, borderRadius:"6px", color:theme.textMuted, fontSize:"11px", cursor:"pointer", fontWeight:"600" }}>Sign Out</button>
+          </div>
         </div>
       </div>
+      {showChangePwd && <ChangePasswordModal onClose={() => setShowChangePwd(false)} />}
       <main style={styles.main} {...(isBoard ? { 'data-board-view': 'true' } : {})}>
         {isBoard && (
           <style>{`
