@@ -261,7 +261,7 @@ export default function LoginScreen({ onLogin }) {
         <div style={{ fontWeight: '600', color: theme.text + 'aa', marginBottom: '2px' }}>
           Abuja Precast Concrete Limited
         </div>
-        <div>Plot 12, Karsana Industrial Layout, Abuja, FCT, Nigeria</div>
+        <div>1, Dutse Alhaji, Behind Tipper Garage, Off Bwari Expressway, Abuja, Nigeria</div>
         <div style={{ marginTop: '10px', fontSize: '11px', color: theme.textMuted + '88' }}>
           &copy; {new Date().getFullYear()} All rights reserved
         </div>

@@ -1,22 +1,30 @@
 import { createClient } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 
+// Admin client uses the service role key so it can create pre-confirmed users.
+// VITE_SUPABASE_SERVICE_ROLE_KEY must be set in .env.local and in Vercel env vars.
+const adminClient = createClient(
+  import.meta.env.VITE_SUPABASE_URL,
+  import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY,
+  { auth: { persistSession: false, autoRefreshToken: false } }
+)
+
 export const authService = {
   /**
-   * Create a new user account without disturbing the current MD session.
-   * Uses a throw-away client with persistSession:false so localStorage is untouched.
+   * Create a pre-confirmed user via the Admin API so they can log in immediately.
+   * Requires VITE_SUPABASE_SERVICE_ROLE_KEY in the environment.
    */
   async createUser(email, password, fullName, role, staffId = null) {
-    const tmpClient = createClient(
-      import.meta.env.VITE_SUPABASE_URL,
-      import.meta.env.VITE_SUPABASE_ANON_KEY,
-      { auth: { persistSession: false, autoRefreshToken: false } }
-    )
-    const { data, error } = await tmpClient.auth.signUp({ email, password })
+    const { data, error } = await adminClient.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: { full_name: fullName, role },
+    })
     if (error) throw error
     const userId = data.user?.id
-    if (!userId) throw new Error('Sign-up succeeded but no user ID was returned — check Supabase email confirmation settings.')
-    // Upsert profile; the DB trigger may have already created it
+    if (!userId) throw new Error('User creation failed — no user ID returned.')
+    // Upsert profile; the DB trigger may have already created a row
     const { data: profile, error: profErr } = await supabase
       .from('user_profiles')
       .upsert({ id: userId, email, full_name: fullName, role, is_active: true, ...(staffId ? { staff_id: staffId } : {}) })
@@ -25,7 +33,6 @@ export const authService = {
     if (profErr) throw profErr
     return profile
   },
-
 
   /**
    * Fetch all active staff members ordered by name.

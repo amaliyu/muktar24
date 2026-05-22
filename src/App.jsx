@@ -6549,7 +6549,7 @@ export default function App() {
         <div style={{ padding: "14px 20px", borderTop: `1px solid ${theme.border}`, fontSize: "11px", color: theme.textMuted, lineHeight: "1.7" }}>
           <div style={{ fontWeight: "700", color: theme.text, fontSize: "12px", marginBottom: "2px" }}>{userProfile?.full_name || 'User'}</div>
           <div style={{ color: theme.accent, fontSize: "11px", marginBottom: "6px" }}>{APP_ROLES.find(r => r.id === role)?.label || role} {(isBoard || isICO) ? '· View Only' : ''}</div>
-          <div>📍 No. 1, Off Bwari Road, Abuja, Nigeria.</div>
+          <div>📍 1, Dutse Alhaji, Behind Tipper Garage, Off Bwari Expressway, Abuja.</div>
           <div>📞 +234 905 554 4433</div>
           <div style={{ wordBreak: "break-all" }}>✉️ abujaprecastconcreteltd@gmail.com</div>
           <button onClick={handleLogout} style={{ marginTop: "10px", width: "100%", padding: "6px", background: "transparent", border: `1px solid ${theme.border}`, borderRadius: "6px", color: theme.textMuted, fontSize: "11px", cursor: "pointer", fontWeight: "600" }}>Sign Out</button>
