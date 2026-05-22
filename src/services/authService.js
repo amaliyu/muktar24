@@ -1,26 +1,19 @@
 import { createClient } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 
-// Admin client uses the service role key so it can create pre-confirmed users.
-// VITE_SUPABASE_SERVICE_ROLE_KEY must be set in .env.local and in Vercel env vars.
-const adminClient = createClient(
-  import.meta.env.VITE_SUPABASE_URL,
-  import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY,
-  { auth: { persistSession: false, autoRefreshToken: false } }
-)
-
 export const authService = {
   /**
-   * Create a pre-confirmed user via the Admin API so they can log in immediately.
-   * Requires VITE_SUPABASE_SERVICE_ROLE_KEY in the environment.
+   * Create a pre-confirmed user. Email confirmation is disabled in Supabase
+   * settings, so signUp() lets staff log in immediately. A separate client
+   * with persistSession:false is used so the MD's own session is untouched.
    */
   async createUser(email, password, fullName, role, staffId = null) {
-    const { data, error } = await adminClient.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true,
-      user_metadata: { full_name: fullName, role },
-    })
+    const tmpClient = createClient(
+      import.meta.env.VITE_SUPABASE_URL,
+      import.meta.env.VITE_SUPABASE_ANON_KEY,
+      { auth: { persistSession: false, autoRefreshToken: false } }
+    )
+    const { data, error } = await tmpClient.auth.signUp({ email, password })
     if (error) throw error
     const userId = data.user?.id
     if (!userId) throw new Error('User creation failed — no user ID returned.')
