@@ -97,13 +97,37 @@ const fmt = (n) => (n || 0).toLocaleString();
 const naira = (n) => `₦${fmt(n)}`;
 
 const APP_ROLES = [
-  { id: 'md',           label: 'MD (Managing Director)' },
-  { id: 'accountant',   label: 'Accountant' },
-  { id: 'board_member', label: 'Board Member' },
-  { id: 'operations',   label: 'Operations' },
-  { id: 'sales',        label: 'Sales' },
-  { id: 'staff',        label: 'Staff' },
+  { id: 'md',                 label: 'MD (Managing Director)' },
+  { id: 'accountant',         label: 'Accountant' },
+  { id: 'board_member',       label: 'Board Member' },
+  { id: 'bdm',                label: 'Business Development Manager' },
+  { id: 'ico',                label: 'Internal Control Officer' },
+  { id: 'store_officer',      label: 'Store Officer' },
+  { id: 'logistics_manager',  label: 'Logistics Manager' },
+  { id: 'marketer',           label: 'Marketer' },
+  { id: 'driver',             label: 'Driver' },
+  { id: 'hr_officer',         label: 'HR Officer' },
+  { id: 'production_manager', label: 'Production Manager' },
 ];
+
+// Pages each role is allowed to access. 'all' = unrestricted.
+const ROLE_PAGES = {
+  md:                 'all',
+  ico:                'all',
+  accountant:         ['dashboard','reports','kpi_dashboard','accounting','opening_balances'],
+  board_member:       ['dashboard'],
+  bdm:                ['dashboard','customers','orders','pending_register','daily_schedule','lpo_approvals','reports','kpi_dashboard'],
+  store_officer:      ['dashboard','inventory','batches','waybills','vehicles','daily_schedule','products'],
+  logistics_manager:  ['dashboard','waybills','vehicles','pending_register','daily_schedule','customers'],
+  marketer:           ['dashboard','customers','orders','products'],
+  driver:             ['dashboard','waybills'],
+  hr_officer:         ['dashboard','staff','reports'],
+  production_manager: ['dashboard','production','inventory','batches','reports','products'],
+  // legacy roles — kept for any existing users
+  operations:         ['dashboard','production','inventory','batches','waybills','vehicles','staff','pending_register','daily_schedule','lpo_approvals'],
+  sales:              ['dashboard','customers','orders'],
+  staff:              ['dashboard'],
+};
 
 // ── UI HELPERS ───────────────────────────────────────────────
 const Spinner = () => (
@@ -6295,7 +6319,15 @@ export default function App() {
 
   const role = userProfile?.role || 'staff';
   const isBoard = role === 'board_member';
-  const isMD = role === 'md';
+  const isICO   = role === 'ico';
+  const isMD    = role === 'md';
+
+  const allowedPages = ROLE_PAGES[role] || ['dashboard'];
+  const canSee = (pageId) => allowedPages === 'all' || allowedPages.includes(pageId);
+  const visibleNav = navItems
+    .map(s => ({ ...s, items: s.items.filter(it => canSee(it.id)) }))
+    .filter(s => s.items.length > 0);
+  const safePage = canSee(active) ? active : 'dashboard';
 
   const pages = {
     dashboard: isBoard ? <BoardDashboard userProfile={userProfile} /> : <Dashboard />,
@@ -6335,7 +6367,7 @@ export default function App() {
           <div style={styles.logoSub}>Quality Precast products. Reliable Delivery.</div>
         </div>
         <nav style={styles.nav}>
-          {navItems.map(section => (
+          {visibleNav.map(section => (
             <div key={section.section}>
               <div style={styles.navSection}>{section.section}</div>
               {section.items.map(item => {
@@ -6355,7 +6387,7 @@ export default function App() {
         </nav>
         <div style={{ padding: "14px 20px", borderTop: `1px solid ${theme.border}`, fontSize: "11px", color: theme.textMuted, lineHeight: "1.7" }}>
           <div style={{ fontWeight: "700", color: theme.text, fontSize: "12px", marginBottom: "2px" }}>{userProfile?.full_name || 'User'}</div>
-          <div style={{ color: theme.accent, fontSize: "11px", marginBottom: "6px" }}>{role?.replace('_',' ').replace(/\b\w/g, c => c.toUpperCase())} {isBoard ? '· View Only' : ''}</div>
+          <div style={{ color: theme.accent, fontSize: "11px", marginBottom: "6px" }}>{APP_ROLES.find(r => r.id === role)?.label || role} {(isBoard || isICO) ? '· View Only' : ''}</div>
           <div>📍 No. 1, Off Bwari Road, Abuja, Nigeria.</div>
           <div>📞 +234 905 554 4433</div>
           <div style={{ wordBreak: "break-all" }}>✉️ abujaprecastconcreteltd@gmail.com</div>
@@ -6375,7 +6407,7 @@ export default function App() {
             👁 View Only Mode — Board Member access
           </div>
         )}
-        {pages[active]}
+        {pages[safePage]}
       </main>
     </div>
   );
