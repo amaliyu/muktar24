@@ -1,4 +1,10 @@
 import { useState, useEffect } from "react";
+import { supabase } from './lib/supabase';
+import { authService } from './services/authService';
+import LoginScreen from './components/LoginScreen';
+import BoardDashboard from './components/BoardDashboard';
+import FinancialStatements from './components/FinancialStatements';
+import OpeningBalances from './components/OpeningBalances';
 import { productionService } from './services/production';
 import { staffService } from './services/staff';
 import Staff from './components/StaffHR';
@@ -6022,7 +6028,7 @@ const ReceiptsTab = () => {
   );
 };
 
-const Accounting = () => {
+const Accounting = ({ userProfile }) => {
   const [tab, setTab] = useState('bookkeeping');
   const TABS = [
     { id: 'bookkeeping', label: 'Daily Bookkeeping' },
@@ -6033,6 +6039,7 @@ const Accounting = () => {
     { id: 'bank', label: 'Bank Accounts' },
     { id: 'reconciliation', label: 'Reconciliation' },
     { id: 'receipts', label: 'Receipts' },
+    { id: 'financial_statements', label: '📊 Financial Statements' },
   ];
   return (
     <div>
@@ -6042,7 +6049,7 @@ const Accounting = () => {
           <div style={styles.pageSubtitle}>Financial records, P&L, cost analysis and management accounts</div>
         </div>
       </div>
-      <div style={{ display: 'flex', gap: '2px', marginBottom: '24px', borderBottom: `1px solid ${theme.border}` }}>
+      <div style={{ display: 'flex', gap: '2px', marginBottom: '24px', borderBottom: `1px solid ${theme.border}`, flexWrap: 'wrap' }}>
         {TABS.map(t => (
           <button key={t.id} onClick={() => setTab(t.id)} style={{
             padding: '9px 16px', fontSize: '13px', fontWeight: tab === t.id ? '600' : '400',
@@ -6061,6 +6068,7 @@ const Accounting = () => {
       {tab === 'bank' && <BankAccountsTab />}
       {tab === 'reconciliation' && <ReconciliationTab />}
       {tab === 'receipts' && <ReceiptsTab />}
+      {tab === 'financial_statements' && <FinancialStatements userProfile={userProfile} />}
     </div>
   );
 };
@@ -6093,18 +6101,134 @@ const navItems = [
   { section: "Settings", items: [
     { id: "products", label: "Products", icon: "products" },
     { id: "suppliers", label: "Suppliers", icon: "supplier" },
+    { id: "opening_balances", label: "Opening Balances", icon: "orders" },
+    { id: "user_management", label: "User Management", icon: "staff" },
   ]},
 ];
 
+// ── USER MANAGEMENT ───────────────────────────────────────────
+const UserManagement = ({ userProfile }) => {
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState('');
+  const [ok, setOk] = useState('');
+
+  useEffect(() => {
+    authService.listUsers().then(setUsers).catch(e => setErr(e.message)).finally(() => setLoading(false));
+  }, []);
+
+  const updateRole = async (id, role) => {
+    try { await authService.updateUserRole(id, role); setUsers(p => p.map(u => u.id === id ? {...u, role} : u)); setOk('Role updated'); setTimeout(() => setOk(''), 2000); }
+    catch(e) { setErr(e.message); }
+  };
+  const toggleActive = async (id, isActive) => {
+    try { await authService.toggleUserActive(id, isActive); setUsers(p => p.map(u => u.id === id ? {...u, is_active: isActive} : u)); }
+    catch(e) { setErr(e.message); }
+  };
+
+  return (
+    <div>
+      <div style={styles.header}><div><div style={styles.pageTitle}>User Management</div><div style={styles.pageSubtitle}>Manage system users and roles — MD access only</div></div></div>
+      {err && <Alert msg={err} onClose={() => setErr('')} />}
+      {ok  && <Alert msg={ok} type="success" onClose={() => setOk('')} />}
+      <div style={{ ...styles.card, marginBottom: '14px', padding: '12px 16px', background: theme.accent+'18', border: `1px solid ${theme.accent}44`, fontSize: '12px', color: theme.accent }}>
+        ℹ To create a new user, go to your <strong>Supabase Dashboard → Authentication → Users → Add User</strong>. Once they log in, their profile will appear here and you can assign their role.
+      </div>
+      {loading ? <Spinner /> : (
+        <div style={styles.card}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+            <thead>
+              <tr style={{ borderBottom: `2px solid ${theme.border}` }}>
+                {['Name', 'Email', 'Role', 'Status', 'Actions'].map(h => <th key={h} style={{ padding: '8px 10px', textAlign: 'left', color: theme.textMuted, fontWeight: '700', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{h}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {users.map(u => (
+                <tr key={u.id} style={{ borderBottom: `1px solid ${theme.border}22` }}>
+                  <td style={{ padding: '10px' }}>{u.full_name}</td>
+                  <td style={{ padding: '10px', color: theme.textMuted }}>{u.email}</td>
+                  <td style={{ padding: '10px' }}>
+                    {userProfile?.role === 'md' && u.id !== userProfile?.id ? (
+                      <select style={{ ...styles.input, padding: '4px 8px', fontSize: '12px' }} value={u.role} onChange={e => updateRole(u.id, e.target.value)}>
+                        {['md','accountant','board_member','operations','sales','staff'].map(r => <option key={r} value={r}>{r.replace('_',' ').replace(/\b\w/g, c => c.toUpperCase())}</option>)}
+                      </select>
+                    ) : (
+                      <span style={{ background: theme.accent+'22', color: theme.accent, borderRadius: '4px', padding: '2px 8px', fontSize: '11px', fontWeight: '700' }}>{u.role?.replace('_',' ')}</span>
+                    )}
+                  </td>
+                  <td style={{ padding: '10px' }}>
+                    <span style={{ background: u.is_active ? theme.green+'22' : theme.red+'22', color: u.is_active ? theme.green : theme.red, borderRadius: '4px', padding: '2px 8px', fontSize: '11px', fontWeight: '700' }}>{u.is_active ? 'Active' : 'Inactive'}</span>
+                  </td>
+                  <td style={{ padding: '10px' }}>
+                    {u.id !== userProfile?.id && userProfile?.role === 'md' && (
+                      <button style={{ ...styles.btn(u.is_active ? 'danger' : 'secondary'), padding: '3px 10px', fontSize: '11px' }} onClick={() => toggleActive(u.id, !u.is_active)}>
+                        {u.is_active ? 'Deactivate' : 'Activate'}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {!users.length && <tr><td colSpan={5} style={{ padding: '20px', textAlign: 'center', color: theme.textMuted }}>No users found. Users appear here after their first login.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ── APP ───────────────────────────────────────────────────────
 export default function App() {
+  const [session, setSession] = useState(undefined); // undefined = loading
+  const [userProfile, setUserProfile] = useState(null);
   const [active, setActive] = useState("dashboard");
   const [lowStockCount, setLowStockCount] = useState(0);
   const [lpoCount, setLpoCount] = useState(0);
   const [scheduleCount, setScheduleCount] = useState(0);
 
+  // ── Auth ──────────────────────────────────────────────────
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session || null);
+      if (session) loadProfile(session.user);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session || null);
+      if (!session) { setUserProfile(null); }
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const loadProfile = async (user) => {
+    try {
+      const profile = await authService.getProfile(user.id);
+      setUserProfile(profile);
+    } catch {
+      // Auto-create profile on first login
+      try {
+        const namePart = user.email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+        const profile = await authService.upsertProfile(user.id, user.email, namePart, 'staff');
+        setUserProfile(profile);
+      } catch { setUserProfile({ id: user.id, email: user.email, full_name: user.email, role: 'staff', is_active: true }); }
+    }
+  };
+
+  const handleLogin = (profile) => { setUserProfile(profile); };
+  const handleLogout = async () => { await authService.signOut(); setSession(null); setUserProfile(null); setActive('dashboard'); };
+
+  if (session === undefined) return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#0f1117' }}>
+      <div style={{ color: '#e8eaf0', fontSize: '14px' }}>Loading…</div>
+    </div>
+  );
+  if (!session) return <LoginScreen onLogin={handleLogin} />;
+
+  const role = userProfile?.role || 'staff';
+  const isBoard = role === 'board_member';
+  const isMD = role === 'md';
+
   const pages = {
-    dashboard: <Dashboard />,
+    dashboard: isBoard ? <BoardDashboard userProfile={userProfile} /> : <Dashboard />,
     production: <Production />,
     inventory: <Inventory onLowStockChange={setLowStockCount} />,
     batches: <Batches />,
@@ -6121,7 +6245,9 @@ export default function App() {
     kpi_dashboard: <KPIDashboard />,
     products: <Products />,
     suppliers: <SupplierRegistry />,
-    accounting: <Accounting />,
+    accounting: <Accounting userProfile={userProfile} />,
+    opening_balances: <OpeningBalances userProfile={userProfile} />,
+    user_management: <UserManagement userProfile={userProfile} />,
   };
 
   // Load approval badge counts on mount
@@ -6164,13 +6290,27 @@ export default function App() {
           ))}
         </nav>
         <div style={{ padding: "14px 20px", borderTop: `1px solid ${theme.border}`, fontSize: "11px", color: theme.textMuted, lineHeight: "1.7" }}>
-          <div style={{ fontWeight: "700", color: theme.text, fontSize: "12px", marginBottom: "6px" }}>MD Access · Full permissions</div>
+          <div style={{ fontWeight: "700", color: theme.text, fontSize: "12px", marginBottom: "2px" }}>{userProfile?.full_name || 'User'}</div>
+          <div style={{ color: theme.accent, fontSize: "11px", marginBottom: "6px" }}>{role?.replace('_',' ').replace(/\b\w/g, c => c.toUpperCase())} {isBoard ? '· View Only' : ''}</div>
           <div>📍 No. 1, Off Bwari Road, Abuja, Nigeria.</div>
           <div>📞 +234 905 554 4433</div>
           <div style={{ wordBreak: "break-all" }}>✉️ abujaprecastconcreteltd@gmail.com</div>
+          <button onClick={handleLogout} style={{ marginTop: "10px", width: "100%", padding: "6px", background: "transparent", border: `1px solid ${theme.border}`, borderRadius: "6px", color: theme.textMuted, fontSize: "11px", cursor: "pointer", fontWeight: "600" }}>Sign Out</button>
         </div>
       </div>
-      <main style={styles.main}>
+      <main style={styles.main} {...(isBoard ? { 'data-board-view': 'true' } : {})}>
+        {isBoard && (
+          <style>{`
+            [data-board-view] button:not([data-board-allow]) { display: none !important; }
+            [data-board-view] input { pointer-events: none; opacity: 0.8; }
+            [data-board-view] select { pointer-events: none; opacity: 0.8; }
+          `}</style>
+        )}
+        {isBoard && active !== 'dashboard' && (
+          <div style={{ background: theme.accent+'22', border: `1px solid ${theme.accent}44`, borderRadius: '8px', padding: '8px 16px', margin: '0 0 16px', fontSize: '12px', color: theme.accent, fontWeight: '600' }}>
+            👁 View Only Mode — Board Member access
+          </div>
+        )}
         {pages[active]}
       </main>
     </div>
