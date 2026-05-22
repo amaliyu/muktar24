@@ -6216,6 +6216,12 @@ export default function App() {
   const handleLogin = (profile) => { setUserProfile(profile); };
   const handleLogout = async () => { await authService.signOut(); setSession(null); setUserProfile(null); setActive('dashboard'); };
 
+  // Load approval badge counts (must be before any conditional returns)
+  useEffect(() => {
+    lpoService.getPending().then(l => setLpoCount(l.length)).catch(() => {});
+    schedulesService.getSubmitted().then(s => setScheduleCount(s.length)).catch(() => {});
+  }, [active]);
+
   if (session === undefined) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#0f1117' }}>
       <div style={{ color: '#e8eaf0', fontSize: '14px' }}>Loading…</div>
@@ -6249,12 +6255,6 @@ export default function App() {
     opening_balances: <OpeningBalances userProfile={userProfile} />,
     user_management: <UserManagement userProfile={userProfile} />,
   };
-
-  // Load approval badge counts on mount
-  useEffect(() => {
-    lpoService.getPending().then(l => setLpoCount(l.length)).catch(() => {});
-    schedulesService.getSubmitted().then(s => setScheduleCount(s.length)).catch(() => {});
-  }, [active]);
 
   const getBadge = (id) => {
     if (id === "inventory" && lowStockCount > 0) return lowStockCount;
