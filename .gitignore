@@ -29,3 +29,6 @@ dist-ssr
 # Coverage
 coverage
 .nyc_output
+
+# Local MCP config (contains secrets)
+.mcp.json
