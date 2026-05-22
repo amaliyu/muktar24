@@ -182,7 +182,7 @@ const SectionHeader = ({ title }) => (
 )
 
 // ── Main Component ────────────────────────────────────────────────────
-export default function BoardDashboard() {
+export default function BoardDashboard({ userProfile }) {
   const [loading, setLoading] = useState(true)
   const [d, setD] = useState({
     revThisMonth:     0,
@@ -380,7 +380,7 @@ export default function BoardDashboard() {
     }
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── PDF Download ─────────────────────────────────────────────────
   const downloadPDF = () => {

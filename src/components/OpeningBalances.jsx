@@ -407,7 +407,7 @@ export default function OpeningBalances({ userProfile }) {
     }
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Filter helpers ────────────────────────────────────────────────
   const bySubCat = (subCat) => balances.filter(b => b.sub_category === subCat)

@@ -75,8 +75,8 @@ const BalanceSheetTab = ({ userProfile }) => {
     finally { setLoading(false) }
   }, [])
 
-  useEffect(() => { load(asAt, setData) }, [asAt, load])
-  useEffect(() => { if (compareDate) load(compareDate, setCompareData); else setCompareData(null) }, [compareDate, load])
+  useEffect(() => { load(asAt, setData) }, [asAt]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (compareDate) load(compareDate, setCompareData); else setCompareData(null) }, [compareDate]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const calcBS = (d) => {
     if (!d) return null
@@ -84,7 +84,7 @@ const BalanceSheetTab = ({ userProfile }) => {
 
     // Fixed Assets
     const vehicleEntries = obs.filter(o => o.vehicle_id)
-    const otherFixed = obs.filter(o => o.sub_category === 'fixed_asset' && !o.vehicle_id)
+    const otherFixed = obs.filter(o => o.sub_category === 'fixed_asset_other')
     const totalVehiclesNBV = vehicleEntries.reduce((s, o) => s + (Number(o.amount) - Number(o.depreciation_amount||0)), 0)
     const totalOtherFixedNBV = otherFixed.reduce((s, o) => s + (Number(o.amount) - Number(o.depreciation_amount||0)), 0)
     const totalFixedAssets = totalVehiclesNBV + totalOtherFixedNBV
@@ -697,7 +697,7 @@ const CashFlowTab = ({ userProfile }) => {
     const finAdjs = adjs.filter(a => a.statement_type === 'cashflow' && (a.account_name.toLowerCase().includes('loan') || a.account_name.toLowerCase().includes('capital') || a.account_name.toLowerCase().includes('repay')))
 
     const netProfit = Number(d.netProfit || 0)
-    const depreciation = obs.filter(o => o.sub_category === 'fixed_asset').reduce((s, o) => s + Number(o.depreciation_amount||0), 0)
+    const depreciation = obs.filter(o => o.sub_category?.startsWith('fixed_asset')).reduce((s, o) => s + Number(o.depreciation_amount||0), 0)
     const opAdjTotal = opAdjs.reduce((s, a) => s + Number(a.amount||0), 0)
     const netCashOps = netProfit + depreciation + opAdjTotal
 
