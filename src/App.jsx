@@ -96,6 +96,15 @@ const HOW_HEARD = [
 const fmt = (n) => (n || 0).toLocaleString();
 const naira = (n) => `₦${fmt(n)}`;
 
+const APP_ROLES = [
+  { id: 'md',           label: 'MD (Managing Director)' },
+  { id: 'accountant',   label: 'Accountant' },
+  { id: 'board_member', label: 'Board Member' },
+  { id: 'operations',   label: 'Operations' },
+  { id: 'sales',        label: 'Sales' },
+  { id: 'staff',        label: 'Staff' },
+];
+
 // ── UI HELPERS ───────────────────────────────────────────────
 const Spinner = () => (
   <div style={{ padding: "40px", textAlign: "center", color: theme.textMuted, fontSize: "13px" }}>Loading…</div>
@@ -6174,7 +6183,7 @@ const UserManagement = ({ userProfile }) => {
               <div>
                 <label style={{ display: 'block', fontSize: '11px', color: theme.textMuted, marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Role *</label>
                 <select style={styles.input} value={form.role} onChange={e => setForm(p => ({...p, role: e.target.value}))}>
-                  {['md','accountant','board_member','operations','sales','staff'].map(r => <option key={r} value={r}>{r.replace(/_/g,' ').replace(/\b\w/g, c => c.toUpperCase())}</option>)}
+                  {APP_ROLES.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}
                 </select>
               </div>
             </div>
@@ -6205,10 +6214,10 @@ const UserManagement = ({ userProfile }) => {
                   <td style={{ padding: '10px' }}>
                     {isMD && u.id !== userProfile?.id ? (
                       <select style={{ ...styles.input, padding: '4px 8px', fontSize: '12px' }} value={u.role} onChange={e => updateRole(u.id, e.target.value)}>
-                        {['md','accountant','board_member','operations','sales','staff'].map(r => <option key={r} value={r}>{r.replace(/_/g,' ').replace(/\b\w/g, c => c.toUpperCase())}</option>)}
+                        {APP_ROLES.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}
                       </select>
                     ) : (
-                      <span style={{ background: theme.accent+'22', color: theme.accent, borderRadius: '4px', padding: '2px 8px', fontSize: '11px', fontWeight: '700' }}>{u.role?.replace('_',' ')}</span>
+                      <span style={{ background: theme.accent+'22', color: theme.accent, borderRadius: '4px', padding: '2px 8px', fontSize: '11px', fontWeight: '700' }}>{APP_ROLES.find(r => r.id === u.role)?.label || u.role}</span>
                     )}
                   </td>
                   <td style={{ padding: '10px' }}>
