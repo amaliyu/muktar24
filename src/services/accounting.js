@@ -21,6 +21,32 @@ export const expenseCategoriesService = {
     if (error) throw error
     return data || []
   },
+
+  async create(name, parentCategory) {
+    const { data, error } = await supabase
+      .from('expense_categories')
+      .insert({ name: name.trim(), parent_category: parentCategory?.trim() || null, is_active: true })
+      .select()
+      .single()
+    if (error) throw error
+    return data
+  },
+
+  async setActive(id, isActive) {
+    const { error } = await supabase
+      .from('expense_categories')
+      .update({ is_active: isActive })
+      .eq('id', id)
+    if (error) throw error
+  },
+
+  async delete(id) {
+    const { error } = await supabase
+      .from('expense_categories')
+      .delete()
+      .eq('id', id)
+    if (error) throw error
+  },
 }
 
 export const expensesService = {

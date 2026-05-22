@@ -4056,6 +4056,10 @@ const BookkeepingTab = () => {
   const [err, setErr] = useState('');
   const [ok, setOk] = useState('');
   const [acctSuppliers, setAcctSuppliers] = useState([]);
+  const [showCatManager, setShowCatManager] = useState(false);
+  const [allCats, setAllCats] = useState([]);
+  const [catForm, setCatForm] = useState({ name: '', parentCategory: '' });
+  const [catErr, setCatErr] = useState('');
 
   useEffect(() => {
     setLoading(true);
@@ -4111,6 +4115,39 @@ const BookkeepingTab = () => {
   const deleteExpense = async (id) => {
     try { await expensesService.delete(id); setExpenses(p => p.filter(e => e.id !== id)); }
     catch (e) { setErr(e.message); }
+  };
+
+  const openCatManager = async () => {
+    try { const all = await expenseCategoriesService.getAll(); setAllCats(all); } catch (e) { setCatErr(e.message); }
+    setShowCatManager(true);
+  };
+
+  const addCategory = async () => {
+    if (!catForm.name.trim()) { setCatErr('Name is required'); return; }
+    try {
+      const created = await expenseCategoriesService.create(catForm.name, catForm.parentCategory);
+      setAllCats(p => [...p, created].sort((a, b) => (a.parent_category || '').localeCompare(b.parent_category || '') || a.name.localeCompare(b.name)));
+      setCategories(p => [...p, created].sort((a, b) => (a.parent_category || '').localeCompare(b.parent_category || '') || a.name.localeCompare(b.name)));
+      setCatForm({ name: '', parentCategory: '' });
+      setCatErr('');
+    } catch (e) { setCatErr(e.message); }
+  };
+
+  const toggleCategory = async (cat) => {
+    try {
+      await expenseCategoriesService.setActive(cat.id, !cat.is_active);
+      setAllCats(p => p.map(c => c.id === cat.id ? { ...c, is_active: !cat.is_active } : c));
+      if (cat.is_active) setCategories(p => p.filter(c => c.id !== cat.id));
+      else setCategories(p => [...p, { ...cat, is_active: true }].sort((a, b) => (a.parent_category || '').localeCompare(b.parent_category || '') || a.name.localeCompare(b.name)));
+    } catch (e) { setCatErr(e.message); }
+  };
+
+  const deleteCategory = async (id) => {
+    try {
+      await expenseCategoriesService.delete(id);
+      setAllCats(p => p.filter(c => c.id !== id));
+      setCategories(p => p.filter(c => c.id !== id));
+    } catch (e) { setCatErr(e.message); }
   };
 
   const totalPaymentsAmt = payments.reduce((s, p) => s + Number(p.amount_paid || 0), 0);
@@ -4196,7 +4233,41 @@ const BookkeepingTab = () => {
         <div style={{ flex: 1 }}>
           <div style={styles.sectionTitle}>Expenses</div>
           <div style={styles.card}>
-            <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Record Expense</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Record Expense</div>
+              <button style={{ ...styles.btn('secondary'), padding: '3px 10px', fontSize: '11px' }} onClick={openCatManager}>⚙ Manage Categories</button>
+            </div>
+
+            {showCatManager && (
+              <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '8px', padding: '14px', marginBottom: '14px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                  <div style={{ fontSize: '12px', fontWeight: '700', color: theme.text }}>Expense Categories</div>
+                  <button style={{ ...styles.btn('secondary'), padding: '2px 8px', fontSize: '11px' }} onClick={() => { setShowCatManager(false); setCatErr(''); }}>✕ Close</button>
+                </div>
+                {catErr && <div style={{ color: theme.red, fontSize: '11px', marginBottom: '8px' }}>{catErr}</div>}
+                <div style={{ display: 'flex', gap: '6px', marginBottom: '10px', flexWrap: 'wrap' }}>
+                  <input style={{ ...styles.input, flex: 2, minWidth: '100px', padding: '5px 8px', fontSize: '12px' }} placeholder="Category name *" value={catForm.name} onChange={e => setCatForm(f => ({ ...f, name: e.target.value }))} />
+                  <input style={{ ...styles.input, flex: 2, minWidth: '100px', padding: '5px 8px', fontSize: '12px' }} placeholder="Group (e.g. Operating Expenses)" value={catForm.parentCategory} onChange={e => setCatForm(f => ({ ...f, parentCategory: e.target.value }))} />
+                  <button style={{ ...styles.btn('primary'), padding: '5px 12px', fontSize: '12px', whiteSpace: 'nowrap' }} onClick={addCategory}>+ Add</button>
+                </div>
+                <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
+                  {allCats.map(c => (
+                    <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 0', borderBottom: `1px solid ${theme.border}22`, opacity: c.is_active ? 1 : 0.5 }}>
+                      <div style={{ fontSize: '12px' }}>
+                        {c.parent_category && <span style={{ color: theme.textMuted }}>{c.parent_category} › </span>}
+                        <span style={{ fontWeight: '500' }}>{c.name}</span>
+                        {!c.is_active && <span style={{ marginLeft: '6px', fontSize: '10px', color: theme.textMuted }}>(disabled)</span>}
+                      </div>
+                      <div style={{ display: 'flex', gap: '4px' }}>
+                        <button style={{ ...styles.btn('secondary'), padding: '2px 8px', fontSize: '10px' }} onClick={() => toggleCategory(c)}>{c.is_active ? 'Disable' : 'Enable'}</button>
+                        <button style={{ ...styles.btn('danger'), padding: '2px 8px', fontSize: '10px' }} onClick={() => deleteCategory(c.id)}>Delete</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div style={styles.formGroup}>
               <label style={styles.label}>Category</label>
               <select style={styles.input} value={expenseForm.category_id} onChange={e => setExpenseForm(f => ({ ...f, category_id: e.target.value }))}>
