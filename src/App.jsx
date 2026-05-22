@@ -6141,17 +6141,71 @@ const navItems = [
 
 // ── USER MANAGEMENT ───────────────────────────────────────────
 const UserManagement = ({ userProfile }) => {
-  const [users, setUsers] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState('');
-  const [ok, setOk] = useState('');
+  const [users, setUsers]         = useState([]);
+  const [staffList, setStaffList] = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [err, setErr]             = useState('');
+  const [ok, setOk]               = useState('');
+  const [search, setSearch]       = useState('');
   const [showCreate, setShowCreate] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [form, setForm] = useState({ full_name: '', email: '', password: '', role: 'staff' });
+  const [creating, setCreating]   = useState(false);
+
+  // Create-form state
+  const [form, setForm]           = useState({ full_name: '', email: '', password: '', role: 'staff', staff_id: null });
+  const [staffSearch, setStaffSearch] = useState('');
+  const [showStaffDrop, setShowStaffDrop] = useState(false);
+  const [staffMode, setStaffMode] = useState('search'); // 'search' | 'manual'
+  const [selectedStaff, setSelectedStaff] = useState(null);
+  const [duplicateUser, setDuplicateUser] = useState(null);
 
   useEffect(() => {
-    authService.listUsers().then(setUsers).catch(e => setErr(e.message)).finally(() => setLoading(false));
+    Promise.all([authService.listUsers(), authService.getStaffList()])
+      .then(([u, s]) => { setUsers(u); setStaffList(s); })
+      .catch(e => setErr(e.message))
+      .finally(() => setLoading(false));
   }, []);
+
+  const resetForm = () => {
+    setForm({ full_name: '', email: '', password: '', role: 'staff', staff_id: null });
+    setStaffSearch(''); setStaffMode('search'); setSelectedStaff(null); setDuplicateUser(null);
+  };
+
+  const filteredStaff = staffList.filter(s =>
+    !staffSearch || s.full_name.toLowerCase().includes(staffSearch.toLowerCase())
+  );
+
+  const selectStaff = (s) => {
+    const dup = users.find(u => u.staff_id === s.id);
+    setDuplicateUser(dup || null);
+    setSelectedStaff(s);
+    setForm(p => ({ ...p, full_name: s.full_name, staff_id: s.id }));
+    setStaffSearch(s.full_name);
+    setShowStaffDrop(false);
+  };
+
+  const selectManual = () => {
+    setStaffMode('manual'); setSelectedStaff(null);
+    setForm(p => ({ ...p, full_name: '', staff_id: null }));
+    setStaffSearch(''); setShowStaffDrop(false); setDuplicateUser(null);
+  };
+
+  const emailDuplicate = form.email ? users.find(u => u.email === form.email) : null;
+
+  const handleCreate = async (e) => {
+    e.preventDefault();
+    if (form.password.length < 6) { setErr('Password must be at least 6 characters'); return; }
+    if (emailDuplicate) { setErr(`This email is already in use by ${emailDuplicate.full_name}.`); return; }
+    if (duplicateUser) { setErr(`${selectedStaff?.full_name} already has a system account.`); return; }
+    setCreating(true); setErr('');
+    try {
+      const profile = await authService.createUser(form.email, form.password, form.full_name, form.role, form.staff_id || null);
+      setUsers(p => [...p, profile].sort((a, b) => (a.full_name||'').localeCompare(b.full_name||'')));
+      setOk(`${form.full_name} created. Share the temporary password with them.`);
+      setTimeout(() => setOk(''), 5000);
+      resetForm(); setShowCreate(false);
+    } catch(e) { setErr(e.message); }
+    finally { setCreating(false); }
+  };
 
   const updateRole = async (id, role) => {
     try { await authService.updateUserRole(id, role); setUsers(p => p.map(u => u.id === id ? {...u, role} : u)); setOk('Role updated'); setTimeout(() => setOk(''), 2000); }
@@ -6161,62 +6215,137 @@ const UserManagement = ({ userProfile }) => {
     try { await authService.toggleUserActive(id, isActive); setUsers(p => p.map(u => u.id === id ? {...u, is_active: isActive} : u)); }
     catch(e) { setErr(e.message); }
   };
-  const handleCreate = async (e) => {
-    e.preventDefault();
-    if (form.password.length < 6) { setErr('Password must be at least 6 characters'); return; }
-    setCreating(true); setErr('');
-    try {
-      const profile = await authService.createUser(form.email, form.password, form.full_name, form.role);
-      setUsers(p => [...p, profile].sort((a, b) => (a.full_name||'').localeCompare(b.full_name||'')));
-      setOk(`${form.full_name} created successfully. Share their password so they can log in.`);
-      setTimeout(() => setOk(''), 5000);
-      setForm({ full_name: '', email: '', password: '', role: 'staff' });
-      setShowCreate(false);
-    } catch(e) { setErr(e.message); }
-    finally { setCreating(false); }
+  const handleResetPwd = async (email, name) => {
+    try { await authService.resetPassword(email); setOk(`Password reset email sent to ${name}.`); setTimeout(() => setOk(''), 4000); }
+    catch(e) { setErr(e.message); }
   };
 
   const isMD = userProfile?.role === 'md';
+
+  const filteredUsers = users.filter(u =>
+    !search ||
+    (u.full_name||'').toLowerCase().includes(search.toLowerCase()) ||
+    (u.email||'').toLowerCase().includes(search.toLowerCase()) ||
+    (APP_ROLES.find(r => r.id === u.role)?.label || '').toLowerCase().includes(search.toLowerCase())
+  );
+
+  const avatarColors = ['#4f8ef7','#27ae60','#e67e22','#9b59b6','#e74c3c','#16a085','#2980b9','#8e44ad'];
+  const avatarColor = (name) => { let h = 0; for (let c of (name||'')) h = (h*31 + c.charCodeAt(0)) % avatarColors.length; return avatarColors[Math.abs(h)]; };
+  const initials = (name) => (name||'?').split(' ').map(p=>p[0]).join('').slice(0,2).toUpperCase();
+
+  const labelSt = { display:'block', fontSize:'11px', color:theme.textMuted, marginBottom:'4px', textTransform:'uppercase', letterSpacing:'0.06em' };
+  const isRoleBoard = form.role === 'board_member';
 
   return (
     <div>
       <div style={styles.header}>
         <div><div style={styles.pageTitle}>User Management</div><div style={styles.pageSubtitle}>Manage system users and roles — MD access only</div></div>
-        {isMD && <button style={styles.btn('primary')} onClick={() => { setShowCreate(s => !s); setErr(''); }}>{showCreate ? '✕ Cancel' : '+ Add User'}</button>}
+        {isMD && <button style={styles.btn('primary')} onClick={() => { setShowCreate(s => !s); setErr(''); if (showCreate) resetForm(); }}>{showCreate ? '✕ Cancel' : '+ Add User'}</button>}
       </div>
       {err && <Alert msg={err} onClose={() => setErr('')} />}
       {ok  && <Alert msg={ok} type="success" onClose={() => setOk('')} />}
 
       {showCreate && (
-        <div style={{ ...styles.card, marginBottom: '16px' }}>
-          <div style={{ fontWeight: '700', fontSize: '14px', marginBottom: '16px' }}>Create New User</div>
+        <div style={{ ...styles.card, marginBottom:'16px' }}>
+          <div style={{ fontWeight:'700', fontSize:'14px', marginBottom:'16px' }}>Create New User</div>
           <form onSubmit={handleCreate}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '14px' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '11px', color: theme.textMuted, marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Full Name *</label>
-                <input style={styles.input} value={form.full_name} onChange={e => setForm(p => ({...p, full_name: e.target.value}))} placeholder="e.g. John Doe" required />
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px', marginBottom:'14px' }}>
+
+              {/* STAFF COMBO */}
+              <div style={{ position:'relative' }}>
+                <label style={labelSt}>Staff Member *</label>
+                {staffMode === 'search' ? (
+                  <>
+                    <input
+                      style={styles.input}
+                      value={staffSearch}
+                      onChange={e => { setStaffSearch(e.target.value); setShowStaffDrop(true); setSelectedStaff(null); setForm(p=>({...p, full_name:'', staff_id:null})); setDuplicateUser(null); }}
+                      onFocus={() => setShowStaffDrop(true)}
+                      onBlur={() => setTimeout(() => setShowStaffDrop(false), 200)}
+                      onKeyDown={e => e.key === 'Escape' && setShowStaffDrop(false)}
+                      placeholder="Search staff by name…"
+                      autoComplete="off"
+                    />
+                    {showStaffDrop && (
+                      <div style={{ position:'absolute', top:'100%', left:0, right:0, background:theme.surface, border:`1px solid ${theme.border}`, borderRadius:'8px', zIndex:100, maxHeight:'220px', overflowY:'auto', boxShadow:'0 8px 24px rgba(0,0,0,0.4)', marginTop:'2px' }}>
+                        {filteredStaff.length === 0 && staffSearch && (
+                          <div style={{ padding:'10px 12px', color:theme.textMuted, fontSize:'12px' }}>No staff match "{staffSearch}"</div>
+                        )}
+                        {filteredStaff.map(s => (
+                          <div key={s.id} onMouseDown={() => selectStaff(s)} style={{ padding:'10px 12px', cursor:'pointer', borderBottom:`1px solid ${theme.border}22` }}>
+                            <div style={{ fontWeight:'600', fontSize:'13px' }}>{s.full_name}</div>
+                            <div style={{ fontSize:'11px', color:theme.textMuted }}>{s.role} · {s.staff_type === 'permanent' ? 'Permanent' : 'Daily'}</div>
+                          </div>
+                        ))}
+                        <div onMouseDown={selectManual} style={{ padding:'10px 12px', cursor:'pointer', borderTop:`1px solid ${theme.border}`, color:theme.accent, fontSize:'12px', fontWeight:'600' }}>
+                          + Not in staff list — enter manually
+                        </div>
+                      </div>
+                    )}
+                    {selectedStaff && !duplicateUser && (
+                      <div style={{ marginTop:'6px', fontSize:'11px', color:theme.textMuted, padding:'6px 10px', background:theme.accent+'11', borderRadius:'6px' }}>
+                        ✓ {selectedStaff.full_name} · {selectedStaff.role} · {selectedStaff.staff_type === 'permanent' ? 'Permanent' : 'Daily'}
+                      </div>
+                    )}
+                    {duplicateUser && (
+                      <div style={{ marginTop:'6px', padding:'8px 10px', background:theme.red+'18', border:`1px solid ${theme.red}44`, borderRadius:'6px', fontSize:'12px' }}>
+                        <div style={{ color:theme.red, fontWeight:'700' }}>⚠ {selectedStaff?.full_name} already has a system account</div>
+                        <div style={{ color:theme.textMuted, marginTop:'2px' }}>{duplicateUser.email} · {APP_ROLES.find(r=>r.id===duplicateUser.role)?.label || duplicateUser.role}</div>
+                        <div style={{ marginTop:'6px', fontSize:'11px', color:theme.textMuted }}>Update their role using the table below instead.</div>
+                      </div>
+                    )}
+                    {isRoleBoard && !duplicateUser && (
+                      <div style={{ marginTop:'6px', fontSize:'11px', color:theme.accent }}>
+                        Board members are typically not in the staff list — select "Not in staff list" above.
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <input style={styles.input} value={form.full_name} onChange={e => setForm(p=>({...p, full_name:e.target.value}))} placeholder="Full name" required />
+                    <div style={{ marginTop:'6px', fontSize:'11px', color:theme.textMuted }}>
+                      This user will not be linked to a staff record.{' '}
+                      <span style={{ color:theme.accent, cursor:'pointer', textDecoration:'underline' }} onClick={() => { setStaffMode('search'); setForm(p=>({...p, full_name:'', staff_id:null})); }}>Search staff instead</span>
+                    </div>
+                  </>
+                )}
               </div>
+
+              {/* EMAIL */}
               <div>
-                <label style={{ display: 'block', fontSize: '11px', color: theme.textMuted, marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Email Address *</label>
-                <input style={styles.input} type="email" value={form.email} onChange={e => setForm(p => ({...p, email: e.target.value}))} placeholder="user@company.com" required />
+                <label style={labelSt}>Email Address *</label>
+                <input style={{ ...styles.input, ...(emailDuplicate ? { borderColor:theme.red } : {}) }} type="email" value={form.email} onChange={e => setForm(p=>({...p, email:e.target.value}))} placeholder="user@company.com" required />
+                {emailDuplicate && <div style={{ marginTop:'4px', fontSize:'11px', color:theme.red }}>Already in use by {emailDuplicate.full_name}.</div>}
               </div>
+
+              {/* PASSWORD */}
               <div>
-                <label style={{ display: 'block', fontSize: '11px', color: theme.textMuted, marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Temporary Password *</label>
-                <input style={styles.input} type="password" value={form.password} onChange={e => setForm(p => ({...p, password: e.target.value}))} placeholder="Min. 6 characters" required minLength={6} />
+                <label style={labelSt}>Temporary Password *</label>
+                <input style={styles.input} type="password" value={form.password} onChange={e => setForm(p=>({...p, password:e.target.value}))} placeholder="Min. 6 characters" required minLength={6} />
               </div>
+
+              {/* ROLE */}
               <div>
-                <label style={{ display: 'block', fontSize: '11px', color: theme.textMuted, marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Role *</label>
-                <select style={styles.input} value={form.role} onChange={e => setForm(p => ({...p, role: e.target.value}))}>
+                <label style={labelSt}>Role *</label>
+                <select style={styles.input} value={form.role} onChange={e => setForm(p=>({...p, role:e.target.value}))}>
                   {APP_ROLES.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}
                 </select>
+                {isRoleBoard && (
+                  <div style={{ marginTop:'6px', fontSize:'11px', color:theme.accent, padding:'6px 10px', background:theme.accent+'11', borderRadius:'6px' }}>
+                    Board Members have read-only access to all modules including financial statements.
+                  </div>
+                )}
               </div>
             </div>
-            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-              <button type="submit" style={styles.btn('primary')} disabled={creating}>{creating ? 'Creating…' : 'Create User'}</button>
-              <button type="button" style={styles.btn('secondary')} onClick={() => { setShowCreate(false); setForm({ full_name: '', email: '', password: '', role: 'staff' }); }}>Cancel</button>
+
+            <div style={{ display:'flex', gap:'10px', alignItems:'center' }}>
+              <button type="submit" style={styles.btn('primary')} disabled={creating || !!duplicateUser || !!emailDuplicate}>
+                {creating ? 'Creating…' : 'Create User'}
+              </button>
+              <button type="button" style={styles.btn('secondary')} onClick={() => { setShowCreate(false); resetForm(); }}>Cancel</button>
             </div>
-            <div style={{ marginTop: '10px', fontSize: '11px', color: theme.textMuted }}>
-              The user can log in immediately using their email and the temporary password above. Share the password with them privately.
+            <div style={{ marginTop:'10px', fontSize:'11px', color:theme.textMuted }}>
+              Share the temporary password privately — the user can log in immediately.
             </div>
           </form>
         </div>
@@ -6224,39 +6353,70 @@ const UserManagement = ({ userProfile }) => {
 
       {loading ? <Spinner /> : (
         <div style={styles.card}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+          <input style={{ ...styles.input, maxWidth:'320px', marginBottom:'14px' }} value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name, email or role…" />
+          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'13px' }}>
             <thead>
-              <tr style={{ borderBottom: `2px solid ${theme.border}` }}>
-                {['Name', 'Email', 'Role', 'Status', 'Actions'].map(h => <th key={h} style={{ padding: '8px 10px', textAlign: 'left', color: theme.textMuted, fontWeight: '700', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{h}</th>)}
+              <tr style={{ borderBottom:`2px solid ${theme.border}` }}>
+                {['','Name','Email','Role','Staff Record','Status','Last Login','Actions'].map(h =>
+                  <th key={h} style={{ padding:'8px 10px', textAlign:'left', color:theme.textMuted, fontWeight:'700', fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.06em' }}>{h}</th>
+                )}
               </tr>
             </thead>
             <tbody>
-              {users.map(u => (
-                <tr key={u.id} style={{ borderBottom: `1px solid ${theme.border}22` }}>
-                  <td style={{ padding: '10px' }}>{u.full_name}</td>
-                  <td style={{ padding: '10px', color: theme.textMuted }}>{u.email}</td>
-                  <td style={{ padding: '10px' }}>
-                    {isMD && u.id !== userProfile?.id ? (
-                      <select style={{ ...styles.input, padding: '4px 8px', fontSize: '12px' }} value={u.role} onChange={e => updateRole(u.id, e.target.value)}>
-                        {APP_ROLES.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}
-                      </select>
-                    ) : (
-                      <span style={{ background: theme.accent+'22', color: theme.accent, borderRadius: '4px', padding: '2px 8px', fontSize: '11px', fontWeight: '700' }}>{APP_ROLES.find(r => r.id === u.role)?.label || u.role}</span>
-                    )}
-                  </td>
-                  <td style={{ padding: '10px' }}>
-                    <span style={{ background: u.is_active ? theme.green+'22' : theme.red+'22', color: u.is_active ? theme.green : theme.red, borderRadius: '4px', padding: '2px 8px', fontSize: '11px', fontWeight: '700' }}>{u.is_active ? 'Active' : 'Inactive'}</span>
-                  </td>
-                  <td style={{ padding: '10px' }}>
-                    {u.id !== userProfile?.id && isMD && (
-                      <button style={{ ...styles.btn(u.is_active ? 'danger' : 'secondary'), padding: '3px 10px', fontSize: '11px' }} onClick={() => toggleActive(u.id, !u.is_active)}>
-                        {u.is_active ? 'Deactivate' : 'Activate'}
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-              {!users.length && <tr><td colSpan={5} style={{ padding: '20px', textAlign: 'center', color: theme.textMuted }}>No users found. Create the first user using the button above.</td></tr>}
+              {filteredUsers.map(u => {
+                const col = avatarColor(u.full_name);
+                const linked = staffList.find(s => s.id === u.staff_id);
+                return (
+                  <tr key={u.id} style={{ borderBottom:`1px solid ${theme.border}22` }}>
+                    <td style={{ padding:'8px 10px' }}>
+                      <div style={{ width:'34px', height:'34px', borderRadius:'50%', background:col, display:'flex', alignItems:'center', justifyContent:'center', color:'#fff', fontWeight:'700', fontSize:'12px' }}>
+                        {initials(u.full_name)}
+                      </div>
+                    </td>
+                    <td style={{ padding:'8px 10px', fontWeight:'600' }}>{u.full_name}</td>
+                    <td style={{ padding:'8px 10px', color:theme.textMuted, fontSize:'12px' }}>{u.email}</td>
+                    <td style={{ padding:'8px 10px' }}>
+                      {isMD && u.id !== userProfile?.id ? (
+                        <select style={{ ...styles.input, padding:'3px 6px', fontSize:'12px', width:'auto' }} value={u.role} onChange={e => updateRole(u.id, e.target.value)}>
+                          {APP_ROLES.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}
+                        </select>
+                      ) : (
+                        <span style={{ background:col+'22', color:col, borderRadius:'4px', padding:'2px 8px', fontSize:'11px', fontWeight:'700', whiteSpace:'nowrap' }}>
+                          {APP_ROLES.find(r=>r.id===u.role)?.label || u.role}
+                        </span>
+                      )}
+                    </td>
+                    <td style={{ padding:'8px 10px', fontSize:'12px' }}>
+                      {linked
+                        ? <span style={{ color:theme.green, fontWeight:'600' }}>✓ {linked.full_name}</span>
+                        : <span style={{ color:theme.textMuted }}>—</span>}
+                    </td>
+                    <td style={{ padding:'8px 10px' }}>
+                      <span style={{ background:u.is_active?theme.green+'22':theme.red+'22', color:u.is_active?theme.green:theme.red, borderRadius:'4px', padding:'2px 8px', fontSize:'11px', fontWeight:'700' }}>
+                        {u.is_active?'Active':'Inactive'}
+                      </span>
+                    </td>
+                    <td style={{ padding:'8px 10px', color:theme.textMuted, fontSize:'11px' }}>
+                      {u.last_login ? new Date(u.last_login).toLocaleString('en-GB',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}) : '—'}
+                    </td>
+                    <td style={{ padding:'8px 10px' }}>
+                      {u.id !== userProfile?.id && isMD && (
+                        <div style={{ display:'flex', gap:'6px', flexWrap:'wrap' }}>
+                          <button style={{ ...styles.btn('secondary'), padding:'3px 8px', fontSize:'11px' }} onClick={() => handleResetPwd(u.email, u.full_name)}>Reset Pwd</button>
+                          <button style={{ ...styles.btn(u.is_active?'danger':'secondary'), padding:'3px 8px', fontSize:'11px' }} onClick={() => toggleActive(u.id, !u.is_active)}>
+                            {u.is_active?'Deactivate':'Activate'}
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+              {!filteredUsers.length && (
+                <tr><td colSpan={8} style={{ padding:'20px', textAlign:'center', color:theme.textMuted }}>
+                  {search ? `No users match "${search}"` : 'No users found. Create the first user above.'}
+                </td></tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -6291,6 +6451,7 @@ export default function App() {
     try {
       const profile = await authService.getProfile(user.id);
       setUserProfile(profile);
+      supabase.from('user_profiles').update({ last_login: new Date().toISOString() }).eq('id', user.id).then(() => {}).catch(() => {});
     } catch {
       // Auto-create profile on first login
       try {

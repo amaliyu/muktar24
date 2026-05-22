@@ -6,7 +6,7 @@ export const authService = {
    * Create a new user account without disturbing the current MD session.
    * Uses a throw-away client with persistSession:false so localStorage is untouched.
    */
-  async createUser(email, password, fullName, role) {
+  async createUser(email, password, fullName, role, staffId = null) {
     const tmpClient = createClient(
       import.meta.env.VITE_SUPABASE_URL,
       import.meta.env.VITE_SUPABASE_ANON_KEY,
@@ -19,13 +19,26 @@ export const authService = {
     // Upsert profile; the DB trigger may have already created it
     const { data: profile, error: profErr } = await supabase
       .from('user_profiles')
-      .upsert({ id: userId, email, full_name: fullName, role, is_active: true })
+      .upsert({ id: userId, email, full_name: fullName, role, is_active: true, ...(staffId ? { staff_id: staffId } : {}) })
       .select()
       .single()
     if (profErr) throw profErr
     return profile
   },
 
+
+  /**
+   * Fetch all active staff members ordered by name.
+   */
+  async getStaffList() {
+    const { data, error } = await supabase
+      .from('staff')
+      .select('id, full_name, role, staff_type')
+      .eq('is_active', true)
+      .order('full_name')
+    if (error) throw error
+    return data || []
+  },
 
   /**
    * Sign in with email and password.
@@ -105,6 +118,14 @@ export const authService = {
       .from('user_profiles')
       .update({ is_active: isActive })
       .eq('id', id)
+    if (error) throw error
+  },
+
+  /**
+   * Send a password reset email to the given address.
+   */
+  async resetPassword(email) {
+    const { error } = await supabase.auth.resetPasswordForEmail(email)
     if (error) throw error
   },
 }
