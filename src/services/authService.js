@@ -1,6 +1,32 @@
+import { createClient } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 
 export const authService = {
+  /**
+   * Create a new user account without disturbing the current MD session.
+   * Uses a throw-away client with persistSession:false so localStorage is untouched.
+   */
+  async createUser(email, password, fullName, role) {
+    const tmpClient = createClient(
+      import.meta.env.VITE_SUPABASE_URL,
+      import.meta.env.VITE_SUPABASE_ANON_KEY,
+      { auth: { persistSession: false, autoRefreshToken: false } }
+    )
+    const { data, error } = await tmpClient.auth.signUp({ email, password })
+    if (error) throw error
+    const userId = data.user?.id
+    if (!userId) throw new Error('Sign-up succeeded but no user ID was returned — check Supabase email confirmation settings.')
+    // Upsert profile; the DB trigger may have already created it
+    const { data: profile, error: profErr } = await supabase
+      .from('user_profiles')
+      .upsert({ id: userId, email, full_name: fullName, role, is_active: true })
+      .select()
+      .single()
+    if (profErr) throw profErr
+    return profile
+  },
+
+
   /**
    * Sign in with email and password.
    * Throws on auth error so callers can catch and display a message.

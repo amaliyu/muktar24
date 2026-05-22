@@ -6112,6 +6112,9 @@ const UserManagement = ({ userProfile }) => {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
   const [ok, setOk] = useState('');
+  const [showCreate, setShowCreate] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [form, setForm] = useState({ full_name: '', email: '', password: '', role: 'staff' });
 
   useEffect(() => {
     authService.listUsers().then(setUsers).catch(e => setErr(e.message)).finally(() => setLoading(false));
@@ -6125,15 +6128,67 @@ const UserManagement = ({ userProfile }) => {
     try { await authService.toggleUserActive(id, isActive); setUsers(p => p.map(u => u.id === id ? {...u, is_active: isActive} : u)); }
     catch(e) { setErr(e.message); }
   };
+  const handleCreate = async (e) => {
+    e.preventDefault();
+    if (form.password.length < 6) { setErr('Password must be at least 6 characters'); return; }
+    setCreating(true); setErr('');
+    try {
+      const profile = await authService.createUser(form.email, form.password, form.full_name, form.role);
+      setUsers(p => [...p, profile].sort((a, b) => (a.full_name||'').localeCompare(b.full_name||'')));
+      setOk(`${form.full_name} created successfully. Share their password so they can log in.`);
+      setTimeout(() => setOk(''), 5000);
+      setForm({ full_name: '', email: '', password: '', role: 'staff' });
+      setShowCreate(false);
+    } catch(e) { setErr(e.message); }
+    finally { setCreating(false); }
+  };
+
+  const isMD = userProfile?.role === 'md';
 
   return (
     <div>
-      <div style={styles.header}><div><div style={styles.pageTitle}>User Management</div><div style={styles.pageSubtitle}>Manage system users and roles — MD access only</div></div></div>
+      <div style={styles.header}>
+        <div><div style={styles.pageTitle}>User Management</div><div style={styles.pageSubtitle}>Manage system users and roles — MD access only</div></div>
+        {isMD && <button style={styles.btn('primary')} onClick={() => { setShowCreate(s => !s); setErr(''); }}>{showCreate ? '✕ Cancel' : '+ Add User'}</button>}
+      </div>
       {err && <Alert msg={err} onClose={() => setErr('')} />}
       {ok  && <Alert msg={ok} type="success" onClose={() => setOk('')} />}
-      <div style={{ ...styles.card, marginBottom: '14px', padding: '12px 16px', background: theme.accent+'18', border: `1px solid ${theme.accent}44`, fontSize: '12px', color: theme.accent }}>
-        ℹ To create a new user, go to your <strong>Supabase Dashboard → Authentication → Users → Add User</strong>. Once they log in, their profile will appear here and you can assign their role.
-      </div>
+
+      {showCreate && (
+        <div style={{ ...styles.card, marginBottom: '16px' }}>
+          <div style={{ fontWeight: '700', fontSize: '14px', marginBottom: '16px' }}>Create New User</div>
+          <form onSubmit={handleCreate}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '14px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '11px', color: theme.textMuted, marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Full Name *</label>
+                <input style={styles.input} value={form.full_name} onChange={e => setForm(p => ({...p, full_name: e.target.value}))} placeholder="e.g. John Doe" required />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '11px', color: theme.textMuted, marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Email Address *</label>
+                <input style={styles.input} type="email" value={form.email} onChange={e => setForm(p => ({...p, email: e.target.value}))} placeholder="user@company.com" required />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '11px', color: theme.textMuted, marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Temporary Password *</label>
+                <input style={styles.input} type="password" value={form.password} onChange={e => setForm(p => ({...p, password: e.target.value}))} placeholder="Min. 6 characters" required minLength={6} />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '11px', color: theme.textMuted, marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Role *</label>
+                <select style={styles.input} value={form.role} onChange={e => setForm(p => ({...p, role: e.target.value}))}>
+                  {['md','accountant','board_member','operations','sales','staff'].map(r => <option key={r} value={r}>{r.replace(/_/g,' ').replace(/\b\w/g, c => c.toUpperCase())}</option>)}
+                </select>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+              <button type="submit" style={styles.btn('primary')} disabled={creating}>{creating ? 'Creating…' : 'Create User'}</button>
+              <button type="button" style={styles.btn('secondary')} onClick={() => { setShowCreate(false); setForm({ full_name: '', email: '', password: '', role: 'staff' }); }}>Cancel</button>
+            </div>
+            <div style={{ marginTop: '10px', fontSize: '11px', color: theme.textMuted }}>
+              The user can log in immediately using their email and the temporary password above. Share the password with them privately.
+            </div>
+          </form>
+        </div>
+      )}
+
       {loading ? <Spinner /> : (
         <div style={styles.card}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
@@ -6148,9 +6203,9 @@ const UserManagement = ({ userProfile }) => {
                   <td style={{ padding: '10px' }}>{u.full_name}</td>
                   <td style={{ padding: '10px', color: theme.textMuted }}>{u.email}</td>
                   <td style={{ padding: '10px' }}>
-                    {userProfile?.role === 'md' && u.id !== userProfile?.id ? (
+                    {isMD && u.id !== userProfile?.id ? (
                       <select style={{ ...styles.input, padding: '4px 8px', fontSize: '12px' }} value={u.role} onChange={e => updateRole(u.id, e.target.value)}>
-                        {['md','accountant','board_member','operations','sales','staff'].map(r => <option key={r} value={r}>{r.replace('_',' ').replace(/\b\w/g, c => c.toUpperCase())}</option>)}
+                        {['md','accountant','board_member','operations','sales','staff'].map(r => <option key={r} value={r}>{r.replace(/_/g,' ').replace(/\b\w/g, c => c.toUpperCase())}</option>)}
                       </select>
                     ) : (
                       <span style={{ background: theme.accent+'22', color: theme.accent, borderRadius: '4px', padding: '2px 8px', fontSize: '11px', fontWeight: '700' }}>{u.role?.replace('_',' ')}</span>
@@ -6160,7 +6215,7 @@ const UserManagement = ({ userProfile }) => {
                     <span style={{ background: u.is_active ? theme.green+'22' : theme.red+'22', color: u.is_active ? theme.green : theme.red, borderRadius: '4px', padding: '2px 8px', fontSize: '11px', fontWeight: '700' }}>{u.is_active ? 'Active' : 'Inactive'}</span>
                   </td>
                   <td style={{ padding: '10px' }}>
-                    {u.id !== userProfile?.id && userProfile?.role === 'md' && (
+                    {u.id !== userProfile?.id && isMD && (
                       <button style={{ ...styles.btn(u.is_active ? 'danger' : 'secondary'), padding: '3px 10px', fontSize: '11px' }} onClick={() => toggleActive(u.id, !u.is_active)}>
                         {u.is_active ? 'Deactivate' : 'Activate'}
                       </button>
@@ -6168,7 +6223,7 @@ const UserManagement = ({ userProfile }) => {
                   </td>
                 </tr>
               ))}
-              {!users.length && <tr><td colSpan={5} style={{ padding: '20px', textAlign: 'center', color: theme.textMuted }}>No users found. Users appear here after their first login.</td></tr>}
+              {!users.length && <tr><td colSpan={5} style={{ padding: '20px', textAlign: 'center', color: theme.textMuted }}>No users found. Create the first user using the button above.</td></tr>}
             </tbody>
           </table>
         </div>
