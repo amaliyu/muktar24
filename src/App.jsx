@@ -18,6 +18,7 @@ import { schedulesService } from './services/schedules';
 import { batchesService } from './services/batches';
 import { finishedGoodsService } from './services/finishedGoods';
 import { generateInvoicePDF } from './utils/generateInvoicePDF';
+import ReportsEngine from './components/Reports';
 import { generateStatementPDF } from './utils/generateStatementPDF';
 import { generateInventoryReportPDF } from './utils/generateInventoryReportPDF';
 import { generateWaybillPDF } from './utils/generateWaybillPDF';
@@ -37,8 +38,6 @@ import KPIDashboard from './components/KPIDashboard'
 import { vehiclesService, fuelLogService } from './services/vehicles'
 import SupplierRegistry from './components/SupplierRegistry'
 import { suppliersService, supplierTransactionsService } from './services/suppliers'
-import jsPDF from 'jspdf'
-import autoTable from 'jspdf-autotable'
 
 const theme = {
   bg: "#0f1117", surface: "#1a1d27", card: "#21263a", border: "#2e3452",
@@ -2298,206 +2297,7 @@ const Customers = () => {
 };
 
 // ── REPORTS ───────────────────────────────────────────────────
-const Reports = () => {
-  const [fleetReport, setFleetReport] = useState(null);
-  const [fleetLoading, setFleetLoading] = useState(false);
-  const [supplierReport, setSupplierReport] = useState(null);
-  const [supplierReportLoading, setSupplierReportLoading] = useState(false);
-  const [supRptFrom, setSupRptFrom] = useState('');
-  const [supRptTo, setSupRptTo] = useState('');
-
-  const generateSupplierReport = async () => {
-    setSupplierReportLoading(true);
-    try {
-      const [suppliers, allTxns] = await Promise.all([
-        suppliersService.getAll(),
-        (async () => {
-          let q = supabase.from('supplier_transactions').select('supplier_id, transaction_type, amount, transaction_date');
-          if (supRptFrom) q = q.gte('transaction_date', supRptFrom);
-          if (supRptTo) q = q.lte('transaction_date', supRptTo);
-          const { data } = await q;
-          return data || [];
-        })(),
-      ]);
-      const rows = suppliers.map(s => {
-        const txns = allTxns.filter(t => t.supplier_id === s.id);
-        const purchased = txns.filter(t => t.transaction_type === 'purchase').reduce((sum, t) => sum + Number(t.amount), 0);
-        const paid = txns.filter(t => t.transaction_type === 'payment').reduce((sum, t) => sum + Number(t.amount), 0);
-        return { id: s.id, company: s.company_name, number: s.supplier_number, rating: s.rating || 0, purchased, paid, outstanding: purchased - paid };
-      }).sort((a, b) => b.outstanding - a.outstanding);
-      setSupplierReport(rows);
-    } catch (e) { alert('Could not load supplier data: ' + e.message); }
-    finally { setSupplierReportLoading(false); }
-  };
-
-  const downloadSupplierReportPDF = () => {
-    if (!supplierReport) return;
-    const doc = new jsPDF();
-    doc.setFontSize(16); doc.setFont(undefined, 'bold');
-    doc.text('Supplier Performance Report', 14, 18);
-    doc.setFontSize(10); doc.setFont(undefined, 'normal');
-    doc.text(`Generated: ${new Date().toLocaleDateString('en-NG')}${supRptFrom ? `   Period: ${supRptFrom} → ${supRptTo || 'present'}` : ''}`, 14, 26);
-    autoTable(doc, {
-      startY: 32,
-      head: [['Supplier', 'Number', 'Total Purchased', 'Total Paid', 'Outstanding', 'Rating']],
-      body: supplierReport.map(r => [r.company, r.number, `₦${r.purchased.toLocaleString()}`, `₦${r.paid.toLocaleString()}`, `₦${Math.max(0, r.outstanding).toLocaleString()}`, '★'.repeat(r.rating)]),
-      styles: { fontSize: 9 },
-      headStyles: { fillColor: [245, 166, 35], textColor: 0 },
-      didParseCell: (data) => {
-        if (data.section === 'body' && data.column.index === 4) {
-          if (supplierReport[data.row.index]?.outstanding > 0) data.cell.styles.textColor = [240, 107, 107];
-        }
-      },
-    });
-    doc.save(`Supplier-Report-${new Date().toISOString().split('T')[0]}.pdf`);
-  };
-
-  const generateFleetDamageReport = async () => {
-    setFleetLoading(true);
-    try {
-      const [waybills, vehicles] = await Promise.all([
-        waybillsService.getAll(),
-        vehiclesService.getAll(),
-      ]);
-      const vehicleMap = Object.fromEntries(vehicles.map(v => [v.id, v]));
-      const grouped = {};
-      waybills.forEach(w => {
-        const key = w.vehicle_id || '__unknown__';
-        if (!grouped[key]) grouped[key] = { loaded: 0, damaged: 0, trips: 0 };
-        grouped[key].loaded += w.quantity_loaded || 0;
-        grouped[key].damaged += w.quantity_damaged || 0;
-        grouped[key].trips += 1;
-      });
-      const totalLoaded = Object.values(grouped).reduce((s, g) => s + g.loaded, 0);
-      const totalDamaged = Object.values(grouped).reduce((s, g) => s + g.damaged, 0);
-      const fleetRate = totalLoaded > 0 ? (totalDamaged / totalLoaded) * 100 : 0;
-      const rows = Object.entries(grouped)
-        .map(([vId, g]) => {
-          const v = vehicleMap[vId];
-          return { vehicleNumber: v?.vehicle_number || '—', vehicleName: v?.vehicle_name || '', trips: g.trips, loaded: g.loaded, damaged: g.damaged, rate: g.loaded > 0 ? (g.damaged / g.loaded) * 100 : 0 };
-        })
-        .sort((a, b) => b.rate - a.rate);
-      setFleetReport({ rows, fleetRate, totalLoaded, totalDamaged });
-    } catch (e) { alert('Could not load fleet data: ' + e.message); }
-    finally { setFleetLoading(false); }
-  };
-
-  const downloadFleetPDF = () => {
-    if (!fleetReport) return;
-    const doc = new jsPDF();
-    doc.setFontSize(16); doc.setFont(undefined, 'bold');
-    doc.text('Fleet Damage Analysis Report', 14, 18);
-    doc.setFontSize(10); doc.setFont(undefined, 'normal');
-    doc.text(`Generated: ${new Date().toLocaleDateString('en-NG')}   Fleet Average Damage Rate: ${fleetReport.fleetRate.toFixed(2)}%`, 14, 26);
-    autoTable(doc, {
-      startY: 32,
-      head: [['Vehicle', 'Name', 'Trips', 'Loaded', 'Damaged', 'Damage Rate']],
-      body: fleetReport.rows.map(r => [r.vehicleNumber, r.vehicleName, r.trips, r.loaded.toLocaleString(), r.damaged.toLocaleString(), `${r.rate.toFixed(2)}%`]),
-      styles: { fontSize: 10 },
-      headStyles: { fillColor: [245, 166, 35], textColor: 0 },
-      didParseCell: (data) => {
-        if (data.section === 'body' && data.column.index === 5) {
-          const rate = fleetReport.rows[data.row.index]?.rate || 0;
-          if (rate > fleetReport.fleetRate) data.cell.styles.textColor = [240, 107, 107];
-        }
-      },
-    });
-    doc.save(`Fleet-Damage-Report-${new Date().toISOString().split('T')[0]}.pdf`);
-  };
-
-  return (
-    <div>
-      <div style={styles.header}>
-        <div>
-          <div style={styles.pageTitle}>Reports</div>
-          <div style={styles.pageSubtitle}>Generate staff, production, and board-level reports</div>
-        </div>
-      </div>
-      <div style={styles.grid(2)}>
-        {[
-          { title: "Production Report", desc: "Daily/weekly/monthly production volumes, material usage, and cost per block", color: theme.accent, icon: "🏭" },
-          { title: "Damage & Waste Report", desc: "Breakages by stage — production, stacking, loading, and delivery", color: theme.red, icon: "⚠️" },
-          { title: "Customer Statement", desc: "Per-customer order history, payments received, and delivery records", color: theme.blue, icon: "📋" },
-          { title: "Staff & Payroll Report", desc: "Attendance, wages for daily workers, and permanent staff costs", color: theme.green, icon: "👥" },
-          { title: "Delivery & Logistics Report", desc: "Diesel usage, distances covered, loading/offloading costs by driver", color: theme.accentDim, icon: "🚛" },
-          { title: "Board Summary Report", desc: "High-level overview of revenue, costs, production, and KPIs for board review", color: theme.blue, icon: "📊" },
-        ].map((r, i) => (
-          <div key={i} style={{ ...styles.card, borderTop: `3px solid ${r.color}`, cursor: "pointer" }}>
-            <div style={{ fontSize: "24px", marginBottom: "10px" }}>{r.icon}</div>
-            <div style={{ fontWeight: "700", fontSize: "14px", marginBottom: "6px" }}>{r.title}</div>
-            <div style={{ fontSize: "12px", color: theme.textMuted, marginBottom: "16px" }}>{r.desc}</div>
-            <div style={styles.row}>
-              <button style={styles.btn("primary")}>Generate PDF</button>
-              <button style={styles.btn("secondary")}>Export Excel</button>
-            </div>
-          </div>
-        ))}
-
-        {/* Fleet Damage Report — live */}
-        <div style={{ ...styles.card, borderTop: `3px solid ${theme.red}`, gridColumn: "span 2" }}>
-          <div style={{ fontSize: "24px", marginBottom: "10px" }}>🚛</div>
-          <div style={{ fontWeight: "700", fontSize: "14px", marginBottom: "6px" }}>Fleet Damage Analysis Report</div>
-          <div style={{ fontSize: "12px", color: theme.textMuted, marginBottom: "16px" }}>Per-vehicle damage rates ranked worst-to-best. Vehicles above fleet average highlighted in red. Downloadable as PDF.</div>
-          <div style={styles.row}>
-            <button style={styles.btn("primary")} onClick={generateFleetDamageReport} disabled={fleetLoading}>{fleetLoading ? "Loading…" : "Generate Report"}</button>
-            {fleetReport && <button style={styles.btn("secondary")} onClick={downloadFleetPDF}>Download PDF</button>}
-          </div>
-          {fleetReport && (
-            <div style={{ marginTop: "16px" }}>
-              <div style={{ fontSize: "12px", color: theme.textMuted, marginBottom: "10px" }}>Fleet average damage rate: <strong style={{ color: theme.accent }}>{fleetReport.fleetRate.toFixed(2)}%</strong> &nbsp;|&nbsp; Total loaded: <strong>{fleetReport.totalLoaded.toLocaleString()}</strong> &nbsp;|&nbsp; Total damaged: <strong style={{ color: theme.red }}>{fleetReport.totalDamaged.toLocaleString()}</strong></div>
-              <table style={styles.table}>
-                <thead><tr>{["Rank", "Vehicle", "Name", "Trips", "Blocks Loaded", "Blocks Damaged", "Damage Rate"].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
-                <tbody>
-                  {fleetReport.rows.map((r, i) => (
-                    <tr key={i}>
-                      <td style={styles.td}><span style={{ fontWeight: "700", color: i === 0 ? theme.red : theme.textMuted }}>#{i + 1}</span></td>
-                      <td style={styles.td}><span style={{ color: theme.accent, fontWeight: "600" }}>{r.vehicleNumber}</span></td>
-                      <td style={styles.td}>{r.vehicleName || "—"}</td>
-                      <td style={styles.td}>{r.trips}</td>
-                      <td style={styles.td}>{r.loaded.toLocaleString()}</td>
-                      <td style={styles.td}><strong style={{ color: r.damaged > 0 ? theme.red : theme.textMuted }}>{r.damaged.toLocaleString()}</strong></td>
-                      <td style={styles.td}><span style={{ fontWeight: "700", color: r.rate > fleetReport.fleetRate ? theme.red : theme.green }}>{r.rate.toFixed(2)}%{r.rate > fleetReport.fleetRate ? " ⚠" : ""}</span></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-
-        {/* Supplier Performance Report — live */}
-        <div style={{ ...styles.card, borderTop: `3px solid ${theme.blue}`, gridColumn: "span 2" }}>
-          <div style={{ fontSize: "24px", marginBottom: "10px" }}>🏢</div>
-          <div style={{ fontWeight: "700", fontSize: "14px", marginBottom: "6px" }}>Supplier Performance Report</div>
-          <div style={{ fontSize: "12px", color: theme.textMuted, marginBottom: "16px" }}>All suppliers ranked by outstanding balance. Highlights unpaid balances in red. Filter by date range.</div>
-          <div style={{ ...styles.row, marginBottom: "12px", flexWrap: "wrap" }}>
-            <div><label style={{ ...styles.label, display: "inline", marginRight: "6px" }}>From</label><input style={{ ...styles.input, width: "140px" }} type="date" value={supRptFrom} onChange={e => setSupRptFrom(e.target.value)} /></div>
-            <div><label style={{ ...styles.label, display: "inline", marginRight: "6px" }}>To</label><input style={{ ...styles.input, width: "140px" }} type="date" value={supRptTo} onChange={e => setSupRptTo(e.target.value)} /></div>
-            <button style={styles.btn("primary")} onClick={generateSupplierReport} disabled={supplierReportLoading}>{supplierReportLoading ? "Loading…" : "Generate Report"}</button>
-            {supplierReport && <button style={styles.btn("secondary")} onClick={downloadSupplierReportPDF}>Download PDF</button>}
-          </div>
-          {supplierReport && (
-            <table style={styles.table}>
-              <thead><tr>{["Supplier", "Number", "Total Purchased", "Total Paid", "Outstanding", "Rating"].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
-              <tbody>
-                {supplierReport.map((r, i) => (
-                  <tr key={i}>
-                    <td style={styles.td}><span style={{ fontWeight: "600" }}>{r.company}</span></td>
-                    <td style={styles.td}>{r.number}</td>
-                    <td style={styles.td}>{naira(r.purchased)}</td>
-                    <td style={styles.td}><span style={{ color: theme.green }}>{naira(r.paid)}</span></td>
-                    <td style={styles.td}><strong style={{ color: r.outstanding > 0 ? theme.red : theme.green }}>{naira(Math.max(0, r.outstanding))}{r.outstanding > 0 ? " ⚠" : ""}</strong></td>
-                    <td style={styles.td}>{"★".repeat(r.rating)}{"☆".repeat(5 - r.rating)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-};
+const Reports = ({ userProfile }) => <ReportsEngine userProfile={userProfile} />;
 
 // ── INVENTORY ─────────────────────────────────────────────────
 const UNITS = ["bags", "kg", "litres", "units", "tonnes", "metres", "packs"];
@@ -6553,7 +6353,7 @@ export default function App() {
     daily_schedule: <DailySchedule />,
     lpo_approvals: <LPOApprovals />,
     schedule_approvals: <ScheduleApprovals />,
-    reports: <Reports />,
+    reports: <Reports userProfile={userProfile} />,
     kpi_dashboard: <KPIDashboard />,
     products: <Products />,
     suppliers: <SupplierRegistry />,
