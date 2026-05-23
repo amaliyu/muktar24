@@ -301,7 +301,7 @@ const StatCard = ({ label, value, sub, accent, pct }) => (
 );
 
 // ── DASHBOARD ─────────────────────────────────────────────────
-const Dashboard = () => {
+const Dashboard = ({ onNavigate }) => {
   const [stats, setStats] = useState({ staff: 0, produced: 0, orders: 0, revenue: 0, pending: 0, waybills: 0, damages: 0, lpoQueue: 0, scheduleQueue: 0, pendingRegister: 0 });
   const [finishedGoods, setFinishedGoods] = useState([]);
   const [recent, setRecent] = useState([]);
@@ -338,7 +338,14 @@ const Dashboard = () => {
         ]);
         const productUnitMap = Object.fromEntries(prods.map(p => [p.name, p.unit]));
         setStats(s => ({ ...s, lpoQueue: lpos.length, scheduleQueue: scheds.length, pendingRegister: pendReg.length }));
-        setFinishedGoods(fg.map(f => ({ ...f, unit: productUnitMap[f.block_type] || 'pieces' })));
+        // Group by block_type in case duplicate rows exist
+        const grouped = Object.values(fg.reduce((acc, f) => {
+          const k = f.block_type;
+          if (!acc[k]) acc[k] = { ...f, quantity_in_yard: 0 };
+          acc[k].quantity_in_yard += Number(f.quantity_in_yard || 0);
+          return acc;
+        }, {}));
+        setFinishedGoods(grouped.map(f => ({ ...f, unit: productUnitMap[f.block_type] || 'pieces' })));
         setVehicleAlerts(expiring);
       } catch { /* workflow tables may not exist yet */ } finally {
         setLoading(false);
@@ -400,21 +407,35 @@ const Dashboard = () => {
           {vehicleAlerts.length > 0 && (
             <div style={{ ...styles.card, marginBottom: "16px", borderColor: theme.red + "55", borderLeft: `4px solid ${theme.red}` }}>
               <div style={{ fontSize: "13px", fontWeight: "700", color: theme.red, marginBottom: "10px" }}>🚛 Vehicle Document Alerts ({vehicleAlerts.length})</div>
-              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                 {vehicleAlerts.map(v => {
-                  const today = new Date().toISOString().split('T')[0];
-                  const insExpired = v.insurance_expiry_date && v.insurance_expiry_date < today;
-                  const rwExpired = v.road_worthiness_expiry_date && v.road_worthiness_expiry_date < today;
-                  const insDue = v.insurance_expiry_date && !insExpired;
-                  const rwDue = v.road_worthiness_expiry_date && !rwExpired;
+                  const todayStr = new Date().toISOString().split('T')[0];
+                  const in14 = new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0];
+                  const insExpired  = v.insurance_expiry_date && v.insurance_expiry_date < todayStr;
+                  const rwExpired   = v.road_worthiness_expiry_date && v.road_worthiness_expiry_date < todayStr;
+                  const insWarning  = !insExpired && v.insurance_expiry_date && v.insurance_expiry_date <= in14;
+                  const rwWarning   = !rwExpired && v.road_worthiness_expiry_date && v.road_worthiness_expiry_date <= in14;
+                  const insDue      = !insExpired && !insWarning && v.insurance_expiry_date;
+                  const rwDue       = !rwExpired && !rwWarning && v.road_worthiness_expiry_date;
+                  const anyExpired  = insExpired || rwExpired;
                   return (
-                    <div key={v.id} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "8px 10px", background: theme.surface, borderRadius: "8px" }}>
-                      <span style={{ fontWeight: "600", color: theme.text, minWidth: "120px" }}>{v.vehicle_number}</span>
-                      <span style={{ color: theme.textMuted, fontSize: "12px", flex: 1 }}>{v.vehicle_name || ""}</span>
-                      {insExpired && <span style={{ fontSize: "11px", background: theme.red + "22", color: theme.red, padding: "2px 8px", borderRadius: "12px", fontWeight: "600" }}>Insurance EXPIRED</span>}
-                      {insDue && <span style={{ fontSize: "11px", background: theme.accent + "22", color: theme.accent, padding: "2px 8px", borderRadius: "12px", fontWeight: "600" }}>Insurance due {v.insurance_expiry_date}</span>}
-                      {rwExpired && <span style={{ fontSize: "11px", background: theme.red + "22", color: theme.red, padding: "2px 8px", borderRadius: "12px", fontWeight: "600" }}>Road Worthiness EXPIRED</span>}
-                      {rwDue && <span style={{ fontSize: "11px", background: theme.accent + "22", color: theme.accent, padding: "2px 8px", borderRadius: "12px", fontWeight: "600" }}>Road Worthiness due {v.road_worthiness_expiry_date}</span>}
+                    <div key={v.id} style={{ background: theme.surface, borderRadius: "8px", padding: "10px 12px", border: anyExpired ? `1px solid ${theme.red}44` : `1px solid ${theme.border}` }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+                        <span style={{ fontWeight: "700", color: theme.text, minWidth: "120px" }}>{v.vehicle_number}</span>
+                        <span style={{ color: theme.textMuted, fontSize: "12px", flex: 1 }}>{v.vehicle_name || ""}</span>
+                        {insExpired  && <span style={{ fontSize: "11px", background: theme.red + "22", color: theme.red, padding: "2px 8px", borderRadius: "12px", fontWeight: "700" }}>Insurance EXPIRED {v.insurance_expiry_date}</span>}
+                        {insWarning  && <span style={{ fontSize: "11px", background: "#e67e2222", color: "#e67e22", padding: "2px 8px", borderRadius: "12px", fontWeight: "700" }}>Insurance WARNING — due {v.insurance_expiry_date}</span>}
+                        {insDue      && <span style={{ fontSize: "11px", background: theme.accent + "22", color: theme.accent, padding: "2px 8px", borderRadius: "12px", fontWeight: "600" }}>Insurance due {v.insurance_expiry_date}</span>}
+                        {rwExpired   && <span style={{ fontSize: "11px", background: theme.red + "22", color: theme.red, padding: "2px 8px", borderRadius: "12px", fontWeight: "700" }}>Road Worthiness EXPIRED {v.road_worthiness_expiry_date}</span>}
+                        {rwWarning   && <span style={{ fontSize: "11px", background: "#e67e2222", color: "#e67e22", padding: "2px 8px", borderRadius: "12px", fontWeight: "700" }}>Road Worthiness WARNING — due {v.road_worthiness_expiry_date}</span>}
+                        {rwDue       && <span style={{ fontSize: "11px", background: theme.accent + "22", color: theme.accent, padding: "2px 8px", borderRadius: "12px", fontWeight: "600" }}>Road Worthiness due {v.road_worthiness_expiry_date}</span>}
+                        {onNavigate  && <button onClick={() => onNavigate("vehicles")} style={{ fontSize: "11px", padding: "2px 10px", borderRadius: "12px", background: theme.blue + "22", color: theme.blue, border: `1px solid ${theme.blue}44`, cursor: "pointer", fontWeight: "600", marginLeft: "auto" }}>Update Documents →</button>}
+                      </div>
+                      {anyExpired && (
+                        <div style={{ marginTop: "8px", fontSize: "12px", color: theme.red, fontWeight: "600", display: "flex", alignItems: "center", gap: "6px" }}>
+                          ⚠️ This vehicle should not be dispatched until documents are renewed.
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -6340,7 +6361,7 @@ export default function App() {
   const safePage = canSee(active) ? active : 'dashboard';
 
   const pages = {
-    dashboard: isBoard ? <BoardDashboard userProfile={userProfile} /> : <Dashboard />,
+    dashboard: isBoard ? <BoardDashboard userProfile={userProfile} /> : <Dashboard onNavigate={setActive} />,
     production: <Production />,
     inventory: <Inventory onLowStockChange={setLowStockCount} />,
     batches: <Batches />,
