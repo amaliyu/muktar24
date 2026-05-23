@@ -1429,7 +1429,7 @@ const Waybills = () => {
   const handleSave = async () => {
     if (!editTarget && !selectedOrderId) return setAlert({ type: "error", msg: "Select a customer with an active invoice before recording a waybill." });
     if (!form.waybillDate || !form.quantityLoaded) return setAlert({ type: "error", msg: "Date and quantity loaded are required." });
-    if (!editTarget && !form.batchId) return setAlert({ type: "error", msg: "Batch selection is required before recording a waybill." });
+    // batch is optional — blocks dispatched from yard stock without a specific batch
     setSaving(true);
     setAlert(null);
     try {
