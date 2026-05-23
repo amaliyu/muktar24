@@ -38,6 +38,7 @@ import KPIDashboard from './components/KPIDashboard'
 import { vehiclesService, fuelLogService } from './services/vehicles'
 import SupplierRegistry from './components/SupplierRegistry'
 import { suppliersService, supplierTransactionsService } from './services/suppliers'
+import Labour from './components/Labour'
 
 const theme = {
   bg: "#0f1117", surface: "#1a1d27", card: "#21263a", border: "#2e3452",
@@ -113,15 +114,15 @@ const APP_ROLES = [
 const ROLE_PAGES = {
   md:                 'all',
   ico:                'all',
-  accountant:         ['dashboard','reports','kpi_dashboard','accounting','opening_balances'],
+  accountant:         ['dashboard','reports','kpi_dashboard','accounting','opening_balances','labour'],
   board_member:       ['dashboard'],
   bdm:                ['dashboard','customers','orders','pending_register','daily_schedule','lpo_approvals','reports','kpi_dashboard'],
   store_officer:      ['dashboard','inventory','batches','waybills','vehicles','daily_schedule','products'],
-  logistics_manager:  ['dashboard','waybills','vehicles','pending_register','daily_schedule','customers'],
+  logistics_manager:  ['dashboard','waybills','vehicles','pending_register','daily_schedule','customers','labour'],
   marketer:           ['dashboard','customers','orders','products'],
   driver:             ['dashboard','waybills'],
-  hr_officer:         ['dashboard','staff','reports'],
-  production_manager: ['dashboard','production','inventory','batches','reports','products'],
+  hr_officer:         ['dashboard','staff','reports','labour'],
+  production_manager: ['dashboard','production','inventory','batches','reports','products','labour'],
   // legacy roles — kept for any existing users
   operations:         ['dashboard','production','inventory','batches','waybills','vehicles','staff','pending_register','daily_schedule','lpo_approvals'],
   sales:              ['dashboard','customers','orders'],
@@ -5985,6 +5986,7 @@ const navItems = [
     { id: "waybills", label: "Waybills", icon: "waybill" },
     { id: "vehicles", label: "Vehicles", icon: "truck" },
     { id: "staff", label: "Staff", icon: "staff" },
+    { id: "labour", label: "Labour", icon: "staff" },
   ]},
   { section: "Deliveries", items: [
     { id: "pending_register", label: "Pending Deliveries", icon: "pending" },
@@ -6381,6 +6383,7 @@ export default function App() {
     accounting: <Accounting userProfile={userProfile} />,
     opening_balances: <OpeningBalances userProfile={userProfile} />,
     user_management: <UserManagement userProfile={userProfile} />,
+    labour: <Labour userProfile={userProfile} />,
   };
 
   const getBadge = (id) => {
