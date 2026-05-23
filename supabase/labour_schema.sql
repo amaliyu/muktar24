@@ -83,6 +83,7 @@ CREATE TABLE IF NOT EXISTS daily_roster (
   roster_date           date NOT NULL UNIQUE,
   target_met            boolean DEFAULT false,
   total_daily_cost      numeric(12,2) DEFAULT 0,
+  worker_count          integer DEFAULT 0,
   submitted_by          text,
   submitted_date        timestamptz,
   ico_approved_by       text,

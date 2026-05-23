@@ -116,7 +116,7 @@ const ROLE_PAGES = {
   ico:                'all',
   accountant:         ['dashboard','reports','kpi_dashboard','accounting','opening_balances','labour'],
   board_member:       ['dashboard'],
-  bdm:                ['dashboard','customers','orders','pending_register','daily_schedule','lpo_approvals','reports','kpi_dashboard'],
+  bdm:                ['dashboard','customers','orders','pending_register','daily_schedule','reports','kpi_dashboard'],
   store_officer:      ['dashboard','inventory','batches','waybills','vehicles','daily_schedule','products'],
   logistics_manager:  ['dashboard','waybills','vehicles','pending_register','daily_schedule','customers','labour'],
   marketer:           ['dashboard','customers','orders','products'],

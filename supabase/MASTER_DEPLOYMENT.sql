@@ -247,6 +247,7 @@ CREATE TABLE IF NOT EXISTS daily_roster (
   roster_date           date NOT NULL UNIQUE,
   target_met            boolean DEFAULT false,
   total_daily_cost      numeric(12,2) DEFAULT 0,
+  worker_count          integer DEFAULT 0,
   submitted_by          text,
   submitted_date        timestamptz,
   ico_approved_by       text,
@@ -260,6 +261,9 @@ CREATE TABLE IF NOT EXISTS daily_roster (
   notes                 text,
   created_at            timestamptz DEFAULT now()
 );
+
+-- Add worker_count if table already exists from an older schema run
+ALTER TABLE daily_roster ADD COLUMN IF NOT EXISTS worker_count integer DEFAULT 0;
 
 -- Daily Roster Entries (one row per worker per day)
 CREATE TABLE IF NOT EXISTS daily_roster_entries (

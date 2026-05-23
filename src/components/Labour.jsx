@@ -1260,7 +1260,7 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
           </div>
 
           <div style={styles.row}>
-            {!currentPayroll && workers.length > 0 && (
+            {!currentPayroll && workers.length > 0 && ['production_manager','hr_officer','md'].includes(userProfile?.role) && (
               <button style={styles.btn('primary')} onClick={handleGeneratePayroll} disabled={actioning}>Generate Payroll</button>
             )}
             {currentPayroll?.status === 'draft' && userProfile?.role === 'ico' && (
