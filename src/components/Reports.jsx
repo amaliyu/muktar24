@@ -776,10 +776,25 @@ function monthBounds(m) {
 
 // ── HISTORY HELPERS ──────────────────────────────────────────
 const HISTORY_KEY = 'apc_report_history'
-function saveHistory(reportName, period, generatedBy) {
+async function saveHistory(reportName, period, generatedBy, userId, format, reportId) {
+  // 1. Keep local cache (fast / offline)
   const arr = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]')
-  arr.unshift({ name: reportName, period, generatedBy, generatedAt: new Date().toISOString() })
+  arr.unshift({ name: reportName, period, generatedBy, generatedAt: new Date().toISOString(), format: format || 'pdf' })
   localStorage.setItem(HISTORY_KEY, JSON.stringify(arr.slice(0, 50)))
+  // 2. Also persist to DB (non-critical — swallow errors)
+  try {
+    const cat = CATALOG.find(r => r.id === reportId)?.category || null
+    await supabase.from('report_history').insert({
+      report_id: reportId || null,
+      report_name: reportName,
+      report_category: cat,
+      period,
+      generated_by: userId || null,
+      generated_by_name: generatedBy,
+      format: format || 'pdf',
+      generated_at: new Date().toISOString(),
+    })
+  } catch { /* non-critical */ }
 }
 function getHistory() {
   return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]')
@@ -838,7 +853,7 @@ function GenerateModal({ report, userProfile, onClose, onGenerated }) {
       } else {
         renderExcel(report.id, data, p, period)
       }
-      saveHistory(report.name, period, userProfile?.full_name || 'Unknown')
+      await saveHistory(report.name, period, userProfile?.full_name || 'Unknown', userProfile?.id, format, report.id)
       onGenerated()
       onClose()
     } catch(e) {
@@ -900,11 +915,11 @@ function GenerateModal({ report, userProfile, onClose, onGenerated }) {
         </div>
 
         <div style={{ display:'flex', gap:'10px', flexWrap:'wrap' }}>
-          <button style={styles.btn('primary')} onClick={()=>handleGenerate('pdf')} disabled={loading}>
+          <button data-board-allow style={styles.btn('primary')} onClick={()=>handleGenerate('pdf')} disabled={loading}>
             {loading ? 'Generating…' : '⬇ Generate PDF'}
           </button>
           {report.formats.includes('excel') && (
-            <button style={styles.btn('secondary')} onClick={()=>handleGenerate('excel')} disabled={loading}>
+            <button data-board-allow style={styles.btn('secondary')} onClick={()=>handleGenerate('excel')} disabled={loading}>
               ⬇ Generate Excel
             </button>
           )}
@@ -1002,7 +1017,7 @@ function ReportCard({ report, userRole, schedule, onGenerate, onSchedule }) {
       <div style={{ marginTop:'auto', display:'flex', gap:'8px', alignItems:'center' }}>
         {hasAccess ? (
           <>
-            <button style={{ ...styles.btn('primary'), padding:'6px 14px', fontSize:'12px' }} onClick={onGenerate}>Generate</button>
+            <button data-board-allow style={{ ...styles.btn('primary'), padding:'6px 14px', fontSize:'12px' }} onClick={onGenerate}>Generate</button>
             <button style={{ ...styles.btn('secondary'), padding:'6px 10px', fontSize:'11px' }} onClick={onSchedule}>Schedule</button>
           </>
         ) : (

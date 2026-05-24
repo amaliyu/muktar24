@@ -1286,23 +1286,34 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
 }
 
 // ── MONTHLY FIXED TAB ────────────────────────────────────────────────────────
-const FIXED_WORKERS = [
-  { key: 'machine_operator', label: 'Machine Operator', amount: 200000 },
-  { key: 'foreman', label: 'Foreman', amount: 200000 },
-  { key: 'waterman', label: 'Waterman', amount: 150000 },
-]
 
-function MonthlyFixedTab({ pool, userProfile }) {
+function MonthlyFixedTab({ pool, roles, userProfile }) {
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7))
   const [payrollRecords, setPayrollRecords] = useState([])
   const [loading, setLoading] = useState(false)
   const [alert, setAlert] = useState(null)
   const [actioning, setActioning] = useState(false)
 
+  // Build fixed workers dynamically from labour_pool (category = monthly_fixed)
+  const fixedWorkers = pool
+    .filter(w => w.category === 'monthly_fixed' && w.is_active !== false)
+    .map(w => {
+      const role = roles.find(r => r.id === w.usual_role_id)
+      return {
+        id: w.id,
+        label: w.full_name,
+        roleName: role?.role_name || '—',
+        amount: Number(role?.base_rate || 0),
+        bank: w.bank_name || '—',
+        account: w.bank_account_number || '—',
+        accountName: w.bank_account_name || '—',
+      }
+    })
+  const totalFixed = fixedWorkers.reduce((s, w) => s + w.amount, 0)
+
   const loadData = useCallback(async () => {
     if (!month) return
     setLoading(true)
-    const weekEnding = `${month}-28`
     const { data } = await supabase.from('weekly_labour_payroll').select('*').eq('payroll_type', 'monthly_fixed').ilike('week_ending', `${month}%`)
     setPayrollRecords(data || [])
     setLoading(false)
@@ -1311,14 +1322,14 @@ function MonthlyFixedTab({ pool, userProfile }) {
   useEffect(() => { loadData() }, [loadData])
 
   const existingPayroll = payrollRecords[0]
-  const totalFixed = FIXED_WORKERS.reduce((s, w) => s + w.amount, 0)
 
   const handleGenerate = async () => {
+    if (fixedWorkers.length === 0) return setAlert({ msg: 'No monthly fixed workers in Labour Pool. Add workers with category "monthly_fixed" first.', type: 'error' })
     setActioning(true)
     const weekEnding = `${month}-28`
     const { error } = await supabase.from('weekly_labour_payroll').insert({
       week_ending: weekEnding, payroll_type: 'monthly_fixed', total_amount: totalFixed,
-      worker_count: FIXED_WORKERS.length, status: 'draft', prepared_by: userProfile?.full_name,
+      worker_count: fixedWorkers.length, status: 'draft', prepared_by: userProfile?.full_name,
     })
     setActioning(false)
     if (error) setAlert({ msg: error.message, type: 'error' })
@@ -1349,7 +1360,11 @@ function MonthlyFixedTab({ pool, userProfile }) {
   }
 
   const handlePDF = () => {
-    const pdfWorkers = FIXED_WORKERS.map(w => ({ name: w.label, role: 'Fixed Staff', days_or_blocks: '1 month', base_rate: w.amount, bonus: 0, total_pay: w.amount, bank: '—', account: '—' }))
+    const pdfWorkers = fixedWorkers.map(w => ({
+      name: w.label, role: w.roleName, days_or_blocks: '1 month',
+      base_rate: w.amount, bonus: 0, total_pay: w.amount,
+      bank: w.bank, account: w.account,
+    }))
     generatePayrollPDF('monthly_fixed', `${month} (Monthly)`, pdfWorkers, totalFixed, existingPayroll)
   }
 
@@ -1364,22 +1379,29 @@ function MonthlyFixedTab({ pool, userProfile }) {
       </div>
       {alert && <AlertBar msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
 
-      <div style={{ marginBottom: '16px' }}>
-        <div style={{ ...styles.row, gap: '12px', flexWrap: 'wrap' }}>
-          {FIXED_WORKERS.map(w => (
-            <div key={w.key} style={{ ...styles.card, flex: '1', minWidth: '200px', marginBottom: 0, borderLeft: `4px solid ${theme.blue}` }}>
-              <div style={{ fontSize: '13px', fontWeight: '700' }}>{w.label}</div>
-              <div style={{ fontSize: '22px', fontWeight: '700', color: theme.accent, marginTop: '6px' }}>{naira(w.amount)}</div>
-              <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '4px' }}>Monthly Fixed</div>
-              {existingPayroll && <span style={{ ...styles.badge(statusColor(existingPayroll.status)), marginTop: '8px', display: 'inline-block' }}>{existingPayroll.status}</span>}
-            </div>
-          ))}
+      {fixedWorkers.length === 0 ? (
+        <div style={{ ...styles.card, color: theme.textMuted, textAlign: 'center', padding: '32px' }}>
+          No monthly fixed workers found. Add workers to the Labour Pool with category set to <strong>monthly_fixed</strong>.
         </div>
-      </div>
+      ) : (
+        <div style={{ marginBottom: '16px' }}>
+          <div style={{ ...styles.row, gap: '12px', flexWrap: 'wrap' }}>
+            {fixedWorkers.map(w => (
+              <div key={w.id} style={{ ...styles.card, flex: '1', minWidth: '200px', marginBottom: 0, borderLeft: `4px solid ${theme.blue}` }}>
+                <div style={{ fontSize: '13px', fontWeight: '700' }}>{w.label}</div>
+                <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '2px' }}>{w.roleName}</div>
+                <div style={{ fontSize: '22px', fontWeight: '700', color: theme.accent, marginTop: '6px' }}>{naira(w.amount)}</div>
+                <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '4px' }}>Monthly Fixed</div>
+                {existingPayroll && <span style={{ ...styles.badge(statusColor(existingPayroll.status)), marginTop: '8px', display: 'inline-block' }}>{existingPayroll.status}</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div style={{ ...styles.card, borderTop: `2px solid ${theme.accent}` }}>
         <div style={{ ...styles.row, justifyContent: 'space-between' }}>
-          <div style={{ fontSize: '16px', fontWeight: '700' }}>Total Monthly Fixed Labour</div>
+          <div style={{ fontSize: '16px', fontWeight: '700' }}>Total Monthly Fixed Labour ({fixedWorkers.length} worker{fixedWorkers.length !== 1 ? 's' : ''})</div>
           <div style={{ fontSize: '24px', fontWeight: '700', color: theme.accent }}>{naira(totalFixed)}</div>
         </div>
       </div>
@@ -1705,7 +1727,7 @@ export default function Labour({ userProfile }) {
           {activeTab === 'roster' && <DailyRosterTab pool={pool} roles={roles} userProfile={userProfile} />}
           {activeTab === 'truck' && <TruckLoadingTab pool={pool} userProfile={userProfile} />}
           {activeTab === 'payroll' && <WeeklyPayrollTab pool={pool} roles={roles} userProfile={userProfile} />}
-          {activeTab === 'monthly' && <MonthlyFixedTab pool={pool} userProfile={userProfile} />}
+          {activeTab === 'monthly' && <MonthlyFixedTab pool={pool} roles={roles} userProfile={userProfile} />}
           {activeTab === 'rates' && <LabourRatesTab roles={roles} userProfile={userProfile} onRefresh={loadSharedData} />}
         </>
       )}

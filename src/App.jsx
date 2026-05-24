@@ -39,6 +39,8 @@ import { vehiclesService, fuelLogService } from './services/vehicles'
 import SupplierRegistry from './components/SupplierRegistry'
 import { suppliersService, supplierTransactionsService } from './services/suppliers'
 import Labour from './components/Labour'
+import jsPDF from 'jspdf'
+import autoTable from 'jspdf-autotable'
 
 const theme = {
   bg: "#0f1117", surface: "#1a1d27", card: "#21263a", border: "#2e3452",
@@ -115,7 +117,7 @@ const ROLE_PAGES = {
   md:                 'all',
   ico:                'all',
   accountant:         ['dashboard','reports','kpi_dashboard','accounting','opening_balances','labour'],
-  board_member:       ['dashboard'],
+  board_member:       ['dashboard','production','inventory','batches','waybills','vehicles','staff','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','opening_balances','suppliers','products'],
   bdm:                ['dashboard','customers','orders','pending_register','daily_schedule','reports','kpi_dashboard'],
   store_officer:      ['dashboard','inventory','batches','waybills','vehicles','daily_schedule','products'],
   logistics_manager:  ['dashboard','waybills','vehicles','pending_register','daily_schedule','customers','labour'],
@@ -496,6 +498,10 @@ const Production = () => {
   const [alert, setAlert] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [editTarget, setEditTarget] = useState(null);
+  const [showTargetForm, setShowTargetForm] = useState(false);
+  const [targets, setTargets] = useState([]);
+  const [targetForm, setTargetForm] = useState({ date: new Date().toISOString().split('T')[0], blockType: "9 Inch 3 Hole Block", quantity: "" });
+  const [savingTarget, setSavingTarget] = useState(false);
   const emptyForm = { date: "", blockType: "9 Inch 3 Hole Block", produced: "", cement: "", granite: "", diesel: "", dmgProd: "0", dmgStack: "0" };
   const [form, setForm] = useState(emptyForm);
 
@@ -521,7 +527,32 @@ const Production = () => {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  const loadTargets = async () => {
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      const { data } = await supabase.from('production_targets').select('*').eq('target_date', today);
+      setTargets(data || []);
+    } catch { /* table may not exist yet */ }
+  };
+
+  const handleSaveTarget = async () => {
+    if (!targetForm.quantity) return setAlert({ type: "error", msg: "Enter a target quantity." });
+    setSavingTarget(true);
+    try {
+      await supabase.from('production_targets').upsert({
+        target_date: targetForm.date,
+        block_type: targetForm.blockType,
+        target_quantity: parseInt(targetForm.quantity) || 0,
+      }, { onConflict: 'target_date,block_type' });
+      setAlert({ type: "success", msg: "Daily target saved." });
+      setShowTargetForm(false);
+      setTargetForm({ date: new Date().toISOString().split('T')[0], blockType: "9 Inch 3 Hole Block", quantity: "" });
+      await loadTargets();
+    } catch (e) { setAlert({ type: "error", msg: "Could not save target: " + e.message }); }
+    finally { setSavingTarget(false); }
+  };
+
+  useEffect(() => { load(); loadTargets(); }, []);
 
   const startEdit = (record) => {
     setEditTarget(record);
@@ -640,10 +671,53 @@ const Production = () => {
           <div style={styles.pageTitle}>Production Log</div>
           <div style={styles.pageSubtitle}>Daily block production, material usage, and damage tracking</div>
         </div>
-        <button style={styles.btn("primary")} onClick={() => setShowForm(!showForm)}>+ Log Today's Production</button>
+        <div style={{ display: "flex", gap: "8px" }}>
+          <button style={styles.btn("secondary")} onClick={() => setShowTargetForm(!showTargetForm)}>Set Daily Target</button>
+          <button style={styles.btn("primary")} onClick={() => setShowForm(!showForm)}>+ Log Today's Production</button>
+        </div>
       </div>
 
       {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
+
+      {showTargetForm && (
+        <div style={{ ...styles.card, marginBottom: "20px", borderColor: theme.blue + "44" }}>
+          <div style={styles.sectionTitle}>Set Daily Production Target</div>
+          <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", marginBottom: "14px" }}>
+            <div style={styles.formGroup}><label style={styles.label}>Date</label><input style={{ ...styles.input, width: "160px" }} type="date" value={targetForm.date} onChange={e => setTargetForm({ ...targetForm, date: e.target.value })} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Block Type</label><ProductSelect value={targetForm.blockType} onChange={v => setTargetForm({ ...targetForm, blockType: v })} style={{ ...styles.input, width: "240px" }} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Target Quantity</label><input style={{ ...styles.input, width: "140px" }} type="number" placeholder="e.g. 1000" value={targetForm.quantity} onChange={e => setTargetForm({ ...targetForm, quantity: e.target.value })} /></div>
+          </div>
+          <div style={styles.row}>
+            <button style={styles.btn("primary")} onClick={handleSaveTarget} disabled={savingTarget}>{savingTarget ? "Saving…" : "Save Target"}</button>
+            <button style={styles.btn("secondary")} onClick={() => setShowTargetForm(false)}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {targets.length > 0 && (
+        <div style={{ ...styles.card, marginBottom: "20px", borderLeft: `4px solid ${theme.blue}` }}>
+          <div style={{ fontSize: "12px", fontWeight: "700", color: theme.blue, marginBottom: "10px", textTransform: "uppercase", letterSpacing: "0.05em" }}>Today's Targets vs Actual</div>
+          <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
+            {targets.map(t => {
+              const today = new Date().toISOString().split('T')[0];
+              const actualQty = records.filter(r => r.date === t.target_date && r.block_type === t.block_type).reduce((s, r) => s + (r.quantity_produced || 0), 0);
+              const pct = t.target_quantity > 0 ? Math.min(Math.round((actualQty / t.target_quantity) * 100), 100) : 0;
+              const barColor = pct >= 100 ? theme.green : pct >= 70 ? theme.accent : theme.red;
+              return (
+                <div key={t.id} style={{ background: theme.surface, borderRadius: "8px", padding: "12px 16px", flex: 1, minWidth: "200px", border: `1px solid ${theme.border}` }}>
+                  <div style={{ fontSize: "11px", color: theme.textMuted, marginBottom: "4px" }}>{t.block_type}</div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                    <span style={{ fontSize: "20px", fontWeight: "700", color: barColor }}>{actualQty.toLocaleString()}</span>
+                    <span style={{ fontSize: "12px", color: theme.textMuted }}>of {t.target_quantity.toLocaleString()}</span>
+                  </div>
+                  <div style={styles.progressBar()}><div style={styles.progressFill(pct, barColor)} /></div>
+                  <div style={{ fontSize: "11px", color: barColor, marginTop: "4px", fontWeight: "600" }}>{pct}% — {actualQty >= t.target_quantity ? "TARGET MET ✓" : `${(t.target_quantity - actualQty).toLocaleString()} remaining`}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {showForm && (
         <div style={{ ...styles.card, marginBottom: "24px", borderColor: theme.accent + "44" }}>
@@ -3298,6 +3372,48 @@ const DailySchedule = () => {
 
   const statusColor = (s) => ({ draft: theme.textMuted, submitted: theme.accent, ico_approved: theme.green, rejected: theme.red, completed: theme.blue, in_progress: theme.blue, store_notified: theme.green }[s] || theme.textMuted);
 
+  const printSchedulePDF = (sched) => {
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const W = doc.internal.pageSize.getWidth();
+    doc.setFillColor(30, 40, 70); doc.rect(0, 0, W, 28, 'F');
+    doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(255, 255, 255);
+    doc.text('Abuja Precast Concrete Limited', 14, 11);
+    doc.setFontSize(11); doc.setTextColor(180, 200, 255);
+    doc.text('DAILY DELIVERY SCHEDULE', W - 14, 11, { align: 'right' });
+    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 210, 240);
+    doc.text(`Date: ${sched.schedule_date}`, 14, 20);
+    doc.text(`Status: ${(sched.status || '').replace(/_/g, ' ').toUpperCase()}  |  Created by: ${sched.created_by || '—'}`, W - 14, 20, { align: 'right' });
+    doc.setDrawColor(79, 142, 247); doc.setLineWidth(0.5); doc.line(14, 28, W - 14, 28);
+    if (sched.ico_notes) {
+      doc.setFontSize(9); doc.setTextColor(100, 150, 255); doc.text(`ICO Notes: ${sched.ico_notes}`, 14, 35);
+    }
+    const startY = sched.ico_notes ? 40 : 34;
+    autoTable(doc, {
+      startY,
+      head: [['S/N', 'Customer', 'Site / Location', 'Block Type', 'Qty Scheduled', 'Special Instructions']],
+      body: (sched.items || []).map((item, i) => [
+        i + 1,
+        item.customer?.name || '—',
+        item.location || item.customer?.location || '—',
+        item.block_type || '—',
+        Number(item.qty_scheduled || 0).toLocaleString(),
+        item.notes || '—',
+      ]),
+      styles: { fontSize: 8.5, cellPadding: 3 },
+      headStyles: { fillColor: [30, 40, 70], textColor: [255, 255, 255], fontStyle: 'bold' },
+      alternateRowStyles: { fillColor: [245, 247, 255] },
+      margin: { left: 14, right: 14 },
+    });
+    const finalY = doc.lastAutoTable.finalY + 12;
+    doc.setFontSize(9); doc.setTextColor(60, 60, 80); doc.setFont(undefined, 'normal');
+    doc.text(`Prepared by: ${sched.created_by || '—'}`, 14, finalY);
+    if (sched.ico_approved_by) doc.text(`Approved by ICO: ${sched.ico_approved_by}`, W / 2, finalY, { align: 'center' });
+    doc.text(`Printed: ${new Date().toLocaleDateString('en-GB')}`, W - 14, finalY, { align: 'right' });
+    doc.setFontSize(8); doc.setTextColor(140, 140, 160);
+    doc.text('1, Dutse Alhaji, Behind Tipper Garage, Off Bwari Expressway, Abuja  |  +234 905 554 4433', W / 2, doc.internal.pageSize.getHeight() - 8, { align: 'center' });
+    doc.save(`Schedule-${sched.schedule_date}.pdf`);
+  };
+
   return (
     <div>
       <div style={styles.header}>
@@ -3377,6 +3493,9 @@ const DailySchedule = () => {
               <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
                 <span style={styles.badge(statusColor(s.status))}>{s.status?.replace(/_/g, " ")}</span>
                 {s.status === "draft" && <button style={{ ...styles.btn("primary"), padding: "4px 12px", fontSize: "11px" }} onClick={e => { e.stopPropagation(); handleSubmit(s.id); }}>Submit for Approval</button>}
+                {['ico_approved','store_notified','in_progress','completed'].includes(s.status) && (
+                  <button data-board-allow style={{ ...styles.btn("secondary"), padding: "4px 12px", fontSize: "11px" }} onClick={e => { e.stopPropagation(); printSchedulePDF(s); }}>Print PDF</button>
+                )}
               </div>
             </div>
             {expandedId === s.id && (
@@ -3466,6 +3585,57 @@ const ScheduleApprovals = () => {
 
   const supabaseUpdateScheduleItemStatus = async () => {}; // status updates handled by icoApprove
 
+  const printApprovalPDF = (sched) => {
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const W = doc.internal.pageSize.getWidth();
+    doc.setFillColor(30, 40, 70); doc.rect(0, 0, W, 28, 'F');
+    doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(255, 255, 255);
+    doc.text('Abuja Precast Concrete Limited', 14, 11);
+    doc.setFontSize(11); doc.setTextColor(180, 200, 255);
+    doc.text('SCHEDULE APPROVAL RECORD', W - 14, 11, { align: 'right' });
+    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 210, 240);
+    doc.text(`Date: ${sched.schedule_date}  |  Reviewed by ICO: ${approvedBy || sched.ico_approved_by || '—'}`, 14, 20);
+    doc.text(`Status: ${(sched.status || '').replace(/_/g, ' ').toUpperCase()}`, W - 14, 20, { align: 'right' });
+    doc.setDrawColor(79, 142, 247); doc.setLineWidth(0.5); doc.line(14, 28, W - 14, 28);
+    let y = 34;
+    if (sched.ico_notes) {
+      doc.setFontSize(9); doc.setTextColor(100, 150, 255); doc.text(`ICO Notes: ${sched.ico_notes}`, 14, y); y += 8;
+    }
+    autoTable(doc, {
+      startY: y,
+      head: [['S/N', 'Customer', 'Site / Location', 'Block Type', 'Qty Scheduled', 'Decision', 'Notes']],
+      body: (sched.items || []).map((item, i) => [
+        i + 1,
+        item.customer?.name || '—',
+        item.location || item.customer?.location || '—',
+        item.block_type || '—',
+        Number(item.qty_scheduled || 0).toLocaleString(),
+        item.status === 'rejected' ? 'REMOVED' : 'APPROVED',
+        item.notes || '—',
+      ]),
+      styles: { fontSize: 8.5, cellPadding: 3 },
+      headStyles: { fillColor: [30, 40, 70], textColor: [255, 255, 255], fontStyle: 'bold' },
+      alternateRowStyles: { fillColor: [245, 247, 255] },
+      didParseCell: (data) => {
+        if (data.column.index === 5 && data.cell.text[0] === 'REMOVED') {
+          data.cell.styles.textColor = [220, 60, 60]; data.cell.styles.fontStyle = 'bold';
+        }
+        if (data.column.index === 5 && data.cell.text[0] === 'APPROVED') {
+          data.cell.styles.textColor = [30, 140, 80]; data.cell.styles.fontStyle = 'bold';
+        }
+      },
+      margin: { left: 14, right: 14 },
+    });
+    const finalY = doc.lastAutoTable.finalY + 12;
+    doc.setFontSize(9); doc.setTextColor(60, 60, 80);
+    doc.text(`BDM / Prepared by: ${sched.created_by || '—'}`, 14, finalY);
+    doc.text(`ICO Reviewer: ${approvedBy || sched.ico_approved_by || '—'}`, W / 2, finalY, { align: 'center' });
+    doc.text(`Printed: ${new Date().toLocaleDateString('en-GB')}`, W - 14, finalY, { align: 'right' });
+    doc.setFontSize(8); doc.setTextColor(140, 140, 160);
+    doc.text('1, Dutse Alhaji, Behind Tipper Garage, Off Bwari Expressway, Abuja  |  +234 905 554 4433', W / 2, doc.internal.pageSize.getHeight() - 8, { align: 'center' });
+    doc.save(`Schedule-Approval-${sched.schedule_date}.pdf`);
+  };
+
   return (
     <div>
       <div style={styles.header}>
@@ -3520,6 +3690,7 @@ const ScheduleApprovals = () => {
                 <div style={styles.row}>
                   <button style={styles.btn("primary")} disabled={!!saving} onClick={() => handleApprove(sched)}>{saving === sched.id + "approve" ? "Approving…" : rejected.length > 0 ? `Approve (Remove ${rejected.length})` : "Approve Full Schedule"}</button>
                   <button style={styles.btn("danger")} disabled={!!saving} onClick={() => handleReject(sched)}>{saving === sched.id + "reject" ? "Rejecting…" : "Reject Entire Schedule"}</button>
+                  <button data-board-allow style={{ ...styles.btn("secondary"), marginLeft: "auto" }} onClick={() => printApprovalPDF(sched)}>Print PDF</button>
                 </div>
               </div>
             )}
@@ -4251,7 +4422,7 @@ const PLTab = () => {
         <div><label style={styles.label}>From</label><input type="date" style={{ ...styles.input, width: '150px' }} value={from} onChange={e => setFrom(e.target.value)} /></div>
         <div><label style={styles.label}>To</label><input type="date" style={{ ...styles.input, width: '150px' }} value={to} onChange={e => setTo(e.target.value)} /></div>
         <button style={styles.btn('secondary')} onClick={load}>Load</button>
-        <button style={{ ...styles.btn('primary'), marginLeft: 'auto' }} onClick={downloadPdf} disabled={pdfLoading}>{pdfLoading ? 'Generating…' : '↓ Download PDF'}</button>
+        <button data-board-allow style={{ ...styles.btn('primary'), marginLeft: 'auto' }} onClick={downloadPdf} disabled={pdfLoading}>{pdfLoading ? 'Generating…' : '↓ Download PDF'}</button>
       </div>
       {err && <Alert msg={err} onClose={() => setErr('')} />}
       {loading ? <Spinner /> : (
@@ -4317,6 +4488,7 @@ const CostTab = () => {
   const [expenses, setExpenses] = useState([]);
   const [productionLogs, setProductionLogs] = useState([]);
   const [products, setProducts] = useState([]);
+  const [labourCost, setLabourCost] = useState(0);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
   const [pdfLoading, setPdfLoading] = useState(false);
@@ -4327,19 +4499,33 @@ const CostTab = () => {
       expensesService.getAll(from, to),
       accountingService.getProductionTotals(from, to),
       productsService.getActive().catch(() => []),
-    ]).then(([ex, pl, pr]) => { setExpenses(ex); setProductionLogs(pl); setProducts(pr); })
-      .catch(e => setErr(e.message)).finally(() => setLoading(false));
+      supabase.from('weekly_labour_payroll')
+        .select('total_amount')
+        .in('status', ['paid', 'md_approved'])
+        .gte('week_ending', from)
+        .lte('week_ending', to)
+        .catch(() => ({ data: [] })),
+    ]).then(([ex, pl, pr, labourRes]) => {
+      setExpenses(ex);
+      setProductionLogs(pl);
+      setProducts(pr);
+      const labourData = labourRes?.data || [];
+      setLabourCost(labourData.reduce((s, r) => s + Number(r.total_amount || 0), 0));
+    }).catch(e => setErr(e.message)).finally(() => setLoading(false));
   };
 
   useEffect(() => { load(); }, []);
 
-  const totalExpenses = expenses.filter(e => e.status !== 'rejected').reduce((s, e) => s + Number(e.amount || 0), 0);
+  const rawExpenses = expenses.filter(e => e.status !== 'rejected').reduce((s, e) => s + Number(e.amount || 0), 0);
+  const totalExpenses = rawExpenses + labourCost;
   const productTotals = {};
   for (const log of productionLogs) {
     productTotals[log.block_type] = (productTotals[log.block_type] || 0) + Number(log.quantity_produced || 0);
   }
   const totalQty = Object.values(productTotals).reduce((s, v) => s + v, 0);
   const productMap = Object.fromEntries(products.map(p => [p.name, p]));
+  const labourPerUnit = totalQty > 0 ? labourCost / totalQty : 0;
+  const rawExpPerUnit = totalQty > 0 ? rawExpenses / totalQty : 0;
 
   const downloadPdf = async () => {
     setPdfLoading(true);
@@ -4353,32 +4539,45 @@ const CostTab = () => {
         <div><label style={styles.label}>From</label><input type="date" style={{ ...styles.input, width: '150px' }} value={from} onChange={e => setFrom(e.target.value)} /></div>
         <div><label style={styles.label}>To</label><input type="date" style={{ ...styles.input, width: '150px' }} value={to} onChange={e => setTo(e.target.value)} /></div>
         <button style={styles.btn('secondary')} onClick={load}>Load</button>
-        <button style={{ ...styles.btn('primary'), marginLeft: 'auto' }} onClick={downloadPdf} disabled={pdfLoading}>{pdfLoading ? 'Generating…' : '↓ Download PDF'}</button>
+        <button data-board-allow style={{ ...styles.btn('primary'), marginLeft: 'auto' }} onClick={downloadPdf} disabled={pdfLoading}>{pdfLoading ? 'Generating…' : '↓ Download PDF'}</button>
       </div>
       {err && <Alert msg={err} onClose={() => setErr('')} />}
       {loading ? <Spinner /> : (
         <>
-          <div style={{ ...styles.grid(3), marginBottom: '20px' }}>
+          <div style={{ ...styles.grid(4), marginBottom: '20px' }}>
             <div style={styles.statCard(theme.blue)}><div style={styles.statLabel}>Total Units Produced</div><div style={{ ...styles.statValue, fontSize: '20px' }}>{fmt(totalQty)}</div></div>
-            <div style={styles.statCard(theme.red)}><div style={styles.statLabel}>Total Expenses (Period)</div><div style={{ ...styles.statValue, fontSize: '20px', color: theme.red }}>{naira(totalExpenses)}</div></div>
-            <div style={styles.statCard(theme.accent)}><div style={styles.statLabel}>Avg Cost / Unit</div><div style={{ ...styles.statValue, fontSize: '20px', color: theme.accent }}>{totalQty > 0 ? naira(Math.round(totalExpenses / totalQty)) : '—'}</div></div>
+            <div style={styles.statCard(theme.red)}><div style={styles.statLabel}>Material &amp; Overhead Expenses</div><div style={{ ...styles.statValue, fontSize: '20px', color: theme.red }}>{naira(rawExpenses)}</div></div>
+            <div style={styles.statCard(theme.blue)}><div style={styles.statLabel}>Labour Cost (Period)</div><div style={{ ...styles.statValue, fontSize: '20px', color: theme.blue }}>{naira(labourCost)}</div></div>
+            <div style={styles.statCard(theme.accent)}><div style={styles.statLabel}>Total Cost / Unit (Avg)</div><div style={{ ...styles.statValue, fontSize: '20px', color: theme.accent }}>{totalQty > 0 ? naira(Math.round(totalExpenses / totalQty)) : '—'}</div></div>
           </div>
+          {labourCost > 0 && (
+            <div style={{ ...styles.card, marginBottom: '20px', borderLeft: `4px solid ${theme.blue}` }}>
+              <div style={{ fontSize: '12px', fontWeight: '700', color: theme.blue, marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Labour Cost Breakdown per Unit (avg all block types)</div>
+              <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap', fontSize: '13px' }}>
+                <span>Raw materials &amp; overhead: <strong style={{ color: theme.text }}>{naira(Math.round(rawExpPerUnit))}/unit</strong></span>
+                <span>Labour: <strong style={{ color: theme.blue }}>{naira(Math.round(labourPerUnit))}/unit</strong></span>
+                <span>Total: <strong style={{ color: theme.accent }}>{naira(Math.round((rawExpPerUnit + labourPerUnit)))}/unit</strong></span>
+              </div>
+            </div>
+          )}
           <div style={styles.card}>
-            <div style={styles.sectionTitle}>Cost per Product</div>
+            <div style={styles.sectionTitle}>Cost per Product (including Labour)</div>
             <table style={styles.table}>
               <thead>
                 <tr>
-                  {['Product', 'Units Produced', 'Allocated Cost', 'Cost / Unit', 'Selling Price', 'Gross Profit / Unit', 'Margin'].map(h => (
+                  {['Product', 'Units Produced', 'Materials Cost', 'Labour Cost', 'Total Cost', 'Cost / Unit', 'Selling Price', 'Gross Profit / Unit', 'Margin'].map(h => (
                     <th key={h} style={{ ...styles.th, textAlign: h === 'Product' ? 'left' : 'right' }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {Object.entries(productTotals).length === 0 ? (
-                  <tr><td colSpan="7" style={{ ...styles.td, textAlign: 'center', color: theme.textMuted }}>No production data for this period</td></tr>
+                  <tr><td colSpan="9" style={{ ...styles.td, textAlign: 'center', color: theme.textMuted }}>No production data for this period</td></tr>
                 ) : Object.entries(productTotals).map(([name, qty]) => {
                   const share = totalQty > 0 ? qty / totalQty : 0;
-                  const allocated = totalExpenses * share;
+                  const allocatedMaterials = rawExpenses * share;
+                  const allocatedLabour = labourCost * share;
+                  const allocated = allocatedMaterials + allocatedLabour;
                   const costPerUnit = qty > 0 ? allocated / qty : 0;
                   const sellingPrice = productMap[name]?.unit_price || 0;
                   const profit = sellingPrice - costPerUnit;
@@ -4388,7 +4587,9 @@ const CostTab = () => {
                     <tr key={name}>
                       <td style={styles.td}><strong>{name}</strong></td>
                       <td style={{ ...styles.td, textAlign: 'right' }}>{fmt(qty)} {unit}</td>
-                      <td style={{ ...styles.td, textAlign: 'right' }}>{naira(Math.round(allocated))}</td>
+                      <td style={{ ...styles.td, textAlign: 'right' }}>{naira(Math.round(allocatedMaterials))}</td>
+                      <td style={{ ...styles.td, textAlign: 'right', color: theme.blue }}>{naira(Math.round(allocatedLabour))}</td>
+                      <td style={{ ...styles.td, textAlign: 'right', fontWeight: '700' }}>{naira(Math.round(allocated))}</td>
                       <td style={{ ...styles.td, textAlign: 'right' }}>{naira(Math.round(costPerUnit))}</td>
                       <td style={{ ...styles.td, textAlign: 'right' }}>{sellingPrice > 0 ? naira(sellingPrice) : <span style={{ color: theme.textMuted }}>—</span>}</td>
                       <td style={{ ...styles.td, textAlign: 'right', fontWeight: '600', color: profit >= 0 ? theme.green : theme.red }}>{sellingPrice > 0 ? naira(Math.round(profit)) : '—'}</td>
@@ -4446,7 +4647,7 @@ const ReceivablesTab = () => {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '20px' }}>
-        <button style={styles.btn('primary')} onClick={downloadPdf} disabled={pdfLoading}>{pdfLoading ? 'Generating…' : '↓ Download PDF'}</button>
+        <button data-board-allow style={styles.btn('primary')} onClick={downloadPdf} disabled={pdfLoading}>{pdfLoading ? 'Generating…' : '↓ Download PDF'}</button>
       </div>
       {err && <Alert msg={err} onClose={() => setErr('')} />}
 
@@ -6305,6 +6506,8 @@ export default function App() {
   const [lpoCount, setLpoCount] = useState(0);
   const [scheduleCount, setScheduleCount] = useState(0);
   const [showChangePwd, setShowChangePwd] = useState(false);
+  const [sessionWarning, setSessionWarning] = useState(false); // 15-min expiry warning
+  const [sessionMinutes, setSessionMinutes] = useState(15);
 
   // ── Auth ──────────────────────────────────────────────────
   useEffect(() => {
@@ -6318,6 +6521,34 @@ export default function App() {
     });
     return () => subscription.unsubscribe();
   }, []);
+
+  // ── Session expiry monitor ────────────────────────────────
+  useEffect(() => {
+    if (!session) return;
+    const check = () => {
+      const expiresAt = session.expires_at; // unix timestamp (seconds)
+      if (!expiresAt) return;
+      const secsLeft = expiresAt - Math.floor(Date.now() / 1000);
+      const minsLeft = Math.floor(secsLeft / 60);
+      if (secsLeft <= 0) {
+        supabase.auth.signOut();
+        return;
+      }
+      if (secsLeft <= 900) { // 15 minutes
+        setSessionWarning(true);
+        setSessionMinutes(minsLeft);
+      } else {
+        setSessionWarning(false);
+      }
+    };
+    check();
+    const interval = setInterval(check, 60000);
+    return () => clearInterval(interval);
+  }, [session]);
+
+  const handleExtendSession = async () => {
+    try { await supabase.auth.refreshSession(); setSessionWarning(false); } catch { /* ignore */ }
+  };
 
   const loadProfile = async (user) => {
     try {
@@ -6433,6 +6664,15 @@ export default function App() {
       </div>
       {showChangePwd && <ChangePasswordModal onClose={() => setShowChangePwd(false)} />}
       <main style={styles.main} {...(isBoard ? { 'data-board-view': 'true' } : {})}>
+        {sessionWarning && (
+          <div style={{ background: "#7c3a0022", border: "1px solid #c47d0e88", borderRadius: "8px", padding: "10px 16px", marginBottom: "16px", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "13px", color: theme.accent }}>
+            <span>⚠️ Your session expires in <strong>{sessionMinutes} minute{sessionMinutes !== 1 ? 's' : ''}</strong>. Unsaved work may be lost.</span>
+            <div style={{ display: "flex", gap: "8px" }}>
+              <button data-board-allow onClick={handleExtendSession} style={{ padding: "5px 14px", borderRadius: "6px", background: theme.accent, color: "#000", border: "none", fontSize: "12px", fontWeight: "700", cursor: "pointer" }}>Extend Session</button>
+              <button data-board-allow onClick={() => setSessionWarning(false)} style={{ padding: "5px 10px", borderRadius: "6px", background: "transparent", color: theme.textMuted, border: `1px solid ${theme.border}`, fontSize: "12px", cursor: "pointer" }}>Dismiss</button>
+            </div>
+          </div>
+        )}
         {isBoard && (
           <style>{`
             [data-board-view] button:not([data-board-allow]) { display: none !important; }
