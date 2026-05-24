@@ -189,7 +189,7 @@ CREATE POLICY "waybills_select" ON waybills
   FOR SELECT
   USING (
     CASE WHEN get_user_role() = 'driver'
-    THEN driver_id IN (SELECT id FROM staff WHERE user_id = auth.uid())
+    THEN driver_id = (SELECT staff_id FROM user_profiles WHERE id = auth.uid())
     ELSE true
     END
   );
@@ -217,7 +217,7 @@ CREATE POLICY "staff_select" ON staff
   USING (
     CASE WHEN get_user_role() IN ('md','hr_officer','accountant','ico','board_member')
     THEN true
-    ELSE user_id = auth.uid()
+    ELSE id = (SELECT staff_id FROM user_profiles WHERE id = auth.uid())
     END
   );
 
