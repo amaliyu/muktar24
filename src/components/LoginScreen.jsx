@@ -16,10 +16,26 @@ const theme = {
 }
 
 export default function LoginScreen({ onLogin }) {
-  const [email, setEmail]       = useState('')
-  const [password, setPassword] = useState('')
-  const [loading, setLoading]   = useState(false)
-  const [error, setError]       = useState('')
+  const [email, setEmail]         = useState('')
+  const [password, setPassword]   = useState('')
+  const [loading, setLoading]     = useState(false)
+  const [error, setError]         = useState('')
+  const [showReset, setShowReset] = useState(false)
+  const [resetEmail, setResetEmail] = useState('')
+  const [resetMsg, setResetMsg]   = useState('')
+  const [resetLoading, setResetLoading] = useState(false)
+
+  const handleForgotPassword = async (e) => {
+    e.preventDefault()
+    if (!resetEmail.trim()) { setResetMsg('Enter your email address.'); return }
+    setResetLoading(true); setResetMsg('')
+    try {
+      await authService.resetPassword(resetEmail.trim())
+      setResetMsg('Password reset email sent. Check your inbox.')
+    } catch (err) {
+      setResetMsg(err.message || 'Could not send reset email.')
+    } finally { setResetLoading(false) }
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -190,7 +206,7 @@ export default function LoginScreen({ onLogin }) {
           </div>
 
           {/* Password */}
-          <div style={{ marginBottom: '24px' }}>
+          <div style={{ marginBottom: '8px' }}>
             <label htmlFor="login-password" style={labelStyle}>
               Password
             </label>
@@ -204,6 +220,15 @@ export default function LoginScreen({ onLogin }) {
               disabled={loading}
               style={inputStyle(!!error)}
             />
+          </div>
+          <div style={{ marginBottom: '20px', textAlign: 'right' }}>
+            <button
+              type="button"
+              onClick={() => { setShowReset(true); setResetEmail(email); setResetMsg('') }}
+              style={{ background: 'none', border: 'none', color: theme.accent, fontSize: '12px', cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}
+            >
+              Forgot Password?
+            </button>
           </div>
 
           {/* Error */}
@@ -247,6 +272,42 @@ export default function LoginScreen({ onLogin }) {
           </button>
         </form>
       </div>
+
+      {/* ── Forgot Password Modal ────────────────────────────── */}
+      {showReset && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '24px' }}>
+          <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: '14px', padding: '32px', width: '100%', maxWidth: '400px', boxShadow: '0 8px 40px rgba(0,0,0,0.6)' }}>
+            <div style={{ fontSize: '16px', fontWeight: '700', color: theme.text, marginBottom: '6px' }}>Reset Password</div>
+            <div style={{ fontSize: '13px', color: theme.textMuted, marginBottom: '24px' }}>Enter your email and we'll send a reset link.</div>
+            <form onSubmit={handleForgotPassword}>
+              <div style={{ marginBottom: '16px' }}>
+                <label style={labelStyle}>Email Address</label>
+                <input
+                  type="email"
+                  value={resetEmail}
+                  onChange={e => setResetEmail(e.target.value)}
+                  placeholder="you@abujaprecast.com"
+                  style={inputStyle(false)}
+                  autoFocus
+                />
+              </div>
+              {resetMsg && (
+                <div style={{ padding: '10px 14px', borderRadius: '8px', marginBottom: '16px', fontSize: '13px', background: resetMsg.includes('sent') ? theme.green + '18' : theme.red + '18', border: `1px solid ${resetMsg.includes('sent') ? theme.green : theme.red}44`, color: resetMsg.includes('sent') ? theme.green : theme.red }}>
+                  {resetMsg}
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button type="submit" disabled={resetLoading} style={{ flex: 1, padding: '11px', background: theme.accent, border: 'none', borderRadius: '8px', color: '#1a0e00', fontWeight: '700', fontSize: '13px', cursor: resetLoading ? 'not-allowed' : 'pointer', fontFamily: 'inherit' }}>
+                  {resetLoading ? 'Sending…' : 'Send Reset Link'}
+                </button>
+                <button type="button" onClick={() => setShowReset(false)} style={{ flex: 1, padding: '11px', background: 'transparent', border: `1px solid ${theme.border}`, borderRadius: '8px', color: theme.textMuted, fontWeight: '600', fontSize: '13px', cursor: 'pointer', fontFamily: 'inherit' }}>
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* ── Footer ───────────────────────────────────────────── */}
       <div
