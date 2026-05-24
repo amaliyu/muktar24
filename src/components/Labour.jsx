@@ -68,8 +68,27 @@ const AlertBar = ({ msg, type = 'error', onClose }) => msg ? (
 
 const statusColor = (s) => {
   if (!s) return theme.textMuted
-  const m = { draft: theme.textMuted, submitted: theme.accent, ico_approved: theme.blue, ico_rejected: theme.red, md_approved: theme.green, md_rejected: theme.red, paid: theme.green, unpaid: theme.textMuted, approved: theme.green, rejected: theme.red, pending: theme.accent, ico_review: theme.blue, md_review: theme.accent }
+  const m = {
+    draft:        theme.textMuted,
+    submitted:    theme.blue,
+    ico_approved: theme.green,
+    ico_rejected: theme.red,
+    md_approved:  theme.green,
+    md_rejected:  theme.red,
+    paid:         theme.green,
+    unpaid:       theme.red,
+    approved:     theme.green,
+    rejected:     theme.red,
+    pending:      '#f59e0b',
+    ico_review:   theme.blue,
+    md_review:    '#f59e0b',
+  }
   return m[s] || theme.textMuted
+}
+
+const fmtDate = (d) => {
+  if (!d) return '—'
+  return new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
 async function getOrCreateCategory(name) {
@@ -324,10 +343,13 @@ function WorkerForm({ worker, roles, userProfile, onSave, onCancel }) {
 function DailyRosterTab({ pool, roles, userProfile }) {
   const [rosters, setRosters] = useState([])
   const [loading, setLoading] = useState(true)
-  const [showCreate, setShowCreate] = useState(false)
   const [selectedRoster, setSelectedRoster] = useState(null)
-  const [viewMode, setViewMode] = useState('list') // list | detail | create | weekly
+  const [editingRoster, setEditingRoster] = useState(null)
+  const [viewMode, setViewMode] = useState('list')
   const [alert, setAlert] = useState(null)
+  const [deleteTarget, setDeleteTarget] = useState(null)
+  const [deleteReason, setDeleteReason] = useState('')
+  const [deleting, setDeleting] = useState(false)
 
   const loadRosters = useCallback(async () => {
     setLoading(true)
@@ -339,7 +361,6 @@ function DailyRosterTab({ pool, roles, userProfile }) {
   useEffect(() => { loadRosters() }, [loadRosters])
 
   const handleAction = async (roster, action, comment = '') => {
-    const role = userProfile?.role
     let update = {}
     if (action === 'submit') update = { ico_status: 'submitted', submitted_by: userProfile?.full_name, submitted_date: todayStr() }
     else if (action === 'ico_approve') update = { ico_status: 'ico_approved', ico_approved_by: userProfile?.full_name, ico_approval_date: todayStr() }
@@ -347,36 +368,99 @@ function DailyRosterTab({ pool, roles, userProfile }) {
     else if (action === 'md_approve') update = { md_status: 'approved', md_approved_by: userProfile?.full_name, md_approval_date: todayStr() }
     else if (action === 'md_reject') update = { md_status: 'rejected', md_approved_by: userProfile?.full_name, md_approval_date: todayStr(), notes: comment }
     else if (action === 'mark_paid') update = { payment_status: 'paid' }
-
     const { error } = await supabase.from('daily_roster').update(update).eq('id', roster.id)
     if (error) setAlert({ msg: error.message, type: 'error' })
     else { setAlert({ msg: 'Updated successfully.', type: 'success' }); loadRosters(); setSelectedRoster(r => r ? { ...r, ...update } : null) }
   }
 
-  if (viewMode === 'create' || showCreate) {
-    return <RosterCreateForm pool={pool} roles={roles} userProfile={userProfile} onSave={() => { setShowCreate(false); setViewMode('list'); loadRosters() }} onCancel={() => { setShowCreate(false); setViewMode('list') }} />
+  const handleDeleteConfirm = async () => {
+    if (!deleteTarget) return
+    const icoSt = deleteTarget.ico_status || 'draft'
+    const mdSt = deleteTarget.md_status || 'pending'
+    const isApproved = ['ico_approved', 'md_approved'].includes(icoSt) || mdSt === 'approved'
+    if (isApproved && !deleteReason.trim()) {
+      setAlert({ msg: 'Please enter a reason for deletion.', type: 'error' })
+      return
+    }
+    setDeleting(true)
+    await supabase.from('daily_roster_entries').delete().eq('roster_id', deleteTarget.id)
+    const { error } = await supabase.from('daily_roster').delete().eq('id', deleteTarget.id)
+    if (error) { setAlert({ msg: error.message, type: 'error' }); setDeleting(false); return }
+    if (isApproved) {
+      try {
+        await supabase.from('audit_log').insert({
+          action: 'delete_roster', entity: 'daily_roster', entity_id: deleteTarget.id,
+          performed_by: userProfile?.full_name, performed_at: new Date().toISOString(),
+          reason: deleteReason, details: `Deleted approved roster for ${deleteTarget.roster_date}`,
+        })
+      } catch { /* audit_log table may not exist yet */ }
+    }
+    setDeleting(false)
+    setDeleteTarget(null)
+    setDeleteReason('')
+    setAlert({ msg: 'Roster deleted.', type: 'success' })
+    loadRosters()
   }
 
+  const role = userProfile?.role
+
+  if (viewMode === 'create') {
+    return <RosterCreateForm pool={pool} roles={roles} userProfile={userProfile} onSave={() => { setViewMode('list'); loadRosters() }} onCancel={() => setViewMode('list')} />
+  }
+  if (viewMode === 'edit' && editingRoster) {
+    return <RosterCreateForm pool={pool} roles={roles} userProfile={userProfile} editRoster={editingRoster} onSave={() => { setEditingRoster(null); setViewMode('list'); loadRosters() }} onCancel={() => { setEditingRoster(null); setViewMode('list') }} />
+  }
   if (viewMode === 'detail' && selectedRoster) {
     return <RosterDetail roster={selectedRoster} roles={roles} pool={pool} userProfile={userProfile} onBack={() => { setSelectedRoster(null); setViewMode('list') }} onAction={handleAction} alert={alert} clearAlert={() => setAlert(null)} />
   }
-
   if (viewMode === 'weekly') {
     return <WeeklySummary rosters={rosters} onBack={() => setViewMode('list')} />
   }
 
   return (
     <div>
+      {deleteTarget && (() => {
+        const icoSt = deleteTarget.ico_status || 'draft'
+        const mdSt = deleteTarget.md_status || 'pending'
+        const isApproved = ['ico_approved', 'md_approved'].includes(icoSt) || mdSt === 'approved'
+        return (
+          <div style={styles.modal}>
+            <div style={{ ...styles.modalBox, maxWidth: '440px' }}>
+              <div style={{ fontWeight: '700', fontSize: '16px', marginBottom: '10px', color: theme.red }}>Delete Roster</div>
+              {isApproved ? (
+                <>
+                  <div style={{ fontSize: '13px', color: theme.textMuted, marginBottom: '16px' }}>
+                    This roster for <strong style={{ color: theme.text }}>{deleteTarget.roster_date}</strong> has been approved by ICO. Enter a reason for deletion:
+                  </div>
+                  <input style={styles.input} value={deleteReason} onChange={e => setDeleteReason(e.target.value)} placeholder="Reason for deletion…" autoFocus />
+                </>
+              ) : (
+                <div style={{ fontSize: '13px', color: theme.textMuted, marginBottom: '8px' }}>
+                  Delete roster for <strong style={{ color: theme.text }}>{deleteTarget.roster_date}</strong>? This cannot be undone.
+                </div>
+              )}
+              {alert && <div style={{ marginTop: '10px' }}><AlertBar msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} /></div>}
+              <div style={{ ...styles.row, marginTop: '20px', justifyContent: 'flex-end' }}>
+                <button style={styles.btn('ghost')} onClick={() => { setDeleteTarget(null); setDeleteReason(''); setAlert(null) }}>Cancel</button>
+                <button style={styles.btn('danger')} onClick={handleDeleteConfirm} disabled={deleting}>
+                  {deleting ? 'Deleting…' : isApproved ? 'Delete — MD Only' : 'Delete'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
       <div style={{ ...styles.row, justifyContent: 'space-between', marginBottom: '16px' }}>
         <div style={styles.row}>
           <button style={styles.tab(true)}>Roster List</button>
           <button style={styles.tab(false)} onClick={() => setViewMode('weekly')}>Weekly Summary</button>
         </div>
-        {['production_manager', 'hr_officer'].includes(userProfile?.role) && (
-          <button style={styles.btn('primary')} onClick={() => { setShowCreate(true) }}>+ Create Roster</button>
+        {['production_manager', 'hr_officer'].includes(role) && (
+          <button style={styles.btn('primary')} onClick={() => setViewMode('create')}>+ Create Roster</button>
         )}
       </div>
-      {alert && <AlertBar msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
+      {alert && !deleteTarget && <AlertBar msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
       {loading ? <Spinner /> : (
         <div style={{ ...styles.card, padding: 0, overflow: 'hidden' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -389,20 +473,46 @@ function DailyRosterTab({ pool, roles, userProfile }) {
             </thead>
             <tbody>
               {rosters.length === 0 && <tr><td colSpan={8} style={{ ...styles.td, textAlign: 'center', color: theme.textMuted }}>No rosters yet.</td></tr>}
-              {rosters.map(r => (
-                <tr key={r.id} style={{ cursor: 'pointer' }} onClick={() => { setSelectedRoster(r); setViewMode('detail') }}>
-                  <td style={styles.td}>{r.roster_date}</td>
-                  <td style={styles.td}>{r.worker_count ?? '—'}</td>
-                  <td style={styles.td}>{naira(r.total_daily_cost)}</td>
-                  <td style={styles.td}><span style={styles.badge(r.target_met ? theme.green : theme.red)}>{r.target_met ? 'Yes' : 'No'}</span></td>
-                  <td style={styles.td}><span style={styles.badge(statusColor(r.ico_status))}>{r.ico_status || 'draft'}</span></td>
-                  <td style={styles.td}><span style={styles.badge(statusColor(r.md_status))}>{r.md_status || '—'}</span></td>
-                  <td style={styles.td}><span style={styles.badge(statusColor(r.payment_status))}>{r.payment_status || 'unpaid'}</span></td>
-                  <td style={styles.td} onClick={e => e.stopPropagation()}>
-                    <button style={{ ...styles.btn('ghost'), padding: '5px 10px', fontSize: '12px' }} onClick={() => { setSelectedRoster(r); setViewMode('detail') }}>View</button>
-                  </td>
-                </tr>
-              ))}
+              {rosters.map(r => {
+                const icoSt = r.ico_status || 'draft'
+                const mdSt = r.md_status || 'pending'
+                const paySt = r.payment_status || 'unpaid'
+                const isPaid = paySt === 'paid'
+                const isApproved = ['ico_approved', 'md_approved'].includes(icoSt) || mdSt === 'approved'
+                const canEdit = !isPaid && (
+                  (role === 'production_manager' && ['draft', 'submitted'].includes(icoSt)) ||
+                  role === 'md'
+                )
+                const canDelete = !isPaid && (
+                  (role === 'production_manager' && ['draft', 'submitted'].includes(icoSt)) ||
+                  (role === 'md' && (!isApproved || role === 'md'))
+                )
+                return (
+                  <tr key={r.id} style={{ cursor: 'pointer' }} onClick={() => { setSelectedRoster(r); setViewMode('detail') }}>
+                    <td style={styles.td}>{r.roster_date}</td>
+                    <td style={styles.td}>{r.worker_count ?? '—'}</td>
+                    <td style={styles.td}>{naira(r.total_daily_cost)}</td>
+                    <td style={styles.td}><span style={styles.badge(r.target_met ? theme.green : theme.red)}>{r.target_met ? 'Yes' : 'No'}</span></td>
+                    <td style={styles.td}><span style={styles.badge(statusColor(icoSt))}>{icoSt.replace('_', ' ')}</span></td>
+                    <td style={styles.td}><span style={styles.badge(statusColor(mdSt))}>{mdSt}</span></td>
+                    <td style={styles.td}><span style={styles.badge(statusColor(paySt))}>{paySt}</span></td>
+                    <td style={styles.td} onClick={e => e.stopPropagation()}>
+                      <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
+                        <button style={{ ...styles.btn('ghost'), padding: '4px 10px', fontSize: '12px' }} onClick={() => { setSelectedRoster(r); setViewMode('detail') }}>View</button>
+                        {canEdit && (
+                          <button style={{ ...styles.btn('blue'), padding: '4px 10px', fontSize: '12px' }} onClick={() => { setEditingRoster(r); setViewMode('edit') }}>Edit</button>
+                        )}
+                        {canDelete && (
+                          <button style={{ ...styles.btn('danger'), padding: '4px 10px', fontSize: '12px' }} onClick={() => setDeleteTarget(r)}>Delete</button>
+                        )}
+                        {isPaid && (
+                          <span title="Paid rosters cannot be deleted" style={{ fontSize: '14px', cursor: 'help', alignSelf: 'center' }}>🔒</span>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
@@ -411,14 +521,25 @@ function DailyRosterTab({ pool, roles, userProfile }) {
   )
 }
 
-function RosterCreateForm({ pool, roles, userProfile, onSave, onCancel }) {
-  const [date, setDate] = useState(todayStr())
-  const [targetMet, setTargetMet] = useState(false)
+function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCancel }) {
+  const isEdit = !!editRoster
+  const [date, setDate] = useState(editRoster?.roster_date || todayStr())
+  const [targetMet, setTargetMet] = useState(editRoster?.target_met || false)
   const [entries, setEntries] = useState([])
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState('')
 
   const activePool = pool.filter(w => w.is_active)
+
+  useEffect(() => {
+    if (!editRoster) return
+    supabase.from('daily_roster_entries').select('*').eq('roster_id', editRoster.id).then(({ data }) => {
+      if (data) setEntries(data.map(e => ({
+        labour_id: e.labour_id, role_id: e.role_id, base_rate: e.base_rate,
+        bonus_applicable: e.bonus_applicable, total_pay: e.total_pay, notes: e.notes || '',
+      })))
+    })
+  }, [editRoster])
 
   const addRow = () => setEntries(e => [...e, { labour_id: '', role_id: '', base_rate: 0, bonus_applicable: false, total_pay: 0, notes: '' }])
   const removeRow = (i) => setEntries(e => e.filter((_, j) => j !== i))
@@ -472,28 +593,47 @@ function RosterCreateForm({ pool, roles, userProfile, onSave, onCancel }) {
     }
     setSaving(true); setErr('')
     const weekEnding = getFriday(date)
-    const { data: roster, error: re } = await supabase.from('daily_roster').insert({
-      roster_date: date, target_met: targetMet, total_daily_cost: grandTotal,
-      submitted_by: userProfile?.full_name, submitted_date: submit ? todayStr() : null,
-      ico_status: submit ? 'submitted' : 'draft', md_status: 'pending',
-      payment_week_ending: weekEnding, payment_status: 'unpaid', worker_count: entries.length,
-    }).select('id').single()
-    if (re) { setSaving(false); return setErr(re.message) }
-    const entryRows = entries.map(e => ({
-      roster_id: roster.id, labour_id: e.labour_id, role_id: e.role_id,
-      base_rate: e.base_rate, target_bonus: (() => { const r = roles.find(x => String(x.id) === String(e.role_id)); return r?.target_bonus || 0 })(),
+    const entryRows = (rosterId) => entries.map(e => ({
+      roster_id: rosterId, labour_id: e.labour_id, role_id: e.role_id,
+      base_rate: e.base_rate,
+      target_bonus: (() => { const r = roles.find(x => String(x.id) === String(e.role_id)); return r?.target_bonus || 0 })(),
       bonus_applicable: e.bonus_applicable, total_pay: e.total_pay, notes: e.notes,
     }))
-    const { error: ee } = await supabase.from('daily_roster_entries').insert(entryRows)
-    setSaving(false)
-    if (ee) setErr(ee.message)
-    else onSave()
+
+    if (isEdit) {
+      const wasSubmitted = editRoster.ico_status === 'submitted'
+      const { error: re } = await supabase.from('daily_roster').update({
+        roster_date: date, target_met: targetMet, total_daily_cost: grandTotal,
+        payment_week_ending: weekEnding, worker_count: entries.length,
+        ico_status: submit ? 'submitted' : wasSubmitted ? 'draft' : (editRoster.ico_status || 'draft'),
+        submitted_by: submit ? userProfile?.full_name : editRoster.submitted_by,
+        submitted_date: submit ? todayStr() : editRoster.submitted_date,
+      }).eq('id', editRoster.id)
+      if (re) { setSaving(false); return setErr(re.message) }
+      await supabase.from('daily_roster_entries').delete().eq('roster_id', editRoster.id)
+      const { error: ee } = await supabase.from('daily_roster_entries').insert(entryRows(editRoster.id))
+      setSaving(false)
+      if (ee) setErr(ee.message)
+      else onSave()
+    } else {
+      const { data: roster, error: re } = await supabase.from('daily_roster').insert({
+        roster_date: date, target_met: targetMet, total_daily_cost: grandTotal,
+        submitted_by: userProfile?.full_name, submitted_date: submit ? todayStr() : null,
+        ico_status: submit ? 'submitted' : 'draft', md_status: 'pending',
+        payment_week_ending: weekEnding, payment_status: 'unpaid', worker_count: entries.length,
+      }).select('id').single()
+      if (re) { setSaving(false); return setErr(re.message) }
+      const { error: ee } = await supabase.from('daily_roster_entries').insert(entryRows(roster.id))
+      setSaving(false)
+      if (ee) setErr(ee.message)
+      else onSave()
+    }
   }
 
   return (
     <div style={styles.card}>
       <div style={{ ...styles.row, justifyContent: 'space-between', marginBottom: '18px' }}>
-        <h3 style={{ margin: 0 }}>Create Daily Roster</h3>
+        <h3 style={{ margin: 0 }}>{isEdit ? `Edit Roster — ${editRoster.roster_date}` : 'Create Daily Roster'}</h3>
         <button style={styles.btn('ghost')} onClick={onCancel}>Cancel</button>
       </div>
       {err && <AlertBar msg={err} type="error" onClose={() => setErr('')} />}
@@ -558,8 +698,8 @@ function RosterCreateForm({ pool, roles, userProfile, onSave, onCancel }) {
       <div style={{ ...styles.row, marginTop: '14px', justifyContent: 'space-between' }}>
         <button style={{ ...styles.btn('ghost'), border: `1px dashed ${theme.border}` }} onClick={addRow}>+ Add Worker Row</button>
         <div style={styles.row}>
-          <button style={styles.btn('ghost')} onClick={() => handleSave(false)} disabled={saving}>Save as Draft</button>
-          <button style={styles.btn('primary')} onClick={() => handleSave(true)} disabled={saving}>{saving ? 'Saving…' : 'Submit for ICO Review'}</button>
+          <button style={styles.btn('ghost')} onClick={() => handleSave(false)} disabled={saving}>{isEdit ? 'Save Changes (Draft)' : 'Save as Draft'}</button>
+          <button style={styles.btn('primary')} onClick={() => handleSave(true)} disabled={saving}>{saving ? 'Saving…' : isEdit ? 'Save & Re-submit' : 'Submit for ICO Review'}</button>
         </div>
       </div>
     </div>
@@ -607,11 +747,11 @@ function RosterDetail({ roster, roles, pool, userProfile, onBack, onAction, aler
         </div>
         <div style={styles.card}>
           <div style={{ fontSize: '11px', color: theme.textMuted, fontWeight: '700', textTransform: 'uppercase' }}>Target Met</div>
-          <span style={styles.badge(roster.target_met ? theme.green : theme.red)}>{roster.target_met ? 'Yes' : 'No'}</span>
+          <span style={styles.badge(roster.target_met ? theme.green : theme.red)}>{roster.target_met ? 'YES' : 'NO'}</span>
         </div>
         <div style={styles.card}>
           <div style={{ fontSize: '11px', color: theme.textMuted, fontWeight: '700', textTransform: 'uppercase' }}>ICO Status</div>
-          <span style={styles.badge(statusColor(icoStatus))}>{icoStatus}</span>
+          <span style={styles.badge(statusColor(icoStatus))}>{icoStatus.replace('_', ' ')}</span>
         </div>
         <div style={styles.card}>
           <div style={{ fontSize: '11px', color: theme.textMuted, fontWeight: '700', textTransform: 'uppercase' }}>MD Status</div>
@@ -620,8 +760,44 @@ function RosterDetail({ roster, roles, pool, userProfile, onBack, onAction, aler
         <div style={styles.card}>
           <div style={{ fontSize: '11px', color: theme.textMuted, fontWeight: '700', textTransform: 'uppercase' }}>Payment</div>
           <span style={styles.badge(statusColor(payStatus))}>{payStatus}</span>
+          {payStatus === 'paid' && roster.payment_date && <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '4px' }}>{fmtDate(roster.payment_date)}</div>}
         </div>
       </div>
+
+      {/* Approval Journey */}
+      {(() => {
+        const steps = [
+          { label: 'Production', sub: icoStatus === 'draft' ? 'Draft' : 'Created', done: true, current: icoStatus === 'draft', rejected: false },
+          { label: 'ICO Review', sub: icoStatus === 'submitted' ? 'Awaiting' : icoStatus === 'ico_approved' ? 'Approved' : icoStatus === 'ico_rejected' ? 'Rejected' : 'Pending', done: icoStatus === 'ico_approved', current: icoStatus === 'submitted', rejected: icoStatus === 'ico_rejected' },
+          { label: 'MD Approval', sub: mdStatus === 'pending' ? 'Awaiting' : mdStatus === 'approved' ? 'Approved' : mdStatus === 'rejected' ? 'Rejected' : 'Pending', done: mdStatus === 'approved', current: icoStatus === 'ico_approved' && mdStatus !== 'approved' && mdStatus !== 'rejected', rejected: mdStatus === 'rejected' },
+          { label: 'Accountant', sub: payStatus === 'paid' ? 'Done' : mdStatus === 'approved' ? 'Awaiting' : 'Pending', done: payStatus === 'paid', current: mdStatus === 'approved' && payStatus !== 'paid', rejected: false },
+          { label: 'Paid', sub: payStatus === 'paid' ? '✓' : '', done: payStatus === 'paid', current: false, rejected: false },
+        ]
+        return (
+          <div style={{ ...styles.card, marginBottom: '16px' }}>
+            <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase', marginBottom: '14px', letterSpacing: '0.06em' }}>Approval Journey</div>
+            <div style={{ display: 'flex', alignItems: 'center', overflowX: 'auto' }}>
+              {steps.map((step, i) => {
+                const color = step.rejected ? theme.red : step.done ? theme.green : step.current ? theme.blue : theme.textMuted
+                return (
+                  <React.Fragment key={step.label}>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: '72px' }}>
+                      <div style={{ width: '30px', height: '30px', borderRadius: '50%', background: color + '20', border: `2px solid ${color}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', color, fontWeight: '700' }}>
+                        {step.rejected ? '✕' : step.done ? '✓' : String(i + 1)}
+                      </div>
+                      <div style={{ fontSize: '10px', fontWeight: '700', color, marginTop: '5px', textAlign: 'center', lineHeight: 1.3 }}>{step.label}</div>
+                      <div style={{ fontSize: '9px', color: theme.textMuted, textAlign: 'center', marginTop: '2px' }}>{step.sub}</div>
+                    </div>
+                    {i < steps.length - 1 && (
+                      <div style={{ flex: 1, height: '2px', background: steps[i + 1].done || steps[i + 1].current ? color : theme.border, minWidth: '16px', margin: '0 2px', marginBottom: '18px' }} />
+                    )}
+                  </React.Fragment>
+                )
+              })}
+            </div>
+          </div>
+        )
+      })()}
 
       {loading ? <Spinner /> : (
         <div style={{ ...styles.card, padding: 0, overflow: 'hidden', marginBottom: '16px' }}>
@@ -748,7 +924,7 @@ function TruckLoadingTab({ pool, userProfile }) {
       supabase.from('vehicles').select('id, vehicle_number, vehicle_name').order('vehicle_number'),
       supabase.from('truck_loader_assignments').select('*, labour:labour_pool(id, full_name, labour_number)').eq('is_active', true),
       supabase.from('truck_loading_log').select('*, loaders:truck_loading_loaders(labour_id, labour:labour_pool(full_name))').order('created_at', { ascending: false }),
-      supabase.from('waybills').select('id, waybill_number, waybill_date, blocks_quantity, vehicle_id').order('waybill_date', { ascending: false }).limit(100),
+      supabase.from('waybills').select('id, waybill_number, waybill_date, quantity_loaded, block_type, receiver_name').order('waybill_date', { ascending: false }).limit(100),
     ])
     setVehicles(vRes.data || [])
     setAssignments(aRes.data || [])
@@ -908,6 +1084,12 @@ function LoadingLogForm({ waybills, pool, userProfile, onSave, onCancel }) {
   const activePool = pool.filter(w => w.is_active)
 
   const selectedWaybill = waybills.find(w => String(w.id) === String(waybillId))
+
+  const handleWaybillSelect = (id) => {
+    setWaybillId(id)
+    const w = waybills.find(x => String(x.id) === String(id))
+    if (w?.quantity_loaded) setBlocksLoaded(String(w.quantity_loaded))
+  }
   const total = Number(blocksLoaded || 0) * ratePerBlock
   const split = selectedLoaders.length > 0 ? total / selectedLoaders.length : 0
 
@@ -940,14 +1122,23 @@ function LoadingLogForm({ waybills, pool, userProfile, onSave, onCancel }) {
       <div style={styles.grid2}>
         <div style={styles.formGroup}>
           <label style={styles.label}>Waybill</label>
-          <select style={styles.input} value={waybillId} onChange={e => setWaybillId(e.target.value)}>
+          <select style={styles.input} value={waybillId} onChange={e => handleWaybillSelect(e.target.value)}>
             <option value="">— Select Waybill —</option>
-            {waybills.map(w => <option key={w.id} value={w.id}>{w.waybill_number} ({w.waybill_date})</option>)}
+            {waybills.map(w => (
+              <option key={w.id} value={w.id}>
+                {w.waybill_number} — {w.receiver_name || '—'} — {w.quantity_loaded || 0} blocks — {fmtDate(w.waybill_date)}
+              </option>
+            ))}
           </select>
+          {selectedWaybill && (
+            <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '4px' }}>
+              {selectedWaybill.block_type} · {selectedWaybill.receiver_name || 'No customer'}
+            </div>
+          )}
         </div>
         <div style={styles.formGroup}>
           <label style={styles.label}>Blocks Loaded</label>
-          <input type="number" style={styles.input} value={blocksLoaded} onChange={e => setBlocksLoaded(e.target.value)} placeholder={selectedWaybill?.blocks_quantity ? `Waybill qty: ${selectedWaybill.blocks_quantity}` : ''} />
+          <input type="number" style={styles.input} value={blocksLoaded} onChange={e => setBlocksLoaded(e.target.value)} placeholder={selectedWaybill?.quantity_loaded ? `Waybill qty: ${selectedWaybill.quantity_loaded}` : 'Enter quantity'} />
         </div>
       </div>
       <div style={{ ...styles.row, gap: '20px', marginBottom: '14px' }}>
