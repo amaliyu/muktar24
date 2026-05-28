@@ -115,20 +115,20 @@ const APP_ROLES = [
 // Pages each role is allowed to access. 'all' = unrestricted.
 const ROLE_PAGES = {
   md:                 'all',
-  ico:                'all',
-  accountant:         ['dashboard','reports','kpi_dashboard','accounting','opening_balances','labour'],
-  board_member:       ['dashboard','production','inventory','batches','waybills','vehicles','staff','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','opening_balances','suppliers','products'],
-  bdm:                ['dashboard','customers','orders','pending_register','daily_schedule','reports','kpi_dashboard'],
-  store_officer:      ['dashboard','inventory','batches','waybills','vehicles','daily_schedule','products'],
-  logistics_manager:  ['dashboard','waybills','vehicles','pending_register','daily_schedule','customers','labour'],
-  marketer:           ['dashboard','customers','orders','products'],
-  driver:             ['dashboard','waybills'],
-  hr_officer:         ['dashboard','staff','reports','labour'],
-  production_manager: ['dashboard','production','inventory','batches','reports','products','labour'],
+  ico:                ['dashboard','production','inventory','batches','waybills','vehicles','staff','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','opening_balances','suppliers','products','my_profile'],
+  accountant:         ['dashboard','reports','kpi_dashboard','accounting','opening_balances','labour','my_profile'],
+  board_member:       ['dashboard','production','inventory','batches','waybills','vehicles','staff','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','opening_balances','suppliers','products','my_profile'],
+  bdm:                ['dashboard','customers','orders','pending_register','daily_schedule','reports','kpi_dashboard','my_profile'],
+  store_officer:      ['dashboard','inventory','batches','waybills','vehicles','pending_register','daily_schedule','products','my_profile'],
+  logistics_manager:  ['dashboard','waybills','vehicles','pending_register','daily_schedule','customers','labour','my_profile'],
+  marketer:           ['dashboard','customers','orders','products','my_profile'],
+  driver:             ['dashboard','waybills','my_profile'],
+  hr_officer:         ['dashboard','staff','reports','labour','my_profile'],
+  production_manager: ['dashboard','production','inventory','batches','reports','products','labour','my_profile'],
   // legacy roles — kept for any existing users
-  operations:         ['dashboard','production','inventory','batches','waybills','vehicles','staff','pending_register','daily_schedule','lpo_approvals'],
-  sales:              ['dashboard','customers','orders'],
-  staff:              ['dashboard'],
+  operations:         ['dashboard','production','inventory','batches','waybills','vehicles','staff','pending_register','daily_schedule','lpo_approvals','my_profile'],
+  sales:              ['dashboard','customers','orders','my_profile'],
+  staff:              ['dashboard','my_profile'],
 };
 
 // ── UI HELPERS ───────────────────────────────────────────────
@@ -304,7 +304,7 @@ const StatCard = ({ label, value, sub, accent, pct }) => (
 );
 
 // ── DASHBOARD ─────────────────────────────────────────────────
-const Dashboard = ({ onNavigate }) => {
+const Dashboard = ({ onNavigate, userProfile }) => {
   const [stats, setStats] = useState({ staff: 0, produced: 0, orders: 0, revenue: 0, pending: 0, waybills: 0, damages: 0, lpoQueue: 0, scheduleQueue: 0, pendingRegister: 0 });
   const [finishedGoods, setFinishedGoods] = useState([]);
   const [recent, setRecent] = useState([]);
@@ -364,7 +364,7 @@ const Dashboard = ({ onNavigate }) => {
     <div>
       <div style={styles.header}>
         <div>
-          <div style={styles.pageTitle}>{greeting}, MD 👋</div>
+          <div style={styles.pageTitle}>{greeting}, {userProfile?.full_name?.split(' ')[0] || 'MD'} 👋</div>
           <div style={styles.pageSubtitle}>Business overview — Abuja Precast Concrete Limited</div>
         </div>
         <span style={styles.badge(theme.green)}>Operations Active</span>
@@ -1446,7 +1446,7 @@ const Waybills = () => {
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [editTarget, setEditTarget] = useState(null);
   const [selectedOrderId, setSelectedOrderId] = useState("");
-  const emptyForm = { waybillDate: "", vehicleId: "", driverId: "", truckNumber: "", blockType: "9 Inch 3 Hole Block", quantityLoaded: "", quantityReceived: "", quantityDamaged: "0", batchId: "", scheduleItemId: "", dieselLitres: "", storeOfficer: "", notes: "" };
+  const emptyForm = { waybillDate: "", vehicleId: "", driverId: "", truckNumber: "", physicalWaybillNumber: "", blockType: "9 Inch 3 Hole Block", quantityLoaded: "", quantityReceived: "", quantityDamaged: "0", batchId: "", scheduleItemId: "", dieselLitres: "", storeOfficer: "", notes: "" };
   const [form, setForm] = useState(emptyForm);
 
   const load = async () => {
@@ -1486,7 +1486,8 @@ const Waybills = () => {
     setEditTarget(w);
     setForm({
       waybillDate: w.waybill_date, vehicleId: w.vehicle_id || "", driverId: w.driver_id || "",
-      truckNumber: w.truck_number || "", blockType: w.block_type || "9 Inch 3 Hole Block",
+      truckNumber: w.truck_number || "", physicalWaybillNumber: w.physical_waybill_number || "",
+      blockType: w.block_type || "9 Inch 3 Hole Block",
       quantityLoaded: String(w.quantity_loaded || ""),
       quantityReceived: String(w.quantity_received || ""),
       quantityDamaged: String(w.quantity_damaged || 0),
@@ -1513,6 +1514,7 @@ const Waybills = () => {
         vehicle_id: form.vehicleId || null,
         driver_id: form.driverId || null,
         truck_number: form.truckNumber || null,
+        physical_waybill_number: form.physicalWaybillNumber || null,
         block_type: form.blockType,
         quantity_loaded: parseInt(form.quantityLoaded) || 0,
         quantity_received: parseInt(form.quantityReceived) || 0,
@@ -1690,6 +1692,10 @@ const Waybills = () => {
               <input style={styles.input} placeholder="e.g. ABC-123-AA" value={form.truckNumber} onChange={e => setForm({ ...form, truckNumber: e.target.value })} />
             </div>
             <div style={styles.formGroup}>
+              <label style={styles.label}>Physical Waybill No. (Manual)</label>
+              <input style={styles.input} placeholder="e.g. WB-0042 (from physical book)" value={form.physicalWaybillNumber} onChange={e => setForm({ ...form, physicalWaybillNumber: e.target.value })} />
+            </div>
+            <div style={styles.formGroup}>
               <label style={styles.label}>Block Type</label>
               <ProductSelect value={form.blockType} onChange={(name) => setForm({ ...form, blockType: name })} style={styles.input} />
             </div>
@@ -1787,12 +1793,13 @@ const Waybills = () => {
         ) : (
           <table style={styles.table}>
             <thead>
-              <tr>{["Waybill No.", "Date", "Driver", "Truck", "Block Type", "Loaded", "Received", "Damaged", "Receiver", ""].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
+              <tr>{["APC Waybill No.", "Physical WB No.", "Date", "Driver", "Truck", "Block Type", "Loaded", "Received", "Damaged", "Receiver", ""].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
             </thead>
             <tbody>
               {waybills.map(w => (
                 <tr key={w.id}>
                   <td style={styles.td}><span style={{ color: theme.accent, fontWeight: "600" }}>{w.waybill_number}</span></td>
+                  <td style={styles.td}>{w.physical_waybill_number ? <span style={{ color: theme.textMuted, fontSize: "12px" }}>{w.physical_waybill_number}</span> : <span style={{ color: theme.textDim, fontSize: "11px" }}>—</span>}</td>
                   <td style={styles.td}>{w.waybill_date}</td>
                   <td style={styles.td}>{w.driver?.full_name || "—"}</td>
                   <td style={styles.td}>{w.truck_number || "—"}</td>
@@ -1805,7 +1812,7 @@ const Waybills = () => {
                     <div style={{ display: "flex", gap: "6px" }}>
                       <button style={{ ...styles.btn("secondary"), padding: "4px 10px", fontSize: "11px" }} onClick={() => {
                         const driver = staff.find(s => s.id === w.driver_id);
-                        generateWaybillPDF({ waybill_number: w.waybill_number, date: w.waybill_date, customer_name: w.receiver_name, customer_location: "", block_type: w.block_type, quantity_loaded: w.quantity_loaded, batch_number: batchMap[w.batch_id] || "", driver_name: driver?.full_name || "", truck_number: w.truck_number || "", notes: w.notes || "" });
+                        generateWaybillPDF({ waybill_number: w.waybill_number, physical_waybill_number: w.physical_waybill_number || "", date: w.waybill_date, customer_name: w.receiver_name, customer_location: "", block_type: w.block_type, quantity_loaded: w.quantity_loaded, batch_number: batchMap[w.batch_id] || "", driver_name: driver?.full_name || "", truck_number: w.truck_number || "", notes: w.notes || "" });
                       }}>PDF</button>
                       <button style={{ ...styles.btn("secondary"), padding: "4px 10px", fontSize: "11px" }} onClick={() => startEditWaybill(w)}>Edit</button>
                       <button style={{ ...styles.btn("danger"), padding: "4px 10px", fontSize: "11px" }} onClick={() => setConfirmDelete(w)}>Delete</button>
@@ -3688,9 +3695,9 @@ const ScheduleApprovals = () => {
                   <input style={styles.input} placeholder="Comments for BDM…" value={notes[sched.id] || ""} onChange={e => setNotes(prev => ({ ...prev, [sched.id]: e.target.value }))} />
                 </div>
                 <div style={styles.row}>
-                  <button style={styles.btn("primary")} disabled={!!saving} onClick={() => handleApprove(sched)}>{saving === sched.id + "approve" ? "Approving…" : rejected.length > 0 ? `Approve (Remove ${rejected.length})` : "Approve Full Schedule"}</button>
-                  <button style={styles.btn("danger")} disabled={!!saving} onClick={() => handleReject(sched)}>{saving === sched.id + "reject" ? "Rejecting…" : "Reject Entire Schedule"}</button>
-                  <button data-board-allow style={{ ...styles.btn("secondary"), marginLeft: "auto" }} onClick={() => printApprovalPDF(sched)}>Print PDF</button>
+                  <button data-ico-allow style={styles.btn("primary")} disabled={!!saving} onClick={() => handleApprove(sched)}>{saving === sched.id + "approve" ? "Approving…" : rejected.length > 0 ? `Approve (Remove ${rejected.length})` : "Approve Full Schedule"}</button>
+                  <button data-ico-allow style={styles.btn("danger")} disabled={!!saving} onClick={() => handleReject(sched)}>{saving === sched.id + "reject" ? "Rejecting…" : "Reject Entire Schedule"}</button>
+                  <button data-board-allow data-ico-allow style={{ ...styles.btn("secondary"), marginLeft: "auto" }} onClick={() => printApprovalPDF(sched)}>Print PDF</button>
                 </div>
               </div>
             )}
@@ -6177,6 +6184,192 @@ const ChangePasswordModal = ({ onClose }) => {
   );
 };
 
+// ── MY PROFILE ────────────────────────────────────────────────
+const MyProfile = ({ userProfile }) => {
+  const [tab, setTab] = useState('info');
+  const [documents, setDocuments] = useState([]);
+  const [uploading, setUploading] = useState(false);
+  const [docAlert, setDocAlert] = useState(null);
+  const [newPwd, setNewPwd] = useState('');
+  const [confirmPwd, setConfirmPwd] = useState('');
+  const [pwdSaving, setPwdSaving] = useState(false);
+  const [pwdMsg, setPwdMsg] = useState(null);
+  const [staffRecord, setStaffRecord] = useState(null);
+
+  useEffect(() => {
+    if (userProfile?.staff_id) {
+      supabase.from('staff').select('*').eq('id', userProfile.staff_id).single().then(({ data }) => setStaffRecord(data));
+    }
+    loadDocs();
+  }, [userProfile]);
+
+  const loadDocs = async () => {
+    if (!userProfile?.id) return;
+    const { data } = await supabase.from('staff_documents').select('*').eq('user_id', userProfile.id).order('uploaded_at', { ascending: false });
+    setDocuments(data || []);
+  };
+
+  const handleUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true); setDocAlert(null);
+    try {
+      const ext = file.name.split('.').pop();
+      const path = `${userProfile.id}/${Date.now()}.${ext}`;
+      const { error: upErr } = await supabase.storage.from('staff-documents').upload(path, file);
+      if (upErr) throw upErr;
+      const { data: { publicUrl } } = supabase.storage.from('staff-documents').getPublicUrl(path);
+      await supabase.from('staff_documents').insert({
+        user_id: userProfile.id,
+        staff_id: userProfile.staff_id || null,
+        file_name: file.name,
+        file_url: publicUrl,
+        file_size: file.size,
+        document_type: ext.toLowerCase() === 'pdf' ? 'pdf' : ['jpg','jpeg','png'].includes(ext.toLowerCase()) ? 'image' : 'other',
+      });
+      setDocAlert({ type: 'success', msg: `${file.name} uploaded successfully.` });
+      loadDocs();
+    } catch (err) {
+      setDocAlert({ type: 'error', msg: 'Upload failed: ' + err.message });
+    } finally {
+      setUploading(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleDeleteDoc = async (doc) => {
+    try {
+      const pathPart = doc.file_url.split('/staff-documents/')[1];
+      if (pathPart) await supabase.storage.from('staff-documents').remove([pathPart]);
+      await supabase.from('staff_documents').delete().eq('id', doc.id);
+      setDocAlert({ type: 'success', msg: 'Document deleted.' });
+      loadDocs();
+    } catch (err) {
+      setDocAlert({ type: 'error', msg: 'Delete failed: ' + err.message });
+    }
+  };
+
+  const handleChangePwd = async (e) => {
+    e.preventDefault();
+    if (newPwd.length < 6) { setPwdMsg({ type: 'error', msg: 'Password must be at least 6 characters.' }); return; }
+    if (newPwd !== confirmPwd) { setPwdMsg({ type: 'error', msg: 'Passwords do not match.' }); return; }
+    setPwdSaving(true); setPwdMsg(null);
+    try {
+      await authService.changePassword(newPwd);
+      setPwdMsg({ type: 'success', msg: 'Password changed successfully.' });
+      setNewPwd(''); setConfirmPwd('');
+    } catch (err) {
+      setPwdMsg({ type: 'error', msg: err.message });
+    } finally {
+      setPwdSaving(false);
+    }
+  };
+
+  const role = userProfile?.role;
+  const roleLabel = APP_ROLES.find(r => r.id === role)?.label || role;
+  const fmtBytes = (b) => b > 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${(b / 1024).toFixed(0)} KB`;
+
+  return (
+    <div>
+      <div style={styles.header}>
+        <div>
+          <div style={styles.pageTitle}>My Profile</div>
+          <div style={styles.pageSubtitle}>View your account details, upload documents, and change your password</div>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', borderBottom: `1px solid ${theme.border}`, paddingBottom: '12px' }}>
+        {['info', 'documents', 'password'].map(t => (
+          <button data-ico-allow key={t} onClick={() => setTab(t)} style={{ padding: '8px 18px', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: tab === t ? '700' : '400', background: tab === t ? theme.accent + '22' : 'transparent', color: tab === t ? theme.accent : theme.textMuted }}>
+            {t === 'info' ? 'Personal Info' : t === 'documents' ? 'My Documents' : 'Change Password'}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'info' && (
+        <div style={styles.card}>
+          <div style={{ display: 'flex', gap: '32px', flexWrap: 'wrap' }}>
+            <div style={{ flex: 1, minWidth: '260px' }}>
+              <div style={{ fontSize: '13px', fontWeight: '700', color: theme.textMuted, marginBottom: '16px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Account</div>
+              {[['Full Name', userProfile?.full_name], ['Email', userProfile?.email], ['Role', roleLabel], ['Account Status', userProfile?.is_active ? 'Active' : 'Inactive']].map(([label, val]) => (
+                <div key={label} style={{ marginBottom: '14px' }}>
+                  <div style={{ fontSize: '11px', color: theme.textMuted, fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '3px' }}>{label}</div>
+                  <div style={{ fontSize: '14px', color: theme.text, fontWeight: '500' }}>{val || '—'}</div>
+                </div>
+              ))}
+            </div>
+            {staffRecord && (
+              <div style={{ flex: 1, minWidth: '260px' }}>
+                <div style={{ fontSize: '13px', fontWeight: '700', color: theme.textMuted, marginBottom: '16px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Staff Record</div>
+                {[['Employee No.', staffRecord.employee_number], ['Department', staffRecord.department], ['Position', staffRecord.position], ['Phone', staffRecord.phone], ['Date Joined', staffRecord.date_joined]].map(([label, val]) => (
+                  <div key={label} style={{ marginBottom: '14px' }}>
+                    <div style={{ fontSize: '11px', color: theme.textMuted, fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '3px' }}>{label}</div>
+                    <div style={{ fontSize: '14px', color: theme.text, fontWeight: '500' }}>{val || '—'}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {tab === 'documents' && (
+        <div>
+          {docAlert && <Alert msg={docAlert.msg} type={docAlert.type} onClose={() => setDocAlert(null)} />}
+          <div style={{ ...styles.card, marginBottom: '16px' }}>
+            <div style={{ fontSize: '13px', fontWeight: '700', color: theme.text, marginBottom: '12px' }}>Upload a Document</div>
+            <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '12px' }}>Upload personal documents: NIN slip, guarantor form, certificates, ID cards, etc. (PDF, JPG, PNG — max 5 MB)</div>
+            <input data-ico-allow type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={handleUpload} disabled={uploading} style={{ fontSize: '13px', color: theme.text }} />
+            {uploading && <div style={{ fontSize: '12px', color: theme.accent, marginTop: '8px' }}>Uploading…</div>}
+          </div>
+          <div style={styles.card}>
+            <div style={{ fontSize: '13px', fontWeight: '700', color: theme.text, marginBottom: '12px' }}>My Documents ({documents.length})</div>
+            {documents.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '32px', color: theme.textMuted, fontSize: '13px' }}>No documents uploaded yet.</div>
+            ) : (
+              <table style={styles.table}>
+                <thead><tr>{['File Name', 'Type', 'Size', 'Uploaded', ''].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {documents.map(doc => (
+                    <tr key={doc.id}>
+                      <td style={styles.td}><a href={doc.file_url} target="_blank" rel="noreferrer" style={{ color: theme.blue, textDecoration: 'none', fontWeight: '600' }}>{doc.file_name}</a></td>
+                      <td style={styles.td}><span style={styles.badge(theme.blue)}>{doc.document_type}</span></td>
+                      <td style={styles.td}>{doc.file_size ? fmtBytes(doc.file_size) : '—'}</td>
+                      <td style={styles.td}>{doc.uploaded_at ? new Date(doc.uploaded_at).toLocaleDateString('en-GB') : '—'}</td>
+                      <td style={styles.td}>
+                        <button data-ico-allow style={{ ...styles.btn('danger'), padding: '4px 10px', fontSize: '11px' }} onClick={() => handleDeleteDoc(doc)}>Delete</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
+
+      {tab === 'password' && (
+        <div style={{ ...styles.card, maxWidth: '420px' }}>
+          <div style={{ fontSize: '13px', fontWeight: '700', color: theme.text, marginBottom: '16px' }}>Change Password</div>
+          {pwdMsg && <Alert msg={pwdMsg.msg} type={pwdMsg.type} onClose={() => setPwdMsg(null)} />}
+          <form onSubmit={handleChangePwd}>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>New Password</label>
+              <input data-ico-allow style={styles.input} type="password" value={newPwd} onChange={e => setNewPwd(e.target.value)} placeholder="Min. 6 characters" required minLength={6} />
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Confirm New Password</label>
+              <input data-ico-allow style={{ ...styles.input, ...(confirmPwd && confirmPwd !== newPwd ? { borderColor: theme.red } : {}) }} type="password" value={confirmPwd} onChange={e => setConfirmPwd(e.target.value)} placeholder="Repeat password" required />
+              {confirmPwd && confirmPwd !== newPwd && <div style={{ fontSize: '11px', color: theme.red, marginTop: '4px' }}>Passwords do not match.</div>}
+            </div>
+            <button data-ico-allow type="submit" style={styles.btn('primary')} disabled={pwdSaving}>{pwdSaving ? 'Saving…' : 'Change Password'}</button>
+          </form>
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ── NAV ───────────────────────────────────────────────────────
 const navItems = [
   { section: "Overview", items: [{ id: "dashboard", label: "Dashboard", icon: "dashboard" }] },
@@ -6208,6 +6401,9 @@ const navItems = [
     { id: "suppliers", label: "Suppliers", icon: "supplier" },
     { id: "opening_balances", label: "Opening Balances", icon: "orders" },
     { id: "user_management", label: "User Management", icon: "staff" },
+  ]},
+  { section: "Account", items: [
+    { id: "my_profile", label: "My Profile", icon: "staff" },
   ]},
 ];
 
@@ -6587,14 +6783,14 @@ export default function App() {
   const isMD    = role === 'md';
 
   const allowedPages = ROLE_PAGES[role] || ['dashboard'];
-  const canSee = (pageId) => allowedPages === 'all' || allowedPages.includes(pageId);
+  const canSee = (pageId) => pageId === 'my_profile' || allowedPages === 'all' || allowedPages.includes(pageId);
   const visibleNav = navItems
     .map(s => ({ ...s, items: s.items.filter(it => canSee(it.id)) }))
     .filter(s => s.items.length > 0);
   const safePage = canSee(active) ? active : 'dashboard';
 
   const pages = {
-    dashboard: isBoard ? <BoardDashboard userProfile={userProfile} /> : <Dashboard onNavigate={setActive} />,
+    dashboard: isBoard ? <BoardDashboard userProfile={userProfile} /> : <Dashboard onNavigate={setActive} userProfile={userProfile} />,
     production: <Production />,
     inventory: <Inventory onLowStockChange={setLowStockCount} />,
     batches: <Batches />,
@@ -6615,6 +6811,7 @@ export default function App() {
     opening_balances: <OpeningBalances userProfile={userProfile} />,
     user_management: <UserManagement userProfile={userProfile} />,
     labour: <Labour userProfile={userProfile} />,
+    my_profile: <MyProfile userProfile={userProfile} />,
   };
 
   const getBadge = (id) => {
@@ -6663,13 +6860,13 @@ export default function App() {
         </div>
       </div>
       {showChangePwd && <ChangePasswordModal onClose={() => setShowChangePwd(false)} />}
-      <main style={styles.main} {...(isBoard ? { 'data-board-view': 'true' } : {})}>
+      <main style={styles.main} {...(isBoard ? { 'data-board-view': 'true' } : {})} {...(isICO ? { 'data-ico-view': 'true' } : {})}>
         {sessionWarning && (
           <div style={{ background: "#7c3a0022", border: "1px solid #c47d0e88", borderRadius: "8px", padding: "10px 16px", marginBottom: "16px", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "13px", color: theme.accent }}>
             <span>⚠️ Your session expires in <strong>{sessionMinutes} minute{sessionMinutes !== 1 ? 's' : ''}</strong>. Unsaved work may be lost.</span>
             <div style={{ display: "flex", gap: "8px" }}>
-              <button data-board-allow onClick={handleExtendSession} style={{ padding: "5px 14px", borderRadius: "6px", background: theme.accent, color: "#000", border: "none", fontSize: "12px", fontWeight: "700", cursor: "pointer" }}>Extend Session</button>
-              <button data-board-allow onClick={() => setSessionWarning(false)} style={{ padding: "5px 10px", borderRadius: "6px", background: "transparent", color: theme.textMuted, border: `1px solid ${theme.border}`, fontSize: "12px", cursor: "pointer" }}>Dismiss</button>
+              <button data-board-allow data-ico-allow onClick={handleExtendSession} style={{ padding: "5px 14px", borderRadius: "6px", background: theme.accent, color: "#000", border: "none", fontSize: "12px", fontWeight: "700", cursor: "pointer" }}>Extend Session</button>
+              <button data-board-allow data-ico-allow onClick={() => setSessionWarning(false)} style={{ padding: "5px 10px", borderRadius: "6px", background: "transparent", color: theme.textMuted, border: `1px solid ${theme.border}`, fontSize: "12px", cursor: "pointer" }}>Dismiss</button>
             </div>
           </div>
         )}
@@ -6680,9 +6877,19 @@ export default function App() {
             [data-board-view] select { pointer-events: none; opacity: 0.8; }
           `}</style>
         )}
+        {isICO && (
+          <style>{`
+            [data-ico-view] button:not([data-ico-allow]) { display: none !important; }
+          `}</style>
+        )}
         {isBoard && active !== 'dashboard' && (
           <div style={{ background: theme.accent+'22', border: `1px solid ${theme.accent}44`, borderRadius: '8px', padding: '8px 16px', margin: '0 0 16px', fontSize: '12px', color: theme.accent, fontWeight: '600' }}>
             👁 View Only Mode — Board Member access
+          </div>
+        )}
+        {isICO && active !== 'dashboard' && active !== 'schedule_approvals' && active !== 'labour' && (
+          <div style={{ background: theme.blue+'22', border: `1px solid ${theme.blue}44`, borderRadius: '8px', padding: '8px 16px', margin: '0 0 16px', fontSize: '12px', color: theme.blue, fontWeight: '600' }}>
+            🔒 Read-Only Mode — Internal Control Officer. Approvals available in Schedule Approvals and Labour modules.
           </div>
         )}
         {pages[safePage]}

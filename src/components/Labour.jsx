@@ -12,10 +12,10 @@ const theme = {
 const naira = (n) => `₦${Math.round(Number(n) || 0).toLocaleString()}`
 const todayStr = () => new Date().toISOString().split('T')[0]
 
-function getFriday(dateStr) {
+function getSaturday(dateStr) {
   const d = new Date(dateStr || todayStr())
   const day = d.getDay()
-  const diff = day <= 5 ? 5 - day : 5 - day + 7
+  const diff = day === 0 ? 6 : 6 - day
   d.setDate(d.getDate() + diff)
   return d.toISOString().split('T')[0]
 }
@@ -592,7 +592,7 @@ function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCanc
       if (!e.labour_id || !e.role_id) return setErr('All rows must have a worker and role selected.')
     }
     setSaving(true); setErr('')
-    const weekEnding = getFriday(date)
+    const weekEnding = getSaturday(date)
     const entryRows = (rosterId) => entries.map(e => ({
       roster_id: rosterId, labour_id: e.labour_id, role_id: e.role_id,
       base_rate: e.base_rate,
@@ -840,8 +840,8 @@ function RosterDetail({ roster, roles, pool, userProfile, onBack, onAction, aler
           )}
           {role === 'ico' && icoStatus === 'submitted' && (
             <>
-              <button style={styles.btn('success')} onClick={() => doAction('ico_approve')} disabled={actioning}>Approve</button>
-              <button style={styles.btn('danger')} onClick={() => doAction('ico_reject')} disabled={actioning}>Reject</button>
+              <button data-ico-allow style={styles.btn('success')} onClick={() => doAction('ico_approve')} disabled={actioning}>Approve</button>
+              <button data-ico-allow style={styles.btn('danger')} onClick={() => doAction('ico_reject')} disabled={actioning}>Reject</button>
             </>
           )}
           {role === 'md' && icoStatus === 'ico_approved' && mdStatus !== 'approved' && (
@@ -1101,7 +1101,7 @@ function LoadingLogForm({ waybills, pool, userProfile, onSave, onCancel }) {
     if (!waybillId || !blocksLoaded) return setErr('Waybill and blocks loaded are required.')
     if (selectedLoaders.length === 0) return setErr('Select at least one loader.')
     setSaving(true)
-    const weekEnding = getFriday(selectedWaybill?.waybill_date || todayStr())
+    const weekEnding = getSaturday(selectedWaybill?.waybill_date || todayStr())
     const { data: log, error: le } = await supabase.from('truck_loading_log').insert({
       waybill_id: waybillId, blocks_loaded: Number(blocksLoaded), rate_per_block: ratePerBlock,
       total_amount: total, split_per_loader: split, payment_week_ending: weekEnding,
@@ -1284,7 +1284,7 @@ function generatePayrollPDF(payrollType, weekEnding, workers, totalAmount, payro
 
 function WeeklyPayrollTab({ pool, roles, userProfile }) {
   const [subTab, setSubTab] = useState('production')
-  const [weekEnding, setWeekEnding] = useState(getFriday(todayStr()))
+  const [weekEnding, setWeekEnding] = useState(getSaturday(todayStr()))
   const [rosters, setRosters] = useState([])
   const [loadingLogs, setLoadingLogs] = useState([])
   const [payrollRecords, setPayrollRecords] = useState([])
@@ -1394,7 +1394,7 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
       <div style={{ ...styles.row, marginBottom: '16px', gap: '12px' }}>
         <div>
           <label style={styles.label}>Week Ending (Friday)</label>
-          <input type="date" style={styles.input} value={weekEnding} onChange={e => setWeekEnding(getFriday(e.target.value))} />
+          <input type="date" style={styles.input} value={weekEnding} onChange={e => setWeekEnding(getSaturday(e.target.value))} />
         </div>
         <button style={{ ...styles.btn('ghost'), marginTop: '18px' }} onClick={loadWeekData}>Load Week</button>
       </div>
@@ -1455,7 +1455,7 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
               <button style={styles.btn('primary')} onClick={handleGeneratePayroll} disabled={actioning}>Generate Payroll</button>
             )}
             {currentPayroll?.status === 'draft' && userProfile?.role === 'ico' && (
-              <button style={styles.btn('success')} onClick={() => handlePayrollAction('ico_approve')} disabled={actioning}>ICO Approve</button>
+              <button data-ico-allow style={styles.btn('success')} onClick={() => handlePayrollAction('ico_approve')} disabled={actioning}>ICO Approve</button>
             )}
             {currentPayroll?.status === 'ico_approved' && userProfile?.role === 'md' && (
               <button style={styles.btn('success')} onClick={() => handlePayrollAction('md_approve')} disabled={actioning}>MD Approve</button>
@@ -1603,7 +1603,7 @@ function MonthlyFixedTab({ pool, roles, userProfile }) {
             <button style={styles.btn('primary')} onClick={handleGenerate} disabled={actioning}>Create Payroll for {month}</button>
           )}
           {existingPayroll?.status === 'draft' && userProfile?.role === 'ico' && (
-            <button style={styles.btn('success')} onClick={() => handleAction('ico_approve')} disabled={actioning}>ICO Approve</button>
+            <button data-ico-allow style={styles.btn('success')} onClick={() => handleAction('ico_approve')} disabled={actioning}>ICO Approve</button>
           )}
           {existingPayroll?.status === 'ico_approved' && userProfile?.role === 'md' && (
             <button style={styles.btn('success')} onClick={() => handleAction('md_approve')} disabled={actioning}>MD Approve</button>
@@ -1726,8 +1726,8 @@ function LabourRatesTab({ roles, userProfile, onRefresh }) {
                       <input style={styles.input} value={commentMap[req.id] || ''} onChange={e => setCommentMap(m => ({ ...m, [req.id]: e.target.value }))} placeholder="Optional comment…" />
                     </div>
                     <div style={styles.row}>
-                      <button style={styles.btn('success')} onClick={() => handleAction(req, 'ico_approve', commentMap[req.id] || '')} disabled={actioning[req.id]}>Approve</button>
-                      <button style={styles.btn('danger')} onClick={() => handleAction(req, 'ico_reject', commentMap[req.id] || '')} disabled={actioning[req.id]}>Reject</button>
+                      <button data-ico-allow style={styles.btn('success')} onClick={() => handleAction(req, 'ico_approve', commentMap[req.id] || '')} disabled={actioning[req.id]}>Approve</button>
+                      <button data-ico-allow style={styles.btn('danger')} onClick={() => handleAction(req, 'ico_reject', commentMap[req.id] || '')} disabled={actioning[req.id]}>Reject</button>
                     </div>
                   </div>
                 )}

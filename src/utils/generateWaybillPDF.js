@@ -47,8 +47,13 @@ export async function generateWaybillPDF(waybill) {
 
   const half = (W - 28) / 2;
   field('DATE', waybill.date || new Date().toISOString().split('T')[0], ml, half);
-  field('WAYBILL NO.', waybill.waybill_number, ml + half + 6, half);
+  field('APC WAYBILL NO.', waybill.waybill_number, ml + half + 6, half);
   y += rowH + 4;
+
+  if (waybill.physical_waybill_number) {
+    field('PHYSICAL WAYBILL NO.', waybill.physical_waybill_number, ml, half * 2);
+    y += rowH + 4;
+  }
 
   field('CUSTOMER / RECIPIENT', waybill.customer_name, ml, half * 2);
   y += rowH + 4;
