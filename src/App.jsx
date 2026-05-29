@@ -1847,7 +1847,7 @@ const Waybills = ({ userProfile }) => {
                     <div style={{ display: "flex", gap: "6px" }}>
                       <button style={{ ...styles.btn("secondary"), padding: "4px 10px", fontSize: "11px" }} onClick={() => {
                         const driver = staff.find(s => s.id === w.driver_id);
-                        generateWaybillPDF({ waybill_number: w.waybill_number, physical_waybill_number: w.physical_waybill_number || "", date: w.waybill_date, customer_name: w.receiver_name, customer_location: "", block_type: w.block_type, quantity_loaded: w.quantity_loaded, batch_number: batchMap[w.batch_id] || "", driver_name: driver?.full_name || "", truck_number: w.truck_number || "", notes: w.notes || "" });
+                        generateWaybillPDF({ waybill_number: w.waybill_number, physical_waybill_number: w.physical_waybill_number || "", date: w.waybill_date, customer_name: w.receiver_name, customer_location: w.order?.customer?.location || "", block_type: w.block_type, quantity_loaded: w.quantity_loaded, batch_number: batchMap[w.batch_id] || "", driver_name: driver?.full_name || "", truck_number: w.truck_number || "", notes: w.notes || "" });
                       }}>PDF</button>
                       <button style={{ ...styles.btn("secondary"), padding: "4px 10px", fontSize: "11px" }} onClick={() => startEditWaybill(w)}>Edit</button>
                       <button style={{ ...styles.btn("danger"), padding: "4px 10px", fontSize: "11px" }} onClick={() => setConfirmDelete(w)}>Delete</button>

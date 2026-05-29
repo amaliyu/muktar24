@@ -80,8 +80,10 @@ export const ordersService = {
   },
 
   async updateOrder(id, { marketerId, items }) {
-    await supabase.from('orders').update({ marketer_id: marketerId || null }).eq('id', id)
-    await supabase.from('order_items').delete().eq('order_id', id)
+    const { error: e1 } = await supabase.from('orders').update({ marketer_id: marketerId || null }).eq('id', id)
+    if (e1) throw e1
+    const { error: e2 } = await supabase.from('order_items').delete().eq('order_id', id)
+    if (e2) throw e2
     const { error } = await supabase.from('order_items').insert(items.map(i => ({ ...i, order_id: id })))
     if (error) throw error
   },

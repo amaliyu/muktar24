@@ -1393,7 +1393,7 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
 
       <div style={{ ...styles.row, marginBottom: '16px', gap: '12px' }}>
         <div>
-          <label style={styles.label}>Week Ending (Friday)</label>
+          <label style={styles.label}>Week Ending (Saturday)</label>
           <input type="date" style={styles.input} value={weekEnding} onChange={e => setWeekEnding(getSaturday(e.target.value))} />
         </div>
         <button style={{ ...styles.btn('ghost'), marginTop: '18px' }} onClick={loadWeekData}>Load Week</button>

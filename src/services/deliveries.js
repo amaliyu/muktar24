@@ -32,7 +32,8 @@ export const waybillsService = {
       .from('waybills')
       .select(`
         *,
-        driver:driver_id(id, full_name)
+        driver:driver_id(id, full_name),
+        order:order_id(customer:customer_id(location))
       `)
       .order('waybill_date', { ascending: false })
     if (error) throw error
@@ -44,7 +45,8 @@ export const waybillsService = {
       .from('waybills')
       .select(`
         *,
-        driver:driver_id(id, full_name)
+        driver:driver_id(id, full_name),
+        order:order_id(customer:customer_id(location))
       `)
       .eq('driver_id', staffId)
       .order('waybill_date', { ascending: false })

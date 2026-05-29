@@ -65,6 +65,6 @@ export const invoicesService = {
       .select('*, payments(*)')
       .eq('order_id', orderId)
     if (error) throw error
-    return data
+    return data || []
   },
 }

@@ -243,10 +243,11 @@ export const payrollService = {
   },
 
   async markPaid(id, paymentDate, totalAmount, workerCount, payrollType, weekEnding, mdName) {
-    await supabase.from('weekly_labour_payroll').update({
+    const { error: updateErr } = await supabase.from('weekly_labour_payroll').update({
       status: 'paid',
       payment_date: paymentDate,
     }).eq('id', id)
+    if (updateErr) throw updateErr
 
     // Auto-create expense entry
     try {

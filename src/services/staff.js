@@ -7,7 +7,7 @@ export const staffService = {
       .select('*, staffRole:role_id(id, role_name, department)')
       .order('full_name')
     if (error) throw error
-    return data
+    return data || []
   },
 
   async getActive() {
@@ -17,7 +17,7 @@ export const staffService = {
       .eq('is_active', true)
       .order('full_name')
     if (error) throw error
-    return data
+    return data || []
   },
 
   async create(staff) {
