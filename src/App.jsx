@@ -806,7 +806,7 @@ const Production = () => {
 // ── ORDERS ────────────────────────────────────────────────────
 const emptyItem = () => ({ blockType: "9 Inch 3 Hole Block", quantity: "", unitPrice: "", unit: "pieces" });
 
-const Orders = ({ onNavigate }) => {
+const Orders = ({ onNavigate, userProfile }) => {
   const [orders, setOrders] = useState([]);
   const [staff, setStaff] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -836,10 +836,18 @@ const Orders = ({ onNavigate }) => {
   const [orderEditItems, setOrderEditItems] = useState([]);
   const [orderEditMarketer, setOrderEditMarketer] = useState("");
 
+  const isMarketerRole = userProfile?.role === 'marketer';
+
   const load = async () => {
     setLoading(true);
     try {
-      const [o, s, c] = await Promise.all([ordersService.getAll(), staffService.getActive(), customersService.getAll()]);
+      const fetchOrders = isMarketerRole
+        ? ordersService.getAllForMarketer(userProfile.id)
+        : ordersService.getAll();
+      const fetchCustomers = isMarketerRole
+        ? customersService.getAllForMarketer(userProfile.id)
+        : customersService.getAll();
+      const [o, s, c] = await Promise.all([fetchOrders, staffService.getActive(), fetchCustomers]);
       setOrders(o);
       setStaff(s);
       setAllCustomers(c);
@@ -1431,7 +1439,7 @@ const Orders = ({ onNavigate }) => {
 };
 
 // ── WAYBILLS ──────────────────────────────────────────────────
-const Waybills = () => {
+const Waybills = ({ userProfile }) => {
   const [waybills, setWaybills] = useState([]);
   const [staff, setStaff] = useState([]);
   const [vehicles, setVehicles] = useState([]);
@@ -1449,16 +1457,25 @@ const Waybills = () => {
   const emptyForm = { waybillDate: "", vehicleId: "", driverId: "", truckNumber: "", physicalWaybillNumber: "", blockType: "9 Inch 3 Hole Block", quantityLoaded: "", quantityReceived: "", quantityDamaged: "0", batchId: "", scheduleItemId: "", dieselLitres: "", storeOfficer: "", notes: "" };
   const [form, setForm] = useState(emptyForm);
 
+  const isDriverRole = userProfile?.role === 'driver';
+  const driverStaffId = userProfile?.staff_id;
+
   const load = async () => {
     setLoading(true);
     try {
-      const [w, s, v] = await Promise.all([waybillsService.getAll(), staffService.getActive(), vehiclesService.getActive().catch(() => [])]);
+      const fetchWaybills = isDriverRole && driverStaffId
+        ? waybillsService.getAllForDriver(driverStaffId)
+        : isDriverRole && !driverStaffId
+          ? Promise.resolve([])
+          : waybillsService.getAll();
+      const [w, s, v] = await Promise.all([fetchWaybills, staffService.getActive(), vehiclesService.getActive().catch(() => [])]);
       setWaybills(w);
       setStaff(s);
       setVehicles(v);
     } catch {
       setAlert({ type: "error", msg: "Could not load waybills." });
     }
+    if (isDriverRole) { setLoading(false); return; } // drivers don't need orders/batches/schedules
     try {
       const [orders, activeBatches, allBatches, approvedScheds] = await Promise.all([
         ordersService.getAll(),
@@ -1635,6 +1652,18 @@ const Waybills = () => {
   const totalDamaged = waybills.reduce((s, w) => s + (w.quantity_damaged || 0), 0);
   const damageRate = totalLoaded > 0 ? ((totalDamaged / totalLoaded) * 100).toFixed(2) : "0.00";
 
+  if (isDriverRole && !driverStaffId) {
+    return (
+      <div style={{ ...styles.card, textAlign: "center", padding: "48px 32px", maxWidth: "480px", margin: "40px auto" }}>
+        <div style={{ fontSize: "48px", marginBottom: "16px" }}>🚛</div>
+        <div style={{ fontWeight: "700", fontSize: "16px", color: theme.text, marginBottom: "10px" }}>Driver Record Not Linked</div>
+        <div style={{ fontSize: "13px", color: theme.textMuted, lineHeight: "1.6" }}>
+          Your account is not linked to a driver record yet. Please contact HR or the MD to link your account to your staff record so your waybills appear here.
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div>
       {confirmDelete && <ConfirmModal
@@ -1657,8 +1686,14 @@ const Waybills = () => {
           <div style={styles.pageTitle}>Waybill Records</div>
           <div style={styles.pageSubtitle}>Track every delivery trip — loaded, received, and damaged quantities</div>
         </div>
-        <button style={styles.btn("primary")} onClick={() => setShowForm(!showForm)}>+ Record Waybill</button>
+        {!isDriverRole && <button style={styles.btn("primary")} onClick={() => setShowForm(!showForm)}>+ Record Waybill</button>}
       </div>
+
+      {isDriverRole && (
+        <div style={{ background: theme.blue+'11', border: `1px solid ${theme.blue}33`, borderRadius: '8px', padding: '10px 16px', marginBottom: '16px', fontSize: '12px', color: theme.blue }}>
+          👁 Showing only waybills assigned to you.
+        </div>
+      )}
 
       {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
 
@@ -1934,7 +1969,7 @@ const CustomerForm = ({ form, setForm, staff, saving, onSubmit, onCancel, submit
 );
 
 // ── CUSTOMERS ─────────────────────────────────────────────────
-const Customers = () => {
+const Customers = ({ userProfile }) => {
   const [customers, setCustomers] = useState([]);
   const [staff, setStaff] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -1963,10 +1998,15 @@ const Customers = () => {
   const [savingSite, setSavingSite] = useState(false);
   const [stmtSiteId, setStmtSiteId] = useState("");
 
+  const isMarketer = userProfile?.role === 'marketer';
+
   const load = async () => {
     setLoading(true);
     try {
-      const [c, s] = await Promise.all([customersService.getAllWithStats(), staffService.getAll()]);
+      const fetchCustomers = isMarketer
+        ? customersService.getAllWithStatsForMarketer(userProfile.id)
+        : customersService.getAllWithStats();
+      const [c, s] = await Promise.all([fetchCustomers, staffService.getAll()]);
       setCustomers(c);
       setStaff(s);
       return c;
@@ -2143,10 +2183,15 @@ const Customers = () => {
       </div>
 
       {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
+      {isMarketer && (
+        <div style={{ background: theme.accent+'11', border: `1px solid ${theme.accent}33`, borderRadius: '8px', padding: '10px 16px', marginBottom: '16px', fontSize: '12px', color: theme.accent }}>
+          👤 Showing only customers you registered.
+        </div>
+      )}
       {showForm && !editMode && <CustomerForm form={form} setForm={setForm} staff={staff} saving={saving} onSubmit={handleSave} onCancel={() => setShowForm(false)} submitLabel="Register" />}
 
       <div style={styles.grid(3)}>
-        <StatCard label="Total Customers" value={customers.length} sub="All registered" accent={theme.blue} />
+        <StatCard label="Total Customers" value={customers.length} sub={isMarketer ? "Your customers" : "All registered"} accent={theme.blue} />
         <StatCard label="This Month" value={customers.filter(c => c.created_at?.startsWith(new Date().toISOString().slice(0, 7))).length} sub="New registrations" accent={theme.green} />
         <StatCard label="With Active Orders" value={customers.filter(c => (c.orders || []).some(o => o.status !== "completed" && o.status !== "cancelled")).length} sub="Pending/in progress" accent={theme.accent} />
       </div>
@@ -6807,11 +6852,11 @@ export default function App() {
     production: <Production />,
     inventory: <Inventory onLowStockChange={setLowStockCount} />,
     batches: <Batches />,
-    waybills: <Waybills />,
+    waybills: <Waybills userProfile={userProfile} />,
     vehicles: <VehicleRegistry />,
     staff: <Staff />,
-    customers: <Customers />,
-    orders: <Orders onNavigate={setActive} />,
+    customers: <Customers userProfile={userProfile} />,
+    orders: <Orders onNavigate={setActive} userProfile={userProfile} />,
     pending_register: <PendingDeliveryRegister />,
     daily_schedule: <DailySchedule />,
     lpo_approvals: <LPOApprovals />,

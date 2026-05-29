@@ -39,6 +39,19 @@ export const waybillsService = {
     return data
   },
 
+  async getAllForDriver(staffId) {
+    const { data, error } = await supabase
+      .from('waybills')
+      .select(`
+        *,
+        driver:driver_id(id, full_name)
+      `)
+      .eq('driver_id', staffId)
+      .order('waybill_date', { ascending: false })
+    if (error) throw error
+    return data
+  },
+
   async create(waybill) {
     const { data, error } = await supabase
       .from('waybills')

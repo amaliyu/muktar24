@@ -17,6 +17,23 @@ export const ordersService = {
     return data
   },
 
+  async getAllForMarketer(userId) {
+    const { data, error } = await supabase
+      .from('orders')
+      .select(`
+        *,
+        customer:customer_id(*),
+        marketer:marketer_id(id, full_name),
+        site:site_id(id, site_name, site_address),
+        order_items(*),
+        invoices(id, invoice_number, total_amount, issued_date, due_date, payments(id, amount_paid, payment_date, status))
+      `)
+      .eq('marketer_id', userId)
+      .order('created_at', { ascending: false })
+    if (error) throw error
+    return data
+  },
+
   async getById(id) {
     const { data, error } = await supabase
       .from('orders')
@@ -90,6 +107,16 @@ export const customersService = {
     return data
   },
 
+  async getAllForMarketer(userId) {
+    const { data, error } = await supabase
+      .from('customers')
+      .select('*')
+      .eq('added_by', userId)
+      .order('name')
+    if (error) throw error
+    return data
+  },
+
   async getAllWithStats() {
     const { data, error } = await supabase
       .from('customers')
@@ -102,6 +129,24 @@ export const customersService = {
           invoices(id, payments(amount_paid, status))
         )
       `)
+      .order('created_at', { ascending: false })
+    if (error) throw error
+    return data
+  },
+
+  async getAllWithStatsForMarketer(userId) {
+    const { data, error } = await supabase
+      .from('customers')
+      .select(`
+        *,
+        marketer:added_by(id, full_name),
+        orders(
+          id, status, created_at, site_id,
+          order_items(quantity, unit_price, subtotal),
+          invoices(id, payments(amount_paid, status))
+        )
+      `)
+      .eq('added_by', userId)
       .order('created_at', { ascending: false })
     if (error) throw error
     return data
