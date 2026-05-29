@@ -12,7 +12,7 @@ export const deliveriesService = {
       `)
       .order('delivery_date', { ascending: false })
     if (error) throw error
-    return data
+    return data || []
   },
 
   async create(delivery) {
@@ -37,7 +37,7 @@ export const waybillsService = {
       `)
       .order('waybill_date', { ascending: false })
     if (error) throw error
-    return data
+    return data || []
   },
 
   async getAllForDriver(staffId) {
@@ -51,7 +51,7 @@ export const waybillsService = {
       .eq('driver_id', staffId)
       .order('waybill_date', { ascending: false })
     if (error) throw error
-    return data
+    return data || []
   },
 
   async create(waybill) {

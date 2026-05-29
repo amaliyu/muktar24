@@ -8,7 +8,7 @@ export const paymentsService = {
       .eq('invoice_id', invoiceId)
       .order('payment_date', { ascending: false })
     if (error) throw error
-    return data
+    return data || []
   },
 
   async recordPayment(payment) {

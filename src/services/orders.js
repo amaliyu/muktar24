@@ -14,7 +14,7 @@ export const ordersService = {
       `)
       .order('created_at', { ascending: false })
     if (error) throw error
-    return data
+    return data || []
   },
 
   async getAllForMarketer(userId) {
@@ -31,7 +31,7 @@ export const ordersService = {
       .eq('marketer_id', userId)
       .order('created_at', { ascending: false })
     if (error) throw error
-    return data
+    return data || []
   },
 
   async getById(id) {
@@ -106,7 +106,7 @@ export const customersService = {
       .select('*')
       .order('name')
     if (error) throw error
-    return data
+    return data || []
   },
 
   async getAllForMarketer(userId) {
@@ -116,7 +116,7 @@ export const customersService = {
       .eq('added_by', userId)
       .order('name')
     if (error) throw error
-    return data
+    return data || []
   },
 
   async getAllWithStats() {
@@ -133,7 +133,7 @@ export const customersService = {
       `)
       .order('created_at', { ascending: false })
     if (error) throw error
-    return data
+    return data || []
   },
 
   async getAllWithStatsForMarketer(userId) {
@@ -151,7 +151,7 @@ export const customersService = {
       .eq('added_by', userId)
       .order('created_at', { ascending: false })
     if (error) throw error
-    return data
+    return data || []
   },
 
   async delete(id) {
