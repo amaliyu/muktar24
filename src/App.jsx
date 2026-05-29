@@ -116,11 +116,11 @@ const APP_ROLES = [
 const ROLE_PAGES = {
   md:                 'all',
   ico:                ['dashboard','production','inventory','batches','waybills','vehicles','staff','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','opening_balances','suppliers','products','my_profile'],
-  accountant:         ['dashboard','reports','kpi_dashboard','accounting','opening_balances','labour','my_profile'],
+  accountant:         ['dashboard','customers','orders','reports','kpi_dashboard','accounting','opening_balances','suppliers','products','my_profile'],
   board_member:       ['dashboard','production','inventory','batches','waybills','vehicles','staff','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','opening_balances','suppliers','products','my_profile'],
-  bdm:                ['dashboard','customers','orders','pending_register','daily_schedule','reports','kpi_dashboard','my_profile'],
+  bdm:                ['dashboard','customers','orders','pending_register','daily_schedule','lpo_approvals','reports','kpi_dashboard','my_profile'],
   store_officer:      ['dashboard','inventory','batches','waybills','vehicles','pending_register','daily_schedule','products','my_profile'],
-  logistics_manager:  ['dashboard','waybills','vehicles','pending_register','daily_schedule','customers','labour','my_profile'],
+  logistics_manager:  ['dashboard','waybills','vehicles','pending_register','daily_schedule','customers','my_profile'],
   marketer:           ['dashboard','customers','orders','products','my_profile'],
   driver:             ['dashboard','waybills','my_profile'],
   hr_officer:         ['dashboard','staff','reports','labour','my_profile'],
@@ -6704,6 +6704,8 @@ export default function App() {
   const [showChangePwd, setShowChangePwd] = useState(false);
   const [sessionWarning, setSessionWarning] = useState(false); // 15-min expiry warning
   const [sessionMinutes, setSessionMinutes] = useState(15);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' && window.innerWidth <= 768);
 
   // ── Auth ──────────────────────────────────────────────────
   useEffect(() => {
@@ -6741,6 +6743,17 @@ export default function App() {
     const interval = setInterval(check, 60000);
     return () => clearInterval(interval);
   }, [session]);
+
+  // ── Mobile sidebar ────────────────────────────────────────
+  useEffect(() => {
+    const onResize = () => {
+      const mobile = window.innerWidth <= 768;
+      setIsMobile(mobile);
+      if (!mobile) setSidebarOpen(false);
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   const handleExtendSession = async () => {
     try { await supabase.auth.refreshSession(); setSessionWarning(false); } catch { /* ignore */ }
@@ -6822,8 +6835,22 @@ export default function App() {
   };
 
   return (
+    <>
+    <style>{`
+      @media (max-width: 768px) {
+        * { box-sizing: border-box; }
+        table { min-width: 520px !important; }
+        div:has(> table) { overflow-x: auto !important; -webkit-overflow-scrolling: touch; }
+        input, select, textarea { font-size: 16px !important; }
+        button { touch-action: manipulation; }
+      }
+    `}</style>
     <div style={styles.app}>
-      <div style={{ ...styles.sidebar, overflowY: "auto" }}>
+      {/* Mobile overlay */}
+      {isMobile && sidebarOpen && (
+        <div onClick={() => setSidebarOpen(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 200 }} />
+      )}
+      <div style={{ ...styles.sidebar, overflowY: "auto", ...(isMobile ? { transform: sidebarOpen ? 'translateX(0)' : 'translateX(-240px)', transition: 'transform 0.25s ease', zIndex: 300 } : {}) }}>
         <div style={styles.logo}>
           <img src="/logo.png" alt="Abuja Precast Concrete Limited" style={{ width: "100%", maxWidth: "180px", marginBottom: "10px", display: "block" }} />
           <div style={styles.logoSub}>Quality Precast products. Reliable Delivery.</div>
@@ -6835,7 +6862,7 @@ export default function App() {
               {section.items.map(item => {
                 const badge = getBadge(item.id);
                 return (
-                  <div key={item.id} style={styles.navItem(active === item.id)} onClick={() => setActive(item.id)}>
+                  <div key={item.id} style={styles.navItem(active === item.id)} onClick={() => { setActive(item.id); if (isMobile) setSidebarOpen(false); }}>
                     <Icon name={item.icon} size={14} />
                     <span style={{ flex: 1 }}>{item.label}</span>
                     {badge > 0 && (
@@ -6860,7 +6887,11 @@ export default function App() {
         </div>
       </div>
       {showChangePwd && <ChangePasswordModal onClose={() => setShowChangePwd(false)} />}
-      <main style={styles.main} {...(isBoard ? { 'data-board-view': 'true' } : {})} {...(isICO ? { 'data-ico-view': 'true' } : {})}>
+      <main style={{ ...styles.main, ...(isMobile ? { marginLeft: 0, padding: '16px 14px', paddingTop: '58px' } : {}) }} {...(isBoard ? { 'data-board-view': 'true' } : {})} {...(isICO ? { 'data-ico-view': 'true' } : {})}>
+        {/* Mobile hamburger */}
+        {isMobile && (
+          <button data-board-allow data-ico-allow onClick={() => setSidebarOpen(s => !s)} style={{ position: 'fixed', top: '12px', left: '12px', zIndex: 250, background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '8px', padding: '8px 12px', cursor: 'pointer', fontSize: '18px', color: theme.text, lineHeight: 1, boxShadow: '0 2px 8px rgba(0,0,0,0.3)' }}>☰</button>
+        )}
         {sessionWarning && (
           <div style={{ background: "#7c3a0022", border: "1px solid #c47d0e88", borderRadius: "8px", padding: "10px 16px", marginBottom: "16px", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "13px", color: theme.accent }}>
             <span>⚠️ Your session expires in <strong>{sessionMinutes} minute{sessionMinutes !== 1 ? 's' : ''}</strong>. Unsaved work may be lost.</span>
@@ -6895,5 +6926,6 @@ export default function App() {
         {pages[safePage]}
       </main>
     </div>
+    </>
   );
 }
