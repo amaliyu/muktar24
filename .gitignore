@@ -32,3 +32,22 @@ coverage
 
 # Local MCP config (contains secrets)
 .mcp.json
+
+# Arcads skill pack — local-only files
+MASTER_CONTEXT.md
+.claude/skills/
+.claude/worktrees/
+.claude/settings.local.json
+.cursor/skills/
+outputs/
+output/
+references/
+!references/README.md
+__pycache__/
+*.pyc
+
+# Disposable one-off thumbnail/generation scripts
+scripts/generate-thumbnails.sh
+scripts/generate-thumbnails-*.sh
+scripts/generate-ab-variants*.sh
+scripts/regen-*.sh
