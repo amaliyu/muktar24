@@ -4153,7 +4153,7 @@ const BookkeepingTab = () => {
       expensesService.getAll(date, date),
       expenseCategoriesService.getActive(),
     ]).then(([p, ir, ex, cats]) => { setPayments(p); setIncomeList(ir); setExpenses(ex); setCategories(cats); })
-      .catch(e => setErr(e.message)).finally(() => setLoading(false));
+      .catch(e => setErr(e?.message || 'An error occurred')).finally(() => setLoading(false));
   }, [date]);
 
   useEffect(() => { suppliersService.getActive().then(setAcctSuppliers).catch(() => {}); }, []);
@@ -4165,12 +4165,12 @@ const BookkeepingTab = () => {
       setIncomeList(p => [rec, ...p]);
       setIncomeForm({ source: '', description: '', amount: '' });
       setOk('Income recorded');
-    } catch (e) { setErr(e.message); }
+    } catch (e) { setErr(e?.message || 'An error occurred'); }
   };
 
   const deleteIncome = async (id) => {
     try { await incomeRecordsService.delete(id); setIncomeList(p => p.filter(r => r.id !== id)); }
-    catch (e) { setErr(e.message); }
+    catch (e) { setErr(e?.message || 'An error occurred'); }
   };
 
   const addExpense = async () => {
@@ -4188,17 +4188,17 @@ const BookkeepingTab = () => {
       }
       setExpenseForm({ category_id: '', description: '', amount: '', vendor: '', supplierId: '' });
       setOk(status === 'pending' ? 'Submitted for MD approval (≥₦50,000)' : 'Expense recorded');
-    } catch (e) { setErr(e.message); }
+    } catch (e) { setErr(e?.message || 'An error occurred'); }
   };
 
   const approveExpense = async (id, status) => {
     try { await expensesService.updateStatus(id, status, 'MD'); setExpenses(p => p.map(e => e.id === id ? { ...e, status } : e)); }
-    catch (e) { setErr(e.message); }
+    catch (e) { setErr(e?.message || 'An error occurred'); }
   };
 
   const deleteExpense = async (id) => {
     try { await expensesService.delete(id); setExpenses(p => p.filter(e => e.id !== id)); }
-    catch (e) { setErr(e.message); }
+    catch (e) { setErr(e?.message || 'An error occurred'); }
   };
 
   const openCatManager = async () => {
@@ -4442,7 +4442,7 @@ const PLTab = () => {
       incomeRecordsService.getAll(from, to),
       expensesService.getAll(from, to),
     ]).then(([p, ir, ex]) => { setPayments(p); setIncomeRecords(ir); setExpenses(ex); })
-      .catch(e => setErr(e.message)).finally(() => setLoading(false));
+      .catch(e => setErr(e?.message || 'An error occurred')).finally(() => setLoading(false));
   };
 
   useEffect(() => { load(); }, []);
@@ -4465,7 +4465,7 @@ const PLTab = () => {
   const downloadPdf = async () => {
     setPdfLoading(true);
     try { await generatePLStatementPDF({ fromDate: from || null, toDate: to || null, payments, incomeRecords, expenses: approvedExpenses }); }
-    catch (e) { setErr(e.message); } finally { setPdfLoading(false); }
+    catch (e) { setErr(e?.message || 'An error occurred'); } finally { setPdfLoading(false); }
   };
 
   return (
@@ -4532,6 +4532,21 @@ const PLTab = () => {
   );
 };
 
+class CostTabErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { hasError: false, errMsg: '' }; }
+  static getDerivedStateFromError(e) { return { hasError: true, errMsg: e?.message || 'Unexpected error' }; }
+  render() {
+    if (this.state.hasError) return (
+      <div style={{ background: '#fff0f0', border: '1px solid #f5c6cb', borderRadius: '8px', padding: '24px', textAlign: 'center' }}>
+        <div style={{ color: '#c00', fontWeight: '700', marginBottom: '8px' }}>Cost Analysis failed to load</div>
+        <div style={{ color: '#555', fontSize: '13px', marginBottom: '16px' }}>{this.state.errMsg}</div>
+        <button onClick={() => this.setState({ hasError: false, errMsg: '' })} style={{ padding: '8px 20px', background: '#c00', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600' }}>Try Again</button>
+      </div>
+    );
+    return this.props.children;
+  }
+}
+
 const CostTab = () => {
   const now = new Date();
   const firstOfMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
@@ -4558,31 +4573,34 @@ const CostTab = () => {
         .lte('week_ending', to)
         .catch(() => ({ data: [] })),
     ]).then(([ex, pl, pr, labourRes]) => {
-      setExpenses(ex);
-      setProductionLogs(pl);
-      setProducts(pr);
+      setExpenses(Array.isArray(ex) ? ex : []);
+      setProductionLogs(Array.isArray(pl) ? pl : []);
+      setProducts(Array.isArray(pr) ? pr : []);
       const labourData = labourRes?.data || [];
       setLabourCost(labourData.reduce((s, r) => s + Number(r.total_amount || 0), 0));
-    }).catch(e => setErr(e.message)).finally(() => setLoading(false));
+    }).catch(e => setErr(e?.message || 'An error occurred')).finally(() => setLoading(false));
   };
 
   useEffect(() => { load(); }, []);
 
-  const rawExpenses = expenses.filter(e => e.status !== 'rejected').reduce((s, e) => s + Number(e.amount || 0), 0);
+  const safeExpenses = Array.isArray(expenses) ? expenses : [];
+  const safeProductionLogs = Array.isArray(productionLogs) ? productionLogs : [];
+  const safeProducts = Array.isArray(products) ? products : [];
+  const rawExpenses = safeExpenses.filter(e => e.status !== 'rejected').reduce((s, e) => s + Number(e.amount || 0), 0);
   const totalExpenses = rawExpenses + labourCost;
   const productTotals = {};
-  for (const log of productionLogs) {
+  for (const log of safeProductionLogs) {
     productTotals[log.block_type] = (productTotals[log.block_type] || 0) + Number(log.quantity_produced || 0);
   }
   const totalQty = Object.values(productTotals).reduce((s, v) => s + v, 0);
-  const productMap = Object.fromEntries(products.map(p => [p.name, p]));
+  const productMap = Object.fromEntries(safeProducts.map(p => [p.name, p]));
   const labourPerUnit = totalQty > 0 ? labourCost / totalQty : 0;
   const rawExpPerUnit = totalQty > 0 ? rawExpenses / totalQty : 0;
 
   const downloadPdf = async () => {
     setPdfLoading(true);
     try { await generateCostAnalysisPDF({ fromDate: from || null, toDate: to || null, productTotals, totalExpenses, products }); }
-    catch (e) { setErr(e.message); } finally { setPdfLoading(false); }
+    catch (e) { setErr(e?.message || 'An error occurred'); } finally { setPdfLoading(false); }
   };
 
   return (
@@ -4667,7 +4685,7 @@ const ReceivablesTab = () => {
   useEffect(() => {
     setLoading(true);
     accountingService.getReceivables()
-      .then(setReceivables).catch(e => setErr(e.message)).finally(() => setLoading(false));
+      .then(setReceivables).catch(e => setErr(e?.message || 'An error occurred')).finally(() => setLoading(false));
   }, []);
 
   const rows = [];
@@ -4693,7 +4711,7 @@ const ReceivablesTab = () => {
   const downloadPdf = async () => {
     setPdfLoading(true);
     try { await generateReceivablesPDF(receivables); }
-    catch (e) { setErr(e.message); } finally { setPdfLoading(false); }
+    catch (e) { setErr(e?.message || 'An error occurred'); } finally { setPdfLoading(false); }
   };
 
   return (
@@ -4799,7 +4817,7 @@ const ManagementTab = () => {
       };
 
       setData({ current: summarise(cp, ci, ce), previous: summarise(pp, pi, pe) });
-    } catch (e) { setErr(e.message); } finally { setLoading(false); }
+    } catch (e) { setErr(e?.message || 'An error occurred'); } finally { setLoading(false); }
   };
 
   useEffect(() => { load(month); }, []);
@@ -4829,7 +4847,7 @@ const ManagementTab = () => {
     setPdfLoading(true);
     try {
       await generateManagementAccountsPDF({ monthLabel: monthLabel(month), prevMonthLabel: monthLabel(prevMonth(month)), current: data.current, previous: data.previous });
-    } catch (e) { setErr(e.message); } finally { setPdfLoading(false); }
+    } catch (e) { setErr(e?.message || 'An error occurred'); } finally { setPdfLoading(false); }
   };
 
   return (
@@ -4983,7 +5001,7 @@ const BankAccountsTab = () => {
     if (!selected) return;
     setTxLoading(true);
     bankTransactionsService.getByAccount(selected.id, txFrom || null, txTo || null)
-      .then(setTransactions).catch(e => setErr(e.message)).finally(() => setTxLoading(false));
+      .then(setTransactions).catch(e => setErr(e?.message || 'An error occurred')).finally(() => setTxLoading(false));
   }, [selected?.id, txFrom, txTo]);
 
   const openImport = (acct) => { setImportAcct(acct.id); setImportFile(null); setImportStep('upload'); setErr(''); setOk(''); };
@@ -5058,7 +5076,7 @@ const BankAccountsTab = () => {
       if (selected?.id === importAcct) {
         bankTransactionsService.getByAccount(importAcct, txFrom || null, txTo || null).then(setTransactions).catch(() => {});
       }
-    } catch (e) { setErr(e.message); } finally { setImporting(false); }
+    } catch (e) { setErr(e?.message || 'An error occurred'); } finally { setImporting(false); }
   };
 
   const handleSaveAcct = async () => {
@@ -5194,7 +5212,7 @@ const BankAccountsTab = () => {
       await bankTransactionsService.updateMatch(matchModal.id, matchType === 'other' ? 'manual' : 'matched', matchType, null, matchNotes);
       setTransactions(t => t.map(tx => tx.id === matchModal.id ? { ...tx, match_status: matchType === 'other' ? 'manual' : 'matched', matched_to_type: matchType, notes: matchNotes } : tx));
       setMatchModal(null);
-    } catch (e) { setErr(e.message); }
+    } catch (e) { setErr(e?.message || 'An error occurred'); }
   };
 
   const filtered = transactions.filter(t => {
@@ -5764,7 +5782,7 @@ const ReconciliationTab = () => {
     bankAccountsService.getAll().then(a => {
       setAccounts(a);
       if (a.length > 0) setAccountId(a[0].id);
-    }).catch(e => setErr(e.message));
+    }).catch(e => setErr(e?.message || 'An error occurred'));
   }, []);
 
   useEffect(() => {
@@ -5801,7 +5819,7 @@ const ReconciliationTab = () => {
       });
 
       setResult({ bankTxs, payments, expenses: expenses2, bank: { openingBalance: bankOpen, totalCredits: bankCredits, totalDebits: bankDebits, closingBalance: bankClose }, system: { openingBalance: sysOpen, totalCredits: sysCredits, totalDebits: sysDebits, closingBalance: sysClose }, difference: diff, reconItems });
-    } catch (e) { setErr(e.message); }
+    } catch (e) { setErr(e?.message || 'An error occurred'); }
     finally { setLoading(false); }
   };
 
@@ -5826,7 +5844,7 @@ const ReconciliationTab = () => {
       });
       setHistory(h => [{ ...rec }, ...h]);
       setOk(Math.abs(result.difference) < 0.01 ? 'Reconciliation completed and saved!' : 'Reconciliation saved as draft (difference exists)');
-    } catch (e) { setErr(e.message); }
+    } catch (e) { setErr(e?.message || 'An error occurred'); }
     finally { setSaving(false); }
   };
 
@@ -5845,7 +5863,7 @@ const ReconciliationTab = () => {
         reconciledBy,
         notes: reconNotes,
       });
-    } catch (e) { setErr(e.message); }
+    } catch (e) { setErr(e?.message || 'An error occurred'); }
     finally { setPdfLoading(false); }
   };
 
@@ -5972,7 +5990,7 @@ const ReceiptsTab = () => {
   const loadReceipts = () => {
     setLoading(true);
     receiptsService.getAll(rfrom || null, rto || null, rsearch || null)
-      .then(setReceipts).catch(e => setErr(e.message)).finally(() => setLoading(false));
+      .then(setReceipts).catch(e => setErr(e?.message || 'An error occurred')).finally(() => setLoading(false));
   };
 
   useEffect(() => {
@@ -5992,7 +6010,7 @@ const ReceiptsTab = () => {
       setUploadForm({ receipt_date: today, vendor_name: '', amount: '', tax_category: '', notes: '', expense_id: '' });
       setOk(`Receipt ${rec.receipt_number} uploaded`);
       receiptsService.getMissingReceiptExpenses().then(setMissingCount).catch(() => {});
-    } catch (e) { setErr(e.message); }
+    } catch (e) { setErr(e?.message || 'An error occurred'); }
     finally { setUploading(false); }
   };
 
@@ -6000,7 +6018,7 @@ const ReceiptsTab = () => {
     try {
       await receiptsService.delete(r.id, r.file_url);
       setReceipts(rs => rs.filter(x => x.id !== r.id));
-    } catch (e) { setErr(e.message); }
+    } catch (e) { setErr(e?.message || 'An error occurred'); }
   };
 
   const exportTaxPackage = async () => {
@@ -6170,7 +6188,7 @@ const Accounting = ({ userProfile }) => {
       </div>
       {tab === 'bookkeeping' && <BookkeepingTab />}
       {tab === 'pl' && <PLTab />}
-      {tab === 'cost' && <CostTab />}
+      {tab === 'cost' && <CostTabErrorBoundary><CostTab /></CostTabErrorBoundary>}
       {tab === 'receivables' && <ReceivablesTab />}
       {tab === 'management' && <ManagementTab />}
       {tab === 'bank' && <BankAccountsTab />}
@@ -6199,7 +6217,7 @@ const ChangePasswordModal = ({ onClose }) => {
       setOk('Password changed successfully.');
       setNewPwd(''); setConfirmPwd('');
       setTimeout(onClose, 1500);
-    } catch(e) { setErr(e.message); }
+    } catch(e) { setErr(e?.message || 'An error occurred'); }
     finally { setSaving(false); }
   };
 
@@ -6474,7 +6492,7 @@ const UserManagement = ({ userProfile }) => {
   useEffect(() => {
     Promise.all([authService.listUsers(), authService.getStaffList()])
       .then(([u, s]) => { setUsers(u); setStaffList(s); })
-      .catch(e => setErr(e.message))
+      .catch(e => setErr(e?.message || 'An error occurred'))
       .finally(() => setLoading(false));
   }, []);
 
@@ -6516,21 +6534,21 @@ const UserManagement = ({ userProfile }) => {
       setOk(`${form.full_name} created. Share the temporary password with them.`);
       setTimeout(() => setOk(''), 5000);
       resetForm(); setShowCreate(false);
-    } catch(e) { setErr(e.message); }
+    } catch(e) { setErr(e?.message || 'An error occurred'); }
     finally { setCreating(false); }
   };
 
   const updateRole = async (id, role) => {
     try { await authService.updateUserRole(id, role); setUsers(p => p.map(u => u.id === id ? {...u, role} : u)); setOk('Role updated'); setTimeout(() => setOk(''), 2000); }
-    catch(e) { setErr(e.message); }
+    catch(e) { setErr(e?.message || 'An error occurred'); }
   };
   const toggleActive = async (id, isActive) => {
     try { await authService.toggleUserActive(id, isActive); setUsers(p => p.map(u => u.id === id ? {...u, is_active: isActive} : u)); }
-    catch(e) { setErr(e.message); }
+    catch(e) { setErr(e?.message || 'An error occurred'); }
   };
   const handleResetPwd = async (email, name) => {
     try { await authService.resetPassword(email); setOk(`Password reset email sent to ${name}.`); setTimeout(() => setOk(''), 4000); }
-    catch(e) { setErr(e.message); }
+    catch(e) { setErr(e?.message || 'An error occurred'); }
   };
 
   const isMD = userProfile?.role === 'md';
