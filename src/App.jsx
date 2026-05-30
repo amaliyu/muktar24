@@ -4560,25 +4560,30 @@ const CostTab = () => {
   const [err, setErr] = useState('');
   const [pdfLoading, setPdfLoading] = useState(false);
 
-  const load = () => {
+  const load = async () => {
     setLoading(true);
-    Promise.all([
-      expensesService.getAll(from, to),
-      accountingService.getProductionTotals(from, to),
-      productsService.getActive().catch(() => []),
-      supabase.from('weekly_labour_payroll')
-        .select('total_amount')
-        .in('status', ['paid', 'md_approved'])
-        .gte('week_ending', from)
-        .lte('week_ending', to)
-        .catch(() => ({ data: [] })),
-    ]).then(([ex, pl, pr, labourRes]) => {
+    setErr('');
+    try {
+      const [ex, pl, pr, labourRes] = await Promise.all([
+        expensesService.getAll(from, to),
+        accountingService.getProductionTotals(from, to),
+        productsService.getActive().catch(() => []),
+        supabase.from('weekly_labour_payroll')
+          .select('total_amount')
+          .in('status', ['paid', 'md_approved'])
+          .gte('week_ending', from)
+          .lte('week_ending', to),
+      ]);
       setExpenses(Array.isArray(ex) ? ex : []);
       setProductionLogs(Array.isArray(pl) ? pl : []);
       setProducts(Array.isArray(pr) ? pr : []);
       const labourData = labourRes?.data || [];
       setLabourCost(labourData.reduce((s, r) => s + Number(r.total_amount || 0), 0));
-    }).catch(e => setErr(e?.message || 'An error occurred')).finally(() => setLoading(false));
+    } catch (e) {
+      setErr(e?.message || 'Failed to load cost analysis');
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => { load(); }, []);
