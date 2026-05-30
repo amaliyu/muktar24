@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, Component } from "react";
 import { supabase } from './lib/supabase';
 import { authService } from './services/authService';
 import LoginScreen from './components/LoginScreen';
@@ -4532,7 +4532,7 @@ const PLTab = () => {
   );
 };
 
-class CostTabErrorBoundary extends React.Component {
+class CostTabErrorBoundary extends Component {
   constructor(props) { super(props); this.state = { hasError: false, errMsg: '' }; }
   static getDerivedStateFromError(e) { return { hasError: true, errMsg: e?.message || 'Unexpected error' }; }
   render() {
