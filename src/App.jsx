@@ -115,9 +115,9 @@ const APP_ROLES = [
 // Pages each role is allowed to access. 'all' = unrestricted.
 const ROLE_PAGES = {
   md:                 'all',
-  ico:                ['dashboard','production','inventory','batches','waybills','vehicles','staff','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','opening_balances','suppliers','products','my_profile'],
-  accountant:         ['dashboard','customers','orders','reports','kpi_dashboard','accounting','opening_balances','suppliers','products','my_profile'],
-  board_member:       ['dashboard','production','inventory','batches','waybills','vehicles','staff','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','opening_balances','suppliers','products','my_profile'],
+  ico:                ['dashboard','production','inventory','batches','waybills','vehicles','staff','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile'],
+  accountant:         ['dashboard','customers','orders','reports','kpi_dashboard','accounting','suppliers','products','my_profile'],
+  board_member:       ['dashboard','production','inventory','batches','waybills','vehicles','staff','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile'],
   bdm:                ['dashboard','customers','orders','pending_register','daily_schedule','lpo_approvals','reports','kpi_dashboard','my_profile'],
   store_officer:      ['dashboard','inventory','batches','waybills','vehicles','pending_register','daily_schedule','products','my_profile'],
   logistics_manager:  ['dashboard','waybills','vehicles','pending_register','daily_schedule','customers','my_profile'],
@@ -4635,6 +4635,12 @@ const CostTab = () => {
               </div>
             </div>
           )}
+          {Object.entries(productTotals).length > 0 && totalExpenses === 0 && (
+            <div style={{ ...styles.card, marginBottom: '16px', borderLeft: `4px solid ${theme.accent}`, color: theme.textMuted, fontSize: '13px' }}>
+              <strong style={{ color: theme.text }}>No expense or labour records found for selected period.</strong>
+              {' '}Record expenses in Daily Bookkeeping to see cost analysis. Labour costs pull from paid payroll entries in Labour Management.
+            </div>
+          )}
           <div style={styles.card}>
             <div style={styles.sectionTitle}>Cost per Product (including Labour)</div>
             <table style={styles.table}>
@@ -6161,6 +6167,7 @@ const ReceiptsTab = () => {
 
 const Accounting = ({ userProfile }) => {
   const [tab, setTab] = useState('bookkeeping');
+  const isFinanceAdmin = userProfile?.role === 'md' || userProfile?.role === 'accountant';
   const TABS = [
     { id: 'bookkeeping', label: 'Daily Bookkeeping' },
     { id: 'pl', label: 'P&L Statement' },
@@ -6170,6 +6177,7 @@ const Accounting = ({ userProfile }) => {
     { id: 'bank', label: 'Bank Accounts' },
     { id: 'reconciliation', label: 'Reconciliation' },
     { id: 'receipts', label: 'Receipts' },
+    ...(isFinanceAdmin ? [{ id: 'opening_balances', label: 'Opening Balances' }] : []),
     { id: 'financial_statements', label: '📊 Financial Statements' },
   ];
   return (
@@ -6199,6 +6207,7 @@ const Accounting = ({ userProfile }) => {
       {tab === 'bank' && <BankAccountsTab />}
       {tab === 'reconciliation' && <ReconciliationTab />}
       {tab === 'receipts' && <ReceiptsTab />}
+      {tab === 'opening_balances' && <OpeningBalances userProfile={userProfile} />}
       {tab === 'financial_statements' && <FinancialStatements userProfile={userProfile} />}
     </div>
   );
@@ -6467,7 +6476,6 @@ const navItems = [
   { section: "Settings", items: [
     { id: "products", label: "Products", icon: "products" },
     { id: "suppliers", label: "Suppliers", icon: "supplier" },
-    { id: "opening_balances", label: "Opening Balances", icon: "orders" },
     { id: "user_management", label: "User Management", icon: "staff" },
   ]},
   { section: "Account", items: [
@@ -6889,7 +6897,6 @@ export default function App() {
     products: <Products />,
     suppliers: <SupplierRegistry />,
     accounting: <Accounting userProfile={userProfile} />,
-    opening_balances: <OpeningBalances userProfile={userProfile} />,
     user_management: <UserManagement userProfile={userProfile} />,
     labour: <Labour userProfile={userProfile} />,
     my_profile: <MyProfile userProfile={userProfile} />,
