@@ -129,6 +129,27 @@ const ROLE_PAGES = {
   staff:              ['dashboard'],
 };
 
+// ── ERROR BOUNDARY ───────────────────────────────────────────
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ padding: '32px', color: '#f06b6b', background: '#21263a', borderRadius: '12px', border: '1px solid #f06b6b44' }}>
+          <div style={{ fontWeight: '700', marginBottom: '8px' }}>Something went wrong</div>
+          <div style={{ fontSize: '13px', color: '#7c839e' }}>{this.state.error.message}</div>
+          <button
+            style={{ marginTop: '16px', padding: '8px 18px', borderRadius: '8px', background: '#f06b6b', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: '600', fontSize: '13px' }}
+            onClick={() => this.setState({ error: null })}
+          >Try again</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 // ── UI HELPERS ───────────────────────────────────────────────
 const Spinner = () => (
   <div style={{ padding: "40px", textAlign: "center", color: theme.textMuted, fontSize: "13px" }}>Loading…</div>
@@ -4327,19 +4348,24 @@ const CostTab = () => {
       expensesService.getAll(from, to),
       accountingService.getProductionTotals(from, to),
       productsService.getActive().catch(() => []),
-    ]).then(([ex, pl, pr]) => { setExpenses(ex); setProductionLogs(pl); setProducts(pr); })
-      .catch(e => setErr(e.message)).finally(() => setLoading(false));
+    ]).then(([ex, pl, pr]) => {
+      setExpenses(Array.isArray(ex) ? ex : []);
+      setProductionLogs(Array.isArray(pl) ? pl : []);
+      setProducts(Array.isArray(pr) ? pr : []);
+    }).catch(e => setErr(e?.message || String(e) || 'Failed to load'))
+      .finally(() => setLoading(false));
   };
 
   useEffect(() => { load(); }, []);
 
-  const totalExpenses = expenses.filter(e => e.status !== 'rejected').reduce((s, e) => s + Number(e.amount || 0), 0);
+  const totalExpenses = expenses.filter(e => e?.status !== 'rejected').reduce((s, e) => s + Number(e?.amount || 0), 0);
   const productTotals = {};
   for (const log of productionLogs) {
+    if (!log?.block_type) continue;
     productTotals[log.block_type] = (productTotals[log.block_type] || 0) + Number(log.quantity_produced || 0);
   }
   const totalQty = Object.values(productTotals).reduce((s, v) => s + v, 0);
-  const productMap = Object.fromEntries(products.map(p => [p.name, p]));
+  const productMap = Object.fromEntries(products.filter(p => p?.name).map(p => [p.name, p]));
 
   const downloadPdf = async () => {
     setPdfLoading(true);
@@ -5917,7 +5943,7 @@ const Accounting = ({ userProfile }) => {
       </div>
       {tab === 'bookkeeping' && <BookkeepingTab />}
       {tab === 'pl' && <PLTab />}
-      {tab === 'cost' && <CostTab />}
+      {tab === 'cost' && <ErrorBoundary key="cost"><CostTab /></ErrorBoundary>}
       {tab === 'receivables' && <ReceivablesTab />}
       {tab === 'management' && <ManagementTab />}
       {tab === 'bank' && <BankAccountsTab />}
