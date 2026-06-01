@@ -536,12 +536,21 @@ function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCanc
     supabase.from('daily_roster_entries').select('*').eq('roster_id', editRoster.id).then(({ data }) => {
       if (data) setEntries(data.map(e => ({
         labour_id: e.labour_id, role_id: e.role_id, base_rate: e.base_rate,
-        bonus_applicable: e.bonus_applicable, total_pay: e.total_pay, notes: e.notes || '',
+        attendance_type: e.attendance_type || 'full_day',
+        manual_amount: e.manual_amount != null ? String(e.manual_amount) : '',
+        bonus_applicable: e.bonus_applicable || false,
+        bonus_amount: e.bonus_amount || 0,
+        bonus_description: e.bonus_description || '',
+        advance_amount: e.advance_amount || 0,
+        deduction_amount: e.deduction_amount || 0,
+        deduction_reason: e.deduction_reason || '',
+        net_pay: e.net_pay || e.total_pay || 0,
+        notes: e.notes || '',
       })))
     })
   }, [editRoster])
 
-  const addRow = () => setEntries(e => [...e, { labour_id: '', role_id: '', base_rate: 0, bonus_applicable: false, total_pay: 0, notes: '' }])
+  const addRow = () => setEntries(e => [...e, { labour_id: '', role_id: '', base_rate: 0, attendance_type: 'full_day', manual_amount: '', bonus_applicable: false, bonus_amount: 0, bonus_description: '', advance_amount: 0, deduction_amount: 0, deduction_reason: '', net_pay: 0, notes: '' }])
   const removeRow = (i) => setEntries(e => e.filter((_, j) => j !== i))
 
   const updateRow = (i, field, value) => {
@@ -568,6 +577,12 @@ function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCanc
         const role = roles.find(r => String(r.id) === String(row.role_id))
         row.total_pay = Number(row.base_rate) + (value ? Number(role?.target_bonus || 0) : 0)
       }
+      // recompute net pay
+      let baseForNet = Number(row.base_rate) || 0
+      if (row.attendance_type === 'half_day') baseForNet = baseForNet / 2
+      if (row.attendance_type === 'absent') baseForNet = 0
+      if (row.manual_amount !== '' && row.manual_amount != null && row.manual_amount !== undefined) baseForNet = Number(row.manual_amount) || 0
+      row.net_pay = baseForNet + (Number(row.bonus_amount) || 0) - (Number(row.advance_amount) || 0) - (Number(row.deduction_amount) || 0)
       next[i] = row
       return next
     })
@@ -583,7 +598,13 @@ function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCanc
     }))
   }, [targetMet, roles])
 
-  const grandTotal = entries.reduce((s, e) => s + Number(e.total_pay || 0), 0)
+  const grandTotal = entries.reduce((s, e) => {
+    let base = Number(e.base_rate) || 0
+    if (e.attendance_type === 'half_day') base = base / 2
+    if (e.attendance_type === 'absent') base = 0
+    if (e.manual_amount !== '' && e.manual_amount != null) base = Number(e.manual_amount) || 0
+    return s + base + (Number(e.bonus_amount) || 0) - (Number(e.advance_amount) || 0) - (Number(e.deduction_amount) || 0)
+  }, 0)
 
   const handleSave = async (submit = false) => {
     if (!date) return setErr('Date is required.')
@@ -596,8 +617,22 @@ function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCanc
     const entryRows = (rosterId) => entries.map(e => ({
       roster_id: rosterId, labour_id: e.labour_id, role_id: e.role_id,
       base_rate: e.base_rate,
+      attendance_type: e.attendance_type || 'full_day',
+      manual_amount: e.manual_amount !== '' ? Number(e.manual_amount) : null,
       target_bonus: (() => { const r = roles.find(x => String(x.id) === String(e.role_id)); return r?.target_bonus || 0 })(),
-      bonus_applicable: e.bonus_applicable, total_pay: e.total_pay, notes: e.notes,
+      bonus_applicable: e.bonus_applicable, bonus_amount: Number(e.bonus_amount) || 0,
+      bonus_description: e.bonus_description || null,
+      advance_amount: Number(e.advance_amount) || 0,
+      deduction_amount: Number(e.deduction_amount) || 0,
+      deduction_reason: e.deduction_reason || null,
+      net_pay: (() => {
+        let base = Number(e.base_rate) || 0
+        if (e.attendance_type === 'half_day') base = base / 2
+        if (e.attendance_type === 'absent') base = 0
+        if (e.manual_amount !== '' && e.manual_amount != null) base = Number(e.manual_amount) || 0
+        return base + (Number(e.bonus_amount) || 0) - (Number(e.advance_amount) || 0) - (Number(e.deduction_amount) || 0)
+      })(),
+      total_pay: Number(e.total_pay || e.net_pay || 0), notes: e.notes,
     }))
 
     if (isEdit) {
@@ -652,42 +687,65 @@ function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCanc
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead style={{ background: theme.surface }}>
             <tr>
-              {['Worker', 'Role', 'Base Rate', 'Bonus?', 'Total Pay', 'Notes', ''].map(h => <th key={h} style={styles.th}>{h}</th>)}
+              {['Worker', 'Role', 'Attendance', 'Rate', 'Bonus (₦)', 'Advance (₦)', 'Deduction (₦)', 'Net Pay', 'Notes', ''].map(h => <th key={h} style={styles.th}>{h}</th>)}
             </tr>
           </thead>
           <tbody>
             {entries.map((row, i) => {
               const selectedRole = roles.find(r => String(r.id) === String(row.role_id))
+              const baseForDisplay = row.attendance_type === 'absent' ? 0 : row.attendance_type === 'half_day' ? (Number(row.base_rate) || 0) / 2 : (Number(row.base_rate) || 0)
+              const netPay = (() => {
+                let base = row.manual_amount !== '' && row.manual_amount != null ? Number(row.manual_amount) || 0 : baseForDisplay
+                return base + (Number(row.bonus_amount) || 0) - (Number(row.advance_amount) || 0) - (Number(row.deduction_amount) || 0)
+              })()
               return (
-                <tr key={i}>
+                <tr key={i} style={{ background: row.attendance_type === 'absent' ? theme.red + '08' : 'transparent' }}>
                   <td style={styles.td}>
-                    <select style={{ ...styles.input, width: '180px' }} value={row.labour_id} onChange={e => updateRow(i, 'labour_id', e.target.value)}>
+                    <select style={{ ...styles.input, width: '160px' }} value={row.labour_id} onChange={e => updateRow(i, 'labour_id', e.target.value)}>
                       <option value="">— Select —</option>
                       {activePool.map(w => <option key={w.id} value={w.id}>{w.full_name}</option>)}
                     </select>
                   </td>
                   <td style={styles.td}>
-                    <select style={{ ...styles.input, width: '160px' }} value={row.role_id} onChange={e => updateRow(i, 'role_id', e.target.value)}>
+                    <select style={{ ...styles.input, width: '140px' }} value={row.role_id} onChange={e => updateRow(i, 'role_id', e.target.value)}>
                       <option value="">— Select —</option>
                       {roles.map(r => <option key={r.id} value={r.id}>{r.role_name}</option>)}
                     </select>
                   </td>
-                  <td style={styles.td}><span style={{ color: theme.textMuted }}>{naira(row.base_rate)}</span></td>
                   <td style={styles.td}>
-                    <input type="checkbox" checked={row.bonus_applicable} onChange={e => updateRow(i, 'bonus_applicable', e.target.checked)} />
-                    {selectedRole?.target_bonus ? <span style={{ marginLeft: '4px', fontSize: '11px', color: theme.textMuted }}>{naira(selectedRole.target_bonus)}</span> : null}
+                    <div style={{ display: 'flex', gap: '4px' }}>
+                      {['full_day', 'half_day', 'absent'].map(at => (
+                        <button key={at} type="button" onClick={() => updateRow(i, 'attendance_type', at)} style={{ padding: '4px 8px', fontSize: '11px', fontWeight: row.attendance_type === at ? '700' : '400', borderRadius: '5px', border: `1px solid ${row.attendance_type === at ? (at === 'absent' ? theme.red : at === 'half_day' ? theme.accent : theme.green) : theme.border}`, background: row.attendance_type === at ? (at === 'absent' ? theme.red + '22' : at === 'half_day' ? theme.accent + '22' : theme.green + '22') : theme.surface, color: row.attendance_type === at ? (at === 'absent' ? theme.red : at === 'half_day' ? theme.accent : theme.green) : theme.textMuted, cursor: 'pointer' }}>
+                          {at === 'full_day' ? 'Full' : at === 'half_day' ? 'Half' : 'Absent'}
+                        </button>
+                      ))}
+                    </div>
+                    <div style={{ fontSize: '10px', color: theme.textMuted, marginTop: '2px' }}>{naira(baseForDisplay)}</div>
+                    <input style={{ ...styles.input, width: '90px', marginTop: '4px', fontSize: '12px' }} placeholder="Override ₦" value={row.manual_amount} onChange={e => updateRow(i, 'manual_amount', e.target.value)} />
                   </td>
-                  <td style={styles.td}><strong style={{ color: theme.green }}>{naira(row.total_pay)}</strong></td>
-                  <td style={styles.td}><input style={{ ...styles.input, width: '120px' }} value={row.notes} onChange={e => updateRow(i, 'notes', e.target.value)} /></td>
+                  <td style={{ ...styles.td, color: theme.textMuted, fontSize: '12px' }}>{naira(baseForDisplay)}</td>
+                  <td style={styles.td}>
+                    <input style={{ ...styles.input, width: '80px', fontSize: '12px' }} placeholder="₦0" value={row.bonus_amount || ''} onChange={e => updateRow(i, 'bonus_amount', e.target.value)} />
+                    <input style={{ ...styles.input, width: '100px', marginTop: '3px', fontSize: '11px' }} placeholder="Description" value={row.bonus_description} onChange={e => updateRow(i, 'bonus_description', e.target.value)} />
+                  </td>
+                  <td style={styles.td}>
+                    <input style={{ ...styles.input, width: '80px', fontSize: '12px', color: theme.red }} placeholder="₦0" value={row.advance_amount || ''} onChange={e => updateRow(i, 'advance_amount', e.target.value)} />
+                  </td>
+                  <td style={styles.td}>
+                    <input style={{ ...styles.input, width: '80px', fontSize: '12px', color: theme.red }} placeholder="₦0" value={row.deduction_amount || ''} onChange={e => updateRow(i, 'deduction_amount', e.target.value)} />
+                    <input style={{ ...styles.input, width: '100px', marginTop: '3px', fontSize: '11px' }} placeholder="Reason" value={row.deduction_reason} onChange={e => updateRow(i, 'deduction_reason', e.target.value)} />
+                  </td>
+                  <td style={styles.td}><strong style={{ color: theme.green }}>{naira(netPay)}</strong></td>
+                  <td style={styles.td}><input style={{ ...styles.input, width: '100px' }} value={row.notes} onChange={e => updateRow(i, 'notes', e.target.value)} /></td>
                   <td style={styles.td}><button style={{ ...styles.btn('danger'), padding: '4px 8px' }} onClick={() => removeRow(i)}>×</button></td>
                 </tr>
               )
             })}
-            {entries.length === 0 && <tr><td colSpan={7} style={{ ...styles.td, textAlign: 'center', color: theme.textMuted }}>No workers added yet.</td></tr>}
+            {entries.length === 0 && <tr><td colSpan={10} style={{ ...styles.td, textAlign: 'center', color: theme.textMuted }}>No workers added yet.</td></tr>}
           </tbody>
           <tfoot>
             <tr style={{ background: theme.surface }}>
-              <td colSpan={4} style={{ ...styles.td, fontWeight: '700', textAlign: 'right' }}>Grand Total</td>
+              <td colSpan={7} style={{ ...styles.td, fontWeight: '700', textAlign: 'right' }}>Grand Total (Net Pay)</td>
               <td style={{ ...styles.td, fontWeight: '700', color: theme.accent }}>{naira(grandTotal)}</td>
               <td colSpan={2} />
             </tr>
@@ -1167,12 +1225,38 @@ function LoadingLogForm({ waybills, pool, userProfile, onSave, onCancel }) {
 
 function LoadingWeeklySummary({ logs, pool, userProfile, onRefresh }) {
   const [alert, setAlert] = useState(null)
+  const [filter, setFilter] = useState('all_unpaid')
+  const [customFrom, setCustomFrom] = useState('')
+  const [customTo, setCustomTo] = useState('')
+
+  const todaySat = getSaturday(todayStr())
+  const lastSat = (() => {
+    const d = new Date(todaySat)
+    d.setDate(d.getDate() - 7)
+    return d.toISOString().split('T')[0]
+  })()
+
+  const filteredLogs = logs.filter(l => {
+    const week = l.payment_week_ending || ''
+    if (filter === 'all_unpaid') return l.payment_status === 'unpaid'
+    if (filter === 'this_week') return week === todaySat
+    if (filter === 'last_week') return week === lastSat
+    if (filter === 'custom') {
+      if (customFrom && week < customFrom) return false
+      if (customTo && week > customTo) return false
+      return true
+    }
+    return true
+  })
+
   const groups = {}
-  logs.forEach(l => {
+  filteredLogs.forEach(l => {
     const key = l.payment_week_ending || 'Unknown'
     if (!groups[key]) groups[key] = []
     groups[key].push(l)
   })
+
+  const canSubmit = ['production_manager', 'hr_officer', 'accountant', 'logistics_manager', 'ico', 'md'].includes(userProfile?.role)
 
   const handleSubmitPayment = async (week) => {
     const weekLogs = logs.filter(l => l.payment_week_ending === week && l.payment_status === 'unpaid')
@@ -1183,12 +1267,31 @@ function LoadingWeeklySummary({ logs, pool, userProfile, onRefresh }) {
       worker_count: weekLogs.length, status: 'draft', prepared_by: userProfile?.full_name,
     })
     if (error) setAlert({ msg: error.message, type: 'error' })
-    else setAlert({ msg: 'Loading payroll submitted.', type: 'success' })
+    else { setAlert({ msg: 'Loading payroll submitted for approval.', type: 'success' }); if (onRefresh) onRefresh() }
   }
 
   return (
     <div>
       {alert && <AlertBar msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
+      <div style={{ ...styles.row, marginBottom: '16px', gap: '8px', flexWrap: 'wrap' }}>
+        {[
+          { id: 'all_unpaid', label: 'All Unpaid' },
+          { id: 'this_week', label: 'This Week' },
+          { id: 'last_week', label: 'Last Week' },
+          { id: 'custom', label: 'Custom Range' },
+        ].map(f => (
+          <button key={f.id} style={styles.tab(filter === f.id)} onClick={() => setFilter(f.id)}>{f.label}</button>
+        ))}
+        {filter === 'custom' && (
+          <>
+            <input type="date" style={{ ...styles.input, width: '140px' }} value={customFrom} onChange={e => setCustomFrom(e.target.value)} placeholder="From" />
+            <input type="date" style={{ ...styles.input, width: '140px' }} value={customTo} onChange={e => setCustomTo(e.target.value)} placeholder="To" />
+          </>
+        )}
+      </div>
+      {Object.keys(groups).length === 0 && (
+        <div style={{ ...styles.card, textAlign: 'center', color: theme.textMuted }}>No loading records match this filter.</div>
+      )}
       {Object.entries(groups).sort(([a], [b]) => b.localeCompare(a)).map(([week, weekLogs]) => {
         const loaderTotals = {}
         weekLogs.forEach(l => {
@@ -1197,7 +1300,7 @@ function LoadingWeeklySummary({ logs, pool, userProfile, onRefresh }) {
           ;(l.loaders || []).forEach(x => {
             const lid = x.labour_id
             const worker = pool.find(w => w.id === lid)
-            if (!loaderTotals[lid]) loaderTotals[lid] = { name: worker?.full_name || '?', blocks: 0, earned: 0 }
+            if (!loaderTotals[lid]) loaderTotals[lid] = { name: worker?.full_name || '?', bank: worker?.bank_name || '—', account: worker?.account_number || '—', blocks: 0, earned: 0 }
             loaderTotals[lid].blocks += Number(l.blocks_loaded || 0) / loaderCount
             loaderTotals[lid].earned += split
           })
@@ -1216,17 +1319,19 @@ function LoadingWeeklySummary({ logs, pool, userProfile, onRefresh }) {
                 <div style={{ textAlign: 'right' }}>
                   <div style={{ fontWeight: '700', fontSize: '18px', color: theme.accent }}>{naira(weekTotal)}</div>
                 </div>
-                {unpaid && ['production_manager', 'hr_officer', 'accountant'].includes(userProfile?.role) && (
-                  <button style={styles.btn('primary')} onClick={() => handleSubmitPayment(week)}>Submit for Payment</button>
+                {unpaid && canSubmit && (
+                  <button style={styles.btn('primary')} onClick={() => handleSubmitPayment(week)}>Submit for Approval</button>
                 )}
               </div>
             </div>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead><tr>{['Loader Name', 'Total Blocks', 'Total Earned'].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
+              <thead><tr>{['Loader Name', 'Bank', 'Account No.', 'Total Blocks', 'Total Earned'].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
               <tbody>
                 {Object.values(loaderTotals).map((lt, i) => (
                   <tr key={i}>
                     <td style={styles.td}>{lt.name}</td>
+                    <td style={styles.td}>{lt.bank}</td>
+                    <td style={styles.td}>{lt.account}</td>
                     <td style={styles.td}>{Math.round(lt.blocks)}</td>
                     <td style={{ ...styles.td, color: theme.accent, fontWeight: '600' }}>{naira(lt.earned)}</td>
                   </tr>
@@ -1862,7 +1967,7 @@ function ProposeRateForm({ roles, userProfile, onSave, onCancel }) {
 
 // ── MAIN COMPONENT ────────────────────────────────────────────────────────────
 export default function Labour({ userProfile }) {
-  const [activeTab, setActiveTab] = useState('pool')
+  const [activeTab, setActiveTab] = useState(userProfile?.role === 'logistics_manager' ? 'truck' : 'pool')
   const [roles, setRoles] = useState([])
   const [pool, setPool] = useState([])
   const [loading, setLoading] = useState(true)
@@ -1881,14 +1986,17 @@ export default function Labour({ userProfile }) {
 
   useEffect(() => { loadSharedData() }, [loadSharedData])
 
-  const TABS = [
-    { key: 'pool', label: 'Labour Pool' },
-    { key: 'roster', label: 'Daily Roster' },
-    { key: 'truck', label: 'Truck Loading' },
-    { key: 'payroll', label: 'Payroll' },
-    { key: 'monthly', label: 'Monthly Fixed' },
-    { key: 'rates', label: 'Labour Rates' },
-  ]
+  const isLogistics = userProfile?.role === 'logistics_manager'
+  const TABS = isLogistics
+    ? [{ key: 'truck', label: 'Truck Loading' }]
+    : [
+      { key: 'pool', label: 'Labour Pool' },
+      { key: 'roster', label: 'Daily Roster' },
+      { key: 'truck', label: 'Truck Loading' },
+      { key: 'payroll', label: 'Payroll' },
+      { key: 'monthly', label: 'Monthly Fixed' },
+      { key: 'rates', label: 'Labour Rates' },
+    ]
 
   return (
     <div style={styles.page}>

@@ -28,7 +28,7 @@ const expiryColor = (d) => {
   return theme.green
 }
 
-const VEHICLE_TYPES = ['Tipper', 'Flatbed', 'Pickup', 'Hijet', 'Other']
+const VEHICLE_TYPES = ['Tipper', 'Flatbed', 'Pickup', 'Hijet', 'Rental', 'Other']
 const MAINTENANCE_TYPES = ['Routine', 'Repair', 'Tyres', 'Engine', 'Electrical', 'Other']
 const DOC_LABELS = ['Insurance Certificate', 'Road Worthiness Certificate', 'Vehicle Licence', 'Purchase Document', 'Other']
 
@@ -74,7 +74,7 @@ const StatCard = ({ label, value, sub, color = theme.accent }) => (
 
 // ── VEHICLE FORM ─────────────────────────────────────────────────
 const VehicleForm = ({ vehicle, staff, onSave, onCancel }) => {
-  const empty = { vehicle_number: '', vehicle_name: '', vehicle_type: 'Tipper', make: '', model: '', year: '', color: '', capacity_blocks: '', assigned_driver_id: '', ownership: 'company_owned', status: 'active', insurance_expiry_date: '', road_worthiness_expiry_date: '', purchase_date: '', purchase_price: '', notes: '' }
+  const empty = { vehicle_number: '', vehicle_name: '', vehicle_type: 'Tipper', make: '', model: '', year: '', color: '', capacity_blocks: '', assigned_driver_id: '', ownership: 'company_owned', status: 'active', insurance_expiry_date: '', road_worthiness_expiry_date: '', purchase_date: '', purchase_price: '', owner_name: '', owner_phone: '', monthly_rental_amount: '', contract_start_date: '', notes: '' }
   const [form, setForm] = useState(vehicle ? { ...empty, ...vehicle, assigned_driver_id: vehicle.assigned_driver_id || '', insurance_expiry_date: vehicle.insurance_expiry_date || '', road_worthiness_expiry_date: vehicle.road_worthiness_expiry_date || '', purchase_date: vehicle.purchase_date || '' } : empty)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState('')
@@ -85,7 +85,7 @@ const VehicleForm = ({ vehicle, staff, onSave, onCancel }) => {
     if (!form.vehicle_type) return setErr('Vehicle type is required.')
     setSaving(true); setErr('')
     try {
-      const payload = { ...form, year: form.year ? Number(form.year) : null, capacity_blocks: form.capacity_blocks ? Number(form.capacity_blocks) : null, purchase_price: form.purchase_price ? Number(form.purchase_price) : null, assigned_driver_id: form.assigned_driver_id || null, insurance_expiry_date: form.insurance_expiry_date || null, road_worthiness_expiry_date: form.road_worthiness_expiry_date || null, purchase_date: form.purchase_date || null }
+      const payload = { ...form, year: form.year ? Number(form.year) : null, capacity_blocks: form.capacity_blocks ? Number(form.capacity_blocks) : null, purchase_price: form.purchase_price ? Number(form.purchase_price) : null, monthly_rental_amount: form.monthly_rental_amount ? Number(form.monthly_rental_amount) : null, assigned_driver_id: form.assigned_driver_id || null, insurance_expiry_date: form.insurance_expiry_date || null, road_worthiness_expiry_date: form.road_worthiness_expiry_date || null, purchase_date: form.purchase_date || null, contract_start_date: form.contract_start_date || null, owner_name: form.owner_name || null, owner_phone: form.owner_phone || null }
       if (vehicle) {
         await vehiclesService.update(vehicle.id, payload)
       } else {
@@ -132,6 +132,18 @@ const VehicleForm = ({ vehicle, staff, onSave, onCancel }) => {
         <div style={styles.formGroup}><label style={styles.label}>Purchase Price (₦)</label><input style={styles.input} type="number" value={form.purchase_price} onChange={e => upd('purchase_price', e.target.value)} /></div>
         <div style={{ ...styles.formGroup, gridColumn: 'span 3' }}><label style={styles.label}>Notes</label><input style={styles.input} value={form.notes} onChange={e => upd('notes', e.target.value)} /></div>
       </div>
+      {form.vehicle_type === 'Rental' && (
+        <div style={{ marginTop: '16px', padding: '14px 16px', background: theme.surface, borderRadius: '8px', border: `1px solid ${theme.accent}44` }}>
+          <div style={{ fontSize: '12px', fontWeight: '700', color: theme.accent, marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Rental Details</div>
+          <div style={styles.grid(3)}>
+            <div style={styles.formGroup}><label style={styles.label}>Owner Name</label><input style={styles.input} placeholder="e.g. Alhaji Musa" value={form.owner_name} onChange={e => upd('owner_name', e.target.value)} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Owner Phone</label><input style={styles.input} placeholder="e.g. 0801234567" value={form.owner_phone} onChange={e => upd('owner_phone', e.target.value)} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Monthly Rental (₦)</label><input style={styles.input} type="number" placeholder="e.g. 150000" value={form.monthly_rental_amount} onChange={e => upd('monthly_rental_amount', e.target.value)} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Contract Start Date</label><input style={styles.input} type="date" value={form.contract_start_date} onChange={e => upd('contract_start_date', e.target.value)} /></div>
+            <div style={{ ...styles.formGroup, gridColumn: 'span 2' }}><label style={styles.label}>Maintenance Responsibility</label><input style={{ ...styles.input, color: theme.textMuted }} value="APCL (Abuja Precast Concrete Limited)" readOnly /></div>
+          </div>
+        </div>
+      )}
       <div style={styles.row}>
         <button style={styles.btn('primary')} onClick={handleSubmit} disabled={saving}>{saving ? 'Saving…' : vehicle ? 'Save Changes' : 'Register Vehicle'}</button>
         <button style={styles.btn()} onClick={onCancel}>Cancel</button>

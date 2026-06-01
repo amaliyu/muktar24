@@ -35,6 +35,7 @@ import { generatePaymentReceiptPDF } from './utils/generatePaymentReceiptPDF'
 import { parseFile, autoMapColumns, mapRowsToTransactions, autoMatchTransactions, detectCategory, extractCustomerFromDesc } from './utils/parseBankStatement';
 import VehicleRegistry from './components/VehicleRegistry'
 import KPIDashboard from './components/KPIDashboard'
+import DataImport from './components/DataImport'
 import { vehiclesService, fuelLogService } from './services/vehicles'
 import SupplierRegistry from './components/SupplierRegistry'
 import { suppliersService, supplierTransactionsService } from './services/suppliers'
@@ -120,7 +121,7 @@ const ROLE_PAGES = {
   board_member:       ['dashboard','production','inventory','batches','waybills','vehicles','staff','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile'],
   bdm:                ['dashboard','customers','orders','pending_register','daily_schedule','lpo_approvals','reports','kpi_dashboard','my_profile'],
   store_officer:      ['dashboard','inventory','batches','waybills','vehicles','pending_register','daily_schedule','products','my_profile'],
-  logistics_manager:  ['dashboard','waybills','vehicles','pending_register','daily_schedule','customers','my_profile'],
+  logistics_manager:  ['dashboard','waybills','vehicles','labour','pending_register','daily_schedule','customers','my_profile'],
   marketer:           ['dashboard','customers','orders','products','my_profile'],
   driver:             ['dashboard','waybills','my_profile'],
   hr_officer:         ['dashboard','staff','reports','labour','my_profile'],
@@ -6476,6 +6477,7 @@ const navItems = [
   { section: "Settings", items: [
     { id: "products", label: "Products", icon: "products" },
     { id: "suppliers", label: "Suppliers", icon: "supplier" },
+    { id: "data_import", label: "Data Import", icon: "orders" },
     { id: "user_management", label: "User Management", icon: "staff" },
   ]},
   { section: "Account", items: [
@@ -6897,6 +6899,7 @@ export default function App() {
     products: <Products />,
     suppliers: <SupplierRegistry />,
     accounting: <Accounting userProfile={userProfile} />,
+    data_import: <DataImport />,
     user_management: <UserManagement userProfile={userProfile} />,
     labour: <Labour userProfile={userProfile} />,
     my_profile: <MyProfile userProfile={userProfile} />,
