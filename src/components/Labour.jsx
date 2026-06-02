@@ -606,6 +606,22 @@ function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCanc
     return s + base + (Number(e.bonus_amount) || 0) - (Number(e.advance_amount) || 0) - (Number(e.deduction_amount) || 0)
   }, 0)
 
+  const totalGross = entries.reduce((s, e) => {
+    if (e.attendance_type === 'absent') return s
+    const base = e.manual_amount !== '' && e.manual_amount != null ? Number(e.manual_amount) || 0 : (e.attendance_type === 'half_day' ? (Number(e.base_rate) || 0) / 2 : Number(e.base_rate) || 0)
+    return s + base
+  }, 0)
+  const totalBonuses = entries.reduce((s, e) => s + (Number(e.bonus_amount) || 0), 0)
+  const totalAdvances = entries.reduce((s, e) => s + (Number(e.advance_amount) || 0), 0)
+  const totalDeductions = entries.reduce((s, e) => s + (Number(e.deduction_amount) || 0), 0)
+  const deferred = entries.reduce((s, e) => {
+    const worker = pool.find(w => String(w.id) === String(e.labour_id))
+    if (worker?.category !== 'monthly_fixed') return s
+    const base = e.manual_amount !== '' && e.manual_amount != null ? Number(e.manual_amount) || 0 : (e.attendance_type === 'absent' ? 0 : e.attendance_type === 'half_day' ? (Number(e.base_rate) || 0) / 2 : Number(e.base_rate) || 0)
+    return s + base + (Number(e.bonus_amount) || 0) - (Number(e.advance_amount) || 0) - (Number(e.deduction_amount) || 0)
+  }, 0)
+  const toBePaidThisWeek = grandTotal - deferred
+
   const handleSave = async (submit = false) => {
     if (!date) return setErr('Date is required.')
     if (entries.length === 0) return setErr('Add at least one worker.')
@@ -752,6 +768,30 @@ function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCanc
           </tfoot>
         </table>
       </div>
+
+      {entries.length > 0 && (
+        <div style={{ marginTop: '16px', background: theme.surface, borderRadius: '10px', padding: '16px', border: `1px solid ${theme.border}` }}>
+          <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '12px' }}>Weekly Pay Summary</div>
+          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+            {[
+              { label: 'Total Gross Pay', value: naira(totalGross), color: theme.text },
+              { label: 'Bonuses', value: naira(totalBonuses), color: theme.green },
+              { label: 'Advances', value: naira(totalAdvances), color: theme.red },
+              { label: 'Deductions', value: naira(totalDeductions), color: theme.red },
+              { label: 'Deferred (Monthly Fixed)', value: naira(deferred), color: theme.textMuted },
+            ].map(({ label, value, color }) => (
+              <div key={label} style={{ flex: '1', minWidth: '130px', background: theme.card, borderRadius: '8px', padding: '10px 12px' }}>
+                <div style={{ fontSize: '10px', color: theme.textMuted, fontWeight: '600', marginBottom: '4px' }}>{label}</div>
+                <div style={{ fontSize: '15px', fontWeight: '700', color }}>{value}</div>
+              </div>
+            ))}
+            <div style={{ flex: '1', minWidth: '160px', background: theme.accent + '18', border: `1px solid ${theme.accent}55`, borderRadius: '8px', padding: '10px 12px' }}>
+              <div style={{ fontSize: '10px', color: theme.accent, fontWeight: '700', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>TO BE PAID THIS WEEK</div>
+              <div style={{ fontSize: '20px', fontWeight: '700', color: theme.accent }}>{naira(toBePaidThisWeek)}</div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div style={{ ...styles.row, marginTop: '14px', justifyContent: 'space-between' }}>
         <button style={{ ...styles.btn('ghost'), border: `1px dashed ${theme.border}` }} onClick={addRow}>+ Add Worker Row</button>
@@ -1589,6 +1629,13 @@ function MonthlyFixedTab({ pool, roles, userProfile }) {
   const [loading, setLoading] = useState(false)
   const [alert, setAlert] = useState(null)
   const [actioning, setActioning] = useState(false)
+  const [rentalVehicles, setRentalVehicles] = useState([])
+
+  useEffect(() => {
+    supabase.from('vehicles').select('id, vehicle_name, vehicle_number, monthly_rental_amount, owner_name, owner_phone')
+      .eq('vehicle_type', 'Rental')
+      .then(({ data }) => setRentalVehicles(data || []))
+  }, [])
 
   // Build fixed workers dynamically from labour_pool (category = monthly_fixed)
   const fixedWorkers = pool
@@ -1689,6 +1736,23 @@ function MonthlyFixedTab({ pool, roles, userProfile }) {
                 <div style={{ fontSize: '22px', fontWeight: '700', color: theme.accent, marginTop: '6px' }}>{naira(w.amount)}</div>
                 <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '4px' }}>Monthly Fixed</div>
                 {existingPayroll && <span style={{ ...styles.badge(statusColor(existingPayroll.status)), marginTop: '8px', display: 'inline-block' }}>{existingPayroll.status}</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {rentalVehicles.length > 0 && (
+        <div style={{ marginBottom: '16px' }}>
+          <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '10px' }}>Rental Vehicles — Deferred (Paid Monthly)</div>
+          <div style={{ ...styles.row, gap: '12px', flexWrap: 'wrap' }}>
+            {rentalVehicles.map(v => (
+              <div key={v.id} style={{ ...styles.card, flex: '1', minWidth: '200px', marginBottom: 0, borderLeft: `4px solid ${theme.accent}` }}>
+                <div style={{ fontSize: '13px', fontWeight: '700' }}>{v.vehicle_name || v.vehicle_number}</div>
+                <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '2px' }}>{v.vehicle_number} • Rental Vehicle</div>
+                <div style={{ fontSize: '22px', fontWeight: '700', color: theme.accent, marginTop: '6px' }}>{naira(Number(v.monthly_rental_amount) || 0)}</div>
+                {v.owner_name && <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '4px' }}>Owner: {v.owner_name}{v.owner_phone ? ` • ${v.owner_phone}` : ''}</div>}
+                <div style={{ fontSize: '10px', color: theme.textMuted, marginTop: '2px' }}>Monthly Rental — Process separately via Accounting</div>
               </div>
             ))}
           </div>

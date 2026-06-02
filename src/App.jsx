@@ -117,7 +117,7 @@ const APP_ROLES = [
 const ROLE_PAGES = {
   md:                 'all',
   ico:                ['dashboard','production','inventory','batches','waybills','vehicles','staff','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile'],
-  accountant:         ['dashboard','customers','orders','reports','kpi_dashboard','accounting','suppliers','products','my_profile'],
+  accountant:         ['dashboard','customers','orders','reports','kpi_dashboard','accounting','suppliers','products','my_profile','data_import'],
   board_member:       ['dashboard','production','inventory','batches','waybills','vehicles','staff','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile'],
   bdm:                ['dashboard','customers','orders','pending_register','daily_schedule','lpo_approvals','reports','kpi_dashboard','my_profile'],
   store_officer:      ['dashboard','inventory','batches','waybills','vehicles','pending_register','daily_schedule','products','my_profile'],
@@ -310,6 +310,7 @@ const Dashboard = ({ onNavigate, userProfile }) => {
   const [finishedGoods, setFinishedGoods] = useState([]);
   const [recent, setRecent] = useState([]);
   const [vehicleAlerts, setVehicleAlerts] = useState([]);
+  const [rentalVehicles, setRentalVehicles] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -332,13 +333,14 @@ const Dashboard = ({ onNavigate, userProfile }) => {
         // show zeros on error
       }
       try {
-        const [lpos, scheds, pendReg, fg, prods, expiring] = await Promise.all([
+        const [lpos, scheds, pendReg, fg, prods, expiring, rentals] = await Promise.all([
           lpoService.getPending(),
           schedulesService.getSubmitted(),
           pendingDeliveryService.getAll(),
           finishedGoodsService.getAll(),
           productsService.getActive().catch(() => []),
           vehiclesService.getExpiringOrExpired(30).catch(() => []),
+          supabase.from('vehicles').select('id, vehicle_name, vehicle_number, monthly_rental_amount, owner_name').eq('vehicle_type', 'Rental').then(r => r.data || []).catch(() => []),
         ]);
         const productUnitMap = Object.fromEntries(prods.map(p => [p.name, p.unit]));
         setStats(s => ({ ...s, lpoQueue: lpos.length, scheduleQueue: scheds.length, pendingRegister: pendReg.length }));
@@ -351,6 +353,7 @@ const Dashboard = ({ onNavigate, userProfile }) => {
         }, {}));
         setFinishedGoods(grouped.map(f => ({ ...f, unit: productUnitMap[f.block_type] || 'pieces' })));
         setVehicleAlerts(expiring);
+        setRentalVehicles(rentals);
       } catch { /* workflow tables may not exist yet */ } finally {
         setLoading(false);
       }
@@ -443,6 +446,22 @@ const Dashboard = ({ onNavigate, userProfile }) => {
                     </div>
                   );
                 })}
+              </div>
+            </div>
+          )}
+          {rentalVehicles.length > 0 && (
+            <div style={{ ...styles.card, marginBottom: "16px", borderLeft: `4px solid ${theme.accent}` }}>
+              <div style={{ fontSize: "13px", fontWeight: "700", color: theme.accent, marginBottom: "10px" }}>🚐 Monthly Rental Payment Reminder</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                {rentalVehicles.map(v => (
+                  <div key={v.id} style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap", background: theme.surface, borderRadius: "8px", padding: "10px 12px" }}>
+                    <span style={{ fontWeight: "700" }}>{v.vehicle_name || v.vehicle_number}</span>
+                    <span style={{ color: theme.textMuted, fontSize: "12px" }}>{v.vehicle_number}</span>
+                    <span style={{ fontWeight: "700", color: theme.accent }}>{naira(Number(v.monthly_rental_amount) || 0)}</span>
+                    {v.owner_name && <span style={{ fontSize: "12px", color: theme.textMuted }}>→ {v.owner_name}</span>}
+                    <span style={{ fontSize: "11px", color: theme.textMuted, marginLeft: "auto" }}>Monthly rental — see Labour → Monthly tab</span>
+                  </div>
+                ))}
               </div>
             </div>
           )}
