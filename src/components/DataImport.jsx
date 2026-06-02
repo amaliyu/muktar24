@@ -181,7 +181,7 @@ const IMPORT_TYPES = [
       return { errors, warnings }
     },
     buildInsert: (mapped) => ({
-      production_date: mapped.date, block_type: sanitizeBlockType(mapped.block_type),
+      date: mapped.date, block_type: sanitizeBlockType(mapped.block_type),
       quantity_produced: Number(mapped.quantity) || 0, shift: mapped.shift || null, notes: mapped.notes || null,
     }),
     mergeTable: 'production_log',
@@ -299,21 +299,35 @@ const IMPORT_TYPES = [
       amount: 'Amount', vendor: 'Vendor', reference: 'Reference',
     },
     requiredFields: ['date', 'amount'],
-    getLookups: async () => ({ }),
-    validate: (mapped) => {
+    getLookups: async () => {
+      const { data: categories } = await supabase.from('expense_categories').select('id, name')
+      return { categories: categories || [] }
+    },
+    validate: (mapped, lookups) => {
       const errors = [], warnings = []
       if (!mapped.date) errors.push('Invalid date')
       if (!mapped.amount || isNaN(Number(mapped.amount))) errors.push('Invalid amount')
-      if (!mapped.category) warnings.push('No category — will use "Uncategorized"')
+      if (mapped.category) {
+        const cat = lookups.categories?.find(c => c.name?.toLowerCase() === mapped.category.toLowerCase())
+        if (!cat) warnings.push(`Category "${mapped.category}" not found — will import uncategorised`)
+      } else {
+        warnings.push('No category provided')
+      }
       if (!mapped.description) warnings.push('No description provided')
       return { errors, warnings }
     },
-    buildInsert: (mapped) => ({
-      expense_date: mapped.date, description: mapped.description || mapped.category || 'Historical import',
-      amount: Number(mapped.amount) || 0, vendor: mapped.vendor || null,
-      reference_number: mapped.reference || null, status: 'approved',
-      category_name: mapped.category || 'Uncategorized',
-    }),
+    buildInsert: (mapped, lookups) => {
+      const cat = lookups.categories?.find(c => c.name?.toLowerCase() === (mapped.category || '').toLowerCase())
+      return {
+        expense_date: mapped.date,
+        description: mapped.description || mapped.category || 'Historical import',
+        amount: Number(mapped.amount) || 0,
+        vendor: mapped.vendor || null,
+        notes: mapped.reference ? `Ref: ${mapped.reference}` : null,
+        status: 'approved',
+        category_id: cat?.id || null,
+      }
+    },
     mergeTable: 'expenses',
   },
 ]
