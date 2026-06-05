@@ -1414,7 +1414,7 @@ const Orders = ({ onNavigate, userProfile }) => {
                   <div style={{ marginTop: "16px" }}>
                     <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
                       {(selected.invoices || []).length === 0 ? (
-                        {userProfile?.role !== 'ico' && <button style={styles.btn("primary")} onClick={handleGenerateInvoice} disabled={invoicing}>{invoicing ? "Generating…" : "Generate Invoice"}</button>}
+                        userProfile?.role !== 'ico' && <button style={styles.btn("primary")} onClick={handleGenerateInvoice} disabled={invoicing}>{invoicing ? "Generating…" : "Generate Invoice"}</button>
                       ) : (
                         <>
                           <div style={{ width: "100%", fontSize: "12px", color: theme.textMuted, marginBottom: "6px" }}>
