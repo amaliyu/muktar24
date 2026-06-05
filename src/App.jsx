@@ -1139,7 +1139,7 @@ const Orders = ({ onNavigate, userProfile }) => {
           <div style={styles.pageTitle}>Orders & Invoicing</div>
           <div style={styles.pageSubtitle}>Customer orders, payment tracking, and delivery status</div>
         </div>
-        <button style={styles.btn("primary")} onClick={() => setShowForm(!showForm)}>+ New Order</button>
+        {userProfile?.role !== 'ico' && <button style={styles.btn("primary")} onClick={() => setShowForm(!showForm)}>+ New Order</button>}
       </div>
 
       {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
@@ -1330,7 +1330,7 @@ const Orders = ({ onNavigate, userProfile }) => {
                 <>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
                     <div style={styles.sectionTitle}>Customer Statement — {selected.customer?.name}</div>
-                    {!orderEditMode && <button style={{ ...styles.btn("secondary"), padding: "4px 12px", fontSize: "12px" }} onClick={() => startOrderEdit(selected)}>Edit Order</button>}
+                    {!orderEditMode && userProfile?.role !== 'ico' && <button style={{ ...styles.btn("secondary"), padding: "4px 12px", fontSize: "12px" }} onClick={() => startOrderEdit(selected)}>Edit Order</button>}
                   </div>
                   <div style={{ marginBottom: "12px", fontSize: "13px", color: theme.textMuted }}>{selected.customer?.location} · {selected.customer?.phone}</div>
                   {orderEditMode ? (
@@ -1403,8 +1403,8 @@ const Orders = ({ onNavigate, userProfile }) => {
                               {p.status === "confirmed" && (
                                 <button style={{ ...styles.btn("primary"), padding: "3px 8px", fontSize: "11px" }} onClick={() => generatePaymentReceiptPDF({ payment: p, customer: selected.customer, invoiceNumber: p._invoiceNumber, invoiceTotal: p._invoiceTotal || null, totalPaidSoFar: totalConfirmed })}>Receipt</button>
                               )}
-                              <button style={{ ...styles.btn("secondary"), padding: "3px 8px", fontSize: "11px" }} onClick={() => { setEditPayment(p); setPayForm({ amount: String(p.amount_paid), date: p.payment_date }); setShowPayForm(true); }}>Edit</button>
-                              <button style={{ ...styles.btn("danger"), padding: "3px 8px", fontSize: "11px" }} onClick={() => setConfirmDelete({ ...p, type: "payment" })}>Remove</button>
+                              {userProfile?.role !== 'ico' && <button style={{ ...styles.btn("secondary"), padding: "3px 8px", fontSize: "11px" }} onClick={() => { setEditPayment(p); setPayForm({ amount: String(p.amount_paid), date: p.payment_date }); setShowPayForm(true); }}>Edit</button>}
+                              {userProfile?.role !== 'ico' && <button style={{ ...styles.btn("danger"), padding: "3px 8px", fontSize: "11px" }} onClick={() => setConfirmDelete({ ...p, type: "payment" })}>Remove</button>}
                             </div>
                           </div>
                         ))}
@@ -1414,14 +1414,14 @@ const Orders = ({ onNavigate, userProfile }) => {
                   <div style={{ marginTop: "16px" }}>
                     <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
                       {(selected.invoices || []).length === 0 ? (
-                        <button style={styles.btn("primary")} onClick={handleGenerateInvoice} disabled={invoicing}>{invoicing ? "Generating…" : "Generate Invoice"}</button>
+                        {userProfile?.role !== 'ico' && <button style={styles.btn("primary")} onClick={handleGenerateInvoice} disabled={invoicing}>{invoicing ? "Generating…" : "Generate Invoice"}</button>}
                       ) : (
                         <>
                           <div style={{ width: "100%", fontSize: "12px", color: theme.textMuted, marginBottom: "6px" }}>
                             Invoice: <strong style={{ color: theme.accent }}>{selected.invoices[0].invoice_number}</strong>
                           </div>
                           <button style={styles.btn("primary")} onClick={handleGenerateInvoice} disabled={invoicing}>{invoicing ? "Downloading…" : "Download Invoice PDF"}</button>
-                          <button style={styles.btn("secondary")} onClick={() => setShowPayForm(!showPayForm)}>+ Record Payment</button>
+                          {userProfile?.role !== 'ico' && <button style={styles.btn("secondary")} onClick={() => setShowPayForm(!showPayForm)}>+ Record Payment</button>}
                         </>
                       )}
                       <button style={styles.btn("secondary")} onClick={() => onNavigate("waybills")}>View Waybills</button>

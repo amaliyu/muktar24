@@ -1296,7 +1296,7 @@ function LoadingWeeklySummary({ logs, pool, userProfile, onRefresh }) {
     groups[key].push(l)
   })
 
-  const canSubmit = ['production_manager', 'hr_officer', 'accountant', 'logistics_manager', 'ico', 'md'].includes(userProfile?.role)
+  const canSubmit = ['production_manager', 'hr_officer', 'accountant', 'logistics_manager', 'md'].includes(userProfile?.role)
 
   const handleSubmitPayment = async (week) => {
     const weekLogs = logs.filter(l => l.payment_week_ending === week && l.payment_status === 'unpaid')
