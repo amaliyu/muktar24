@@ -6984,7 +6984,7 @@ export default function App() {
         </div>
       </div>
       {showChangePwd && <ChangePasswordModal onClose={() => setShowChangePwd(false)} />}
-      <main style={{ ...styles.main, ...(isMobile ? { marginLeft: 0, padding: '16px 14px', paddingTop: '58px' } : {}) }} {...(isBoard ? { 'data-board-view': 'true' } : {})} {...(isICO ? { 'data-ico-view': 'true' } : {})}>
+      <main style={{ ...styles.main, ...(isMobile ? { marginLeft: 0, padding: '16px 14px', paddingTop: '58px' } : {}) }} {...(isBoard ? { 'data-board-view': 'true' } : {})} {...(isICO && safePage !== 'labour' && safePage !== 'schedule_approvals' ? { 'data-ico-view': 'true' } : {})}>
         {/* Mobile hamburger */}
         {isMobile && (
           <button data-board-allow data-ico-allow onClick={() => setSidebarOpen(s => !s)} style={{ position: 'fixed', top: '12px', left: '12px', zIndex: 250, background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '8px', padding: '8px 12px', cursor: 'pointer', fontSize: '18px', color: theme.text, lineHeight: 1, boxShadow: '0 2px 8px rgba(0,0,0,0.3)' }}>☰</button>

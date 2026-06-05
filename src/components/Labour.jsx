@@ -1053,9 +1053,11 @@ function TruckLoadingTab({ pool, userProfile }) {
         <>
           {subTab === 'assignments' && (
             <div>
-              <div style={{ textAlign: 'right', marginBottom: '14px' }}>
-                <button style={styles.btn('primary')} onClick={() => setShowAssignForm(true)}>+ Assign Loader</button>
-              </div>
+              {userProfile?.role !== 'ico' && (
+                <div style={{ textAlign: 'right', marginBottom: '14px' }}>
+                  <button style={styles.btn('primary')} onClick={() => setShowAssignForm(true)}>+ Assign Loader</button>
+                </div>
+              )}
               {showAssignForm && (
                 <AssignLoaderForm vehicles={vehicles} pool={pool} onSave={() => { setShowAssignForm(false); loadData() }} onCancel={() => setShowAssignForm(false)} />
               )}
@@ -1073,7 +1075,7 @@ function TruckLoadingTab({ pool, userProfile }) {
                             <td style={styles.td}><span style={{ fontFamily: 'monospace', color: theme.blue }}>{a.labour?.labour_number}</span></td>
                             <td style={styles.td}>{a.labour?.full_name}</td>
                             <td style={styles.td}>{a.assigned_date}</td>
-                            <td style={styles.td}><button style={{ ...styles.btn('danger'), padding: '4px 10px', fontSize: '12px' }} onClick={() => handleRemoveAssignment(a.id)}>Remove</button></td>
+                            <td style={styles.td}>{userProfile?.role !== 'ico' && <button style={{ ...styles.btn('danger'), padding: '4px 10px', fontSize: '12px' }} onClick={() => handleRemoveAssignment(a.id)}>Remove</button>}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -1086,9 +1088,11 @@ function TruckLoadingTab({ pool, userProfile }) {
 
           {subTab === 'loading_log' && (
             <div>
-              <div style={{ textAlign: 'right', marginBottom: '14px' }}>
-                <button style={styles.btn('primary')} onClick={() => setShowLogForm(true)}>+ Record Loading</button>
-              </div>
+              {userProfile?.role !== 'ico' && (
+                <div style={{ textAlign: 'right', marginBottom: '14px' }}>
+                  <button style={styles.btn('primary')} onClick={() => setShowLogForm(true)}>+ Record Loading</button>
+                </div>
+              )}
               {showLogForm && (
                 <LoadingLogForm waybills={waybills} pool={pool} userProfile={userProfile} onSave={() => { setShowLogForm(false); loadData() }} onCancel={() => setShowLogForm(false)} />
               )}
