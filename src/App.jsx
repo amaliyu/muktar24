@@ -1309,7 +1309,7 @@ const Orders = ({ onNavigate, userProfile }) => {
                     <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
                       {o.is_lpo && <span style={styles.badge(theme.blue)}>LPO</span>}
                       <span style={styles.badge(statusColor(o.status))}>{o.status}</span>
-                      <button style={{ ...styles.btn("danger"), padding: "3px 9px", fontSize: "11px" }} onClick={e => { e.stopPropagation(); setConfirmDelete(o); }}>Delete</button>
+                      {userProfile?.role !== 'ico' && <button style={{ ...styles.btn("danger"), padding: "3px 9px", fontSize: "11px" }} onClick={e => { e.stopPropagation(); setConfirmDelete(o); }}>Delete</button>}
                     </div>
                   </div>
                   <div style={{ marginTop: "8px", display: "flex", gap: "20px", fontSize: "12px", color: theme.textMuted }}>
