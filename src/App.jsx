@@ -121,7 +121,7 @@ const ROLE_PAGES = {
   accountant:         ['dashboard','customers','orders','reports','kpi_dashboard','accounting','suppliers','products','my_profile','data_import'],
   board_member:       ['dashboard','production','inventory','batches','waybills','vehicles','staff','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile'],
   bdm:                ['dashboard','customers','orders','pending_register','daily_schedule','lpo_approvals','reports','kpi_dashboard','my_profile'],
-  store_officer:      ['dashboard','inventory','batches','waybills','vehicles','pending_register','daily_schedule','products','my_profile'],
+  store_officer:      ['dashboard','inventory','batches','waybills','pending_register','daily_schedule','products','reports','my_profile'],
   logistics_manager:  ['dashboard','waybills','vehicles','labour','pending_register','daily_schedule','customers','my_profile'],
   marketer:           ['dashboard','customers','orders','products','my_profile'],
   driver:             ['dashboard','waybills','my_profile'],

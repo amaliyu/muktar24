@@ -299,6 +299,7 @@ const StaffFormModal = ({ onClose, onSaved, editTarget, roles }) => {
         employee_number: form.employee_number || null,
         department: form.department || null,
         role_id: form.role_id || null,
+        role: roles.find(r => String(r.id) === String(form.role_id))?.role_name || form.department || "Staff",
         staff_type: form.staff_type,
         date_hired: form.date_hired || null,
         monthly_salary: form.staff_type === "permanent" ? parseFloat(form.monthly_salary) || null : null,
