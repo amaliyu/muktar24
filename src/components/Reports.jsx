@@ -42,11 +42,11 @@ const CAT_COLOR = {
 // ── REPORT CATALOG ───────────────────────────────────────────
 const CATALOG = [
   // PRODUCTION
-  { id: 'daily_production',    name: 'Daily Production Report',       category: 'production', description: 'Blocks produced, materials used, damages and cost per block for a single day', formats: ['pdf','excel'], roles: ['md','production_manager','ico'], periodType: 'date' },
-  { id: 'weekly_production',   name: 'Weekly Production Summary',     category: 'production', description: 'Day-by-day production table, weekly totals and efficiency vs target',           formats: ['pdf','excel'], roles: ['md','production_manager','accountant','ico'], periodType: 'week' },
-  { id: 'monthly_production',  name: 'Monthly Production Report',     category: 'production', description: 'Monthly totals, material costs, damage analysis and cost per block trend',      formats: ['pdf','excel'], roles: ['md','production_manager','accountant','board_member','ico'], periodType: 'month' },
+  { id: 'daily_production',    name: 'Daily Production Report',       category: 'production', description: 'Blocks produced, materials used, damages and cost per block for a single day', formats: ['pdf','excel'], roles: ['md','production_manager','assistant_production_manager','ico'], periodType: 'date' },
+  { id: 'weekly_production',   name: 'Weekly Production Summary',     category: 'production', description: 'Day-by-day production table, weekly totals and efficiency vs target',           formats: ['pdf','excel'], roles: ['md','production_manager','assistant_production_manager','accountant','ico'], periodType: 'week' },
+  { id: 'monthly_production',  name: 'Monthly Production Report',     category: 'production', description: 'Monthly totals, material costs, damage analysis and cost per block trend',      formats: ['pdf','excel'], roles: ['md','production_manager','assistant_production_manager','accountant','board_member','ico'], periodType: 'month' },
   { id: 'production_cost',     name: 'Production Cost Analysis',      category: 'production', description: 'Cost per block, selling price and gross margin per block type',                 formats: ['pdf','excel'], roles: ['md','accountant','ico'], periodType: 'range' },
-  { id: 'damage_waste',        name: 'Damage & Waste Report',         category: 'production', description: 'Damages by stage, by block type, by vehicle and total value of damaged blocks', formats: ['pdf','excel'], roles: ['md','production_manager','logistics_manager','ico'], periodType: 'range' },
+  { id: 'damage_waste',        name: 'Damage & Waste Report',         category: 'production', description: 'Damages by stage, by block type, by vehicle and total value of damaged blocks', formats: ['pdf','excel'], roles: ['md','production_manager','assistant_production_manager','logistics_manager','ico'], periodType: 'range' },
   // SALES
   { id: 'sales_report',        name: 'Sales Report',                  category: 'sales', description: 'All orders, sales by block type, by area and by marketer with collection rate',    formats: ['pdf','excel'], roles: ['md','accountant','bdm','ico'], periodType: 'range' },
   { id: 'revenue_report',      name: 'Revenue Report',                category: 'sales', description: 'Confirmed payments, daily revenue chart and outstanding balances summary',          formats: ['pdf','excel'], roles: ['md','accountant','ico'], periodType: 'range' },
@@ -67,8 +67,8 @@ const CATALOG = [
   { id: 'payroll_report',      name: 'Payroll Report',                category: 'staff', description: 'Wages per staff member, total payroll and payment status',                         formats: ['pdf','excel'], roles: ['md','hr_officer','accountant'], periodType: 'range' },
   { id: 'staff_directory',     name: 'Staff Directory Report',        category: 'staff', description: 'All active staff with role, type, date hired and contact details',                 formats: ['pdf','excel'], roles: ['md','hr_officer','ico'], periodType: 'today' },
   // INVENTORY
-  { id: 'stock_status',        name: 'Stock Status Report',           category: 'inventory', description: 'Current stock levels, reorder status, and total stock value',                  formats: ['pdf','excel'], roles: ['md','store_officer','production_manager','ico'], periodType: 'today' },
-  { id: 'stock_movement',      name: 'Stock Movement Report',         category: 'inventory', description: 'All stock in/out movements with opening and closing stock',                    formats: ['pdf','excel'], roles: ['md','store_officer','production_manager','ico'], periodType: 'range' },
+  { id: 'stock_status',        name: 'Stock Status Report',           category: 'inventory', description: 'Current stock levels, reorder status, and total stock value',                  formats: ['pdf','excel'], roles: ['md','store_officer','production_manager','assistant_production_manager','ico'], periodType: 'today' },
+  { id: 'stock_movement',      name: 'Stock Movement Report',         category: 'inventory', description: 'All stock in/out movements with opening and closing stock',                    formats: ['pdf','excel'], roles: ['md','store_officer','production_manager','assistant_production_manager','ico'], periodType: 'range' },
   { id: 'inventory_valuation', name: 'Inventory Valuation Report',    category: 'inventory', description: 'Quantity on hand × unit cost = total value per item',                          formats: ['pdf','excel'], roles: ['md','accountant','ico'], periodType: 'asAt' },
   // VEHICLE
   { id: 'fleet_status',        name: 'Fleet Status Report',           category: 'vehicle', description: 'All vehicles, document expiry dates, assigned driver and maintenance due',       formats: ['pdf'], roles: ['md','logistics_manager','ico'], periodType: 'today' },
@@ -978,7 +978,7 @@ function ScheduleModal({ report, onClose }) {
 }
 
 // ── REPORT CARD ──────────────────────────────────────────────
-const ROLE_LABELS = { md:'MD', accountant:'Accountant', board_member:'Board', bdm:'BDM', ico:'ICO', store_officer:'Store', logistics_manager:'Logistics', marketer:'Marketer', driver:'Driver', hr_officer:'HR', production_manager:'Production' }
+const ROLE_LABELS = { md:'MD', accountant:'Accountant', board_member:'Board', bdm:'BDM', ico:'ICO', store_officer:'Store', logistics_manager:'Logistics', marketer:'Marketer', driver:'Driver', hr_officer:'HR', production_manager:'Production', assistant_production_manager:'Asst. Production' }
 
 function ReportCard({ report, userRole, schedule, onGenerate, onSchedule }) {
   const hasAccess = report.roles.includes(userRole)

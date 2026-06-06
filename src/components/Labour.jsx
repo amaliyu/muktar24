@@ -456,7 +456,7 @@ function DailyRosterTab({ pool, roles, userProfile }) {
           <button style={styles.tab(true)}>Roster List</button>
           <button style={styles.tab(false)} onClick={() => setViewMode('weekly')}>Weekly Summary</button>
         </div>
-        {['production_manager', 'hr_officer'].includes(role) && (
+        {['production_manager', 'assistant_production_manager', 'hr_officer'].includes(role) && (
           <button style={styles.btn('primary')} onClick={() => setViewMode('create')}>+ Create Roster</button>
         )}
       </div>
@@ -480,11 +480,11 @@ function DailyRosterTab({ pool, roles, userProfile }) {
                 const isPaid = paySt === 'paid'
                 const isApproved = ['ico_approved', 'md_approved'].includes(icoSt) || mdSt === 'approved'
                 const canEdit = !isPaid && (
-                  (role === 'production_manager' && ['draft', 'submitted'].includes(icoSt)) ||
+                  (['production_manager', 'assistant_production_manager'].includes(role) && ['draft', 'submitted'].includes(icoSt)) ||
                   role === 'md'
                 )
                 const canDelete = !isPaid && (
-                  (role === 'production_manager' && ['draft', 'submitted'].includes(icoSt)) ||
+                  (['production_manager', 'assistant_production_manager'].includes(role) && ['draft', 'submitted'].includes(icoSt)) ||
                   (role === 'md' && (!isApproved || role === 'md'))
                 )
                 return (
@@ -933,7 +933,7 @@ function RosterDetail({ roster, roles, pool, userProfile, onBack, onAction, aler
           </div>
         )}
         <div style={styles.row}>
-          {role === 'production_manager' && icoStatus === 'draft' && (
+          {['production_manager', 'assistant_production_manager'].includes(role) && icoStatus === 'draft' && (
             <button style={styles.btn('primary')} onClick={() => doAction('submit')} disabled={actioning}>Submit for ICO Review</button>
           )}
           {role === 'ico' && icoStatus === 'submitted' && (
@@ -1300,7 +1300,7 @@ function LoadingWeeklySummary({ logs, pool, userProfile, onRefresh }) {
     groups[key].push(l)
   })
 
-  const canSubmit = ['production_manager', 'hr_officer', 'accountant', 'logistics_manager', 'md'].includes(userProfile?.role)
+  const canSubmit = ['production_manager', 'assistant_production_manager', 'hr_officer', 'accountant', 'logistics_manager', 'md'].includes(userProfile?.role)
 
   const handleSubmitPayment = async (week) => {
     const weekLogs = logs.filter(l => l.payment_week_ending === week && l.payment_status === 'unpaid')
@@ -1600,7 +1600,7 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
           </div>
 
           <div style={styles.row}>
-            {!currentPayroll && workers.length > 0 && ['production_manager','hr_officer','md'].includes(userProfile?.role) && (
+            {!currentPayroll && workers.length > 0 && ['production_manager','assistant_production_manager','hr_officer','md'].includes(userProfile?.role) && (
               <button style={styles.btn('primary')} onClick={handleGeneratePayroll} disabled={actioning}>Generate Payroll</button>
             )}
             {currentPayroll?.status === 'draft' && userProfile?.role === 'ico' && (

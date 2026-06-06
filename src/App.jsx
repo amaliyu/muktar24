@@ -110,7 +110,8 @@ const APP_ROLES = [
   { id: 'marketer',           label: 'Marketer' },
   { id: 'driver',             label: 'Driver' },
   { id: 'hr_officer',         label: 'HR Officer' },
-  { id: 'production_manager', label: 'Production Manager' },
+  { id: 'production_manager',           label: 'Production Manager' },
+  { id: 'assistant_production_manager', label: 'Assistant Production Manager' },
 ];
 
 // Pages each role is allowed to access. 'all' = unrestricted.
@@ -125,7 +126,8 @@ const ROLE_PAGES = {
   marketer:           ['dashboard','customers','orders','products','my_profile'],
   driver:             ['dashboard','waybills','my_profile'],
   hr_officer:         ['dashboard','staff','reports','labour','my_profile'],
-  production_manager: ['dashboard','production','inventory','batches','reports','products','labour','my_profile'],
+  production_manager:           ['dashboard','production','inventory','batches','reports','products','labour','my_profile'],
+  assistant_production_manager: ['dashboard','production','inventory','batches','reports','products','labour','my_profile'],
   // legacy roles — kept for any existing users
   operations:         ['dashboard','production','inventory','batches','waybills','vehicles','staff','pending_register','daily_schedule','lpo_approvals','my_profile'],
   sales:              ['dashboard','customers','orders','my_profile'],
