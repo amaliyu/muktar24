@@ -1010,7 +1010,7 @@ const Orders = ({ onNavigate, userProfile }) => {
   };
 
   const handleSaveInvoice = async () => {
-    if (!invoiceEditor) return;
+    if (!invoiceEditor || !selected) return;
     setInvoicing(true);
     try {
       const { _existingId, invoice_number, issued_date, due_date, items, delivery_cost, include_vat, discount } = invoiceEditor;
@@ -1022,13 +1022,14 @@ const Orders = ({ onNavigate, userProfile }) => {
       const vat = include_vat ? afterDisc * 0.075 : 0;
       const total = afterDisc + vat;
 
+      const orderId = selected.id;
       let invoiceId = _existingId;
       if (_existingId) {
         await invoicesService.update(_existingId, { invoice_number, issued_date, due_date, total_amount: total });
       } else {
-        const newInvoice = await invoicesService.create({ order_id: selected.id, invoice_number, issued_date, due_date, total_amount: total });
+        const newInvoice = await invoicesService.create({ order_id: orderId, invoice_number, issued_date, due_date, total_amount: total });
         invoiceId = newInvoice.id;
-        await ordersService.updateStatus(selected.id, "invoiced");
+        await ordersService.updateStatus(orderId, "invoiced");
       }
 
       const customer = selected.customer || { name: selected.customerName, location: selected.customerLocation, phone: selected.customerPhone };
@@ -1036,10 +1037,17 @@ const Orders = ({ onNavigate, userProfile }) => {
 
       setInvoiceEditor(null);
       const newOrders = await load();
-      if (newOrders) setSelected(newOrders.find(o => o.id === selected.id) || null);
+      if (newOrders) setSelected(newOrders.find(o => o.id === orderId) || null);
       setAlert({ type: "success", msg: `Invoice ${invoice_number} saved and downloaded!` });
     } catch (e) {
-      setAlert({ type: "error", msg: "Failed to save invoice. " + e.message });
+      if (e.message?.includes('invoices_order_id_fkey')) {
+        setInvoiceEditor(null);
+        const newOrders = await load().catch(() => null);
+        setSelected(newOrders?.find(o => o.id === selected?.id) || null);
+        setAlert({ type: "error", msg: "This order no longer exists in the system. The list has been refreshed." });
+      } else {
+        setAlert({ type: "error", msg: "Failed to save invoice. " + e.message });
+      }
     } finally {
       setInvoicing(false);
     }
@@ -1311,7 +1319,7 @@ const Orders = ({ onNavigate, userProfile }) => {
                     <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
                       {o.is_lpo && <span style={styles.badge(theme.blue)}>LPO</span>}
                       <span style={styles.badge(statusColor(o.status))}>{o.status}</span>
-                      {userProfile?.role !== 'ico' && <button style={{ ...styles.btn("danger"), padding: "3px 9px", fontSize: "11px" }} onClick={e => { e.stopPropagation(); setConfirmDelete(o); }}>Delete</button>}
+                      {userProfile?.role === 'md' && <button style={{ ...styles.btn("danger"), padding: "3px 9px", fontSize: "11px" }} onClick={e => { e.stopPropagation(); setConfirmDelete(o); }}>Delete</button>}
                     </div>
                   </div>
                   <div style={{ marginTop: "8px", display: "flex", gap: "20px", fontSize: "12px", color: theme.textMuted }}>
