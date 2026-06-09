@@ -1731,12 +1731,12 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
                 generatePayrollPDF(subTab, weekEnding, pdfWorkers, totalAmount, currentPayroll)
               }}>Download PDF</button>
             )}
-            {currentPayroll?.status === 'md_approved' && ['accountant', 'ico'].includes(userProfile?.role) && (
+            {['md_approved', 'paid'].includes(currentPayroll?.status) && ['accountant', 'ico'].includes(userProfile?.role) && (
               <button data-ico-allow style={styles.btn('blue')} onClick={() =>
                 generatePaymentScheduleXLSX(subTab, weekEnding, workers, pool)
               }>Download Payment Schedule</button>
             )}
-            {currentPayroll?.status === 'md_approved' && ['accountant', 'ico'].includes(userProfile?.role) && (
+            {['md_approved', 'paid'].includes(currentPayroll?.status) && ['accountant', 'ico'].includes(userProfile?.role) && (
               <button data-ico-allow style={styles.btn('blue')} onClick={() =>
                 generateBulkTransferXLSX(weekEnding, workers, pool)
               }>Download Bulk Transfer</button>

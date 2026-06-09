@@ -980,7 +980,11 @@ const Orders = ({ onNavigate, userProfile }) => {
     }).catch(() => { setCustomerSites([]); setPickedSiteId(""); });
   }, [pickedCustomer?.id]);
 
-  const orderTotal = (order) => (order.order_items || []).reduce((s, i) => s + (i.subtotal || i.quantity * i.unit_price), 0);
+  const orderTotal = (order) => {
+    const invoiced = (order.invoices || []).reduce((s, inv) => s + Number(inv.total_amount ?? 0), 0);
+    const itemTotal = (order.order_items || []).reduce((s, i) => s + (i.subtotal || i.quantity * i.unit_price), 0);
+    return invoiced !== 0 ? invoiced : itemTotal;
+  };
   const orderPaid = (order) => (order.invoices || []).flatMap(inv => inv.payments || []).filter(p => p.status === "confirmed").reduce((s, p) => s + p.amount_paid, 0);
   const orderQty = (order) => (order.order_items || []).reduce((s, i) => s + i.quantity, 0);
 
