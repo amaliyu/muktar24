@@ -290,7 +290,13 @@ CREATE POLICY "attendance_delete" ON attendance
 ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "orders_select" ON orders;
 CREATE POLICY "orders_select" ON orders
-  FOR SELECT USING (get_user_role() = ANY(ARRAY['md','accountant','board_member','ico','bdm','marketer']));
+  FOR SELECT USING (
+    get_user_role() = ANY(ARRAY['md','accountant','board_member','ico','bdm'])
+    OR (
+      get_user_role() = 'marketer'
+      AND marketer_id = (SELECT id FROM staff WHERE email = (SELECT email FROM auth.users WHERE id = auth.uid()))
+    )
+  );
 DROP POLICY IF EXISTS "orders_insert" ON orders;
 CREATE POLICY "orders_insert" ON orders
   FOR INSERT WITH CHECK (get_user_role() = ANY(ARRAY['md','accountant','bdm','marketer']));
@@ -1026,11 +1032,11 @@ CREATE POLICY "staff_roles_select" ON staff_roles
   FOR SELECT USING (true);
 DROP POLICY IF EXISTS "staff_roles_insert" ON staff_roles;
 CREATE POLICY "staff_roles_insert" ON staff_roles
-  FOR INSERT WITH CHECK (get_user_role() = ANY(ARRAY['md']));
+  FOR INSERT WITH CHECK (get_user_role() = ANY(ARRAY['md','hr_officer']));
 DROP POLICY IF EXISTS "staff_roles_update" ON staff_roles;
 CREATE POLICY "staff_roles_update" ON staff_roles
-  FOR UPDATE USING (get_user_role() = ANY(ARRAY['md']))
-             WITH CHECK (get_user_role() = ANY(ARRAY['md']));
+  FOR UPDATE USING (get_user_role() = ANY(ARRAY['md','hr_officer']))
+             WITH CHECK (get_user_role() = ANY(ARRAY['md','hr_officer']));
 DROP POLICY IF EXISTS "staff_roles_delete" ON staff_roles;
 CREATE POLICY "staff_roles_delete" ON staff_roles
   FOR DELETE USING (get_user_role() = ANY(ARRAY['md']));
