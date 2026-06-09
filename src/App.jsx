@@ -118,7 +118,7 @@ const APP_ROLES = [
 const ROLE_PAGES = {
   md:                 'all',
   ico:                ['dashboard','production','inventory','batches','waybills','vehicles','staff','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile'],
-  accountant:         ['dashboard','customers','orders','reports','kpi_dashboard','accounting','suppliers','products','my_profile','data_import'],
+  accountant:         ['dashboard','customers','orders','reports','kpi_dashboard','accounting','suppliers','products','my_profile','data_import','labour','waybills'],
   board_member:       ['dashboard','production','inventory','batches','waybills','vehicles','staff','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile'],
   bdm:                ['dashboard','customers','orders','pending_register','daily_schedule','lpo_approvals','reports','kpi_dashboard','my_profile'],
   store_officer:      ['dashboard','inventory','batches','waybills','pending_register','daily_schedule','products','reports','my_profile'],
@@ -321,6 +321,7 @@ const Dashboard = ({ onNavigate, userProfile }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!userProfile) return;
     const load = async () => {
       if (isDriver) {
         const staffId = userProfile?.staff_id;
@@ -386,7 +387,7 @@ const Dashboard = ({ onNavigate, userProfile }) => {
       }
     };
     load();
-  }, []);
+  }, [userProfile]);
 
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
