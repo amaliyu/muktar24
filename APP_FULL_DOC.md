@@ -1,776 +1,552 @@
-# Abuja Precast Concrete Manager — Full Application Documentation
+# Abuja Precast Concrete Manager — Project Knowledge Document
 
+> **Last updated:** 2026-06-09 (commit `a49950f`)
 > **Stack:** React 18.3.1 · Vite 5.2.0 · Supabase (PostgreSQL + Auth + RLS + Storage)
-> **Deployment:** `abujaprecast.vercel.app` (auto-deploys from `main`)
-> **Primary files:** `src/App.jsx` (~7 000 lines) · `src/components/Labour.jsx` (~2 100 lines)
+> **Repo:** `amaliyu/muktar24` · **Dev branch:** `claude/analyze-test-coverage-irQFZ`
+> **Deployment:** Vercel auto-deploys from `main`
+> **Primary files:** `src/App.jsx` (~7 030 lines) · `src/components/Labour.jsx` (~2 100 lines)
 
 ---
 
 ## Table of Contents
 
-1. [Roles & Page Access](#1-roles--page-access)
-2. [canSee() Logic](#2-cansee-logic)
-3. [Read-Only Enforcement (Board Member & ICO)](#3-read-only-enforcement-board-member--ico)
+1. [Tech Stack & Architecture](#1-tech-stack--architecture)
+2. [Roles & Page Access](#2-roles--page-access)
+3. [Access Control Mechanics](#3-access-control-mechanics)
 4. [Navigation & Routing](#4-navigation--routing)
-5. [Orders & Invoicing Component](#5-orders--invoicing-component)
-6. [Waybills Component](#6-waybills-component)
-7. [Labour Module — All Tabs](#7-labour-module--all-tabs)
-8. [Other Page-Level Components](#8-other-page-level-components)
-9. [Approval Workflows](#9-approval-workflows)
-10. [Supabase Tables by Feature](#10-supabase-tables-by-feature)
+5. [Orders & Invoicing](#5-orders--invoicing)
+6. [Labour Module](#6-labour-module)
+7. [Payroll Approval Workflow](#7-payroll-approval-workflow)
+8. [LPO Workflow](#8-lpo-workflow)
+9. [Other Modules](#9-other-modules)
+10. [Supabase Tables Reference](#10-supabase-tables-reference)
+11. [Service Layer](#11-service-layer)
+12. [SQL to Run Manually](#12-sql-to-run-manually)
+13. [Known Limitations](#13-known-limitations)
+14. [Feature Status Summary](#14-feature-status-summary)
 
 ---
 
-## 1. Roles & Page Access
+## 1. Tech Stack & Architecture
 
-### APP_ROLES (`src/App.jsx` lines 102–114)
-
-| Role ID | Display Label |
+| Layer | Technology |
 |---|---|
-| `md` | MD (Managing Director) |
-| `accountant` | Accountant |
-| `board_member` | Board Member |
-| `bdm` | Business Development Manager |
-| `ico` | Internal Control Officer |
-| `store_officer` | Store Officer |
-| `logistics_manager` | Logistics Manager |
-| `marketer` | Marketer |
-| `driver` | Driver |
-| `hr_officer` | HR Officer |
-| `production_manager` | Production Manager |
+| Frontend framework | React 18.3.1 (no router — page state is a `useState` string) |
+| Build tool | Vite 5.2.0 |
+| Database & Auth | Supabase (PostgreSQL + Auth + Row Level Security + Storage) |
+| PDF generation | jsPDF 2.5.2 + jspdf-autotable |
+| CSV/Excel import | PapaParse 5.5.3, xlsx 0.18.5 |
+| PDF viewer | pdfjs-dist 5.7 |
+| ZIP export | jszip 3.10 |
+| Styling | Inline styles only — no CSS framework |
+| Testing | Vitest + Testing Library (stubs only — no live tests) |
+
+**Single-file architecture:** almost all page components live in `src/App.jsx`. Exceptions:
+
+| File | Contents |
+|---|---|
+| `src/components/Labour.jsx` | Entire Labour module (~2 100 lines) |
+| `src/components/Reports.jsx` | Reports engine |
+| `src/components/StaffHR.jsx` | Staff/HR management |
+| `src/components/LoginScreen.jsx` | Auth screen |
+| `src/components/BoardDashboard.jsx` | Board member dashboard |
+| `src/components/KPIDashboard.jsx` | KPI dashboard |
+| `src/components/OpeningBalances.jsx` | Opening balances form |
+| `src/components/FinancialStatements.jsx` | P&L, balance sheet, cash flow |
+| `src/components/VehicleRegistry.jsx` | Fleet management |
+| `src/components/SupplierRegistry.jsx` | Supplier management |
+| `src/components/DataImport.jsx` | Bulk CSV/Excel import |
+
+**Service layer:** all Supabase queries are in `src/services/*.js`. Components import from services; no raw Supabase calls in `App.jsx` (Labour.jsx calls Supabase directly in some places).
 
 ---
 
-### ROLE_PAGES constant (`src/App.jsx` lines 117–133)
+## 2. Roles & Page Access
+
+### Role IDs (`APP_ROLES` — `src/App.jsx:102`)
+
+| Role ID | Display Label | Notes |
+|---|---|---|
+| `md` | MD (Managing Director) | Full access (`'all'`) |
+| `accountant` | Accountant | Finance + reports |
+| `board_member` | Board Member | Read-only via `data-board-view` CSS |
+| `bdm` | Business Development Manager | Orders, customers, LPO, reports |
+| `ico` | Internal Control Officer | Wide read + approve payrolls; buttons hidden via `data-ico-view` CSS |
+| `store_officer` | Store Officer | Inventory, waybills, reports |
+| `logistics_manager` | Logistics Manager | Waybills, vehicles, loading payroll |
+| `marketer` | Marketer | Own customers and orders only |
+| `driver` | Driver | Own waybills only |
+| `hr_officer` | HR Officer | Staff, labour, reports |
+| `production_manager` | Production Manager | Production, inventory, labour |
+| `assistant_production_manager` | Assistant Production Manager | Same pages as PM except no Propose Rate Change |
+
+Legacy role IDs (kept for existing users): `operations`, `sales`, `staff`.
+
+---
+
+### ROLE_PAGES (`src/App.jsx:118`)
 
 ```js
 const ROLE_PAGES = {
   md:                 'all',
   ico:                ['dashboard','production','inventory','batches','waybills','vehicles',
                        'staff','labour','pending_register','daily_schedule','customers',
-                       'orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard',
-                       'accounting','suppliers','products','my_profile'],
-  accountant:         ['dashboard','customers','orders','reports','kpi_dashboard','accounting',
-                       'suppliers','products','my_profile','data_import'],
+                       'orders','lpo_approvals','schedule_approvals','reports',
+                       'kpi_dashboard','accounting','suppliers','products','my_profile'],
+  accountant:         ['dashboard','customers','orders','reports','kpi_dashboard',
+                       'accounting','suppliers','products','my_profile','data_import'],
   board_member:       ['dashboard','production','inventory','batches','waybills','vehicles',
                        'staff','labour','pending_register','daily_schedule','customers',
-                       'orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard',
-                       'accounting','suppliers','products','my_profile'],
+                       'orders','lpo_approvals','schedule_approvals','reports',
+                       'kpi_dashboard','accounting','suppliers','products','my_profile'],
   bdm:                ['dashboard','customers','orders','pending_register','daily_schedule',
                        'lpo_approvals','reports','kpi_dashboard','my_profile'],
-  store_officer:      ['dashboard','inventory','batches','waybills','vehicles',
-                       'pending_register','daily_schedule','products','my_profile'],
+  store_officer:      ['dashboard','inventory','batches','waybills','pending_register',
+                       'daily_schedule','products','reports','my_profile'],
   logistics_manager:  ['dashboard','waybills','vehicles','labour','pending_register',
                        'daily_schedule','customers','my_profile'],
   marketer:           ['dashboard','customers','orders','products','my_profile'],
   driver:             ['dashboard','waybills','my_profile'],
   hr_officer:         ['dashboard','staff','reports','labour','my_profile'],
-  production_manager: ['dashboard','production','inventory','batches','reports','products',
-                       'labour','my_profile'],
-  // legacy roles
-  operations:         ['dashboard','production','inventory','batches','waybills','vehicles',
-                       'staff','pending_register','daily_schedule','lpo_approvals','my_profile'],
-  sales:              ['dashboard','customers','orders','my_profile'],
-  staff:              ['dashboard','my_profile'],
-};
+  production_manager:           ['dashboard','production','inventory','batches','reports',
+                                 'products','labour','my_profile'],
+  assistant_production_manager: ['dashboard','production','inventory','batches','reports',
+                                 'products','labour','my_profile'],
+}
 ```
 
-**Special pages not in any ROLE_PAGES list:**
-- `user_management` — MD only (granted separately outside ROLE_PAGES, via canSee fallback or direct nav item visibility)
-- `data_import` — MD + accountant only
-
-**Page count by role (approximate):**
-- MD: all (unrestricted)
-- ICO: 19 pages
-- Board Member: 19 pages (same list as ICO)
-- Accountant: 10 pages
-- BDM: 9 pages
-- Store Officer: 8 pages
-- Logistics Manager: 8 pages
-- HR Officer: 5 pages
-- Production Manager: 7 pages
-- Marketer: 5 pages
-- Driver: 3 pages
+`my_profile` is always accessible to every role (hardcoded in `canSee`).
 
 ---
 
-## 2. canSee() Logic
+## 3. Access Control Mechanics
 
-**Source:** `src/App.jsx` lines 6895–6900
+### `canSee()` (`src/App.jsx:6906`)
 
 ```js
-const role = userProfile?.role || 'staff';
-const isBoard = role === 'board_member';
-const isICO   = role === 'ico';
-const isMD    = role === 'md';
-
-const allowedPages = ROLE_PAGES[role] || ['dashboard'];
-const canSee = (pageId) => pageId === 'my_profile' || allowedPages === 'all' || allowedPages.includes(pageId);
-const visibleNav = navItems
-  .map(s => ({ ...s, items: s.items.filter(it => canSee(it.id)) }))
-  .filter(s => s.items.length > 0);
-const safePage = canSee(active) ? active : 'dashboard';
+const canSee = (pageId) =>
+  pageId === 'my_profile' ||
+  allowedPages === 'all' ||
+  allowedPages.includes(pageId)
 ```
 
-**Key points:**
-- `my_profile` is universally accessible to all roles — the shortcut ensures it's never blocked even if somehow missing from ROLE_PAGES.
-- `allowedPages === 'all'` handles MD (unrestricted).
-- `visibleNav` filters sidebar nav items — roles only see nav links they can access.
-- `safePage` is a safety net: if the URL or state somehow points to a page the current role can't access, it falls back to `dashboard`. This prevents blank or broken page renders.
+Pages not in a role's list are filtered from the sidebar and redirect to `dashboard` if accessed directly.
 
 ---
 
-## 3. Read-Only Enforcement (Board Member & ICO)
+### ICO Read-Only Mode
 
-### Mechanism Overview
-
-Two orthogonal systems enforce read-only behaviour:
-
-1. **CSS blanket hide** (via HTML attributes on `<main>`) — hides all buttons globally for a role on covered pages.
-2. **Explicit JSX role guards** (per-button conditions in component code) — belt-and-suspenders for critical buttons, and for pages where the CSS blanket is intentionally not applied.
-
----
-
-### `<main>` element attribute logic (`src/App.jsx` line 6987)
+When the logged-in user is ICO **and** the current page is not `labour` or `schedule_approvals`, the `<main>` element receives:
 
 ```jsx
-<main
-  {...(isBoard ? { 'data-board-view': 'true' } : {})}
-  {...(isICO && safePage !== 'labour' && safePage !== 'schedule_approvals'
-    ? { 'data-ico-view': 'true' }
-    : {})}
->
+data-ico-view="true"
 ```
 
-**Board Member:** `data-board-view` applied on every page.
+Global CSS rule (in `<style>` block in `App.jsx`):
 
-**ICO:** `data-ico-view` applied on every page **except** `labour` and `schedule_approvals`.
-- These two pages are intentionally interactive for ICO — they have approval buttons ICO must be able to click.
-- Explicit JSX guards (not CSS blanket) control what ICO can/cannot do on those pages.
+```css
+[data-ico-view] button:not([data-ico-allow]) { display: none !important; }
+```
+
+Buttons that ICO must be able to click (approve/recall payrolls) get `data-ico-allow` on the element.
+
+The Labour page and Schedule Approvals page are **excluded** from `data-ico-view` so ICO sees full action buttons there.
 
 ---
 
-### CSS rules injected at runtime (`src/App.jsx` lines 7001–7011)
+### Board Member Read-Only Mode
+
+`<main>` gets `data-board-view="true"` for board members. The CSS hides all action buttons. Board members see the same wide page list as ICO but can only read.
+
+---
+
+### Delete Order
+
+**Only `md` role** can delete an order. Removed from all other roles to prevent FK constraint errors on invoices.
 
 ```jsx
-{isBoard && (
-  <style>{`
-    [data-board-view] button:not([data-board-allow]) { display: none !important; }
-    [data-board-view] input { pointer-events: none; opacity: 0.8; }
-    [data-board-view] select { pointer-events: none; opacity: 0.8; }
-  `}</style>
-)}
-{isICO && (
-  <style>{`
-    [data-ico-view] button:not([data-ico-allow]) { display: none !important; }
-  `}</style>
+{userProfile?.role === 'md' && (
+  <button onClick={() => setConfirmDelete(o)}>Delete</button>
 )}
 ```
-
-**Board Member CSS** hides all buttons AND makes inputs/selects non-interactive (pointer-events: none).
-**ICO CSS** only hides buttons — inputs/selects remain interactive where needed.
-
----
-
-### Opt-in exemptions: `data-board-allow` / `data-ico-allow`
-
-Any button that a board member or ICO should still be able to click gets the corresponding attribute:
-
-```jsx
-<button data-board-allow data-ico-allow onClick={...}>☰</button>  {/* mobile hamburger */}
-<button data-board-allow data-ico-allow onClick={handleExtendSession}>Extend Session</button>
-<button data-board-allow data-ico-allow onClick={() => setSessionWarning(false)}>Dismiss</button>
-```
-
-In Labour and Schedule Approvals (where ICO has no CSS blanket), ICO approval buttons use `data-ico-allow` as a semantic marker only (they're already visible without the CSS blanket — `data-ico-allow` documents intent):
-
-```jsx
-<button data-ico-allow onClick={handleApprove}>Approve</button>
-<button data-ico-allow onClick={handleReject}>Reject</button>
-```
-
----
-
-### ICO read-only banner (`src/App.jsx` lines 7018–7022)
-
-```jsx
-{isICO && active !== 'dashboard' && active !== 'schedule_approvals' && active !== 'labour' && (
-  <div style={{ background: theme.blue+'22', border: `1px solid ${theme.blue}44`, ... }}>
-    🔒 Read-Only Mode — Internal Control Officer. Approvals available in Schedule Approvals and Labour modules.
-  </div>
-)}
-```
-
-Banner is suppressed on `dashboard`, `schedule_approvals`, and `labour` — the pages where ICO is either viewing a summary or is actively expected to act.
-
----
-
-### Board Member read-only banner (`src/App.jsx` line 7013–7016)
-
-```jsx
-{isBoard && active !== 'dashboard' && (
-  <div>👁 View Only Mode — Board Member access</div>
-)}
-```
-
-Banner appears on all Board pages except dashboard.
 
 ---
 
 ## 4. Navigation & Routing
 
-`pages` object maps page IDs to component instances (`src/App.jsx` lines 6902–6925):
+There is no React Router. Navigation is a `useState` string (`active`) in the root component. The sidebar renders links that call `setActive(pageId)`. `safePage` ensures the active page is always in the role's allowed list; falls back to `'dashboard'`.
 
 ```js
-const pages = {
-  dashboard:          isBoard ? <BoardDashboard userProfile={userProfile} /> : <Dashboard onNavigate={setActive} userProfile={userProfile} />,
-  production:         <Production />,
-  inventory:          <Inventory onLowStockChange={setLowStockCount} />,
-  batches:            <Batches />,
-  waybills:           <Waybills userProfile={userProfile} />,
-  vehicles:           <VehicleRegistry />,
-  staff:              <Staff />,
-  customers:          <Customers userProfile={userProfile} />,
-  orders:             <Orders onNavigate={setActive} userProfile={userProfile} />,
-  pending_register:   <PendingDeliveryRegister />,
-  daily_schedule:     <DailySchedule />,
-  lpo_approvals:      <LPOApprovals />,
-  schedule_approvals: <ScheduleApprovals />,
-  reports:            <Reports userProfile={userProfile} />,
-  kpi_dashboard:      <KPIDashboard />,
-  products:           <Products />,
-  suppliers:          <SupplierRegistry />,
-  accounting:         <Accounting userProfile={userProfile} />,
-  data_import:        <DataImport />,
-  user_management:    <UserManagement userProfile={userProfile} />,
-  labour:             <Labour userProfile={userProfile} />,
-  my_profile:         <MyProfile userProfile={userProfile} />,
-};
-```
-
-Active page is rendered as `{pages[safePage]}`.
-
-**Board Dashboard:** Board members see `<BoardDashboard>` instead of the standard `<Dashboard>` — a separate component with aggregated read-only KPIs.
-
-**Nav badges:**
-```js
-const getBadge = (id) => {
-  if (id === "inventory" && lowStockCount > 0) return lowStockCount;
-  if (id === "lpo_approvals" && lpoCount > 0) return lpoCount;
-  if (id === "schedule_approvals" && scheduleCount > 0) return scheduleCount;
-  return 0;
-};
+const safePage = canSee(active) ? active : 'dashboard'
 ```
 
 ---
 
-## 5. Orders & Invoicing Component
+## 5. Orders & Invoicing
 
-**Source:** `src/App.jsx` — `Orders` function component
+### Order Status Flow
 
-### What ICO can see (always visible)
+```
+new → processing → invoiced → delivered → completed
+```
 
-- Full order list (all orders, all customers)
-- Order detail panel — customer name, location, phone, site, marketer
-- Order items table (block type, quantity, unit price)
-- All payment history rows (date, amount, status badge)
-- Payment receipt PDF button (if payment is `confirmed`) — always visible, no ICO guard
-- Download Invoice PDF button — always visible, no ICO guard
-- Invoice number display (once generated)
-- View Waybills button — always visible, no ICO guard
-- Status badges (LPO, order status)
+### Key Behaviours
 
-### ICO-blocked buttons (JSX guards)
+- **New Order** button is hidden for ICO (explicit `role !== 'ico'` check).
+- **Edit Order** hidden for ICO.
+- **Generate Invoice** hidden for ICO.
+- **Delete Order** visible to MD only.
+- **Invoice number** is computed client-side as `count of existing invoices + 1`. Not guaranteed unique under concurrency — it is a display label only (no DB unique constraint).
+- **FK guard:** if `invoicesService.create` throws `invoices_order_id_fkey`, the UI auto-refreshes orders and shows a helpful message rather than a generic error.
+- Invoice PDF is generated via `jsPDF` in `generateInvoicePDF()` and auto-downloaded in the browser.
+- Orders with `is_lpo = true` are LPO orders; they appear in the LPO Approvals page.
 
-All seven guards use the pattern `userProfile?.role !== 'ico'`:
+### Marketer Scoping
 
-| Line | Button | Guard |
+Marketers only see customers and orders where `orders.marketer_id = userProfile.id`. Service functions `ordersService.getAllForMarketer` and `customersService.getAllForMarketer` add the filter.
+
+---
+
+## 6. Labour Module
+
+**File:** `src/components/Labour.jsx`
+
+### Tabs
+
+| Tab key | Component | Who can access |
 |---|---|---|
-| 1142 | `+ New Order` | `userProfile?.role !== 'ico'` |
-| 1312 | `Delete` (order row) | `userProfile?.role !== 'ico'` |
-| 1333 | `Edit Order` (detail panel) | `userProfile?.role !== 'ico'` |
-| 1406 | `Edit` (payment row) | `userProfile?.role !== 'ico'` |
-| 1407 | `Remove` (payment row) | `userProfile?.role !== 'ico'` |
-| 1417 | `Generate Invoice` (no invoice yet) | `userProfile?.role !== 'ico'` |
-| 1424 | `+ Record Payment` | `userProfile?.role !== 'ico'` |
+| `roster` | `DailyRosterTab` | PM, APM, HR, MD |
+| `truck` | `TruckLoadingTab` | PM, APM, Logistics, MD |
+| `payroll` | `WeeklyPayrollTab` | PM, APM, HR, Logistics, ICO, MD |
+| `monthly` | `MonthlyFixedTab` | PM, APM, HR, ICO, MD |
+| `rates` | `LabourRatesTab` | All labour users |
 
-**Note on line 1417** — the Generate Invoice guard sits inside a ternary branch (not inside `{}`):
-```jsx
-{(selected.invoices || []).length === 0 ? (
-  userProfile?.role !== 'ico' && <button onClick={handleGenerateInvoice}>Generate Invoice</button>
-) : (
-  <>
-    <button onClick={handleGenerateInvoice}>Download Invoice PDF</button>
-    {userProfile?.role !== 'ico' && <button>+ Record Payment</button>}
-  </>
-)}
+### Worker Categories
+
+```
+daily | monthly_fixed | piece_rate
 ```
 
-### Invoice detail render logic
+### Loading Payroll Submit Flow (`LoadingWeeklySummary`)
 
-Invoices are stored in `selected.invoices` (array, usually one element). The detail panel:
-1. Shows invoice number from `selected.invoices[0].invoice_number`
-2. Flattens all invoice payments: `selected.invoices.flatMap(inv => inv.payments || [])`
-3. Renders payment history table with date, amount, status badge
-4. Shows Receipt PDF button per confirmed payment (visible to all roles)
-5. Conditionally shows Generate Invoice or Download Invoice PDF based on `selected.invoices.length`
+1. `TruckLoadingTab` records individual log entries in `truck_loading_log` with `payment_status = 'unpaid'`.
+2. `LoadingWeeklySummary` groups logs by `payment_week_ending` (Saturday date).
+3. On component mount / log change, it queries `weekly_labour_payroll` for any existing payroll record for those weeks.
+4. If a payroll record exists for a week → shows a status badge.
+5. If no payroll exists and there are unpaid logs → shows **Submit for Approval** button.
+6. Submit creates a `weekly_labour_payroll` row with `status = 'draft'` and hides the button.
 
-### InvoiceEditorModal
-
-A modal for editing invoice line items. Fields: invoice number, issue date, due date, delivery cost, discount, VAT toggle, line items (description, quantity, unit price). The modal is opened by a separate Edit Invoice button (only rendered for roles with edit access).
+**Important:** `truck_loading_log.payment_status` DB CHECK constraint only allows `'unpaid'` or `'paid'`. There is no intermediate submitted state in that table.
 
 ---
 
-## 6. Waybills Component
+## 7. Payroll Approval Workflow
 
-**Source:** `src/App.jsx` — `Waybills` function component
+Applies to **Weekly Loading Payroll**, **Weekly Production Payroll**, and **Monthly Fixed Payroll**.
 
-### Form fields
+### Status Machine
 
-| Field | Notes |
+```
+draft → ico_approved → md_approved → paid
+```
+
+Recall is allowed from any non-`paid` state back to `draft`.
+
+### Status Transitions & Who Can Trigger
+
+| Action | Trigger | Role Required |
+|---|---|---|
+| Submit (create payroll) | Creates row with `status='draft'` | PM / APM / HR / Logistics / MD |
+| ICO Approve | `status: 'ico_approved'`, sets `ico_approved_by` | ICO only |
+| MD Approve | `status: 'md_approved'`, sets `md_approved_by` | MD only |
+| Mark as Paid + Create Expense | `status: 'paid'` | Accountant only |
+| **Recall to Draft** | `status: 'draft'`, clears `ico_approved_by` + `md_approved_by` | PM / APM / Logistics / HR / ICO / MD |
+
+### `weekly_labour_payroll` Columns
+
+```sql
+id uuid, week_ending date, payroll_type text, total_amount numeric,
+worker_count int, status text CHECK IN ('draft','ico_approved','md_approved','paid'),
+prepared_by text, ico_approved_by text, md_approved_by text,
+ico_approval_date timestamptz, md_approval_date timestamptz,
+paid_at timestamptz, paid_by text, expense_id uuid
+```
+
+### Monthly Fixed (`weekly_labour_payroll` with `payroll_type = 'monthly_fixed'`)
+
+- Create Payroll button restricted to: `production_manager`, `assistant_production_manager`, `hr_officer`, `md`.
+- Recall button: PM / APM / Logistics / HR / ICO / MD (same as weekly).
+- Accountant marks paid and auto-creates an expense entry.
+
+---
+
+## 8. LPO Workflow
+
+LPO orders have `orders.is_lpo = true`. They appear in the **LPO Approvals** page.
+
+### `lpo_orders` Table
+
+```sql
+id uuid, order_id uuid FK orders.id, submitted_at timestamptz,
+md_decision text, md_note text, decided_at timestamptz, md_approved_by text
+```
+
+Service: `src/services/lpo.js`
+
+| Method | Action |
 |---|---|
-| Customer | Select from customers list |
-| Delivery Date | Date picker |
-| Vehicle | Select from vehicles registry |
-| Driver | Filtered by role — see below |
-| Items | Block type, quantity |
-| Destination | Free text |
-| Notes | Optional |
-
-### Driver field role guard
-
-```jsx
-{userProfile?.role === 'driver'
-  ? <input value={userProfile.full_name} disabled />
-  : <select>{drivers.map(d => <option>...)}</select>
-}
-```
-
-Drivers see their own name pre-filled (non-editable). All other roles get a dropdown.
-
-### Role access
-
-- Waybills page is accessible to: md, ico, accountant (via orders nav), board_member, store_officer, logistics_manager, driver, bdm, staff
-
-### ICO on Waybills
-
-ICO has `data-ico-view` active on the waybills page, so all buttons are hidden by CSS blanket. ICO can view waybill list and details but cannot create, edit, or delete waybills.
+| `getPending()` | `md_decision IS NULL` ordered by `submitted_at ASC` |
+| `getAll()` | All LPO orders, newest first |
+| `create(lpo)` | Insert new LPO order |
+| `decide(id, decision, note, approvedBy)` | Set `md_decision`, `md_note`, `decided_at`, `md_approved_by` |
+| `uploadDocument(file)` | Upload to `lpo-documents` Storage bucket, return public URL |
 
 ---
 
-## 7. Labour Module — All Tabs
+## 9. Other Modules
 
-**Source:** `src/components/Labour.jsx` (~2 100 lines)
-
-### Tab Definitions (`Labour.jsx` lines 2057–2067)
-
-```js
-const isLogistics = userProfile?.role === 'logistics_manager'
-const TABS = isLogistics
-  ? [{ key: 'truck', label: 'Truck Loading' }]
-  : [
-    { key: 'pool',    label: 'Labour Pool' },
-    { key: 'roster',  label: 'Daily Roster' },
-    { key: 'truck',   label: 'Truck Loading' },
-    { key: 'payroll', label: 'Payroll' },
-    { key: 'monthly', label: 'Monthly Fixed' },
-    { key: 'rates',   label: 'Labour Rates' },
-  ]
-```
-
-**Logistics Manager** sees only the Truck Loading tab.
-**All other roles** (including ICO) see all 6 tabs.
-
-**ICO note:** ICO receives all 6 tabs because `labour` is excluded from `data-ico-view`, so the CSS blanket does not hide tab buttons. Tabs are rendered as plain buttons — without the CSS blanket they are visible.
+| Module | File | Key Tables |
+|---|---|---|
+| Production | `App.jsx` (Production component) | `production_log`, `damage_log`, `production_targets`, `batches` |
+| Inventory | `App.jsx` | `finished_goods`, `inventory` |
+| Waybills | `App.jsx` (Waybills component) | `waybills`, `deliveries` |
+| Customers | `App.jsx` (Customers component) | `customers` |
+| Suppliers | `SupplierRegistry.jsx` | `suppliers` |
+| Vehicles | `VehicleRegistry.jsx` | `vehicles`, `vehicle_rentals`, `vehicle_maintenance` |
+| Staff/HR | `StaffHR.jsx` | `staff`, `attendance`, `staff_documents` |
+| Reports | `Reports.jsx` | Reads from most tables |
+| Accounting | `App.jsx` (Accounting component) | `expenses`, `expense_categories`, `opening_balances`, `financial_adjustments` |
+| Financial Statements | `FinancialStatements.jsx` | Aggregates from expenses, payments, opening_balances |
+| KPI Dashboard | `KPIDashboard.jsx` | Aggregates across all tables |
+| Board Dashboard | `BoardDashboard.jsx` | Aggregates across all tables |
+| Schedule Approvals | `App.jsx` | `daily_schedule`, `schedule_approvals` |
+| Pending Register | `App.jsx` | `pending_register` |
+| Data Import | `DataImport.jsx` | Bulk inserts into production_log, attendance, expenses |
+| User Management | `App.jsx` | `user_profiles`, `app_roles` |
 
 ---
 
-### Tab 1: Labour Pool (`pool`)
+## 10. Supabase Tables Reference
 
-Displays a list of registered labour workers.
+### Core Auth & Roles
 
-**Roles with write access:** production_manager, hr_officer, md
-**ICO access:** Read-only view. No `data-ico-view` CSS on labour, but no explicit create/edit buttons for ICO either — the Add Worker and Edit buttons are conditionally rendered for pm/hr/md only.
+| Table | Description |
+|---|---|
+| `app_roles` | Role definitions (id, display_name, is_system_role) |
+| `user_profiles` | One row per auth.users row; columns: id, email, full_name, role, is_active, staff_id |
 
-**Data:** `labour_workers` table
-
----
-
-### Tab 2: Daily Roster (`roster`)
-
-Shows daily attendance/assignment roster. Workers are assigned to production shifts.
-
-#### RosterDetail action buttons (`Labour.jsx` lines 927–955)
-
-```jsx
-{role === 'production_manager' && icoStatus === 'draft' && (
-  <button onClick={handleSubmitForICO}>Submit for ICO Review</button>
-)}
-{role === 'ico' && icoStatus === 'submitted' && (
-  <>
-    <button data-ico-allow onClick={handleICOApprove}>Approve</button>
-    <button data-ico-allow onClick={handleICOReject}>Reject</button>
-  </>
-)}
-{role === 'md' && icoStatus === 'ico_approved' && mdStatus !== 'approved' && (
-  <>
-    <button onClick={handleMDApprove}>MD Approve</button>
-    <button onClick={handleMDReject}>MD Reject</button>
-  </>
-)}
-{role === 'accountant' && mdStatus === 'approved' && payStatus !== 'paid' && (
-  <button onClick={handleMarkPaid}>Mark as Paid</button>
-)}
-```
-
-**Approval chain:** production_manager submits → ICO approves/rejects → MD approves/rejects → accountant marks paid.
-
-**Data:** `daily_roster`, `roster_assignments` tables
+Auto-trigger: `on_auth_user_created` fires on `auth.users INSERT`, creates a `user_profiles` row with `role = 'staff'`.
 
 ---
 
-### Tab 3: Truck Loading (`truck`)
+### Orders & Finance
 
-Manages loader assignments to trucks and records actual loading logs.
-
-#### ICO guards on Truck Loading (`Labour.jsx` lines 1054–1095)
-
-```jsx
-{/* + Assign Loader button — hidden from ICO */}
-{userProfile?.role !== 'ico' && (
-  <div style={{ textAlign: 'right', marginBottom: '14px' }}>
-    <button style={styles.btn('primary')} onClick={() => setShowAssignForm(true)}>+ Assign Loader</button>
-  </div>
-)}
-
-{/* Remove assignment — hidden from ICO */}
-<td>
-  {userProfile?.role !== 'ico' && (
-    <button onClick={() => handleRemoveAssignment(a.id)}>Remove</button>
-  )}
-</td>
-
-{/* + Record Loading button — hidden from ICO */}
-{userProfile?.role !== 'ico' && (
-  <div style={{ textAlign: 'right', marginBottom: '14px' }}>
-    <button style={styles.btn('primary')} onClick={() => setShowLogForm(true)}>+ Record Loading</button>
-  </div>
-)}
-```
-
-ICO can view loader assignments and loading logs but cannot create assignments or log loading records.
-
-#### Weekly Summary submit (`Labour.jsx` line 1303)
-
-```js
-const canSubmit = ['production_manager', 'hr_officer', 'accountant', 'logistics_manager', 'md'].includes(userProfile?.role)
-// 'ico' deliberately excluded
-```
-
-**Data:** `truck_assignments`, `truck_loading_logs` tables
+| Table | Key Columns |
+|---|---|
+| `customers` | id, name, location, phone, marketer_id |
+| `orders` | id, customer_id, marketer_id, status, is_lpo, site_id, created_at |
+| `order_items` | id, order_id, product_id, quantity, unit_price |
+| `invoices` | id, order_id, invoice_number, issued_date, due_date, total_amount |
+| `payments` | id, order_id, amount_paid, payment_date |
+| `deliveries` | id, order_id, delivery_date, status |
+| `waybills` | id, order_id, driver_id, vehicle_id, status |
+| `lpo_orders` | id, order_id, md_decision, md_note, decided_at, md_approved_by |
 
 ---
-
-### Tab 4: Weekly Payroll (`payroll`)
-
-Generates and approves weekly payroll for casual/daily labour.
-
-#### WeeklyPayrollTab buttons (`Labour.jsx` lines 1603–1620)
-
-```jsx
-{!currentPayroll && workers.length > 0 && ['production_manager','hr_officer','md'].includes(userProfile?.role) && (
-  <button onClick={handleGeneratePayroll}>Generate Payroll</button>
-)}
-{currentPayroll?.status === 'draft' && userProfile?.role === 'ico' && (
-  <button data-ico-allow onClick={handleICOApprove}>ICO Approve</button>
-)}
-{currentPayroll?.status === 'ico_approved' && userProfile?.role === 'md' && (
-  <button onClick={handleMDApprove}>MD Approve</button>
-)}
-{currentPayroll?.status === 'md_approved' && userProfile?.role === 'accountant' && (
-  <button onClick={handleMarkPaid}>Mark as Paid + Create Expense</button>
-)}
-{currentPayroll?.status === 'paid' && (
-  <button onClick={handleDownloadPDF}>Download PDF</button>
-)}
-```
-
-**Approval chain:** production_manager/hr_officer/md generates → ICO approves → MD approves → accountant marks paid + creates expense entry → PDF available to all.
-
-**Data:** `weekly_payrolls`, `weekly_payroll_items` tables
-
----
-
-### Tab 5: Monthly Fixed (`monthly`)
-
-Manages monthly fixed-salary staff payroll.
-
-#### MonthlyFixedTab buttons (`Labour.jsx` lines 1775–1789)
-
-```jsx
-{!existingPayroll && (
-  <button onClick={handleCreatePayroll}>Create Payroll for {month}</button>
-)}
-{existingPayroll?.status === 'draft' && userProfile?.role === 'ico' && (
-  <button data-ico-allow onClick={handleICOApprove}>ICO Approve</button>
-)}
-{existingPayroll?.status === 'ico_approved' && userProfile?.role === 'md' && (
-  <button onClick={handleMDApprove}>MD Approve</button>
-)}
-{existingPayroll?.status === 'md_approved' && userProfile?.role === 'accountant' && (
-  <button onClick={handleMarkPaid}>Mark as Paid + Create Expense</button>
-)}
-{existingPayroll?.status === 'paid' && (
-  <button onClick={handleDownloadPDF}>Download PDF</button>
-)}
-```
-
-**Approval chain:** any authorized role creates → ICO approves → MD approves → accountant marks paid → PDF available.
-
-**Data:** `monthly_payrolls`, `monthly_payroll_items` tables
-
----
-
-### Tab 6: Labour Rates (`rates`)
-
-Manages rate proposals for labour pay changes.
-
-#### LabourRatesTab buttons (`Labour.jsx` lines 1891–1914)
-
-```jsx
-{userProfile?.role === 'production_manager' && (
-  <button onClick={() => setShowProposeForm(true)}>+ Propose Rate Change</button>
-)}
-{userProfile?.role === 'ico' && req.overall_status === 'pending' && (
-  <>
-    <button data-ico-allow onClick={() => handleApprove(req.id)}>Approve</button>
-    <button data-ico-allow onClick={() => handleReject(req.id)}>Reject</button>
-  </>
-)}
-{userProfile?.role === 'md' && req.overall_status === 'md_review' && (
-  <>
-    <button onClick={() => handleMDApprove(req.id)}>MD Approve</button>
-    <button onClick={() => handleMDReject(req.id)}>MD Reject</button>
-  </>
-)}
-```
-
-**Approval chain:** production_manager proposes → ICO approves/rejects → MD approves/rejects → rates updated.
-
-**Data:** `labour_rate_requests`, `labour_rate_items` tables
-
----
-
-## 8. Other Page-Level Components
-
-### Dashboard / BoardDashboard
-
-- Standard `<Dashboard>` is the default. Receives `onNavigate` and `userProfile`.
-- Board members see `<BoardDashboard>` — a read-only KPI summary component.
-- ICO sees standard `<Dashboard>` (no banner, no CSS blanket on dashboard).
 
 ### Production
 
-Standard read/write for roles with access (md, ico, board_member, store_officer, production_manager).
-ICO: `data-ico-view` active → all buttons hidden by CSS.
-
-### Inventory
-
-Tracks raw material stock. Badges low-stock count in nav.
-ICO: read-only via `data-ico-view`.
-
-### Batches
-
-Concrete batch production records.
-ICO: read-only via `data-ico-view`.
-
-### Customers
-
-Customer registry with contact details and site records.
-ICO: read-only via `data-ico-view`.
-
-### Schedule Approvals
-
-Pending schedules submitted by production_manager for ICO review.
-ICO: `data-ico-view` NOT applied — ICO must approve/reject schedules here.
-Approve/Reject buttons use `data-ico-allow` as semantic markers.
-
-### LPO Approvals
-
-Local Purchase Order approval workflow.
-ICO: read-only via `data-ico-view`.
-
-### Reports
-
-Aggregated financial and production reports.
-ICO: read-only via `data-ico-view` (no write buttons in this component anyway).
-
-### KPI Dashboard
-
-Key Performance Indicators summary.
-ICO: read-only via `data-ico-view`.
-
-### Accounting
-
-Financial records, expenses, bank reconciliation.
-ICO: read-only via `data-ico-view`.
-Only accountant and MD have write access.
-
-### Suppliers
-
-Supplier registry.
-ICO: read-only via `data-ico-view`.
-
-### Products
-
-Product catalogue (block types and prices).
-ICO: read-only via `data-ico-view`.
-
-### Staff
-
-Staff registry and profile management.
-ICO: read-only via `data-ico-view`.
-
-### Vehicles / VehicleRegistry
-
-Vehicle fleet management.
-ICO: read-only via `data-ico-view`.
-
-### Pending Delivery Register
-
-Delivery queue. Read-heavy page.
-ICO: read-only via `data-ico-view`.
-
-### Daily Schedule
-
-Production schedule view.
-ICO: read-only via `data-ico-view`.
-
-### Data Import
-
-Bulk CSV import tool.
-Access: md, accountant only (not in ICO or board_member ROLE_PAGES).
-
-### User Management
-
-User account management (create users, assign roles).
-Access: md only.
-
-### My Profile / MyProfile
-
-Password change and personal info.
-Access: all roles (universally allowed via `canSee` shortcut).
-
----
-
-## 9. Approval Workflows
-
-### 1. Daily Roster Approval
-
-```
-production_manager  →  [Submit for ICO Review]
-ICO                 →  [Approve] or [Reject]  (data-ico-allow)
-MD                  →  [MD Approve] or [MD Reject]
-accountant          →  [Mark as Paid]
-```
-
-Status field: `ico_status` (`draft` → `submitted` → `ico_approved`/`rejected`), `md_status` (`approved`/`rejected`), `pay_status` (`paid`)
-
----
-
-### 2. Weekly Payroll Approval
-
-```
-production_manager / hr_officer / md  →  [Generate Payroll]
-ICO                                   →  [ICO Approve]  (data-ico-allow)
-MD                                    →  [MD Approve]
-accountant                            →  [Mark as Paid + Create Expense]
-all roles                             →  [Download PDF]  (after paid)
-```
-
-Status field: `status` (`draft` → `ico_approved` → `md_approved` → `paid`)
-
----
-
-### 3. Monthly Fixed Payroll Approval
-
-```
-authorized role   →  [Create Payroll for {month}]
-ICO               →  [ICO Approve]  (data-ico-allow)
-MD                →  [MD Approve]
-accountant        →  [Mark as Paid + Create Expense]
-all roles         →  [Download PDF]  (after paid)
-```
-
-Status field: `status` (`draft` → `ico_approved` → `md_approved` → `paid`)
-
----
-
-### 4. Labour Rate Change Approval
-
-```
-production_manager  →  [+ Propose Rate Change]
-ICO                 →  [Approve] or [Reject]  (data-ico-allow, only on status = 'pending')
-MD                  →  [MD Approve] or [MD Reject]  (only on status = 'md_review')
-```
-
-Status field: `overall_status` (`pending` → `md_review` → `approved`/`rejected`)
-
----
-
-### 5. Schedule Approvals (separate page)
-
-Handled by `<ScheduleApprovals>` component. Production managers submit daily schedules; ICO reviews and approves on the `schedule_approvals` page.
-ICO has `data-ico-view` excluded on this page — full interactive access.
-
----
-
-## 10. Supabase Tables by Feature
-
-| Feature | Tables |
+| Table | Key Columns |
 |---|---|
-| Auth | `auth.users` (Supabase managed), `user_profiles` |
-| Customers | `customers`, `customer_sites` |
-| Orders | `orders`, `order_items`, `invoices`, `invoice_items`, `payments` |
-| Waybills | `waybills`, `waybill_items` |
-| Production | `production_records` |
-| Inventory | `inventory_items`, `inventory_transactions` |
-| Batches | `batches`, `batch_items` |
-| Vehicles | `vehicles` |
-| Staff | `staff_profiles` (or `user_profiles` with role filter) |
-| LPO | `lpo_requests`, `lpo_items` |
-| Schedule | `daily_schedules`, `schedule_items` |
-| Schedule Approvals | `daily_schedules` (status field) |
-| Labour Pool | `labour_workers` |
-| Daily Roster | `daily_roster`, `roster_assignments` |
-| Truck Loading | `truck_assignments`, `truck_loading_logs` |
-| Weekly Payroll | `weekly_payrolls`, `weekly_payroll_items` |
-| Monthly Payroll | `monthly_payrolls`, `monthly_payroll_items` |
-| Labour Rates | `labour_rate_requests`, `labour_rate_items` |
-| Accounting | `expense_records`, `bank_transactions` |
-| Suppliers | `suppliers` |
-| Products | `products` |
-| Reports | (aggregation queries across multiple tables) |
-| KPI Dashboard | (aggregation queries across multiple tables) |
+| `production_log` | id, date, block_type, quantity_produced, damage_count, set_by_name |
+| `damage_log` | id, date, block_type, quantity |
+| `production_targets` | id, target_date, block_type, target_quantity, set_by, set_by_name |
+| `batches` | id, batch_number, date, status |
+| `finished_goods` | id, block_type, quantity, location |
+| `inventory` | id, item_name, quantity, unit |
 
 ---
 
-## Appendix: Role Summary Table
+### Labour
 
-| Role | CSS Blanket | Banner | Labour Tabs | Can Approve |
-|---|---|---|---|---|
-| `md` | None | None | All 6 | All stages |
-| `board_member` | `data-board-view` (all pages) | "View Only" | All 6 (buttons hidden) | None |
-| `ico` | `data-ico-view` (all pages except labour, schedule_approvals) | "Read-Only Mode" (all pages except dashboard, labour, schedule_approvals) | All 6 | Roster, Payroll, Monthly, Rates, Schedules |
-| `production_manager` | None | None | All 6 | Submits roster/schedules, generates payroll |
-| `hr_officer` | None | None | All 6 | Generates payroll |
-| `accountant` | None | None | All 6 | Marks payroll paid |
-| `logistics_manager` | None | None | Truck only | Weekly summary submit |
-| `marketer` | None | None | No labour access | N/A |
-| `store_officer` | None | None | No labour access | N/A |
-| `driver` | None | None | No labour access | N/A |
-| `bdm` | None | None | No labour access | N/A |
+| Table | Key Columns |
+|---|---|
+| `labour_pool` | id, name, category, role_id, bank, account_number, status |
+| `labour_roles` | id, role_name, base_rate, target_bonus, bonus_type, effective_date |
+| `daily_labour_log` | id, worker_id, date, hours_worked, block_count, amount_earned |
+| `truck_loading_log` | id, worker_id, date, truck_count, total_amount, payment_week_ending, payment_status CHECK('unpaid','paid') |
+| `weekly_labour_payroll` | id, week_ending, payroll_type, total_amount, worker_count, status CHECK('draft','ico_approved','md_approved','paid'), prepared_by, ico_approved_by, md_approved_by |
+| `monthly_fixed_payroll_items` | id, payroll_id, worker_id, base_amount, bonus_amount |
+| `labour_rate_change_requests` | id, role_id, proposed_rate, overall_status, ico_status, md_status |
+| `labour_attendance` | id, worker_id, date, status |
 
 ---
 
-*Document reflects commit `58c314e` on branch `claude/analyze-test-coverage-irQFZ`. Last updated: 2026-06-05.*
+### Staff & HR
+
+| Table | Key Columns |
+|---|---|
+| `staff` | id, full_name, department, role_name, employment_date |
+| `attendance` | id, staff_id, date, status |
+| `staff_documents` | id, user_id, staff_id, document_name, file_url, uploaded_at |
+
+---
+
+### Finance & Accounting
+
+| Table | Key Columns |
+|---|---|
+| `expenses` | id, date, category_id, amount, description, entered_by |
+| `expense_categories` | id, name, is_active |
+| `opening_balances` | id, category, sub_category, account_name, amount, depreciation_amount, vehicle_id, as_at_date |
+| `opening_balance_history` | id, opening_balance_id, old_amount, new_amount, changed_by, changed_at |
+| `financial_adjustments` | id, statement_type, account_name, amount, period_from, period_to, adjustment_date |
+
+---
+
+### Fleet & Suppliers
+
+| Table | Key Columns |
+|---|---|
+| `vehicles` | id, plate_number, make, model, status |
+| `vehicle_rentals` | id, vehicle_id, start_date, end_date, rental_rate |
+| `vehicle_maintenance` | id, vehicle_id, date, description, cost |
+| `suppliers` | id, name, contact, category |
+| `products` | id, name, unit, price |
+
+---
+
+## 11. Service Layer
+
+Each service file exports a single object with async methods. All raw Supabase calls are in service files.
+
+| Service file | Exported object | Main table(s) |
+|---|---|---|
+| `services/orders.js` | `ordersService` | orders, order_items |
+| `services/invoices.js` (inline in App) | `invoicesService` | invoices |
+| `services/payments.js` | `paymentsService` | payments |
+| `services/deliveries.js` | `deliveriesService` | deliveries |
+| `services/waybills.js` | (in service) | waybills |
+| `services/customers.js` (inline App) | `customersService` | customers |
+| `services/lpo.js` | `lpoService` | lpo_orders |
+| `services/production.js` | `productionService` | production_log, damage_log, production_targets |
+| `services/inventory.js` | `inventoryService` | finished_goods, inventory |
+| `services/batches.js` | `batchesService` | batches |
+| `services/labour.js` | `labourService` | labour_pool, labour_roles, logs |
+| `services/attendance.js` | `attendanceService` | attendance |
+| `services/staff.js` | `staffService` | staff |
+| `services/vehicles.js` | `vehiclesService` | vehicles |
+| `services/suppliers.js` | `suppliersService` | suppliers |
+| `services/products.js` | `productsService` | products |
+| `services/expenses.js` (accounting.js) | `accountingService` | expenses, expense_categories |
+| `services/financialService.js` | `financialService` | aggregates |
+| `services/bank.js` | `bankService` | bank transactions |
+| `services/authService.js` | `authService` | user_profiles, app_roles |
+| `services/hrService.js` | `hrService` | staff documents |
+
+### `ordersService.create` — Known Gap
+
+Two sequential INSERTs (no DB transaction):
+
+```js
+const order = await supabase.from('orders').insert(...)
+await supabase.from('order_items').insert(items.map(...))
+```
+
+If the second insert fails, a zombie `orders` row is left behind. This is a known limitation with low frequency; would require a Postgres function with a transaction to fix properly.
+
+---
+
+## 12. SQL to Run Manually
+
+**RULE: never execute SQL directly — paste into the Supabase SQL Editor.**
+
+---
+
+### A. Fix `prod_targets_write` — APM blocked from setting production targets
+
+```sql
+DROP POLICY IF EXISTS "prod_targets_write" ON production_targets;
+CREATE POLICY "prod_targets_write" ON production_targets
+  FOR ALL
+  USING     (get_user_role() IN ('md','production_manager','assistant_production_manager','ico'))
+  WITH CHECK (get_user_role() IN ('md','production_manager','assistant_production_manager','ico'));
+```
+
+---
+
+### B. Seed `assistant_production_manager` role (deployment safety)
+
+The role exists in the app but is missing from the SQL seed files. Run this once, and also add it manually to `supabase/add_all_roles.sql` and `supabase/MASTER_DEPLOYMENT.sql`:
+
+```sql
+INSERT INTO app_roles (id, display_name, description, is_system_role)
+VALUES (
+  'assistant_production_manager',
+  'Asst. Production Manager',
+  'Production access — targets, logs, schedule; no rate changes',
+  false
+)
+ON CONFLICT (id) DO UPDATE
+  SET display_name   = EXCLUDED.display_name,
+      description    = EXCLUDED.description;
+```
+
+---
+
+## 13. Known Limitations
+
+| # | Description | Severity |
+|---|-------------|----------|
+| 1 | `ordersService.create` is not transactional — zombie order rows possible if `order_items` insert fails | Low |
+| 2 | `invoice_number` computed client-side from current order list — race condition possible under concurrent sessions | Low |
+| 3 | `prod_targets_write` RLS policy missing `assistant_production_manager` — APM cannot set daily targets | **Blocking for APM** — fix with SQL A above |
+| 4 | `assistant_production_manager` missing from SQL seed files | Low — only matters on full DB rebuild |
+
+---
+
+## 14. Feature Status Summary
+
+### Fully Working
+
+- Orders creation, invoicing, payment recording, PDF invoice download
+- LPO workflow (submit → MD approve/reject)
+- Deliveries and waybill management (driver scoping works)
+- Customer management (marketer scoping works)
+- Production logging, target setting, damage log
+- Inventory and finished goods tracking
+- Batch management
+- Labour pool management
+- Daily labour roster
+- Truck loading log + weekly summary
+- Weekly payroll (loading and production) full approval chain: draft → ICO → MD → paid
+- Monthly fixed payroll full approval chain: draft → ICO → MD → paid
+- **Recall to Draft** for all payroll types (any non-paid state)
+- Labour rate change request workflow (propose → ICO → MD → auto-apply to labour_roles)
+- Staff management and attendance
+- Vehicle registry, maintenance, rentals
+- Supplier registry
+- Expense tracking and categorisation
+- Opening balances (asset/liability/equity with history)
+- Financial statements (P&L, balance sheet, cash flow) with adjustments
+- Reports engine (production, sales, finance, inventory by role)
+- KPI dashboard
+- Board dashboard (read-only aggregates)
+- ICO read-only mode (CSS attribute-based button hiding)
+- Board member read-only mode
+- User management (MD only — create, assign role, activate/deactivate)
+- Data import (CSV/Excel bulk upload for production, attendance, expenses)
+- My Profile (view details, upload documents)
+- Schedule approvals
+- Pending register
+
+### Requires SQL Action Before Working Fully
+
+- Production target setting for `assistant_production_manager` role — run SQL A in section 12
+
+### Not Yet Built / Out of Scope
+
+- Push notifications / email alerts for approval events
+- Audit log / change history outside of `opening_balance_history`
+- Multi-site stock transfer between locations
+- Automated payroll journal entries to financial statements
