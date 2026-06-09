@@ -1281,7 +1281,8 @@ function LoadingWeeklySummary({ logs, pool, userProfile, onRefresh }) {
       .select('week_ending, status, id')
       .eq('payroll_type', 'loading')
       .in('week_ending', weeks)
-      .then(({ data }) => {
+      .then(({ data, error }) => {
+        if (error) return
         const map = {}
         ;(data || []).forEach(p => { map[p.week_ending] = p })
         setExistingPayrolls(map)
@@ -1326,7 +1327,7 @@ function LoadingWeeklySummary({ logs, pool, userProfile, onRefresh }) {
       worker_count: weekLogs.length, status: 'draft', prepared_by: userProfile?.full_name,
     }).select('week_ending, status, id').single()
     if (error) setAlert({ msg: error.message, type: 'error' })
-    else {
+    else if (inserted) {
       setExistingPayrolls(prev => ({ ...prev, [week]: inserted }))
       setAlert({ msg: 'Loading payroll submitted for approval.', type: 'success' })
       if (onRefresh) onRefresh()
@@ -1800,7 +1801,7 @@ function MonthlyFixedTab({ pool, roles, userProfile }) {
 
       {loading ? <Spinner /> : (
         <div style={{ ...styles.row, gap: '8px', flexWrap: 'wrap' }}>
-          {!existingPayroll && (
+          {!existingPayroll && ['production_manager','assistant_production_manager','hr_officer','md'].includes(userProfile?.role) && (
             <button style={styles.btn('primary')} onClick={handleGenerate} disabled={actioning}>Create Payroll for {month}</button>
           )}
           {existingPayroll?.status === 'draft' && userProfile?.role === 'ico' && (
