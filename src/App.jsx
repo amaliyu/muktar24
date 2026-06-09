@@ -308,41 +308,66 @@ const StatCard = ({ label, value, sub, accent, pct }) => (
 
 // ── DASHBOARD ─────────────────────────────────────────────────
 const Dashboard = ({ onNavigate, userProfile }) => {
+  const role = userProfile?.role || 'staff';
+  const can = (...roles) => roles.includes(role);
+  const isDriver = role === 'driver';
+
   const [stats, setStats] = useState({ staff: 0, produced: 0, orders: 0, revenue: 0, pending: 0, waybills: 0, damages: 0, lpoQueue: 0, scheduleQueue: 0, pendingRegister: 0 });
   const [finishedGoods, setFinishedGoods] = useState([]);
   const [recent, setRecent] = useState([]);
   const [vehicleAlerts, setVehicleAlerts] = useState([]);
   const [rentalVehicles, setRentalVehicles] = useState([]);
+  const [myWaybillsToday, setMyWaybillsToday] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const load = async () => {
+      if (isDriver) {
+        const staffId = userProfile?.staff_id;
+        if (staffId) {
+          const today = new Date().toISOString().split('T')[0];
+          const waybills = await waybillsService.getAllForDriver(staffId).catch(() => []);
+          setMyWaybillsToday(waybills.filter(w => w.waybill_date === today).length);
+        }
+        setLoading(false);
+        return;
+      }
+
+      const needsStaff    = can('md', 'board_member', 'ico', 'hr_officer');
+      const needsOrders   = can('md', 'board_member', 'ico', 'accountant', 'bdm', 'marketer');
+      const needsWaybills = can('md', 'board_member', 'ico', 'store_officer', 'logistics_manager');
+
       try {
         const [staffList, productions, orders, waybills] = await Promise.all([
-          staffService.getAll(),
+          needsStaff    ? staffService.getAll()    : Promise.resolve([]),
           productionService.getAll(),
-          ordersService.getAll(),
-          waybillsService.getAll(),
+          needsOrders   ? ordersService.getAll()   : Promise.resolve([]),
+          needsWaybills ? waybillsService.getAll() : Promise.resolve([]),
         ]);
         const produced = productions.reduce((s, p) => s + (p.quantity_produced || 0), 0);
-        const damages = waybills.reduce((s, w) => s + (w.quantity_damaged || 0), 0);
-        const revenue = orders.reduce((s, o) =>
+        const damages  = waybills.reduce((s, w) => s + (w.quantity_damaged || 0), 0);
+        const revenue  = orders.reduce((s, o) =>
           s + (o.invoices || []).flatMap(inv => inv.payments || []).filter(p => p.status === "confirmed").reduce((a, p) => a + p.amount_paid, 0), 0);
-        const pending = orders.filter(o => o.status === "pending").length;
+        const pending  = orders.filter(o => o.status === "pending").length;
         setStats({ staff: staffList.length, produced, orders: orders.length, revenue, pending, waybills: waybills.length, damages, lpoQueue: 0, scheduleQueue: 0, pendingRegister: 0 });
         setRecent(orders.slice(0, 5));
       } catch {
         // show zeros on error
       }
+
+      const needsFG            = can('md', 'board_member', 'ico', 'store_officer', 'logistics_manager', 'production_manager', 'assistant_production_manager');
+      const needsVehicleAlerts = can('md', 'board_member', 'ico', 'logistics_manager');
+      const needsRentals       = can('md', 'ico', 'accountant', 'logistics_manager');
+
       try {
         const [lpos, scheds, pendReg, fg, prods, expiring, rentals] = await Promise.all([
           lpoService.getPending(),
           schedulesService.getSubmitted(),
           pendingDeliveryService.getAll(),
-          finishedGoodsService.getAll(),
-          productsService.getActive().catch(() => []),
-          vehiclesService.getExpiringOrExpired(30).catch(() => []),
-          supabase.from('vehicles').select('id, vehicle_name, vehicle_number, monthly_rental_amount, owner_name').eq('vehicle_type', 'Rental').then(r => r.data || []).catch(() => []),
+          needsFG            ? finishedGoodsService.getAll()                                                                                                                                                       : Promise.resolve([]),
+          needsFG            ? productsService.getActive().catch(() => [])                                                                                                                                         : Promise.resolve([]),
+          needsVehicleAlerts ? vehiclesService.getExpiringOrExpired(30).catch(() => [])                                                                                                                            : Promise.resolve([]),
+          needsRentals       ? supabase.from('vehicles').select('id, vehicle_name, vehicle_number, monthly_rental_amount, owner_name').eq('vehicle_type', 'Rental').then(r => r.data || []).catch(() => [])        : Promise.resolve([]),
         ]);
         const productUnitMap = Object.fromEntries(prods.map(p => [p.name, p.unit]));
         setStats(s => ({ ...s, lpoQueue: lpos.length, scheduleQueue: scheds.length, pendingRegister: pendReg.length }));
@@ -365,46 +390,86 @@ const Dashboard = ({ onNavigate, userProfile }) => {
 
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+  const firstName = userProfile?.full_name?.split(' ')[0] || 'there';
+
+  if (isDriver) {
+    return (
+      <div>
+        <div style={styles.header}>
+          <div>
+            <div style={styles.pageTitle}>{greeting}, {firstName} 👋</div>
+            <div style={styles.pageSubtitle}>Business overview — Abuja Precast Concrete Limited</div>
+          </div>
+          <span style={styles.badge(theme.green)}>Operations Active</span>
+        </div>
+        {loading ? <Spinner /> : (
+          <>
+            <div style={styles.grid(1)}>
+              <StatCard label="My Waybills Today" value={myWaybillsToday} sub="Deliveries assigned today" accent={theme.blue} />
+            </div>
+            <div style={{ ...styles.card, color: theme.textMuted, fontSize: '14px' }}>
+              Welcome, {firstName}. Check the Waybills page to view your delivery records.
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  const row1 = [
+    can('md', 'board_member', 'ico', 'hr_officer') &&
+      <StatCard key="staff" label="Total Staff" value={stats.staff} sub="Active employees" accent={theme.blue} />,
+    can('md', 'board_member', 'ico', 'store_officer', 'production_manager', 'assistant_production_manager') &&
+      <StatCard key="blocks" label="Blocks Produced" value={fmt(stats.produced)} sub="All time" accent={theme.accent} />,
+    can('md', 'board_member', 'ico', 'accountant', 'bdm', 'marketer') &&
+      <StatCard key="orders" label="Total Orders" value={stats.orders} sub={`${stats.pending} pending`} accent={theme.blue} />,
+    can('md', 'board_member', 'ico', 'store_officer', 'logistics_manager') &&
+      <StatCard key="waybills" label="Waybills Issued" value={stats.waybills} sub="All deliveries" accent={theme.accentDim} />,
+  ].filter(Boolean);
+
+  const row2 = [
+    can('md', 'board_member', 'ico', 'accountant') &&
+      <StatCard key="revenue" label="Revenue Collected" value={naira(stats.revenue)} sub="Confirmed payments" accent={theme.green} />,
+    can('md', 'board_member', 'ico', 'accountant', 'bdm', 'marketer') &&
+      <StatCard key="pending" label="Pending Orders" value={stats.pending} sub="Awaiting processing" accent={theme.accent} />,
+    can('md', 'board_member', 'ico', 'logistics_manager', 'production_manager', 'assistant_production_manager') &&
+      <StatCard key="damages" label="Transit Damages" value={fmt(stats.damages)} sub="Blocks damaged in delivery" accent={theme.red} />,
+  ].filter(Boolean);
+
+  const showLpo      = can('md', 'ico', 'bdm') && stats.lpoQueue > 0;
+  const showSchedule = can('md', 'ico') && stats.scheduleQueue > 0;
+  const showPending  = can('md', 'board_member', 'ico', 'bdm', 'store_officer', 'logistics_manager') && stats.pendingRegister > 0;
 
   return (
     <div>
       <div style={styles.header}>
         <div>
-          <div style={styles.pageTitle}>{greeting}, {userProfile?.full_name?.split(' ')[0] || 'MD'} 👋</div>
+          <div style={styles.pageTitle}>{greeting}, {firstName} 👋</div>
           <div style={styles.pageSubtitle}>Business overview — Abuja Precast Concrete Limited</div>
         </div>
         <span style={styles.badge(theme.green)}>Operations Active</span>
       </div>
       {loading ? <Spinner /> : (
         <>
-          <div style={styles.grid(4)}>
-            <StatCard label="Total Staff" value={stats.staff} sub="Active employees" accent={theme.blue} />
-            <StatCard label="Blocks Produced" value={fmt(stats.produced)} sub="All time" accent={theme.accent} />
-            <StatCard label="Total Orders" value={stats.orders} sub={`${stats.pending} pending`} accent={theme.blue} />
-            <StatCard label="Waybills Issued" value={stats.waybills} sub="All deliveries" accent={theme.accentDim} />
-          </div>
-          <div style={styles.grid(3)}>
-            <StatCard label="Revenue Collected" value={naira(stats.revenue)} sub="Confirmed payments" accent={theme.green} />
-            <StatCard label="Pending Orders" value={stats.pending} sub="Awaiting processing" accent={theme.accent} />
-            <StatCard label="Transit Damages" value={fmt(stats.damages)} sub="Blocks damaged in delivery" accent={theme.red} />
-          </div>
-          {(stats.lpoQueue > 0 || stats.scheduleQueue > 0 || stats.pendingRegister > 0) && (
+          {row1.length > 0 && <div style={styles.grid(row1.length)}>{row1}</div>}
+          {row2.length > 0 && <div style={styles.grid(row2.length)}>{row2}</div>}
+          {(showLpo || showSchedule || showPending) && (
             <div style={{ display: "flex", gap: "12px", marginBottom: "16px", flexWrap: "wrap" }}>
-              {stats.lpoQueue > 0 && (
+              {showLpo && (
                 <div style={{ background: "rgba(245,166,35,0.12)", border: `1px solid ${theme.accent}55`, borderRadius: "10px", padding: "12px 18px", flex: 1, minWidth: "200px" }}>
                   <div style={{ fontSize: "11px", fontWeight: "700", color: theme.accent, textTransform: "uppercase", letterSpacing: "0.05em" }}>LPO Approvals Pending</div>
                   <div style={{ fontSize: "28px", fontWeight: "700", color: theme.text, marginTop: "4px" }}>{stats.lpoQueue}</div>
                   <div style={{ fontSize: "12px", color: theme.textMuted }}>Orders awaiting MD approval</div>
                 </div>
               )}
-              {stats.scheduleQueue > 0 && (
+              {showSchedule && (
                 <div style={{ background: "rgba(91,141,238,0.12)", border: `1px solid ${theme.blue}55`, borderRadius: "10px", padding: "12px 18px", flex: 1, minWidth: "200px" }}>
                   <div style={{ fontSize: "11px", fontWeight: "700", color: theme.blue, textTransform: "uppercase", letterSpacing: "0.05em" }}>Schedules Awaiting ICO</div>
                   <div style={{ fontSize: "28px", fontWeight: "700", color: theme.text, marginTop: "4px" }}>{stats.scheduleQueue}</div>
                   <div style={{ fontSize: "12px", color: theme.textMuted }}>Delivery schedules submitted</div>
                 </div>
               )}
-              {stats.pendingRegister > 0 && (
+              {showPending && (
                 <div style={{ background: "rgba(45,212,160,0.10)", border: `1px solid ${theme.green}55`, borderRadius: "10px", padding: "12px 18px", flex: 1, minWidth: "200px" }}>
                   <div style={{ fontSize: "11px", fontWeight: "700", color: theme.green, textTransform: "uppercase", letterSpacing: "0.05em" }}>Pending Deliveries</div>
                   <div style={{ fontSize: "28px", fontWeight: "700", color: theme.text, marginTop: "4px" }}>{stats.pendingRegister}</div>
@@ -413,7 +478,7 @@ const Dashboard = ({ onNavigate, userProfile }) => {
               )}
             </div>
           )}
-          {vehicleAlerts.length > 0 && (
+          {can('md', 'board_member', 'ico', 'logistics_manager') && vehicleAlerts.length > 0 && (
             <div style={{ ...styles.card, marginBottom: "16px", borderColor: theme.red + "55", borderLeft: `4px solid ${theme.red}` }}>
               <div style={{ fontSize: "13px", fontWeight: "700", color: theme.red, marginBottom: "10px" }}>🚛 Vehicle Document Alerts ({vehicleAlerts.length})</div>
               <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
@@ -451,7 +516,7 @@ const Dashboard = ({ onNavigate, userProfile }) => {
               </div>
             </div>
           )}
-          {rentalVehicles.length > 0 && (
+          {can('md', 'ico', 'accountant', 'logistics_manager') && rentalVehicles.length > 0 && (
             <div style={{ ...styles.card, marginBottom: "16px", borderLeft: `4px solid ${theme.accent}` }}>
               <div style={{ fontSize: "13px", fontWeight: "700", color: theme.accent, marginBottom: "10px" }}>🚐 Monthly Rental Payment Reminder</div>
               <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
@@ -467,7 +532,7 @@ const Dashboard = ({ onNavigate, userProfile }) => {
               </div>
             </div>
           )}
-          {finishedGoods.length > 0 && (
+          {can('md', 'board_member', 'ico', 'store_officer', 'logistics_manager', 'production_manager', 'assistant_production_manager') && finishedGoods.length > 0 && (
             <div style={{ ...styles.card, marginBottom: "16px" }}>
               <div style={styles.sectionTitle}>Finished Goods in Yard</div>
               <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
@@ -481,7 +546,7 @@ const Dashboard = ({ onNavigate, userProfile }) => {
               </div>
             </div>
           )}
-          {recent.length > 0 && (
+          {can('md', 'board_member', 'ico', 'accountant', 'bdm', 'marketer') && recent.length > 0 && (
             <div style={styles.card}>
               <div style={styles.sectionTitle}>Recent Orders</div>
               <table style={styles.table}>
