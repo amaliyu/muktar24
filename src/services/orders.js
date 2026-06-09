@@ -128,7 +128,7 @@ export const customersService = {
         orders(
           id, status, created_at, site_id,
           order_items(quantity, unit_price, subtotal),
-          invoices(id, payments(amount_paid, status))
+          invoices(id, total_amount, payments(amount_paid, status))
         )
       `)
       .order('created_at', { ascending: false })
@@ -145,7 +145,7 @@ export const customersService = {
         orders(
           id, status, created_at, site_id,
           order_items(quantity, unit_price, subtotal),
-          invoices(id, payments(amount_paid, status))
+          invoices(id, total_amount, payments(amount_paid, status))
         )
       `)
       .eq('added_by', userId)
