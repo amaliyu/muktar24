@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
+import * as XLSX from 'xlsx'
 
 const theme = {
   bg: '#0f1117', surface: '#1a1d27', card: '#21263a', border: '#2e3452',
@@ -1455,6 +1456,73 @@ function generatePayrollPDF(payrollType, weekEnding, workers, totalAmount, payro
   doc.save(`Payroll_${payrollType}_${weekEnding}.pdf`)
 }
 
+function generatePaymentScheduleXLSX(payrollType, weekEnding, workers, pool) {
+  const sat = new Date(weekEnding)
+  const mon = new Date(sat)
+  mon.setDate(sat.getDate() - 5)
+  const fmtDate = d => d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+  const title = `Workers Wages ${fmtDate(mon)} — ${fmtDate(sat)}`
+
+  const LEFT_HEADERS = ['SN', 'NAMES', 'MON', 'TUES', 'WED', 'THURS', 'FRI', 'SAT', 'TOTAL PAY', 'CLEANING', 'LOAN', 'DEDUCTIONS', 'HAJIYA', 'MINUS', 'TOTAL']
+  const RIGHT_HEADERS = ['S/N', 'NAMES', 'ACCOUNT NAME', 'ACCOUNT NUMBER', 'BANK', 'AMOUNT']
+  const TOTAL_COLS = LEFT_HEADERS.length + 1 + RIGHT_HEADERS.length // 15 + 1 gap + 6 = 22
+
+  const aoa = []
+
+  // Row 0: title spanning all columns
+  const titleRow = Array(TOTAL_COLS).fill('')
+  titleRow[0] = title
+  aoa.push(titleRow)
+
+  // Row 1: headers
+  aoa.push([...LEFT_HEADERS, '', ...RIGHT_HEADERS])
+
+  // Worker rows
+  workers.forEach((w, i) => {
+    const poolWorker = pool.find(p => p.id === w.id)
+    const accountName = poolWorker?.bank_account_name || '—'
+    const totalPay = Math.round(w.total_pay || 0)
+    aoa.push([
+      i + 1, w.name, '', '', '', '', '', '', totalPay, '', '', '', '', '', '',
+      '',
+      i + 1, w.name, accountName, w.account, w.bank, totalPay,
+    ])
+  })
+
+  // Totals row
+  const grandTotal = Math.round(workers.reduce((s, w) => s + Number(w.total_pay || 0), 0))
+  const totalsRow = Array(TOTAL_COLS).fill('')
+  totalsRow[1] = 'TOTAL'
+  totalsRow[8] = grandTotal   // TOTAL PAY
+  totalsRow[14] = grandTotal  // NET TOTAL
+  totalsRow[21] = grandTotal  // AMOUNT (right panel)
+  aoa.push(totalsRow)
+
+  // Summary rows
+  ;['TOTAL LABOR', 'WORKERS FEEDING ADVANCE', 'DEFERRED', 'TO BE PAID'].forEach(label => {
+    const row = Array(TOTAL_COLS).fill('')
+    row[13] = label
+    aoa.push(row)
+  })
+
+  const ws = XLSX.utils.aoa_to_sheet(aoa)
+
+  // Merge title row
+  ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: TOTAL_COLS - 1 } }]
+
+  ws['!cols'] = [
+    { wch: 4 }, { wch: 22 },
+    { wch: 7 }, { wch: 7 }, { wch: 7 }, { wch: 7 }, { wch: 7 }, { wch: 7 },
+    { wch: 13 }, { wch: 10 }, { wch: 8 }, { wch: 12 }, { wch: 10 }, { wch: 20 }, { wch: 13 },
+    { wch: 3 },
+    { wch: 4 }, { wch: 22 }, { wch: 24 }, { wch: 16 }, { wch: 16 }, { wch: 14 },
+  ]
+
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, 'Payment Schedule')
+  XLSX.writeFile(wb, `Payment_Schedule_${payrollType}_${weekEnding}.xlsx`)
+}
+
 function WeeklyPayrollTab({ pool, roles, userProfile }) {
   const [subTab, setSubTab] = useState('production')
   const [weekEnding, setWeekEnding] = useState(getSaturday(todayStr()))
@@ -1645,6 +1713,11 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
                 const pdfWorkers = workers.map(w => ({ ...w, days_or_blocks: subTab === 'production' ? w.days : Math.round(w.days_or_blocks || 0) }))
                 generatePayrollPDF(subTab, weekEnding, pdfWorkers, totalAmount, currentPayroll)
               }}>Download PDF</button>
+            )}
+            {currentPayroll?.status === 'md_approved' && ['accountant', 'ico'].includes(userProfile?.role) && (
+              <button data-ico-allow style={styles.btn('blue')} onClick={() =>
+                generatePaymentScheduleXLSX(subTab, weekEnding, workers, pool)
+              }>Download Payment Schedule</button>
             )}
           </div>
         </>

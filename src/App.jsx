@@ -2143,7 +2143,11 @@ const Customers = ({ userProfile }) => {
 
   const getStats = (c) => {
     const orders = c.orders || [];
-    const totalValue = orders.reduce((s, o) => s + (o.order_items || []).reduce((si, i) => si + Number(i.subtotal ?? i.quantity * i.unit_price), 0), 0);
+    const totalValue = orders.reduce((s, o) => {
+      const invoiced = (o.invoices || []).reduce((si, inv) => si + Number(inv.total_amount || 0), 0);
+      const itemTotal = (o.order_items || []).reduce((si, i) => si + Number(i.subtotal ?? i.quantity * i.unit_price), 0);
+      return s + (invoiced || itemTotal);
+    }, 0);
     const totalPaid = orders.reduce((s, o) => s + (o.invoices || []).flatMap(inv => inv.payments || []).filter(p => p.status === "confirmed").reduce((sp, p) => sp + Number(p.amount_paid), 0), 0);
     return { totalValue, totalPaid, outstanding: totalValue - totalPaid, orderCount: orders.length };
   };
