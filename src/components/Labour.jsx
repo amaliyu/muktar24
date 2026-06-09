@@ -1272,6 +1272,21 @@ function LoadingWeeklySummary({ logs, pool, userProfile, onRefresh }) {
   const [filter, setFilter] = useState('all_unpaid')
   const [customFrom, setCustomFrom] = useState('')
   const [customTo, setCustomTo] = useState('')
+  const [existingPayrolls, setExistingPayrolls] = useState({})
+
+  useEffect(() => {
+    const weeks = [...new Set(logs.map(l => l.payment_week_ending).filter(Boolean))]
+    if (weeks.length === 0) { setExistingPayrolls({}); return }
+    supabase.from('weekly_labour_payroll')
+      .select('week_ending, status, id')
+      .eq('payroll_type', 'loading')
+      .in('week_ending', weeks)
+      .then(({ data }) => {
+        const map = {}
+        ;(data || []).forEach(p => { map[p.week_ending] = p })
+        setExistingPayrolls(map)
+      })
+  }, [logs])
 
   const todaySat = getSaturday(todayStr())
   const lastSat = (() => {
@@ -1306,12 +1321,16 @@ function LoadingWeeklySummary({ logs, pool, userProfile, onRefresh }) {
     const weekLogs = logs.filter(l => l.payment_week_ending === week && l.payment_status === 'unpaid')
     if (weekLogs.length === 0) return
     const total = weekLogs.reduce((s, l) => s + Number(l.total_amount || 0), 0)
-    const { error } = await supabase.from('weekly_labour_payroll').insert({
+    const { data: inserted, error } = await supabase.from('weekly_labour_payroll').insert({
       week_ending: week, payroll_type: 'loading', total_amount: total,
       worker_count: weekLogs.length, status: 'draft', prepared_by: userProfile?.full_name,
-    })
+    }).select('week_ending, status, id').single()
     if (error) setAlert({ msg: error.message, type: 'error' })
-    else { setAlert({ msg: 'Loading payroll submitted for approval.', type: 'success' }); if (onRefresh) onRefresh() }
+    else {
+      setExistingPayrolls(prev => ({ ...prev, [week]: inserted }))
+      setAlert({ msg: 'Loading payroll submitted for approval.', type: 'success' })
+      if (onRefresh) onRefresh()
+    }
   }
 
   return (
@@ -1363,8 +1382,12 @@ function LoadingWeeklySummary({ logs, pool, userProfile, onRefresh }) {
                 <div style={{ textAlign: 'right' }}>
                   <div style={{ fontWeight: '700', fontSize: '18px', color: theme.accent }}>{naira(weekTotal)}</div>
                 </div>
-                {unpaid && canSubmit && (
-                  <button style={styles.btn('primary')} onClick={() => handleSubmitPayment(week)}>Submit for Approval</button>
+                {existingPayrolls[week] ? (
+                  <span style={styles.badge(statusColor(existingPayrolls[week].status))}>{existingPayrolls[week].status}</span>
+                ) : (
+                  unpaid && canSubmit && (
+                    <button style={styles.btn('primary')} onClick={() => handleSubmitPayment(week)}>Submit for Approval</button>
+                  )
                 )}
               </div>
             </div>
@@ -1513,6 +1536,7 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
     let update = {}
     if (action === 'ico_approve') update = { status: 'ico_approved', ico_approved_by: userProfile?.full_name }
     else if (action === 'md_approve') update = { status: 'md_approved', md_approved_by: userProfile?.full_name }
+    else if (action === 'recall') update = { status: 'draft', ico_approved_by: null, md_approved_by: null }
     else if (action === 'mark_paid') {
       update = { status: 'paid', payment_date: todayStr() }
       const catId = await getOrCreateCategory('Labour Wages')
@@ -1527,7 +1551,7 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
     const { error } = await supabase.from('weekly_labour_payroll').update(update).eq('id', currentPayroll.id)
     setActioning(false)
     if (error) setAlert({ msg: error.message, type: 'error' })
-    else { setAlert({ msg: 'Updated.', type: 'success' }); loadWeekData() }
+    else { setAlert({ msg: action === 'recall' ? 'Payroll recalled to draft — corrections can now be made.' : 'Updated.', type: 'success' }); loadWeekData() }
   }
 
   return (
@@ -1599,7 +1623,7 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
             </table>
           </div>
 
-          <div style={styles.row}>
+          <div style={{ ...styles.row, gap: '8px', flexWrap: 'wrap' }}>
             {!currentPayroll && workers.length > 0 && ['production_manager','assistant_production_manager','hr_officer','md'].includes(userProfile?.role) && (
               <button style={styles.btn('primary')} onClick={handleGeneratePayroll} disabled={actioning}>Generate Payroll</button>
             )}
@@ -1611,6 +1635,9 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
             )}
             {currentPayroll?.status === 'md_approved' && userProfile?.role === 'accountant' && (
               <button style={styles.btn('success')} onClick={() => handlePayrollAction('mark_paid')} disabled={actioning}>Mark as Paid + Create Expense</button>
+            )}
+            {currentPayroll && currentPayroll.status !== 'paid' && ['production_manager','assistant_production_manager','logistics_manager','hr_officer','ico','md'].includes(userProfile?.role) && (
+              <button data-ico-allow style={{ ...styles.btn('danger'), opacity: 0.85 }} onClick={() => handlePayrollAction('recall')} disabled={actioning}>Recall to Draft</button>
             )}
             {currentPayroll?.status === 'paid' && (
               <button style={styles.btn('blue')} onClick={() => {
@@ -1689,6 +1716,7 @@ function MonthlyFixedTab({ pool, roles, userProfile }) {
     let update = {}
     if (action === 'ico_approve') update = { status: 'ico_approved', ico_approved_by: userProfile?.full_name }
     else if (action === 'md_approve') update = { status: 'md_approved', md_approved_by: userProfile?.full_name }
+    else if (action === 'recall') update = { status: 'draft', ico_approved_by: null, md_approved_by: null }
     else if (action === 'mark_paid') {
       update = { status: 'paid', payment_date: todayStr() }
       const catId = await getOrCreateCategory('Labour Wages')
@@ -1703,7 +1731,7 @@ function MonthlyFixedTab({ pool, roles, userProfile }) {
     const { error } = await supabase.from('weekly_labour_payroll').update(update).eq('id', existingPayroll.id)
     setActioning(false)
     if (error) setAlert({ msg: error.message, type: 'error' })
-    else { setAlert({ msg: 'Updated.', type: 'success' }); loadData() }
+    else { setAlert({ msg: action === 'recall' ? 'Payroll recalled to draft.' : 'Updated.', type: 'success' }); loadData() }
   }
 
   const handlePDF = () => {
@@ -1771,7 +1799,7 @@ function MonthlyFixedTab({ pool, roles, userProfile }) {
       </div>
 
       {loading ? <Spinner /> : (
-        <div style={styles.row}>
+        <div style={{ ...styles.row, gap: '8px', flexWrap: 'wrap' }}>
           {!existingPayroll && (
             <button style={styles.btn('primary')} onClick={handleGenerate} disabled={actioning}>Create Payroll for {month}</button>
           )}
@@ -1783,6 +1811,9 @@ function MonthlyFixedTab({ pool, roles, userProfile }) {
           )}
           {existingPayroll?.status === 'md_approved' && userProfile?.role === 'accountant' && (
             <button style={styles.btn('success')} onClick={() => handleAction('mark_paid')} disabled={actioning}>Mark as Paid + Create Expense</button>
+          )}
+          {existingPayroll && existingPayroll.status !== 'paid' && ['production_manager','assistant_production_manager','logistics_manager','hr_officer','ico','md'].includes(userProfile?.role) && (
+            <button data-ico-allow style={{ ...styles.btn('danger'), opacity: 0.85 }} onClick={() => handleAction('recall')} disabled={actioning}>Recall to Draft</button>
           )}
           {existingPayroll?.status === 'paid' && (
             <button style={styles.btn('blue')} onClick={handlePDF}>Download PDF</button>
