@@ -1,8 +1,8 @@
 import { supabase } from '../lib/supabase'
 
 export const ordersService = {
-  async getAll() {
-    const { data, error } = await supabase
+  async getAll({ from, to } = {}) {
+    let query = supabase
       .from('orders')
       .select(`
         *,
@@ -13,6 +13,9 @@ export const ordersService = {
         invoices(id, invoice_number, total_amount, issued_date, due_date, payments(id, amount_paid, payment_date, status))
       `)
       .order('created_at', { ascending: false })
+    if (from) query = query.gte('created_at', from)
+    if (to)   query = query.lte('created_at', to + 'T23:59:59')
+    const { data, error } = await query
     if (error) throw error
     return data || []
   },

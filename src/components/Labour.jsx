@@ -1456,6 +1456,23 @@ function generatePayrollPDF(payrollType, weekEnding, workers, totalAmount, payro
   doc.save(`Payroll_${payrollType}_${weekEnding}.pdf`)
 }
 
+function generateBulkTransferXLSX(weekEnding, workers, pool) {
+  const rows = workers.map(w => {
+    const p = pool.find(x => x.id === w.id)
+    return {
+      'Account Name':   p?.bank_account_name || w.name,
+      'Account Number': w.account,
+      'Amount':         Math.round(w.total_pay || 0),
+      'Bank':           w.bank,
+    }
+  })
+  const ws = XLSX.utils.json_to_sheet(rows)
+  ws['!cols'] = [{ wch: 28 }, { wch: 18 }, { wch: 14 }, { wch: 18 }]
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, 'Bulk Transfer')
+  XLSX.writeFile(wb, `bulk-transfer-${weekEnding}.xlsx`)
+}
+
 function generatePaymentScheduleXLSX(payrollType, weekEnding, workers, pool) {
   const sat = new Date(weekEnding)
   const mon = new Date(sat)
@@ -1718,6 +1735,11 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
               <button data-ico-allow style={styles.btn('blue')} onClick={() =>
                 generatePaymentScheduleXLSX(subTab, weekEnding, workers, pool)
               }>Download Payment Schedule</button>
+            )}
+            {currentPayroll?.status === 'md_approved' && ['accountant', 'ico'].includes(userProfile?.role) && (
+              <button data-ico-allow style={styles.btn('blue')} onClick={() =>
+                generateBulkTransferXLSX(weekEnding, workers, pool)
+              }>Download Bulk Transfer</button>
             )}
           </div>
         </>

@@ -312,6 +312,10 @@ const Dashboard = ({ onNavigate, userProfile }) => {
   const can = (...roles) => roles.includes(role);
   const isDriver = role === 'driver';
 
+  const firstOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
+  const todayIso = new Date().toISOString().split('T')[0];
+  const [dateRange, setDateRange] = useState({ from: firstOfMonth, to: todayIso });
+
   const [stats, setStats] = useState({ staff: 0, produced: 0, orders: 0, revenue: 0, pending: 0, waybills: 0, damages: 0, lpoQueue: 0, scheduleQueue: 0, pendingRegister: 0 });
   const [finishedGoods, setFinishedGoods] = useState([]);
   const [recent, setRecent] = useState([]);
@@ -340,10 +344,10 @@ const Dashboard = ({ onNavigate, userProfile }) => {
 
       try {
         const [staffList, productions, orders, waybills] = await Promise.all([
-          needsStaff    ? staffService.getAll()    : Promise.resolve([]),
-          productionService.getAll(),
-          needsOrders   ? ordersService.getAll()   : Promise.resolve([]),
-          needsWaybills ? waybillsService.getAll() : Promise.resolve([]),
+          needsStaff    ? staffService.getAll()                              : Promise.resolve([]),
+          productionService.getAll({ from: dateRange.from, to: dateRange.to }),
+          needsOrders   ? ordersService.getAll({ from: dateRange.from, to: dateRange.to })   : Promise.resolve([]),
+          needsWaybills ? waybillsService.getAll({ from: dateRange.from, to: dateRange.to }) : Promise.resolve([]),
         ]);
         const produced = productions.reduce((s, p) => s + (p.quantity_produced || 0), 0);
         const damages  = waybills.reduce((s, w) => s + (w.quantity_damaged || 0), 0);
@@ -387,7 +391,7 @@ const Dashboard = ({ onNavigate, userProfile }) => {
       }
     };
     load();
-  }, [userProfile]);
+  }, [userProfile, dateRange]);
 
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
@@ -450,6 +454,24 @@ const Dashboard = ({ onNavigate, userProfile }) => {
         </div>
         <span style={styles.badge(theme.green)}>Operations Active</span>
       </div>
+      {!isDriver && (
+        <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end', marginBottom: '16px', flexWrap: 'wrap' }}>
+          <div>
+            <div style={{ fontSize: '11px', color: theme.textMuted, fontWeight: '700', textTransform: 'uppercase', marginBottom: '4px' }}>From</div>
+            <input type="date" value={dateRange.from} onChange={e => setDateRange(r => ({ ...r, from: e.target.value }))}
+              style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '6px', color: theme.text, padding: '6px 10px', fontSize: '13px' }} />
+          </div>
+          <div>
+            <div style={{ fontSize: '11px', color: theme.textMuted, fontWeight: '700', textTransform: 'uppercase', marginBottom: '4px' }}>To</div>
+            <input type="date" value={dateRange.to} onChange={e => setDateRange(r => ({ ...r, to: e.target.value }))}
+              style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '6px', color: theme.text, padding: '6px 10px', fontSize: '13px' }} />
+          </div>
+          <button onClick={() => setDateRange({ from: firstOfMonth, to: todayIso })}
+            style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '6px', color: theme.textMuted, padding: '6px 12px', fontSize: '12px', cursor: 'pointer' }}>
+            This Month
+          </button>
+        </div>
+      )}
       {loading ? <Spinner /> : (
         <>
           {row1.length > 0 && <div style={styles.grid(row1.length)}>{row1}</div>}
@@ -2145,9 +2167,9 @@ const Customers = ({ userProfile }) => {
   const getStats = (c) => {
     const orders = c.orders || [];
     const totalValue = orders.reduce((s, o) => {
-      const invoiced = (o.invoices || []).reduce((si, inv) => si + Number(inv.total_amount || 0), 0);
+      const invoiced = (o.invoices || []).reduce((si, inv) => si + Number(inv.total_amount ?? 0), 0);
       const itemTotal = (o.order_items || []).reduce((si, i) => si + Number(i.subtotal ?? i.quantity * i.unit_price), 0);
-      return s + (invoiced || itemTotal);
+      return s + (invoiced !== 0 ? invoiced : itemTotal);
     }, 0);
     const totalPaid = orders.reduce((s, o) => s + (o.invoices || []).flatMap(inv => inv.payments || []).filter(p => p.status === "confirmed").reduce((sp, p) => sp + Number(p.amount_paid), 0), 0);
     return { totalValue, totalPaid, outstanding: totalValue - totalPaid, orderCount: orders.length };

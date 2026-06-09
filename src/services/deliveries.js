@@ -27,8 +27,8 @@ export const deliveriesService = {
 }
 
 export const waybillsService = {
-  async getAll() {
-    const { data, error } = await supabase
+  async getAll({ from, to } = {}) {
+    let query = supabase
       .from('waybills')
       .select(`
         *,
@@ -36,6 +36,9 @@ export const waybillsService = {
         order:order_id(customer:customer_id(location))
       `)
       .order('waybill_date', { ascending: false })
+    if (from) query = query.gte('waybill_date', from)
+    if (to)   query = query.lte('waybill_date', to)
+    const { data, error } = await query
     if (error) throw error
     return data || []
   },
