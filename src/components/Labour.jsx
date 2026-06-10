@@ -1705,12 +1705,12 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
                 generatePayrollPDF(subTab, weekEnding, pdfWorkers, totalAmount, currentPayroll)
               }}>Download PDF</button>
             )}
-            {['md_approved', 'paid'].includes(currentPayroll?.status) && ['accountant', 'ico'].includes(userProfile?.role) && (
+            {['md_approved', 'paid'].includes(currentPayroll?.status) && ['accountant', 'ico', 'md'].includes(userProfile?.role) && (
               <button data-ico-allow style={styles.btn('blue')} onClick={() =>
                 generatePaymentScheduleXLSX(subTab, weekEnding, workers, pool)
               }>Download Payment Schedule</button>
             )}
-            {['md_approved', 'paid'].includes(currentPayroll?.status) && ['accountant', 'ico'].includes(userProfile?.role) && (
+            {['md_approved', 'paid'].includes(currentPayroll?.status) && ['accountant', 'ico', 'md'].includes(userProfile?.role) && (
               <button data-ico-allow style={styles.btn('blue')} onClick={() =>
                 generateBulkTransferXLSX(weekEnding, workers, pool)
               }>Download Bulk Transfer</button>
@@ -1888,13 +1888,13 @@ function MonthlyFixedTab({ pool, roles, userProfile }) {
           {existingPayroll?.status === 'paid' && (
             <button style={styles.btn('blue')} onClick={handlePDF}>Download PDF</button>
           )}
-          {['md_approved', 'paid'].includes(existingPayroll?.status) && ['accountant', 'ico'].includes(userProfile?.role) && (
+          {['md_approved', 'paid'].includes(existingPayroll?.status) && ['accountant', 'ico', 'md'].includes(userProfile?.role) && (
             <button data-ico-allow style={styles.btn('blue')} onClick={() => {
               const w = fixedWorkers.map(fw => ({ id: fw.id, name: fw.label, account: fw.account, bank: fw.bank, total_pay: fw.amount }))
               generatePaymentScheduleXLSX('monthly_fixed', month, w, pool)
             }}>Download Payment Schedule</button>
           )}
-          {['md_approved', 'paid'].includes(existingPayroll?.status) && ['accountant', 'ico'].includes(userProfile?.role) && (
+          {['md_approved', 'paid'].includes(existingPayroll?.status) && ['accountant', 'ico', 'md'].includes(userProfile?.role) && (
             <button data-ico-allow style={styles.btn('blue')} onClick={() => {
               const w = fixedWorkers.map(fw => ({ id: fw.id, name: fw.label, account: fw.account, bank: fw.bank, total_pay: fw.amount }))
               generateBulkTransferXLSX(month, w, pool)
