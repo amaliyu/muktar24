@@ -1914,6 +1914,18 @@ function MonthlyFixedTab({ pool, roles, userProfile }) {
           {existingPayroll?.status === 'paid' && (
             <button style={styles.btn('blue')} onClick={handlePDF}>Download PDF</button>
           )}
+          {['md_approved', 'paid'].includes(existingPayroll?.status) && ['accountant', 'ico'].includes(userProfile?.role) && (
+            <button data-ico-allow style={styles.btn('blue')} onClick={() => {
+              const w = fixedWorkers.map(fw => ({ id: fw.id, name: fw.label, account: fw.account, bank: fw.bank, total_pay: fw.amount }))
+              generatePaymentScheduleXLSX('monthly_fixed', month, w, pool)
+            }}>Download Payment Schedule</button>
+          )}
+          {['md_approved', 'paid'].includes(existingPayroll?.status) && ['accountant', 'ico'].includes(userProfile?.role) && (
+            <button data-ico-allow style={styles.btn('blue')} onClick={() => {
+              const w = fixedWorkers.map(fw => ({ id: fw.id, name: fw.label, account: fw.account, bank: fw.bank, total_pay: fw.amount }))
+              generateBulkTransferXLSX(month, w, pool)
+            }}>Download Bulk Transfer</button>
+          )}
         </div>
       )}
     </div>

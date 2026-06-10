@@ -9,55 +9,40 @@ function fmtDate(dateStr) {
 }
 
 function buildRows(orders, waybills, fromDate, toDate, productMap = {}) {
-  // Build unit price map: block_type → unit_price from order items
-  const unitPriceMap = {};
+  const rows = [];
+
+  // Debit rows: one per invoice (VAT-inclusive total_amount)
   for (const order of orders) {
-    for (const item of (order.order_items || [])) {
-      if (item.block_type && item.unit_price) {
-        unitPriceMap[item.block_type] = Number(item.unit_price);
-      }
+    for (const invoice of (order.invoices || [])) {
+      const d = invoice.issued_date;
+      if (!d) continue;
+      if (fromDate && d < fromDate) continue;
+      if (toDate   && d > toDate)   continue;
+      const amount = Number(invoice.total_amount || 0);
+      if (amount <= 0) continue;
+      rows.push({
+        type: 'debit',
+        date: d,
+        qty: 0,
+        unitLabel: '',
+        description: `INVOICE ${invoice.invoice_number || ''}`.trim(),
+        ref: invoice.invoice_number || '',
+        debit: amount,
+        credit: 0,
+        balance: 0,
+      });
     }
   }
 
-  const rows = [];
-
-  // Debit rows: one per waybill delivery trip
-  for (const wb of waybills) {
-    const d = wb.waybill_date;
-    if (!d) continue;
-    if (fromDate && d < fromDate) continue;
-    if (toDate   && d > toDate)   continue;
-
-    const qty = Number(wb.quantity_received || 0);
-    if (qty <= 0) continue;
-
-    const blockType = wb.block_type || '';
-    const unitPrice = unitPriceMap[blockType] || 0;
-    const unitLabel = productMap[blockType] || '';
-
-    rows.push({
-      type: 'debit',
-      date: d,
-      qty,
-      unitLabel,
-      description: blockType ? `${blockType.toUpperCase()} BLOCKS DELIVERY` : 'SUPPLY OF CONCRETE PRODUCTS',
-      ref: wb.waybill_number || '',
-      debit: qty * unitPrice,
-      credit: 0,
-      balance: 0,
-    });
-  }
-
-  // Credit rows: from confirmed payments on invoices
+  // Credit rows: confirmed payments on invoices
   for (const order of orders) {
-    for (const invoice of order.invoices || []) {
-      for (const pay of invoice.payments || []) {
+    for (const invoice of (order.invoices || [])) {
+      for (const pay of (invoice.payments || [])) {
         if (pay.status !== 'confirmed') continue;
         const d = pay.payment_date;
         if (!d) continue;
         if (fromDate && d < fromDate) continue;
         if (toDate   && d > toDate)   continue;
-
         rows.push({
           type: 'credit',
           date: d,
@@ -218,7 +203,7 @@ export async function generateStatementPDF(customer, orders, waybills, fromDate,
 
   autoTable(doc, {
     startY: 49,
-    head: [['DATE', 'QTY', 'DESCRIPTION', 'WAYBILL NO.', 'DEBIT (N)', 'CREDIT (N)', 'BALANCE (N)']],
+    head: [['DATE', 'QTY', 'DESCRIPTION', 'INVOICE NO.', 'DEBIT (N)', 'CREDIT (N)', 'BALANCE (N)']],
     body: [...tableBody, totalsRow],
     margin: { left: ml, right: 14 },
     headStyles: {
@@ -275,8 +260,8 @@ export async function generateStatementPDF(customer, orders, waybills, fromDate,
 
   const sumRows = [
     { label: 'TOTAL AMOUNT PAID:', value: N(totalCredit), color: [34, 150, 100] },
-    { label: 'TOTAL BLOCKS DELIVERED:', value: qty(totalQty) + ' blocks', color: [30, 30, 30] },
-    { label: 'WORTH OF BLOCKS NOT PAID FOR:', value: N(Math.max(finalBal, 0)), color: finalBal > 0 ? [200, 50, 50] : [34, 150, 100] },
+    { label: 'TOTAL INVOICED:', value: N(totalDebit), color: [30, 30, 30] },
+    { label: 'OUTSTANDING BALANCE:', value: N(Math.max(finalBal, 0)), color: finalBal > 0 ? [200, 50, 50] : [34, 150, 100] },
   ];
 
   const colW = (mr - ml - 8) / 3;
