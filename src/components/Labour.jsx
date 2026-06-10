@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
+import * as XLSX from 'xlsx'
 
 const theme = {
   bg: '#0f1117', surface: '#1a1d27', card: '#21263a', border: '#2e3452',
@@ -1455,6 +1456,64 @@ function generatePayrollPDF(payrollType, weekEnding, workers, totalAmount, payro
   doc.save(`Payroll_${payrollType}_${weekEnding}.pdf`)
 }
 
+function generateBulkTransferXLSX(label, workers, pool) {
+  const rows = workers.map(w => {
+    const p = pool.find(x => x.id === w.id)
+    return {
+      'Account Name':   p?.bank_account_name || w.name,
+      'Account Number': w.account,
+      'Amount':         Math.round(w.total_pay || 0),
+      'Bank':           w.bank,
+    }
+  })
+  const ws = XLSX.utils.json_to_sheet(rows)
+  ws['!cols'] = [{ wch: 28 }, { wch: 18 }, { wch: 14 }, { wch: 18 }]
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, 'Bulk Transfer')
+  XLSX.writeFile(wb, `bulk-transfer-${label}.xlsx`)
+}
+
+function generatePaymentScheduleXLSX(payrollType, label, workers, pool) {
+  const LEFT_HEADERS = ['SN', 'NAMES', 'MON', 'TUES', 'WED', 'THURS', 'FRI', 'SAT', 'TOTAL PAY', 'CLEANING', 'LOAN', 'DEDUCTIONS', 'HAJIYA', 'MINUS', 'TOTAL']
+  const RIGHT_HEADERS = ['S/N', 'NAMES', 'ACCOUNT NAME', 'ACCOUNT NUMBER', 'BANK', 'AMOUNT']
+  const TOTAL_COLS = LEFT_HEADERS.length + 1 + RIGHT_HEADERS.length
+
+  const aoa = []
+  const titleRow = Array(TOTAL_COLS).fill('')
+  titleRow[0] = `Workers Wages — ${label}`
+  aoa.push(titleRow)
+  aoa.push([...LEFT_HEADERS, '', ...RIGHT_HEADERS])
+
+  workers.forEach((w, i) => {
+    const poolWorker = pool.find(p => p.id === w.id)
+    const accountName = poolWorker?.bank_account_name || '—'
+    const totalPay = Math.round(w.total_pay || 0)
+    aoa.push([
+      i + 1, w.name, '', '', '', '', '', '', totalPay, '', '', '', '', '', '',
+      '',
+      i + 1, w.name, accountName, w.account, w.bank, totalPay,
+    ])
+  })
+
+  const grandTotal = Math.round(workers.reduce((s, w) => s + Number(w.total_pay || 0), 0))
+  const totalsRow = Array(TOTAL_COLS).fill('')
+  totalsRow[1] = 'TOTAL'; totalsRow[8] = grandTotal; totalsRow[14] = grandTotal; totalsRow[21] = grandTotal
+  aoa.push(totalsRow)
+
+  const ws = XLSX.utils.aoa_to_sheet(aoa)
+  ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: TOTAL_COLS - 1 } }]
+  ws['!cols'] = [
+    { wch: 4 }, { wch: 22 },
+    { wch: 7 }, { wch: 7 }, { wch: 7 }, { wch: 7 }, { wch: 7 }, { wch: 7 },
+    { wch: 13 }, { wch: 10 }, { wch: 8 }, { wch: 12 }, { wch: 10 }, { wch: 20 }, { wch: 13 },
+    { wch: 3 },
+    { wch: 4 }, { wch: 22 }, { wch: 24 }, { wch: 16 }, { wch: 16 }, { wch: 14 },
+  ]
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, 'Payment Schedule')
+  XLSX.writeFile(wb, `payment-schedule-${label}.xlsx`)
+}
+
 function WeeklyPayrollTab({ pool, roles, userProfile }) {
   const [subTab, setSubTab] = useState('production')
   const [weekEnding, setWeekEnding] = useState(getSaturday(todayStr()))
@@ -1646,6 +1705,16 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
                 generatePayrollPDF(subTab, weekEnding, pdfWorkers, totalAmount, currentPayroll)
               }}>Download PDF</button>
             )}
+            {['md_approved', 'paid'].includes(currentPayroll?.status) && ['accountant', 'ico'].includes(userProfile?.role) && (
+              <button data-ico-allow style={styles.btn('blue')} onClick={() =>
+                generatePaymentScheduleXLSX(subTab, weekEnding, workers, pool)
+              }>Download Payment Schedule</button>
+            )}
+            {['md_approved', 'paid'].includes(currentPayroll?.status) && ['accountant', 'ico'].includes(userProfile?.role) && (
+              <button data-ico-allow style={styles.btn('blue')} onClick={() =>
+                generateBulkTransferXLSX(weekEnding, workers, pool)
+              }>Download Bulk Transfer</button>
+            )}
           </div>
         </>
       )}
@@ -1818,6 +1887,18 @@ function MonthlyFixedTab({ pool, roles, userProfile }) {
           )}
           {existingPayroll?.status === 'paid' && (
             <button style={styles.btn('blue')} onClick={handlePDF}>Download PDF</button>
+          )}
+          {['md_approved', 'paid'].includes(existingPayroll?.status) && ['accountant', 'ico'].includes(userProfile?.role) && (
+            <button data-ico-allow style={styles.btn('blue')} onClick={() => {
+              const w = fixedWorkers.map(fw => ({ id: fw.id, name: fw.label, account: fw.account, bank: fw.bank, total_pay: fw.amount }))
+              generatePaymentScheduleXLSX('monthly_fixed', month, w, pool)
+            }}>Download Payment Schedule</button>
+          )}
+          {['md_approved', 'paid'].includes(existingPayroll?.status) && ['accountant', 'ico'].includes(userProfile?.role) && (
+            <button data-ico-allow style={styles.btn('blue')} onClick={() => {
+              const w = fixedWorkers.map(fw => ({ id: fw.id, name: fw.label, account: fw.account, bank: fw.bank, total_pay: fw.amount }))
+              generateBulkTransferXLSX(month, w, pool)
+            }}>Download Bulk Transfer</button>
           )}
         </div>
       )}
