@@ -1456,7 +1456,7 @@ function generatePayrollPDF(payrollType, weekEnding, workers, totalAmount, payro
   doc.save(`Payroll_${payrollType}_${weekEnding}.pdf`)
 }
 
-function generateBulkTransferXLSX(weekEnding, workers, pool) {
+function generateBulkTransferXLSX(label, workers, pool) {
   const rows = workers.map(w => {
     const p = pool.find(x => x.id === w.id)
     return {
@@ -1470,31 +1470,20 @@ function generateBulkTransferXLSX(weekEnding, workers, pool) {
   ws['!cols'] = [{ wch: 28 }, { wch: 18 }, { wch: 14 }, { wch: 18 }]
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, ws, 'Bulk Transfer')
-  XLSX.writeFile(wb, `bulk-transfer-${weekEnding}.xlsx`)
+  XLSX.writeFile(wb, `bulk-transfer-${label}.xlsx`)
 }
 
-function generatePaymentScheduleXLSX(payrollType, weekEnding, workers, pool) {
-  const sat = new Date(weekEnding)
-  const mon = new Date(sat)
-  mon.setDate(sat.getDate() - 5)
-  const fmtDate = d => d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
-  const title = `Workers Wages ${fmtDate(mon)} — ${fmtDate(sat)}`
-
+function generatePaymentScheduleXLSX(payrollType, label, workers, pool) {
   const LEFT_HEADERS = ['SN', 'NAMES', 'MON', 'TUES', 'WED', 'THURS', 'FRI', 'SAT', 'TOTAL PAY', 'CLEANING', 'LOAN', 'DEDUCTIONS', 'HAJIYA', 'MINUS', 'TOTAL']
   const RIGHT_HEADERS = ['S/N', 'NAMES', 'ACCOUNT NAME', 'ACCOUNT NUMBER', 'BANK', 'AMOUNT']
-  const TOTAL_COLS = LEFT_HEADERS.length + 1 + RIGHT_HEADERS.length // 15 + 1 gap + 6 = 22
+  const TOTAL_COLS = LEFT_HEADERS.length + 1 + RIGHT_HEADERS.length
 
   const aoa = []
-
-  // Row 0: title spanning all columns
   const titleRow = Array(TOTAL_COLS).fill('')
-  titleRow[0] = title
+  titleRow[0] = `Workers Wages — ${label}`
   aoa.push(titleRow)
-
-  // Row 1: headers
   aoa.push([...LEFT_HEADERS, '', ...RIGHT_HEADERS])
 
-  // Worker rows
   workers.forEach((w, i) => {
     const poolWorker = pool.find(p => p.id === w.id)
     const accountName = poolWorker?.bank_account_name || '—'
@@ -1506,27 +1495,13 @@ function generatePaymentScheduleXLSX(payrollType, weekEnding, workers, pool) {
     ])
   })
 
-  // Totals row
   const grandTotal = Math.round(workers.reduce((s, w) => s + Number(w.total_pay || 0), 0))
   const totalsRow = Array(TOTAL_COLS).fill('')
-  totalsRow[1] = 'TOTAL'
-  totalsRow[8] = grandTotal   // TOTAL PAY
-  totalsRow[14] = grandTotal  // NET TOTAL
-  totalsRow[21] = grandTotal  // AMOUNT (right panel)
+  totalsRow[1] = 'TOTAL'; totalsRow[8] = grandTotal; totalsRow[14] = grandTotal; totalsRow[21] = grandTotal
   aoa.push(totalsRow)
 
-  // Summary rows
-  ;['TOTAL LABOR', 'WORKERS FEEDING ADVANCE', 'DEFERRED', 'TO BE PAID'].forEach(label => {
-    const row = Array(TOTAL_COLS).fill('')
-    row[13] = label
-    aoa.push(row)
-  })
-
   const ws = XLSX.utils.aoa_to_sheet(aoa)
-
-  // Merge title row
   ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: TOTAL_COLS - 1 } }]
-
   ws['!cols'] = [
     { wch: 4 }, { wch: 22 },
     { wch: 7 }, { wch: 7 }, { wch: 7 }, { wch: 7 }, { wch: 7 }, { wch: 7 },
@@ -1534,10 +1509,9 @@ function generatePaymentScheduleXLSX(payrollType, weekEnding, workers, pool) {
     { wch: 3 },
     { wch: 4 }, { wch: 22 }, { wch: 24 }, { wch: 16 }, { wch: 16 }, { wch: 14 },
   ]
-
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, ws, 'Payment Schedule')
-  XLSX.writeFile(wb, `Payment_Schedule_${payrollType}_${weekEnding}.xlsx`)
+  XLSX.writeFile(wb, `payment-schedule-${label}.xlsx`)
 }
 
 function WeeklyPayrollTab({ pool, roles, userProfile }) {
@@ -1731,12 +1705,12 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
                 generatePayrollPDF(subTab, weekEnding, pdfWorkers, totalAmount, currentPayroll)
               }}>Download PDF</button>
             )}
-            {['md_approved', 'paid'].includes(currentPayroll?.status) && ['accountant', 'ico'].includes(userProfile?.role) && (
+            {['md_approved', 'paid'].includes(currentPayroll?.status) && ['accountant', 'ico', 'md'].includes(userProfile?.role) && (
               <button data-ico-allow style={styles.btn('blue')} onClick={() =>
                 generatePaymentScheduleXLSX(subTab, weekEnding, workers, pool)
               }>Download Payment Schedule</button>
             )}
-            {['md_approved', 'paid'].includes(currentPayroll?.status) && ['accountant', 'ico'].includes(userProfile?.role) && (
+            {['md_approved', 'paid'].includes(currentPayroll?.status) && ['accountant', 'ico', 'md'].includes(userProfile?.role) && (
               <button data-ico-allow style={styles.btn('blue')} onClick={() =>
                 generateBulkTransferXLSX(weekEnding, workers, pool)
               }>Download Bulk Transfer</button>
@@ -1914,13 +1888,13 @@ function MonthlyFixedTab({ pool, roles, userProfile }) {
           {existingPayroll?.status === 'paid' && (
             <button style={styles.btn('blue')} onClick={handlePDF}>Download PDF</button>
           )}
-          {['md_approved', 'paid'].includes(existingPayroll?.status) && ['accountant', 'ico'].includes(userProfile?.role) && (
+          {['md_approved', 'paid'].includes(existingPayroll?.status) && ['accountant', 'ico', 'md'].includes(userProfile?.role) && (
             <button data-ico-allow style={styles.btn('blue')} onClick={() => {
               const w = fixedWorkers.map(fw => ({ id: fw.id, name: fw.label, account: fw.account, bank: fw.bank, total_pay: fw.amount }))
               generatePaymentScheduleXLSX('monthly_fixed', month, w, pool)
             }}>Download Payment Schedule</button>
           )}
-          {['md_approved', 'paid'].includes(existingPayroll?.status) && ['accountant', 'ico'].includes(userProfile?.role) && (
+          {['md_approved', 'paid'].includes(existingPayroll?.status) && ['accountant', 'ico', 'md'].includes(userProfile?.role) && (
             <button data-ico-allow style={styles.btn('blue')} onClick={() => {
               const w = fixedWorkers.map(fw => ({ id: fw.id, name: fw.label, account: fw.account, bank: fw.bank, total_pay: fw.amount }))
               generateBulkTransferXLSX(month, w, pool)

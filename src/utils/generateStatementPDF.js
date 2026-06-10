@@ -226,16 +226,13 @@ export async function generateStatementPDF(customer, orders, waybills, fromDate,
     didParseCell: (data) => {
       if (data.section !== 'body' || data.row.index >= rows.length) return;
       const row = rows[data.row.index];
-      // Credit rows: green credit column
       if (row.type === 'credit' && data.column.index === 5) {
         data.cell.styles.textColor  = [34, 150, 100];
         data.cell.styles.fontStyle  = 'bold';
       }
-      // Balance column: red if customer owes, green if paid up
       if (data.column.index === 6) {
         data.cell.styles.textColor = row.balance > 0 ? [200, 50, 50] : [34, 150, 100];
       }
-      // Stripe credit rows lightly
       if (row.type === 'credit') {
         data.cell.styles.fillColor = [245, 255, 250];
       }
