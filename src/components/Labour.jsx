@@ -1514,9 +1514,16 @@ function generatePaymentScheduleXLSX(payrollType, label, workers, pool) {
   XLSX.writeFile(wb, `payment-schedule-${label}.xlsx`)
 }
 
+function getLastSaturday(dateStr) {
+  const d = new Date(dateStr || todayStr())
+  const day = d.getDay()
+  d.setDate(d.getDate() - (day === 6 ? 0 : day + 1))
+  return d.toISOString().split('T')[0]
+}
+
 function WeeklyPayrollTab({ pool, roles, userProfile }) {
   const [subTab, setSubTab] = useState('production')
-  const [weekEnding, setWeekEnding] = useState(getSaturday(todayStr()))
+  const [weekEnding, setWeekEnding] = useState(getLastSaturday(todayStr()))
   const [rosters, setRosters] = useState([])
   const [loadingLogs, setLoadingLogs] = useState([])
   const [payrollRecords, setPayrollRecords] = useState([])
