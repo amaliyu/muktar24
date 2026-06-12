@@ -801,7 +801,7 @@ const StaffProfile = ({ staffId, onBack, onUpdated, roles }) => {
                       <td style={styles.td}>{doc.uploaded_at ? new Date(doc.uploaded_at).toLocaleDateString() : "—"}</td>
                       <td style={styles.td}>
                         <div style={{ display: "flex", gap: "6px" }}>
-                          <a href={doc.file_url} target="_blank" rel="noopener noreferrer" style={{ ...styles.btn("secondary"), padding: "4px 10px", fontSize: "11px", textDecoration: "none" }}>View</a>
+                          <a href={doc.displayUrl || '#'} target="_blank" rel="noopener noreferrer" style={{ ...styles.btn("secondary"), padding: "4px 10px", fontSize: "11px", textDecoration: "none" }}>View</a>
                           <button style={{ ...styles.btn("danger"), padding: "4px 10px", fontSize: "11px" }} onClick={() => handleDeleteDoc(doc)}>Delete</button>
                         </div>
                       </td>
