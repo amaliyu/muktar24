@@ -2792,7 +2792,7 @@ const Inventory = ({ onLowStockChange }) => {
           <div style={styles.pageTitle}>Inventory Management</div>
           <div style={styles.pageSubtitle}>Raw materials, consumables, and stock movements</div>
         </div>
-        <button style={styles.btn("primary")} onClick={() => { setShowItemForm(true); setEditItem(null); setItemForm(emptyItem); setTab("registry"); }}>+ Add Item</button>
+        {tab === "registry" && <button style={styles.btn("primary")} onClick={() => { setShowItemForm(true); setEditItem(null); setItemForm(emptyItem); setTab("registry"); }}>+ Add Item</button>}
       </div>
 
       {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
