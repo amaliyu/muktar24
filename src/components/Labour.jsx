@@ -1605,16 +1605,6 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
       return
     }
     setActioning(true)
-    if (action === 'mark_paid') {
-      const catId = await getOrCreateCategory('Labour Wages')
-      if (catId) {
-        await supabase.from('expenses').insert({
-          category_id: catId,
-          description: `${subTab === 'production' ? 'Production' : 'Loading'} Labour Payroll — Week ending ${weekEnding}`,
-          amount: totalAmount, expense_date: todayStr(), status: 'approved', vendor: 'Labour Pool',
-        })
-      }
-    }
     const { error } = await supabase.rpc('advance_weekly_payroll', {
       p_payroll_id: currentPayroll.id,
       p_action: action,
@@ -1626,7 +1616,20 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
       return
     }
     if (action === 'mark_paid') {
-      await supabase.from('weekly_labour_payroll').update({ payment_date: todayStr() }).eq('id', currentPayroll.id)
+      const catId = await getOrCreateCategory('Labour Wages')
+      if (catId) {
+        const { error: expErr } = await supabase.from('expenses').insert({
+          category_id: catId,
+          description: `${subTab === 'production' ? 'Production' : 'Loading'} Labour Payroll — Week ending ${weekEnding}`,
+          amount: totalAmount, expense_date: todayStr(), status: 'approved', vendor: 'Labour Pool',
+        })
+        if (expErr) {
+          setActioning(false)
+          setAlert({ msg: 'Payroll marked paid — expense entry failed, please create it manually.', type: 'error' })
+          loadWeekData()
+          return
+        }
+      }
     }
     if (action === 'recall') setRecallReason('')
     setActioning(false)
@@ -1811,16 +1814,6 @@ function MonthlyFixedTab({ pool, roles, userProfile }) {
       return
     }
     setActioning(true)
-    if (action === 'mark_paid') {
-      const catId = await getOrCreateCategory('Labour Wages')
-      if (catId) {
-        await supabase.from('expenses').insert({
-          category_id: catId,
-          description: `Monthly Fixed Labour — ${month}`,
-          amount: totalFixed, expense_date: todayStr(), status: 'approved', vendor: 'Labour Pool',
-        })
-      }
-    }
     const { error } = await supabase.rpc('advance_weekly_payroll', {
       p_payroll_id: existingPayroll.id,
       p_action: action,
@@ -1832,7 +1825,20 @@ function MonthlyFixedTab({ pool, roles, userProfile }) {
       return
     }
     if (action === 'mark_paid') {
-      await supabase.from('weekly_labour_payroll').update({ payment_date: todayStr() }).eq('id', existingPayroll.id)
+      const catId = await getOrCreateCategory('Labour Wages')
+      if (catId) {
+        const { error: expErr } = await supabase.from('expenses').insert({
+          category_id: catId,
+          description: `Monthly Fixed Labour — ${month}`,
+          amount: totalFixed, expense_date: todayStr(), status: 'approved', vendor: 'Labour Pool',
+        })
+        if (expErr) {
+          setActioning(false)
+          setAlert({ msg: 'Payroll marked paid — expense entry failed, please create it manually.', type: 'error' })
+          loadData()
+          return
+        }
+      }
     }
     if (action === 'recall') setRecallReason('')
     setActioning(false)
