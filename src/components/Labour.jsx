@@ -1530,6 +1530,7 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
   const [loading, setLoading] = useState(false)
   const [alert, setAlert] = useState(null)
   const [actioning, setActioning] = useState(false)
+  const [recallReason, setRecallReason] = useState('')
 
   const loadWeekData = useCallback(async () => {
     if (!weekEnding) return
@@ -1597,28 +1598,43 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
     else { setAlert({ msg: 'Payroll generated.', type: 'success' }); loadWeekData() }
   }
 
-  const handlePayrollAction = async (action, comment = '') => {
+  const handlePayrollAction = async (action) => {
     if (!currentPayroll) return
+    if (action === 'recall' && !recallReason.trim()) {
+      setAlert({ msg: 'Enter a reason before recalling.', type: 'error' })
+      return
+    }
     setActioning(true)
-    let update = {}
-    if (action === 'ico_approve') update = { status: 'ico_approved', ico_approved_by: userProfile?.full_name }
-    else if (action === 'md_approve') update = { status: 'md_approved', md_approved_by: userProfile?.full_name }
-    else if (action === 'recall') update = { status: 'draft', ico_approved_by: null, md_approved_by: null }
-    else if (action === 'mark_paid') {
-      update = { status: 'paid', payment_date: todayStr() }
+    const { error } = await supabase.rpc('advance_weekly_payroll', {
+      p_payroll_id: currentPayroll.id,
+      p_action: action,
+      p_reason: action === 'recall' ? recallReason.trim() : null,
+    })
+    if (error) {
+      setActioning(false)
+      setAlert({ msg: error.message, type: 'error' })
+      return
+    }
+    if (action === 'mark_paid') {
       const catId = await getOrCreateCategory('Labour Wages')
       if (catId) {
-        await supabase.from('expenses').insert({
+        const { error: expErr } = await supabase.from('expenses').insert({
           category_id: catId,
           description: `${subTab === 'production' ? 'Production' : 'Loading'} Labour Payroll — Week ending ${weekEnding}`,
           amount: totalAmount, expense_date: todayStr(), status: 'approved', vendor: 'Labour Pool',
         })
+        if (expErr) {
+          setActioning(false)
+          setAlert({ msg: 'Payroll marked paid — expense entry failed, please create it manually.', type: 'error' })
+          loadWeekData()
+          return
+        }
       }
     }
-    const { error } = await supabase.from('weekly_labour_payroll').update(update).eq('id', currentPayroll.id)
+    if (action === 'recall') setRecallReason('')
     setActioning(false)
-    if (error) setAlert({ msg: error.message, type: 'error' })
-    else { setAlert({ msg: action === 'recall' ? 'Payroll recalled to draft — corrections can now be made.' : 'Updated.', type: 'success' }); loadWeekData() }
+    setAlert({ msg: action === 'recall' ? 'Payroll recalled to draft — corrections can now be made.' : 'Updated.', type: 'success' })
+    loadWeekData()
   }
 
   return (
@@ -1704,7 +1720,10 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
               <button style={styles.btn('success')} onClick={() => handlePayrollAction('mark_paid')} disabled={actioning}>Mark as Paid + Create Expense</button>
             )}
             {currentPayroll && currentPayroll.status !== 'paid' && ['production_manager','assistant_production_manager','logistics_manager','hr_officer','ico','md'].includes(userProfile?.role) && (
-              <button data-ico-allow style={{ ...styles.btn('danger'), opacity: 0.85 }} onClick={() => handlePayrollAction('recall')} disabled={actioning}>Recall to Draft</button>
+              <>
+                <input data-ico-allow style={{ ...styles.input, minWidth: '200px' }} placeholder="Reason for recall (required)…" value={recallReason} onChange={e => setRecallReason(e.target.value)} />
+                <button data-ico-allow style={{ ...styles.btn('danger'), opacity: recallReason.trim() ? 0.85 : 0.4 }} onClick={() => handlePayrollAction('recall')} disabled={actioning || !recallReason.trim()}>Recall to Draft</button>
+              </>
             )}
             {currentPayroll?.status === 'paid' && (
               <button style={styles.btn('blue')} onClick={() => {
@@ -1737,6 +1756,7 @@ function MonthlyFixedTab({ pool, roles, userProfile }) {
   const [loading, setLoading] = useState(false)
   const [alert, setAlert] = useState(null)
   const [actioning, setActioning] = useState(false)
+  const [recallReason, setRecallReason] = useState('')
   const [rentalVehicles, setRentalVehicles] = useState([])
 
   useEffect(() => {
@@ -1789,26 +1809,41 @@ function MonthlyFixedTab({ pool, roles, userProfile }) {
 
   const handleAction = async (action) => {
     if (!existingPayroll) return
+    if (action === 'recall' && !recallReason.trim()) {
+      setAlert({ msg: 'Enter a reason before recalling.', type: 'error' })
+      return
+    }
     setActioning(true)
-    let update = {}
-    if (action === 'ico_approve') update = { status: 'ico_approved', ico_approved_by: userProfile?.full_name }
-    else if (action === 'md_approve') update = { status: 'md_approved', md_approved_by: userProfile?.full_name }
-    else if (action === 'recall') update = { status: 'draft', ico_approved_by: null, md_approved_by: null }
-    else if (action === 'mark_paid') {
-      update = { status: 'paid', payment_date: todayStr() }
+    const { error } = await supabase.rpc('advance_weekly_payroll', {
+      p_payroll_id: existingPayroll.id,
+      p_action: action,
+      p_reason: action === 'recall' ? recallReason.trim() : null,
+    })
+    if (error) {
+      setActioning(false)
+      setAlert({ msg: error.message, type: 'error' })
+      return
+    }
+    if (action === 'mark_paid') {
       const catId = await getOrCreateCategory('Labour Wages')
       if (catId) {
-        await supabase.from('expenses').insert({
+        const { error: expErr } = await supabase.from('expenses').insert({
           category_id: catId,
           description: `Monthly Fixed Labour — ${month}`,
           amount: totalFixed, expense_date: todayStr(), status: 'approved', vendor: 'Labour Pool',
         })
+        if (expErr) {
+          setActioning(false)
+          setAlert({ msg: 'Payroll marked paid — expense entry failed, please create it manually.', type: 'error' })
+          loadData()
+          return
+        }
       }
     }
-    const { error } = await supabase.from('weekly_labour_payroll').update(update).eq('id', existingPayroll.id)
+    if (action === 'recall') setRecallReason('')
     setActioning(false)
-    if (error) setAlert({ msg: error.message, type: 'error' })
-    else { setAlert({ msg: action === 'recall' ? 'Payroll recalled to draft.' : 'Updated.', type: 'success' }); loadData() }
+    setAlert({ msg: action === 'recall' ? 'Payroll recalled to draft.' : 'Updated.', type: 'success' })
+    loadData()
   }
 
   const handlePDF = () => {
@@ -1890,7 +1925,10 @@ function MonthlyFixedTab({ pool, roles, userProfile }) {
             <button style={styles.btn('success')} onClick={() => handleAction('mark_paid')} disabled={actioning}>Mark as Paid + Create Expense</button>
           )}
           {existingPayroll && existingPayroll.status !== 'paid' && ['production_manager','assistant_production_manager','logistics_manager','hr_officer','ico','md'].includes(userProfile?.role) && (
-            <button data-ico-allow style={{ ...styles.btn('danger'), opacity: 0.85 }} onClick={() => handleAction('recall')} disabled={actioning}>Recall to Draft</button>
+            <>
+              <input data-ico-allow style={{ ...styles.input, minWidth: '200px' }} placeholder="Reason for recall (required)…" value={recallReason} onChange={e => setRecallReason(e.target.value)} />
+              <button data-ico-allow style={{ ...styles.btn('danger'), opacity: recallReason.trim() ? 0.85 : 0.4 }} onClick={() => handleAction('recall')} disabled={actioning || !recallReason.trim()}>Recall to Draft</button>
+            </>
           )}
           {existingPayroll?.status === 'paid' && (
             <button style={styles.btn('blue')} onClick={handlePDF}>Download PDF</button>
