@@ -1252,8 +1252,12 @@ const PayrollTab = () => {
       await payrollService.createRun(run, lines);
       setAlert({ type: "success", msg: `Payroll approved — ${naira(grandTotal)} total for ${calcLines.length} staff.` });
       setStep(1); setCalcLines([]); setView("history"); loadRuns();
-    } catch (e) { setAlert({ type: "error", msg: "Failed to save payroll: " + e.message }); }
-    finally { setSaving(false); }
+    } catch (e) {
+      const msg = e.message?.includes('not active') || e.message?.includes('not eligible')
+        ? 'This staff member is not active and cannot be added to payroll.'
+        : 'Failed to save payroll: ' + e.message;
+      setAlert({ type: "error", msg });
+    }
   };
 
   const openRun = async (run) => {

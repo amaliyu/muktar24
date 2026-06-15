@@ -94,3 +94,4 @@ All migrations tracked via `apply_migration`. **No code-side migrations needed.*
 - Add Staff form Employment tab still shows `employment_status` dropdown with all 4 values — verify that HR staff shouldn't be able to set `active` directly on creation (the DB default enforces it, but the UI still offers it).
 - Payroll line creation in `PayrollTab` uses `staffService.getActive()` which now correctly filters to active only.
 - Staff payroll trigger+RPC+audit workflow — MD decision still pending (see master doc §4).
+- Directory status filter shows **active** and **onboarding** only; no view yet for suspended/terminated staff (deferred to phase 4c disciplinary module). `statusColor` currently styles onboarding only — both intentional, not gaps to fix now.
