@@ -324,7 +324,7 @@ const StaffFormModal = ({ onClose, onSaved, editTarget, roles }) => {
       if (editTarget) {
         result = await staffService.update(editTarget.id, payload);
       } else {
-        result = await staffService.create({ ...payload, is_active: true });
+        result = await staffService.create(payload);
       }
       onSaved(result);
       onClose();
