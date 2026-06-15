@@ -1323,16 +1323,17 @@ function LoadingWeeklySummary({ logs, pool, userProfile, onRefresh }) {
     const weekLogs = logs.filter(l => l.payment_week_ending === week && l.payment_status === 'unpaid')
     if (weekLogs.length === 0) return
     const total = weekLogs.reduce((s, l) => s + Number(l.total_amount || 0), 0)
-    const { data: inserted, error } = await supabase.from('weekly_labour_payroll').insert({
-      week_ending: week, payroll_type: 'loading', total_amount: total,
-      worker_count: weekLogs.length, status: 'draft', prepared_by: userProfile?.full_name,
-    }).select('week_ending, status, id').single()
-    if (error) setAlert({ msg: error.message, type: 'error' })
-    else if (inserted) {
-      setExistingPayrolls(prev => ({ ...prev, [week]: inserted }))
-      setAlert({ msg: 'Loading payroll submitted for approval.', type: 'success' })
-      if (onRefresh) onRefresh()
-    }
+    const { error: upErr } = await supabase.from('weekly_labour_payroll').upsert(
+      { week_ending: week, payroll_type: 'loading', total_amount: total, worker_count: weekLogs.length, status: 'draft', prepared_by: userProfile?.full_name },
+      { onConflict: 'week_ending,payroll_type', ignoreDuplicates: true }
+    )
+    if (upErr) { setAlert({ msg: upErr.message, type: 'error' }); return }
+    const { data: header, error: selErr } = await supabase.from('weekly_labour_payroll')
+      .select('week_ending, status, id').eq('week_ending', week).eq('payroll_type', 'loading').single()
+    if (selErr) { setAlert({ msg: selErr.message, type: 'error' }); return }
+    setExistingPayrolls(prev => ({ ...prev, [week]: header }))
+    setAlert({ msg: 'Loading payroll submitted for approval.', type: 'success' })
+    if (onRefresh) onRefresh()
   }
 
   return (
@@ -1589,13 +1590,14 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
   const handleGeneratePayroll = async () => {
     if (workers.length === 0) return setAlert({ msg: 'No workers found for this week.', type: 'error' })
     setActioning(true)
-    const { error } = await supabase.from('weekly_labour_payroll').insert({
-      week_ending: weekEnding, payroll_type: subTab, total_amount: totalAmount,
-      worker_count: workers.length, status: 'draft', prepared_by: userProfile?.full_name,
-    })
+    const { error: upErr } = await supabase.from('weekly_labour_payroll').upsert(
+      { week_ending: weekEnding, payroll_type: subTab, total_amount: totalAmount, worker_count: workers.length, status: 'draft', prepared_by: userProfile?.full_name },
+      { onConflict: 'week_ending,payroll_type', ignoreDuplicates: true }
+    )
     setActioning(false)
-    if (error) setAlert({ msg: error.message, type: 'error' })
-    else { setAlert({ msg: 'Payroll generated.', type: 'success' }); loadWeekData() }
+    if (upErr) { setAlert({ msg: upErr.message, type: 'error' }); return }
+    setAlert({ msg: 'Payroll generated.', type: 'success' })
+    loadWeekData()
   }
 
   const handlePayrollAction = async (action) => {
@@ -1798,13 +1800,14 @@ function MonthlyFixedTab({ pool, roles, userProfile }) {
     if (fixedWorkers.length === 0) return setAlert({ msg: 'No monthly fixed workers in Labour Pool. Add workers with category "monthly_fixed" first.', type: 'error' })
     setActioning(true)
     const weekEnding = `${month}-28`
-    const { error } = await supabase.from('weekly_labour_payroll').insert({
-      week_ending: weekEnding, payroll_type: 'monthly_fixed', total_amount: totalFixed,
-      worker_count: fixedWorkers.length, status: 'draft', prepared_by: userProfile?.full_name,
-    })
+    const { error: upErr } = await supabase.from('weekly_labour_payroll').upsert(
+      { week_ending: weekEnding, payroll_type: 'monthly_fixed', total_amount: totalFixed, worker_count: fixedWorkers.length, status: 'draft', prepared_by: userProfile?.full_name },
+      { onConflict: 'week_ending,payroll_type', ignoreDuplicates: true }
+    )
     setActioning(false)
-    if (error) setAlert({ msg: error.message, type: 'error' })
-    else { setAlert({ msg: 'Monthly fixed payroll created.', type: 'success' }); loadData() }
+    if (upErr) { setAlert({ msg: upErr.message, type: 'error' }); return }
+    setAlert({ msg: 'Monthly fixed payroll created.', type: 'success' })
+    loadData()
   }
 
   const handleAction = async (action) => {
