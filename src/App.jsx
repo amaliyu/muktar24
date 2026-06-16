@@ -1084,9 +1084,7 @@ const Orders = ({ onNavigate, userProfile }) => {
         _existingId: existingInvoice.id,
       });
     } else {
-      const count = orders.reduce((s, o) => s + (o.invoices || []).length, 0);
-      const year = new Date().getFullYear();
-      const invoiceNumber = `APC-INV-${year}-${String((count || 0) + 1).padStart(3, "0")}`;
+      const invoiceNumber = await invoicesService.getNextNumber();
       const editorItems = buildItems(selected.order_items || []);
       setInvoiceEditor({
         invoice_number: invoiceNumber,
@@ -1106,6 +1104,7 @@ const Orders = ({ onNavigate, userProfile }) => {
     setInvoicing(true);
     try {
       const { _existingId, invoice_number, issued_date, due_date, items, delivery_cost, include_vat, discount } = invoiceEditor;
+      let invNum = invoice_number;
       const itemSubtotal = items.reduce((s, i) => s + (Number(i.quantity) || 0) * (Number(i.unit_price) || 0), 0);
       const delivN = Number(delivery_cost) || 0;
       const discN = Number(discount) || 0;
@@ -1119,18 +1118,28 @@ const Orders = ({ onNavigate, userProfile }) => {
       if (_existingId) {
         await invoicesService.update(_existingId, { invoice_number, issued_date, due_date, total_amount: total });
       } else {
-        const newInvoice = await invoicesService.create({ order_id: orderId, invoice_number, issued_date, due_date, total_amount: total });
+        let newInvoice;
+        try {
+          newInvoice = await invoicesService.create({ order_id: orderId, invoice_number: invNum, issued_date, due_date, total_amount: total });
+        } catch (createErr) {
+          if (createErr.code === '23505') {
+            invNum = await invoicesService.getNextNumber();
+            newInvoice = await invoicesService.create({ order_id: orderId, invoice_number: invNum, issued_date, due_date, total_amount: total });
+          } else {
+            throw createErr;
+          }
+        }
         invoiceId = newInvoice.id;
         await ordersService.updateStatus(orderId, "invoiced");
       }
 
       const customer = selected.customer || { name: selected.customerName, location: selected.customerLocation, phone: selected.customerPhone };
-      await generateInvoicePDF({ invoice_number, issued_date, due_date, items, delivery_cost: delivN, include_vat, discount: discN }, customer);
+      await generateInvoicePDF({ invoice_number: invNum, issued_date, due_date, items, delivery_cost: delivN, include_vat, discount: discN }, customer);
 
       setInvoiceEditor(null);
       const newOrders = await load();
       if (newOrders) setSelected(newOrders.find(o => o.id === orderId) || null);
-      setAlert({ type: "success", msg: `Invoice ${invoice_number} saved and downloaded!` });
+      setAlert({ type: "success", msg: `Invoice ${invNum} saved and downloaded!` });
     } catch (e) {
       if (e.message?.includes('invoices_order_id_fkey')) {
         setInvoiceEditor(null);
