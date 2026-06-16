@@ -47,6 +47,15 @@ export const rolesService = {
   },
 }
 
+function storagePath(fileUrl) {
+  if (!fileUrl) return null
+  if (fileUrl.startsWith('http')) {
+    const m = fileUrl.match(/staff-documents\/(.+)$/)
+    return m ? m[1] : null
+  }
+  return fileUrl
+}
+
 export const documentsService = {
   async getByStaff(staffId) {
     const { data, error } = await supabase
@@ -55,7 +64,19 @@ export const documentsService = {
       .eq('staff_id', staffId)
       .order('uploaded_at', { ascending: false })
     if (error) throw error
-    return data || []
+    const docs = data || []
+    await Promise.all(docs.map(async (doc) => {
+      const path = storagePath(doc.file_url)
+      if (path) {
+        const { data: sd } = await supabase.storage
+          .from('staff-documents')
+          .createSignedUrl(path, 3600)
+        doc.displayUrl = sd?.signedUrl || null
+      } else {
+        doc.displayUrl = null
+      }
+    }))
+    return docs
   },
 
   async upload(staffId, file, label, uploadedBy = '') {
@@ -66,16 +87,12 @@ export const documentsService = {
       .upload(path, file, { upsert: false })
     if (storageErr) throw storageErr
 
-    const { data: { publicUrl } } = supabase.storage
-      .from('staff-documents')
-      .getPublicUrl(storageData.path)
-
     const { data, error } = await supabase
       .from('staff_documents')
       .insert({
         staff_id: staffId,
         document_label: label,
-        file_url: publicUrl,
+        file_url: storageData.path,
         file_name: file.name,
         file_size: file.size,
         uploaded_by: uploadedBy,
@@ -87,10 +104,9 @@ export const documentsService = {
   },
 
   async delete(id, fileUrl) {
-    // Extract storage path from public URL
-    const match = fileUrl?.match(/staff-documents\/(.+)$/)
-    if (match) {
-      await supabase.storage.from('staff-documents').remove([match[1]])
+    const path = storagePath(fileUrl)
+    if (path) {
+      await supabase.storage.from('staff-documents').remove([path])
     }
     const { error } = await supabase.from('staff_documents').delete().eq('id', id)
     if (error) throw error
