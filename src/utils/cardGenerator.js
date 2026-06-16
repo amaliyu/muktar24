@@ -101,11 +101,14 @@ function drawIDFront(doc, staff, logoUrl, photoUrl, photoFmt, barcode, W, H, SB,
   doc.rect(CW, 0, SB, H, 'F');
 
   // Sidebar: job title rotated (reads bottom → top)
-  const jobTitle = (staff.job_title || 'STAFF').toUpperCase();
+  // align:'right' + angle:90 places anchor at the TEXT TOP, pushing body below H → off-canvas.
+  // Fix: compute width first, center vertically with align:'left' (anchor = text bottom).
+  const jobTitle = (staff.job_title?.trim() || staff.role || 'STAFF').toUpperCase();
   doc.setTextColor(...WHITE);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(6.5);
-  doc.text(jobTitle, CW + SB / 2, H - 8, { angle: 90, align: 'right' });
+  const jTW = doc.getTextWidth(jobTitle);
+  doc.text(jobTitle, CW + SB / 2, H / 2 + jTW / 2, { angle: 90 });
 
   // Logo
   doc.addImage(logoUrl, 'PNG', 2, 2, 11, 6);
