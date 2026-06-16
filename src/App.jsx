@@ -7012,7 +7012,7 @@ export default function App() {
     batches: <Batches />,
     waybills: <Waybills userProfile={userProfile} />,
     vehicles: <VehicleRegistry />,
-    staff: <Staff />,
+    staff: <Staff userProfile={userProfile} />,
     customers: <Customers userProfile={userProfile} />,
     orders: <Orders onNavigate={setActive} userProfile={userProfile} />,
     pending_register: <PendingDeliveryRegister />,
