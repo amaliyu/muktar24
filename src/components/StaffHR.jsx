@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { staffService } from '../services/staff';
 import { attendanceService, payrollService } from '../services/attendance';
-import { rolesService, documentsService, hrStaffService } from '../services/hrService';
+import { rolesService, documentsService, hrStaffService, photoService } from '../services/hrService';
 import { generatePayrollPDF } from '../utils/generatePayrollPDF';
+import { generateIDCardPDF, generateBusinessCardPDF } from '../utils/cardGenerator';
 import { supabase } from '../lib/supabase';
 
 const theme = {
@@ -30,6 +31,14 @@ const styles = {
 };
 const naira = (n) => `₦${(n || 0).toLocaleString()}`;
 const fmt = (n) => (n || 0).toLocaleString();
+
+const getMissingFields = (staff) => {
+  const missing = [];
+  if (!staff.job_title?.trim()) missing.push('job title');
+  if (!staff.photo_path)        missing.push('photo');
+  if (!staff.phone?.trim())     missing.push('phone');
+  return missing;
+};
 
 const NIGERIAN_STATES = [
   "Abia","Adamawa","Akwa Ibom","Anambra","Bauchi","Bayelsa","Benue","Borno",
@@ -221,7 +230,7 @@ const StaffFormModal = ({ onClose, onSaved, editTarget, roles }) => {
     full_name: "", date_of_birth: "", gender: "", marital_status: "",
     state_of_origin: "", lga_of_origin: "", home_address: "", nin: "",
     // Tab 2 — Employment
-    employee_number: "", department: "", role_id: "", staff_type: "permanent",
+    employee_number: "", department: "", role_id: "", job_title: "", staff_type: "permanent",
     date_hired: "", monthly_salary: "", daily_rate: "", employment_status: "onboarding",
     // Tab 3 — Contact & Emergency
     phone: "", email: "",
@@ -252,6 +261,7 @@ const StaffFormModal = ({ onClose, onSaved, editTarget, roles }) => {
         employee_number: editTarget.employee_number || "",
         department: editTarget.department || "",
         role_id: editTarget.role_id || "",
+        job_title: editTarget.job_title || "",
         staff_type: editTarget.staff_type || "permanent",
         date_hired: editTarget.date_hired || "",
         monthly_salary: String(editTarget.monthly_salary || ""),
@@ -299,6 +309,7 @@ const StaffFormModal = ({ onClose, onSaved, editTarget, roles }) => {
         employee_number: form.employee_number || null,
         department: form.department || null,
         role_id: form.role_id || null,
+        job_title: form.job_title?.trim() || null,
         role: roles.find(r => String(r.id) === String(form.role_id))?.role_name || form.department || "Staff",
         staff_type: form.staff_type,
         date_hired: form.date_hired || null,
@@ -407,6 +418,10 @@ const StaffFormModal = ({ onClose, onSaved, editTarget, roles }) => {
                   </select>
                 </div>
               </div>
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Job Title <span style={{ color: "#f5a623" }}>(required for ID / business card)</span></label>
+                <input style={styles.input} placeholder="e.g. Internal Control Officer" value={form.job_title} onChange={e => upd("job_title", e.target.value)} />
+              </div>
               <div style={styles.grid(3)}>
                 <div style={styles.formGroup}><label style={styles.label}>Staff Type</label>
                   <select style={styles.input} value={form.staff_type} onChange={e => upd("staff_type", e.target.value)}>
@@ -498,7 +513,7 @@ const StaffFormModal = ({ onClose, onSaved, editTarget, roles }) => {
 };
 
 // ── STAFF PROFILE ─────────────────────────────────────────────
-const StaffProfile = ({ staffId, onBack, onUpdated, roles }) => {
+const StaffProfile = ({ staffId, onBack, onUpdated, roles, userProfile }) => {
   const [staff, setStaff] = useState(null);
   const [loading, setLoading] = useState(true);
   const [documents, setDocuments] = useState([]);
@@ -513,6 +528,12 @@ const StaffProfile = ({ staffId, onBack, onUpdated, roles }) => {
   const [uploading, setUploading] = useState(false);
   const [uploadLabel, setUploadLabel] = useState("Offer Letter");
   const fileInputRef = useRef(null);
+  // Photo upload (phase 4d)
+  const [photoSignedUrl, setPhotoSignedUrl] = useState(null);
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [generatingIDCard, setGeneratingIDCard] = useState(false);
+  const [generatingBizCard, setGeneratingBizCard] = useState(false);
+  const photoFileRef = useRef(null);
 
   const loadStaff = async () => {
     setLoading(true);
@@ -529,6 +550,52 @@ const StaffProfile = ({ staffId, onBack, onUpdated, roles }) => {
   };
 
   useEffect(() => { loadStaff(); loadDocs(); }, [staffId]);
+
+  // Fetch signed URL whenever photo_path changes
+  useEffect(() => {
+    if (!staff?.photo_path) { setPhotoSignedUrl(null); return; }
+    photoService.getSignedUrl(staff.photo_path).then(setPhotoSignedUrl).catch(() => setPhotoSignedUrl(null));
+  }, [staff?.photo_path]);
+
+  const canUploadPhoto = userProfile?.role === 'md' || userProfile?.role === 'hr_officer';
+
+  const handlePhotoUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPhotoUploading(true); setAlert(null);
+    try {
+      const path = await photoService.upload(staff.id, file);
+      const signedUrl = await photoService.getSignedUrl(path);
+      setPhotoSignedUrl(signedUrl);
+      setStaff(s => ({ ...s, photo_path: path }));
+      const completedBy = userProfile?.full_name || userProfile?.email || 'HR';
+      await photoService.markChecklistPhotoComplete(staff.id, completedBy);
+      setAlert({ type: "success", msg: "Photo uploaded and profile updated." });
+    } catch (e) {
+      setAlert({ type: "error", msg: "Photo upload failed: " + e.message });
+    } finally {
+      setPhotoUploading(false);
+      if (photoFileRef.current) photoFileRef.current.value = "";
+    }
+  };
+
+  const handleDownloadIDCard = async () => {
+    setGeneratingIDCard(true); setAlert(null);
+    try {
+      await generateIDCardPDF(staff, photoSignedUrl);
+    } catch (e) {
+      setAlert({ type: "error", msg: "ID card generation failed: " + e.message });
+    } finally { setGeneratingIDCard(false); }
+  };
+
+  const handleDownloadBizCard = async () => {
+    setGeneratingBizCard(true); setAlert(null);
+    try {
+      await generateBusinessCardPDF(staff);
+    } catch (e) {
+      setAlert({ type: "error", msg: "Business card generation failed: " + e.message });
+    } finally { setGeneratingBizCard(false); }
+  };
 
   useEffect(() => {
     if (tab === "attendance" && staff) {
@@ -598,26 +665,84 @@ const StaffProfile = ({ staffId, onBack, onUpdated, roles }) => {
       {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
 
       {/* Profile Header */}
-      <div style={{ ...styles.card, marginBottom: "24px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "16px" }}>
-        <div style={{ display: "flex", gap: "16px", alignItems: "center" }}>
-          {staff.profile_photo_url ? (
-            <img src={staff.profile_photo_url} alt={staff.full_name} style={{ width: "60px", height: "60px", borderRadius: "50%", objectFit: "cover" }} />
-          ) : (
-            <div style={{ width: "60px", height: "60px", borderRadius: "50%", background: theme.accent + "33", color: theme.accent, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "20px", fontWeight: "700" }}>{initials}</div>
-          )}
-          <div>
-            <div style={{ fontSize: "20px", fontWeight: "700", color: theme.text }}>{staff.full_name}</div>
-            <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "2px" }}>{staff.employee_number}</div>
-            <div style={{ display: "flex", gap: "6px", marginTop: "6px" }}>
-              <span style={styles.badge(theme.blue)}>{deptName}</span>
-              <span style={styles.badge(theme.accent)}>{roleName}</span>
+      <div style={{ ...styles.card, marginBottom: "24px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "16px" }}>
+          {/* Left: photo + name */}
+          <div style={{ display: "flex", gap: "16px", alignItems: "flex-start" }}>
+            {/* Photo + upload */}
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "6px" }}>
+              {photoSignedUrl || staff.profile_photo_url ? (
+                <img src={photoSignedUrl || staff.profile_photo_url} alt={staff.full_name} style={{ width: "68px", height: "68px", borderRadius: "10px", objectFit: "cover", border: `2px solid ${theme.blue}44` }} />
+              ) : (
+                <div style={{ width: "68px", height: "68px", borderRadius: "10px", background: theme.accent + "33", color: theme.accent, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "22px", fontWeight: "700" }}>{initials}</div>
+              )}
+              {canUploadPhoto && (
+                <>
+                  <input ref={photoFileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handlePhotoUpload} />
+                  <button
+                    style={{ ...styles.btn("secondary"), padding: "3px 8px", fontSize: "10px", whiteSpace: "nowrap" }}
+                    onClick={() => photoFileRef.current?.click()}
+                    disabled={photoUploading}
+                  >
+                    {photoUploading ? "Uploading…" : "Upload Photo"}
+                  </button>
+                </>
+              )}
+            </div>
+            {/* Name + badges + incomplete flag */}
+            <div>
+              <div style={{ fontSize: "20px", fontWeight: "700", color: theme.text }}>{staff.full_name}</div>
+              <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "2px" }}>{staff.employee_number}</div>
+              <div style={{ display: "flex", gap: "6px", marginTop: "6px", flexWrap: "wrap" }}>
+                <span style={styles.badge(theme.blue)}>{deptName}</span>
+                <span style={styles.badge(theme.accent)}>{roleName}</span>
+                {staff.job_title && <span style={styles.badge(theme.blue)}>{staff.job_title}</span>}
+              </div>
+              {(() => {
+                const missing = getMissingFields(staff);
+                return missing.length > 0 ? (
+                  <div style={{ fontSize: "12px", color: "#f5a623", marginTop: "8px", fontWeight: "600" }}>
+                    ⚠ Incomplete profile — missing: {missing.join(', ')}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: "12px", color: theme.green, marginTop: "8px" }}>✓ Profile complete</div>
+                );
+              })()}
             </div>
           </div>
-        </div>
-        <div style={{ textAlign: "right" }}>
-          <span style={styles.badge(statusColor)}>{staff.employment_status || "active"}</span>
-          <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "6px" }}>Date Hired: {staff.date_hired || "—"}</div>
-          <button style={{ ...styles.btn("secondary"), marginTop: "8px", fontSize: "12px" }} onClick={() => setEditMode(true)}>Edit Profile</button>
+
+          {/* Right: status + actions */}
+          <div style={{ textAlign: "right", display: "flex", flexDirection: "column", gap: "6px", alignItems: "flex-end" }}>
+            <span style={styles.badge(statusColor)}>{staff.employment_status || "active"}</span>
+            <div style={{ fontSize: "12px", color: theme.textMuted }}>Hired: {staff.date_hired || "—"}</div>
+            <button style={{ ...styles.btn("secondary"), fontSize: "12px" }} onClick={() => setEditMode(true)}>Edit Profile</button>
+
+            {/* ID Card button */}
+            {staff.employment_status === "active" && staff.photo_path ? (
+              <button style={{ ...styles.btn("primary"), fontSize: "12px" }} onClick={handleDownloadIDCard} disabled={generatingIDCard}>
+                {generatingIDCard ? "Generating…" : "↓ ID Card"}
+              </button>
+            ) : (
+              <button
+                style={{ ...styles.btn("secondary"), fontSize: "12px", opacity: 0.5, cursor: "not-allowed" }}
+                disabled
+                title="Staff must be active and have a photo before an ID card can be issued"
+              >
+                ↓ ID Card
+              </button>
+            )}
+
+            {/* Business Card button */}
+            {staff.employment_status === "active" ? (
+              <button style={{ ...styles.btn("secondary"), fontSize: "12px" }} onClick={handleDownloadBizCard} disabled={generatingBizCard}>
+                {generatingBizCard ? "Generating…" : "↓ Business Card"}
+              </button>
+            ) : (
+              <button style={{ ...styles.btn("secondary"), fontSize: "12px", opacity: 0.5, cursor: "not-allowed" }} disabled title="Staff must be active">
+                ↓ Business Card
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -678,6 +803,7 @@ const StaffProfile = ({ staffId, onBack, onUpdated, roles }) => {
               ["Employee Number", staff.employee_number],
               ["Department", deptName],
               ["Role", roleName],
+              ["Job Title", staff.job_title],
               ["Staff Type", staff.staff_type],
               ["Date Hired", staff.date_hired],
               ["Employment Status", staff.employment_status],
@@ -955,6 +1081,14 @@ const StaffDirectory = ({ onViewProfile }) => {
                       <td style={styles.td}>
                         <strong style={{ cursor: "pointer", color: theme.accent }} onClick={() => onViewProfile(s.id)}>{s.full_name}</strong>
                         {s.employee_number && <div style={{ fontSize: "11px", color: theme.textMuted }}>{s.employee_number}</div>}
+                        {(() => {
+                          const missing = getMissingFields(s);
+                          return missing.length > 0 ? (
+                            <div style={{ fontSize: "10px", color: "#f5a623", marginTop: "2px", fontWeight: "600" }}>
+                              ⚠ Missing: {missing.join(', ')}
+                            </div>
+                          ) : null;
+                        })()}
                       </td>
                       <td style={styles.td}>
                         <span style={styles.badge(theme.blue)}>{s.department || "—"}</span>
@@ -1627,7 +1761,7 @@ const OnboardingTab = () => {
 };
 
 // ── MAIN STAFF COMPONENT ──────────────────────────────────────
-const Staff = () => {
+const Staff = ({ userProfile }) => {
   const [tab, setTab] = useState("directory");
   const [profileStaffId, setProfileStaffId] = useState(null);
   const [roles, setRoles] = useState([]);
@@ -1646,7 +1780,7 @@ const Staff = () => {
           </div>
           <button style={styles.btn("secondary")} onClick={() => setProfileStaffId(null)}>← Back to Directory</button>
         </div>
-        <StaffProfile staffId={profileStaffId} onBack={() => setProfileStaffId(null)} roles={roles} />
+        <StaffProfile staffId={profileStaffId} onBack={() => setProfileStaffId(null)} roles={roles} userProfile={userProfile} />
       </div>
     );
   }

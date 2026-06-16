@@ -1531,6 +1531,8 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
   const [loading, setLoading] = useState(false)
   const [alert, setAlert] = useState(null)
   const [actioning, setActioning] = useState(false)
+  const [recentPayrolls, setRecentPayrolls] = useState([])
+  const [recentLoading, setRecentLoading] = useState(false)
   const [recallReason, setRecallReason] = useState('')
 
   const loadWeekData = useCallback(async () => {
@@ -1548,6 +1550,25 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
   }, [weekEnding])
 
   useEffect(() => { loadWeekData() }, [loadWeekData])
+
+  const loadRecentPayrolls = useCallback(async () => {
+    setRecentLoading(true)
+    const { data } = await supabase.from('weekly_labour_payroll')
+      .select('*')
+      .in('payroll_type', ['production', 'loading'])
+      .order('week_ending', { ascending: false })
+      .limit(40)
+    setRecentPayrolls(data || [])
+    setRecentLoading(false)
+  }, [])
+
+  // Refresh the list whenever the week data reloads (covers generate/approve/recall/pay)
+  useEffect(() => { loadRecentPayrolls() }, [loadRecentPayrolls, payrollRecords])
+
+  const openPayroll = (p) => {
+    if (p.payroll_type) setSubTab(p.payroll_type)
+    setWeekEnding(p.week_ending)
+  }
 
   // Aggregate production workers from rosters
   const productionWorkers = (() => {
@@ -1641,6 +1662,39 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
 
   return (
     <div>
+      <div style={{ ...styles.card, padding: 0, overflow: 'hidden', marginBottom: '16px' }}>
+        <div style={{ ...styles.row, justifyContent: 'space-between', padding: '12px 16px', borderBottom: `1px solid ${theme.border}` }}>
+          <div style={{ fontWeight: '700', fontSize: '14px' }}>Recent Payrolls</div>
+          <button style={{ ...styles.btn('ghost'), padding: '4px 12px', fontSize: '12px' }} onClick={loadRecentPayrolls} disabled={recentLoading}>{recentLoading ? 'Loading…' : 'Refresh'}</button>
+        </div>
+        {recentLoading ? <div style={{ padding: '16px' }}><Spinner /></div> : recentPayrolls.length === 0 ? (
+          <div style={{ padding: '16px', color: theme.textMuted, fontSize: '13px' }}>No payrolls generated yet. Pick a week below and generate one.</div>
+        ) : (
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead style={{ background: theme.surface }}>
+              <tr>{['Week Ending', 'Type', 'Workers', 'Total', 'Status', ''].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
+            </thead>
+            <tbody>
+              {recentPayrolls.map(p => {
+                const isOpen = p.week_ending === weekEnding && p.payroll_type === subTab
+                return (
+                  <tr key={p.id} style={isOpen ? { background: theme.surface } : undefined}>
+                    <td style={styles.td}>{p.week_ending}</td>
+                    <td style={styles.td}>{p.payroll_type === 'production' ? 'Production' : 'Loading'}</td>
+                    <td style={styles.td}>{p.worker_count ?? '—'}</td>
+                    <td style={{ ...styles.td, color: theme.accent, fontWeight: '600' }}>{naira(p.total_amount)}</td>
+                    <td style={styles.td}><span style={styles.badge(statusColor(p.status))}>{(p.status || 'draft').replace('_', ' ')}</span></td>
+                    <td style={styles.td}>
+                      <button style={{ ...styles.btn(isOpen ? 'primary' : 'ghost'), padding: '4px 12px', fontSize: '12px' }} onClick={() => openPayroll(p)}>{isOpen ? 'Open' : 'View'}</button>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
       <div style={{ ...styles.row, gap: '4px', marginBottom: '16px' }}>
         {['production', 'loading'].map(t => (
           <button key={t} style={styles.tab(subTab === t)} onClick={() => setSubTab(t)}>
