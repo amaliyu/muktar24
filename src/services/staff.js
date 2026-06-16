@@ -14,7 +14,7 @@ export const staffService = {
     const { data, error } = await supabase
       .from('staff')
       .select('*, staffRole:role_id(id, role_name, department)')
-      .eq('is_active', true)
+      .eq('employment_status', 'active')
       .order('full_name')
     if (error) throw error
     return data || []
@@ -39,13 +39,5 @@ export const staffService = {
       .single()
     if (error) throw error
     return data
-  },
-
-  async deactivate(id) {
-    return staffService.update(id, { is_active: false })
-  },
-
-  async activate(id) {
-    return staffService.update(id, { is_active: true })
   },
 }

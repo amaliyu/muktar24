@@ -34,7 +34,7 @@ export const authService = {
     const { data, error } = await supabase
       .from('staff')
       .select('id, full_name, role, staff_type')
-      .eq('is_active', true)
+      .eq('employment_status', 'active')
       .order('full_name')
     if (error) throw error
     return data || []
