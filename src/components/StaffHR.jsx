@@ -309,7 +309,7 @@ const StaffFormModal = ({ onClose, onSaved, editTarget, roles }) => {
         employee_number: form.employee_number || null,
         department: form.department || null,
         role_id: form.role_id || null,
-        job_title: form.job_title || null,
+        job_title: form.job_title?.trim() || null,
         role: roles.find(r => String(r.id) === String(form.role_id))?.role_name || form.department || "Staff",
         staff_type: form.staff_type,
         date_hired: form.date_hired || null,
@@ -335,7 +335,7 @@ const StaffFormModal = ({ onClose, onSaved, editTarget, roles }) => {
       if (editTarget) {
         result = await staffService.update(editTarget.id, payload);
       } else {
-        result = await staffService.create({ ...payload, is_active: true });
+        result = await staffService.create(payload);
       }
       onSaved(result);
       onClose();
