@@ -42,24 +42,30 @@ async function fetchAsDataUrl(url) {
   });
 }
 
-// Crop logo.png to just the graphical icon mark.
-// The full logo contains "ABUJA PRECAST CONCRETE" text and "RC: 1838184".
-// We keep the left ~31 % of width (the mark) and top ~87 % of height (removes RC row).
+// Crop logo.png to just the graphical icon mark (left 31 % × top 87 %).
+// Returns null on any failure so callers can skip the logo rather than abort.
 function fetchLogoIconAsDataUrl() {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), 6000);
+
     const img = new Image();
     img.onload = () => {
-      const nw = img.naturalWidth  || img.width  || 850;
-      const nh = img.naturalHeight || img.height || 310;
-      const cw = Math.round(nw * 0.31);
-      const ch = Math.round(nh * 0.87);
-      const canvas = document.createElement('canvas');
-      canvas.width  = cw;
-      canvas.height = ch;
-      canvas.getContext('2d').drawImage(img, 0, 0);
-      resolve(canvas.toDataURL('image/png'));
+      clearTimeout(timer);
+      try {
+        const nw = img.naturalWidth  || 850;
+        const nh = img.naturalHeight || 310;
+        const cw = Math.round(nw * 0.31);
+        const ch = Math.round(nh * 0.87);
+        const canvas = document.createElement('canvas');
+        canvas.width  = cw;
+        canvas.height = ch;
+        canvas.getContext('2d').drawImage(img, 0, 0);
+        resolve(canvas.toDataURL('image/png'));
+      } catch {
+        resolve(null);
+      }
     };
-    img.onerror = reject;
+    img.onerror = () => { clearTimeout(timer); resolve(null); };
     img.src = '/logo.png';
   });
 }
@@ -85,7 +91,9 @@ export async function generateIDCardPDF(staff, photoSignedUrl) {
   const SB = 11;       // sidebar width (right)
   const CW = W - SB;
 
-  const iconUrl = await fetchLogoIconAsDataUrl();
+  // Logo failure must never abort card generation — we draw without it if needed.
+  let iconUrl = null;
+  try { iconUrl = await fetchLogoIconAsDataUrl(); } catch { /* skip logo */ }
 
   let photoUrl = null, photoFmt = 'JPEG';
   if (photoSignedUrl) {
@@ -131,7 +139,7 @@ function drawIDFront(doc, staff, iconUrl, photoUrl, photoFmt, barcode, W, H, SB,
   doc.text(jobTitle, CW + SB / 2, H / 2 + jTW / 2, { angle: 90 });
 
   // Logo: icon mark only (no company text, no RC number from the PNG)
-  doc.addImage(iconUrl, 'PNG', 2, 2, 9, 9);
+  if (iconUrl) doc.addImage(iconUrl, 'PNG', 2, 2, 9, 9);
 
   // Company name drawn separately in CYAN
   doc.setTextColor(...CYAN);
@@ -225,7 +233,7 @@ function drawIDBack(doc, iconUrl, W, H) {
   doc.rect(0, H - 4.5, 4.5, 4.5, 'F');
 
   // Logo: icon mark + company name
-  doc.addImage(iconUrl, 'PNG', 3, 5, 10, 10);
+  if (iconUrl) doc.addImage(iconUrl, 'PNG', 3, 5, 10, 10);
   doc.setTextColor(...CYAN);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(5.5);
@@ -285,7 +293,8 @@ function drawIDBack(doc, iconUrl, W, H) {
 export async function generateBusinessCardPDF(staff) {
   const W = 85, H = 55;
 
-  const iconUrl = await fetchLogoIconAsDataUrl();
+  let iconUrl = null;
+  try { iconUrl = await fetchLogoIconAsDataUrl(); } catch { /* skip logo */ }
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: [W, H] });
 
   drawBizFront(doc, staff, iconUrl, W, H);
@@ -301,7 +310,7 @@ function drawBizFront(doc, staff, iconUrl, W, H) {
   doc.rect(0, 0, W, H, 'F');
 
   // Header: icon mark + company name text (drawn by code, not from PNG)
-  doc.addImage(iconUrl, 'PNG', 4, 3, 12, 12);
+  if (iconUrl) doc.addImage(iconUrl, 'PNG', 4, 3, 12, 12);
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(11);
@@ -403,7 +412,7 @@ function drawBizBack(doc, iconUrl, W, H) {
   const ICON_W = 14, ICON_H = 14;
   const lx = W / 2 - 20;
 
-  doc.addImage(iconUrl, 'PNG', lx, 3, ICON_W, ICON_H);
+  if (iconUrl) doc.addImage(iconUrl, 'PNG', lx, 3, ICON_W, ICON_H);
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(12);
