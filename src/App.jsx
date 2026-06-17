@@ -1609,7 +1609,7 @@ const Waybills = ({ userProfile }) => {
     if (isDriverRole) { setLoading(false); return; } // drivers don't need orders/batches/schedules
     try {
       const [orders, activeBatches, allBatches, approvedScheds] = await Promise.all([
-        ordersService.getAll(),
+        ordersService.getForDelivery().catch(() => []),
         batchesService.getActive().catch(() => []),
         batchesService.getAll().catch(() => []),
         schedulesService.getApproved().catch(() => []),
@@ -1926,7 +1926,7 @@ const Waybills = ({ userProfile }) => {
                     </option>
                   ))}
                 </select>
-                {activeOrders.length === 0 && <div style={{ fontSize: "11px", color: theme.red, marginTop: "4px" }}>No customers with active invoices. Generate an invoice first.</div>}
+                {activeOrders.length === 0 && <div style={{ fontSize: "11px", color: theme.red, marginTop: "4px" }}>No invoiced orders found. Contact your administrator if an order should appear here.</div>}
               </div>
             )}
             <div style={styles.formGroup}>

@@ -71,6 +71,25 @@ export const ordersService = {
     return newOrder
   },
 
+  async getForDelivery({ from, to } = {}) {
+    let query = supabase
+      .from('orders')
+      .select(`
+        *,
+        customer:customer_id(*),
+        marketer:marketer_id(id, full_name),
+        site:site_id(id, site_name, site_address),
+        order_items_delivery(id, order_id, block_type, quantity, created_at),
+        invoices(id, invoice_number, issued_date, due_date)
+      `)
+      .order('created_at', { ascending: false })
+    if (from) query = query.gte('created_at', from)
+    if (to)   query = query.lte('created_at', to + 'T23:59:59')
+    const { data, error } = await query
+    if (error) throw error
+    return data || []
+  },
+
   async updateStatus(id, status) {
     const { data, error } = await supabase
       .from('orders')
