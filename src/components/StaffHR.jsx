@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { staffService } from '../services/staff';
 import { attendanceService, payrollService } from '../services/attendance';
-import { rolesService, documentsService, hrStaffService } from '../services/hrService';
+import { rolesService, documentsService, hrStaffService, photoService } from '../services/hrService';
 import { generatePayrollPDF } from '../utils/generatePayrollPDF';
+import { generateIDCardPDF, generateBusinessCardPDF } from '../utils/cardGenerator';
 import { supabase } from '../lib/supabase';
 
 const theme = {
@@ -221,7 +222,7 @@ const StaffFormModal = ({ onClose, onSaved, editTarget, roles }) => {
     full_name: "", date_of_birth: "", gender: "", marital_status: "",
     state_of_origin: "", lga_of_origin: "", home_address: "", nin: "",
     // Tab 2 — Employment
-    employee_number: "", department: "", role_id: "", staff_type: "permanent",
+    employee_number: "", department: "", role_id: "", job_title: "", staff_type: "permanent",
     date_hired: "", monthly_salary: "", daily_rate: "", employment_status: "active",
     // Tab 3 — Contact & Emergency
     phone: "", email: "",
@@ -252,6 +253,7 @@ const StaffFormModal = ({ onClose, onSaved, editTarget, roles }) => {
         employee_number: editTarget.employee_number || "",
         department: editTarget.department || "",
         role_id: editTarget.role_id || "",
+        job_title: editTarget.job_title || "",
         staff_type: editTarget.staff_type || "permanent",
         date_hired: editTarget.date_hired || "",
         monthly_salary: String(editTarget.monthly_salary || ""),
@@ -299,6 +301,7 @@ const StaffFormModal = ({ onClose, onSaved, editTarget, roles }) => {
         employee_number: form.employee_number || null,
         department: form.department || null,
         role_id: form.role_id || null,
+        job_title: form.job_title?.trim() || null,
         role: roles.find(r => String(r.id) === String(form.role_id))?.role_name || form.department || "Staff",
         staff_type: form.staff_type,
         date_hired: form.date_hired || null,
@@ -407,6 +410,10 @@ const StaffFormModal = ({ onClose, onSaved, editTarget, roles }) => {
                   </select>
                 </div>
               </div>
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Job Title <span style={{ color: "#f5a623" }}>(for ID / business card)</span></label>
+                <input style={styles.input} placeholder="e.g. Internal Control Officer" value={form.job_title} onChange={e => upd("job_title", e.target.value)} />
+              </div>
               <div style={styles.grid(3)}>
                 <div style={styles.formGroup}><label style={styles.label}>Staff Type</label>
                   <select style={styles.input} value={form.staff_type} onChange={e => upd("staff_type", e.target.value)}>
@@ -513,6 +520,9 @@ const StaffProfile = ({ staffId, onBack, onUpdated, roles }) => {
   const [uploading, setUploading] = useState(false);
   const [uploadLabel, setUploadLabel] = useState("Offer Letter");
   const fileInputRef = useRef(null);
+  const [photoSignedUrl, setPhotoSignedUrl] = useState(null);
+  const [generatingIDCard, setGeneratingIDCard] = useState(false);
+  const [generatingBizCard, setGeneratingBizCard] = useState(false);
 
   const loadStaff = async () => {
     setLoading(true);
@@ -529,6 +539,25 @@ const StaffProfile = ({ staffId, onBack, onUpdated, roles }) => {
   };
 
   useEffect(() => { loadStaff(); loadDocs(); }, [staffId]);
+
+  useEffect(() => {
+    if (!staff?.photo_path) { setPhotoSignedUrl(null); return; }
+    photoService.getSignedUrl(staff.photo_path).then(setPhotoSignedUrl).catch(() => setPhotoSignedUrl(null));
+  }, [staff?.photo_path]);
+
+  const handleDownloadIDCard = async () => {
+    setGeneratingIDCard(true); setAlert(null);
+    try { await generateIDCardPDF(staff, photoSignedUrl); }
+    catch (e) { setAlert({ type: "error", msg: "ID card generation failed: " + e.message }); }
+    finally { setGeneratingIDCard(false); }
+  };
+
+  const handleDownloadBizCard = async () => {
+    setGeneratingBizCard(true); setAlert(null);
+    try { await generateBusinessCardPDF(staff); }
+    catch (e) { setAlert({ type: "error", msg: "Business card generation failed: " + e.message }); }
+    finally { setGeneratingBizCard(false); }
+  };
 
   useEffect(() => {
     if (tab === "attendance" && staff) {
@@ -617,7 +646,11 @@ const StaffProfile = ({ staffId, onBack, onUpdated, roles }) => {
         <div style={{ textAlign: "right" }}>
           <span style={styles.badge(statusColor)}>{staff.employment_status || "active"}</span>
           <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "6px" }}>Date Hired: {staff.date_hired || "—"}</div>
-          <button style={{ ...styles.btn("secondary"), marginTop: "8px", fontSize: "12px" }} onClick={() => setEditMode(true)}>Edit Profile</button>
+          <div style={{ display: "flex", gap: "6px", marginTop: "8px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+            <button style={{ ...styles.btn("secondary"), fontSize: "12px" }} onClick={() => setEditMode(true)}>Edit Profile</button>
+            <button style={{ ...styles.btn("primary"), fontSize: "12px" }} onClick={handleDownloadIDCard} disabled={generatingIDCard}>{generatingIDCard ? "Generating…" : "↓ ID Card"}</button>
+            <button style={{ ...styles.btn("secondary"), fontSize: "12px" }} onClick={handleDownloadBizCard} disabled={generatingBizCard}>{generatingBizCard ? "Generating…" : "↓ Business Card"}</button>
+          </div>
         </div>
       </div>
 

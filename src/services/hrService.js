@@ -97,6 +97,49 @@ export const documentsService = {
   },
 }
 
+export const photoService = {
+  async upload(staffId, file) {
+    const ext = file.name.split('.').pop().toLowerCase() || 'jpg';
+    const path = `${staffId}/photo_${Date.now()}.${ext}`;
+    const { data, error } = await supabase.storage
+      .from('staff-photos')
+      .upload(path, file, { upsert: true, contentType: file.type });
+    if (error) throw error;
+    const { error: upErr } = await supabase
+      .from('staff')
+      .update({ photo_path: data.path })
+      .eq('id', staffId);
+    if (upErr) throw upErr;
+    return data.path;
+  },
+
+  async getSignedUrl(path, expiresIn = 3600) {
+    const { data, error } = await supabase.storage
+      .from('staff-photos')
+      .createSignedUrl(path, expiresIn);
+    if (error) throw error;
+    return data.signedUrl;
+  },
+
+  async markChecklistPhotoComplete(staffId, completedBy) {
+    const { data: existing } = await supabase
+      .from('staff_onboarding_checklist')
+      .select('id')
+      .eq('staff_id', staffId)
+      .eq('item_key', 'photo')
+      .maybeSingle();
+    const payload = {
+      staff_id: staffId, item_key: 'photo', is_complete: true,
+      completed_at: new Date().toISOString(), completed_by: completedBy,
+    };
+    if (existing) {
+      await supabase.from('staff_onboarding_checklist').update(payload).eq('id', existing.id);
+    } else {
+      await supabase.from('staff_onboarding_checklist').insert(payload);
+    }
+  },
+}
+
 export const hrStaffService = {
   async getNextEmployeeNumber() {
     const { data } = await supabase
