@@ -42,34 +42,15 @@ async function fetchAsDataUrl(url) {
   });
 }
 
-// Crop logo.png to just the graphical icon mark (left 31 % × top 65 %).
-// The full logo contains "ABUJA PRECAST CONCRETE" text (right ~70%) and
-// "RC: 1838184" at the bottom (~68–100% height). We keep only the icon bars.
-// Returns null on any failure so callers can skip the logo rather than abort.
-function fetchLogoIconAsDataUrl() {
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => resolve(null), 6000);
-
-    const img = new Image();
-    img.onload = () => {
-      clearTimeout(timer);
-      try {
-        const nw = img.naturalWidth  || 1600;
-        const nh = img.naturalHeight || 656;
-        const cw = Math.round(nw * 0.31);   // icon occupies left ~30 % of width
-        const ch = Math.round(nh * 0.65);   // icon bars end ~63 %, RC text starts ~68 %
-        const canvas = document.createElement('canvas');
-        canvas.width  = cw;
-        canvas.height = ch;
-        canvas.getContext('2d').drawImage(img, 0, 0);
-        resolve(canvas.toDataURL('image/png'));
-      } catch {
-        resolve(null);
-      }
-    };
-    img.onerror = () => { clearTimeout(timer); resolve(null); };
-    img.src = '/logo.png';
-  });
+// Fetch the pre-cropped icon-only logo (no text, no RC number).
+// Returns null on any failure so callers skip the logo rather than abort.
+async function fetchLogoIconAsDataUrl() {
+  try {
+    const { dataUrl } = await fetchAsDataUrl('/logo-icon.png');
+    return dataUrl;
+  } catch {
+    return null;
+  }
 }
 
 function makeBarcodeDataUrl(value) {
