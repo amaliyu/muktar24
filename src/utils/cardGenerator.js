@@ -124,17 +124,17 @@ function drawIDFront(doc, staff, iconUrl, photoUrl, photoFmt, barcode, W, H, SB,
   // Logo: icon mark only (no company text, no RC number from the PNG)
   if (iconUrl) doc.addImage(iconUrl, 'PNG', 2, 2, 9, 9);
 
-  // Company name drawn separately in CYAN
-  doc.setTextColor(...CYAN);
+  // Company name — muted blue/grey (MID), not bright cyan
+  doc.setTextColor(...MID);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(5.5);
   doc.text('Abuja Precast', 12.5, 5);
   doc.text('Concrete Ltd', 12.5, 8.5);
 
-  // Photo with prominent CYAN border
+  // Photo with prominent CYAN border — extra top margin for breathing room
   const PW = 28, PH = 28;
   const PX = (CW - PW) / 2;
-  const PY = 14.5;
+  const PY = 16;
   const B  = 1.2; // border thickness (mm)
 
   doc.setFillColor(...CYAN);
@@ -222,7 +222,7 @@ function drawIDBack(doc, iconUrl, W, H) {
   doc.setTextColor(...DARK);
   doc.text('ABUJA PRECAST', 15, 8.5);
   doc.setFontSize(6);
-  doc.setTextColor(...CYAN);
+  doc.setTextColor(...MID);
   doc.text('CONCRETE LIMITED', 15, 13.5);
 
   // TERMS & CONDITIONS — left-aligned bold black heading
@@ -320,20 +320,20 @@ function drawBizFront(doc, staff, iconUrl, W, H) {
   doc.setDrawColor(225, 230, 245); doc.setLineWidth(0.3);
   doc.line(4, 17, W - 4, 17);
 
-  // Staff name (bold black, uppercase)
+  // Staff name — largest text block on front face
   const name = (staff.full_name || '').toUpperCase();
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10);
+  doc.setFontSize(11);
   doc.setTextColor(...DARK);
   const nameLines = doc.splitTextToSize(name, W - 10);
   const nameY = 24;
   doc.text(nameLines, 5, nameY);
-  const LINE_H_10 = 10 * 1.2 / 2.8346; // ≈ 4.24 mm
-  const afterNameY = nameY + nameLines.length * LINE_H_10;
+  const LINE_H_11 = 11 * 1.2 / 2.8346; // ≈ 4.66 mm
+  const afterNameY = nameY + nameLines.length * LINE_H_11;
 
-  // Job title (BLUE)
+  // Job title — clearly smaller than the name
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8);
+  doc.setFontSize(6.5);
   doc.setTextColor(...BLUE);
   doc.text(staff.job_title || staff.role || '', 5, afterNameY + 2);
 
@@ -409,7 +409,7 @@ function drawBizBack(doc, iconUrl, W, H) {
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(6.5);
-  doc.setTextColor(...CYAN);
+  doc.setTextColor(...MID);
   doc.text('CONCRETE LIMITED', lx + 16, 14.5);
 
   // OUR PRODUCTS heading (no divider line between logo and products)

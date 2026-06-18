@@ -91,10 +91,10 @@ function drawIDFront(doc, staff, iconUrl, photoUrl, photoFmt, barcode, W, H, SB,
   const jTW = doc.getTextWidth(jobTitle);
   doc.text(jobTitle, CW+SB/2, H/2+jTW/2, {angle:90});
   doc.addImage(iconUrl,'PNG',2,2,9,9);
-  doc.setTextColor(...CYAN); doc.setFont('helvetica','bold'); doc.setFontSize(5.5);
+  doc.setTextColor(...MID); doc.setFont('helvetica','bold'); doc.setFontSize(5.5);
   doc.text('Abuja Precast',12.5,5);
   doc.text('Concrete Ltd',12.5,8.5);
-  const PW=28,PH=28,PX=(CW-PW)/2,PY=14.5,B=1.2;
+  const PW=28,PH=28,PX=(CW-PW)/2,PY=16,B=1.2;
   doc.setFillColor(...CYAN); doc.rect(PX-B,PY-B,PW+2*B,PH+2*B,'F');
   if (photoUrl) { doc.addImage(photoUrl,photoFmt,PX,PY,PW,PH); }
   else {
@@ -142,7 +142,7 @@ function drawIDBack(doc, iconUrl, W, H) {
   doc.addImage(iconUrl,'PNG',3,5,10,10);
   doc.setFont('helvetica','bold'); doc.setFontSize(7.5); doc.setTextColor(...DARK);
   doc.text('ABUJA PRECAST',15,8.5);
-  doc.setFontSize(6); doc.setTextColor(...CYAN);
+  doc.setFontSize(6); doc.setTextColor(...MID);
   doc.text('CONCRETE LIMITED',15,13.5);
   doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(...DARK);
   doc.text('TERMS & CONDITIONS',4,21);
@@ -185,13 +185,13 @@ function drawBizFront(doc, staff, iconUrl, W, H) {
   doc.setDrawColor(...BLUE);     doc.line(lnMid,lnY,lnX2,lnY);
   doc.setDrawColor(225,230,245); doc.setLineWidth(0.3); doc.line(4,17,W-4,17);
   const name=(staff.full_name||'').toUpperCase();
-  doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(...DARK);
+  doc.setFont('helvetica','bold'); doc.setFontSize(11); doc.setTextColor(...DARK);
   const nameLines=doc.splitTextToSize(name,W-10);
   const nameY=24;
   doc.text(nameLines,5,nameY);
-  const LINE_H_10=10*1.2/2.8346;
-  const afterNameY=nameY+nameLines.length*LINE_H_10;
-  doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(...BLUE);
+  const LINE_H_11=11*1.2/2.8346;
+  const afterNameY=nameY+nameLines.length*LINE_H_11;
+  doc.setFont('helvetica','normal'); doc.setFontSize(6.5); doc.setTextColor(...BLUE);
   doc.text(staff.job_title||staff.role||'',5,afterNameY+2);
   doc.setDrawColor(225,230,245); doc.setLineWidth(0.3); doc.line(5,afterNameY+6,W-5,afterNameY+6);
   let cy=afterNameY+11;
@@ -233,7 +233,7 @@ function drawBizBack(doc, iconUrl, W, H) {
   doc.addImage(iconUrl,'PNG',lx,3,ICON_W,ICON_H);
   doc.setFont('helvetica','bold'); doc.setFontSize(11); doc.setTextColor(...DARK);
   doc.text('ABUJA PRECAST',lx+16,9);
-  doc.setFont('helvetica','bold'); doc.setFontSize(6.5); doc.setTextColor(...CYAN);
+  doc.setFont('helvetica','bold'); doc.setFontSize(6.5); doc.setTextColor(...MID);
   doc.text('CONCRETE LIMITED',lx+16,14.5);
   doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(...DARK);
   doc.text('OUR PRODUCTS',5,25);
