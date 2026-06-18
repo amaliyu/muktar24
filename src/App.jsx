@@ -6410,7 +6410,7 @@ const MyProfile = ({ userProfile }) => {
 
   useEffect(() => {
     if (userProfile?.staff_id) {
-      supabase.from('staff').select('*').eq('id', userProfile.staff_id).single().then(({ data }) => setStaffRecord(data));
+      supabase.from('staff_public').select('id, full_name, role, staff_type, profile_photo_url').eq('id', userProfile.staff_id).single().then(({ data }) => setStaffRecord(data));
     }
     loadDocs();
   }, [userProfile]);
