@@ -65,7 +65,7 @@ const CATALOG = [
   // STAFF
   { id: 'attendance_report',   name: 'Attendance Report',             category: 'staff', description: 'Days present vs absent per worker, attendance rate and chronic absentees',         formats: ['pdf','excel'], roles: ['md','hr_officer','ico'], periodType: 'range' },
   { id: 'payroll_report',      name: 'Payroll Report',                category: 'staff', description: 'Wages per staff member, total payroll and payment status',                         formats: ['pdf','excel'], roles: ['md','hr_officer','accountant'], periodType: 'range' },
-  { id: 'staff_directory',     name: 'Staff Directory Report',        category: 'staff', description: 'All active staff with role, type, date hired and contact details',                 formats: ['pdf','excel'], roles: ['md','hr_officer','ico'], periodType: 'today' },
+  { id: 'staff_directory',     name: 'Staff Directory Report',        category: 'staff', description: 'All active staff with role, type, date hired and contact details',                 formats: ['pdf','excel'], roles: ['md','hr_officer'], periodType: 'today' },
   // INVENTORY
   { id: 'stock_status',        name: 'Stock Status Report',           category: 'inventory', description: 'Current stock levels, reorder status, and total stock value',                  formats: ['pdf','excel'], roles: ['md','store_officer','production_manager','assistant_production_manager','ico'], periodType: 'today' },
   { id: 'stock_movement',      name: 'Stock Movement Report',         category: 'inventory', description: 'All stock in/out movements with opening and closing stock',                    formats: ['pdf','excel'], roles: ['md','store_officer','production_manager','assistant_production_manager','ico'], periodType: 'range' },
@@ -201,13 +201,21 @@ async function fetchExpensesRange(from, to) {
   const { data } = await q; return data || []
 }
 async function fetchAttendanceRange(from, to) {
-  let q = supabase.from('attendance').select('*, staff:staff_id(full_name,role,staff_type,daily_rate)').order('date')
+  let q = supabase.from('attendance').select('*').order('date')
   if (from) q = q.gte('date', from)
   if (to)   q = q.lte('date', to)
   const { data } = await q; return data || []
 }
 async function fetchAllStaff() {
   const { data } = await supabase.from('staff').select('*').eq('is_active', true).order('full_name')
+  return data || []
+}
+async function fetchPayrollStaff() {
+  const { data } = await supabase
+    .from('staff_payroll')
+    .select('id, full_name, employee_number, staff_type, daily_rate, monthly_salary, bank_name, bank_account_number, bank_account_name')
+    .eq('is_active', true)
+    .order('full_name')
   return data || []
 }
 async function fetchAllVehicles() {
@@ -318,10 +326,18 @@ const GENERATORS = {
     return data || []
   },
   // 18. Attendance
-  attendance_report: async (params) => fetchAttendanceRange(params.from, params.to),
+  attendance_report: async (params) => {
+    const att = await fetchAttendanceRange(params.from, params.to)
+    const ids = [...new Set(att.map(a => a.staff_id).filter(Boolean))]
+    const { data: staffRows } = ids.length
+      ? await supabase.from('staff_public').select('id, full_name').in('id', ids)
+      : { data: [] }
+    const nameMap = Object.fromEntries((staffRows || []).map(s => [s.id, s.full_name]))
+    return att.map(a => ({ ...a, _staff_name: nameMap[a.staff_id] || null }))
+  },
   // 19. Payroll
   payroll_report: async (params) => {
-    const [att, staff] = await Promise.all([fetchAttendanceRange(params.from, params.to), fetchAllStaff()])
+    const [att, staff] = await Promise.all([fetchAttendanceRange(params.from, params.to), fetchPayrollStaff()])
     return { att, staff }
   },
   // 20. Staff Directory
@@ -523,7 +539,7 @@ function renderPDF(reportId, data, params, period) {
       const rows = data
       const staffMap = {}
       rows.forEach(a => {
-        const k = a.staff?.full_name || a.staff_id
+        const k = a._staff_name || a.staff_id
         if (!staffMap[k]) staffMap[k] = { days: 0, present: 0, rate: 0 }
         staffMap[k].days++
         if (a.present) staffMap[k].present++
