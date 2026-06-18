@@ -1,201 +1,152 @@
 # APC MANAGER — UNIFIED MASTER STATE & PLAN
 **Single source of truth. Supersedes all prior handoffs on points of conflict.**
 
-Repo: `amaliyu/muktar24` (PRIVATE) · Prod branch: `main` · Stack: React 18 + Vite 5 + Supabase (PostgreSQL, RLS)
+Repo: `amaliyu/muktar24` (PRIVATE) · Prod branch: `main` · Stack: React 18 + Vite 5 + Supabase (PostgreSQL, RLS) + Vercel
 App: APC Manager — internal ERP for Abuja Precast Concrete Limited
-**Updated: 2026-06-16 (Session 4).** All state below verified by live DB query, not memory.
-**Status: app is in BETA. A physical/manual backup system runs in parallel — there is no downtime pressure. Operating mode for this phase: SLOW AND VERIFIED (fix on branch → test on preview → confirm → promote).**
+**Updated: 2026-06-18 (Session 5).** All DB state verified by live query, not memory.
+**Status: BETA. A physical/manual backup system runs in parallel — NO downtime pressure.**
+**Operating mode: SLOW AND VERIFIED — fix on a branch → test on the branch's Vercel preview AS THE AFFECTED ROLE → confirm with own eyes → MD merges → re-verify production.**
 
 ---
 
 ## 0. HOW THIS DOCUMENT IS USED
-- This is the **master**. On any conflict, **live DB facts win**, then this doc.
-- Repo is private → planning chats have no GitHub read access. Brief new chats by **pasting this file**.
-- Working rule: **Claude Code writes code/SQL FILES; it does NOT apply migrations.** Migrations are
-  applied via the Supabase connector in the planning chat, using **`apply_migration` (tracked)** with
-  before/after verification.
+- This is the master. On conflict: **live DB facts win**, then this doc.
+- Repo is private → planning chats (Claude.ai) have NO GitHub access. Brief new chats by pasting this file.
+- Division of labour: **Claude Code writes code/SQL files & opens PRs; the MD merges. Migrations are applied from the planning chat via the Supabase connector using `apply_migration` (tracked), with before/after verification.**
+- Preview = branch code against the PRODUCTION database (one Supabase project). So test data created on a preview is REAL data and must be cleaned.
 
 ---
 
 ## 1. SESSION HISTORY (most recent first)
 
-### ✅ SESSION 4 (2026-06-16) — PHASE 4A FRONTEND SHIPPED + PRODUCTION OUTAGE FIXED
-1. **Phase 4a frontend merged to main (PR #5).** Add Staff now defaults new hires to
-   `employment_status='onboarding'`; `is_active: true` write removed from create; OnboardingTab
-   (checklist + activate); status badges; attendance/payroll pickers filter to active; eligibility-
-   trigger errors caught on BOTH attendance and payroll_lines inserts with plain messages.
-2. **`is_active` staff-create bug fixed.** Production frontend was sending `is_active: true` to the
-   now-GENERATED column → "cannot insert a non-DEFAULT value into column is_active". Removed in the
-   PR #5 / hotfix work. Live-tested on production: staff create works.
-3. **PRODUCTION OUTAGE — diagnosed and fixed.** Symptom: "permission denied for table users" across
-   register, schedules, customers, orders, LPO, dashboard (all metrics zero). **Root cause was NOT
-   env vars and NOT Phase 4a** (both were investigated and ruled out — env vars confirmed present in
-   Vercel, DB confirmed healthy). Actual cause: the `orders_select` RLS policy contained a subquery
-   reading `auth.users` (`SELECT users.email FROM auth.users WHERE id = auth.uid()`). The
-   `authenticated` role cannot read `auth.users`, so evaluating the policy threw permission-denied,
-   breaking orders and every screen that joins/embeds orders. **Fix:** rewrote `orders_select` to
-   resolve the current user's staff id via `public.user_profiles.staff_id` instead. Migration
-   `fix_orders_select_auth_users_perm`. Verified: 0 policies reference auth.users; app + dashboard
-   confirmed working by MD.
-4. **Test data cleaned.** Removed 4 test staff created during live testing (2 earlier + 2 in prod).
-   Staff back to 17 real records. Checklist rows cascaded cleanly; no orphans.
+### ✅ SESSION 5 (2026-06-18) — PHASE 4D CARDS, INVOICE FIX, LOGISTICS ACCESS
+A long, multi-workstream session. All items below tested and merged unless noted.
 
-**LESSONS (process):**
-- Two production problems this session were **latent** bugs exposed by a redeploy / new access path,
-  not new breakage. DB changes going live ahead of matching frontend, and policies not tested per-role,
-  are the underlying causes.
-- **When an error names a specific Postgres table, trust that over build/env theories.** Time was lost
-  chasing env vars when the error string ("permission denied for table users") pointed straight at the DB.
-- **Test the app as EACH role** (md, accountant, ico, bdm, store_officer, etc.) after any RLS change —
-  this would have caught `orders_select` immediately. Cheap given the physical backup + no downtime.
+**A. Phase 4D — Staff ID cards, business cards, photo upload (PR #7, merged).**
+- Photo upload to private `staff-photos` bucket; `staff.photo_path`; uploading marks the 'photo' checklist item complete.
+- ID card (front+back) and business card (front+back) generated as PDFs from live staff data.
+- Incomplete-profile flag (DERIVED, not stored): warns when job_title, photo_path, or phone is missing; self-clears.
+- Bugs fixed during 4d: (i) staff INSERT was sending `is_active: true` to the GENERATED column — removed; (ii) `job_title` not saving — fixed + trimmed; (iii) ID card sidebar job_title not rendering — fixed with role fallback.
+
+**B. Card visual polish (PR #10 / branch claude/card-design-polish).**
+- Root-caused a BLANK-CARD regression: an async logo-crop helper (`fetchLogoIconAsDataUrl`) rejected on load failure and threw through the await, drawing only the card background. Fix: helper never rejects (returns null on error/timeout), logo placement guarded, content renders regardless.
+- Replaced fragile runtime logo-cropping with a pre-made ICON-ONLY logo file (`public/logo-icon.png`, no text/RC number) — permanently ends the RC-text-bleed on cards.
+- Iterated layout toward the reference samples (name colour dark-navy for readability, name larger than role on business card, grey→blue divider, header sizing). Cards are functional/professional; final pixel polish accepted as "close enough."
+
+**C. Invoice numbering duplicate-key bug (PR #8, merged).**
+- `invoice_number` is UNIQUE; the generator derived the next number from a row count, colliding with existing numbers (two inconsistent series existed: APC-INV-2026-0xx and -23xx).
+- Fix: `invoicesService.getNextNumber()` queries the live DB, parses the NUMERIC max suffix across all APC-INV numbers, increments (4-digit suffix going forward), with a 23505 unique-violation retry. Verified live: generates APC-INV-2026-2362+ cleanly. Existing 22 numbers left untouched.
+
+**D. Logistics-manager delivery access + waybill loophole (PR #9, merged).**
+- Bug: logistics_manager couldn't create waybills ("No customers with active invoices") because `ordersService.getAll()` joined raw `order_items(*)` and the role lacked SELECT on `orders`/`order_items`; the failing query was silently swallowed.
+- Requirement: logistics sees DELIVERY details only (NO money), sees new orders/approved LPOs, customer records & statements; CANNOT write invoices or receipts; CANNOT approve LPOs (only views approved ones); generates waybills/statements.
+- Fix (DB): created money-free view `order_items_delivery` (id, order_id, block_type, quantity, created_at — NO unit_price/subtotal); added logistics_manager + store_officer to `orders_select` (orders has no money columns); logistics NOT added to raw order_items (money stays hidden). Frontend routes logistics to the view.
+- Waybill loophole closed: removed the broad `waybills_write` FOR ALL policy that OR'd ico/production_manager/bdm into write access. Waybill write is now md/logistics_manager/store_officer only (insert/update), md-only delete.
+- Verified: truck/loading-labour functions (truck_loading_log, truck_loading_loaders, truck_loader_assignments, delivery_schedules, delivery_schedule_items) all confirmed INTACT for logistics_manager.
+
+**E. Housekeeping.** Test staff repeatedly created during preview testing were cleaned (rows + cascaded checklist; photo files in storage must be cleared via Supabase dashboard — SQL delete is blocked). Staff settled at 19 (18 active + RANSOM ABANG OSANG APC-EMP-018 correctly in 'onboarding' pending activation).
+
+**LESSONS (carried forward):**
+- Multiple LATENT bugs surfaced this session (invoice numbering, orders_select auth.users from Session 4, logistics RLS gaps). The app has a backlog of these from earlier dev; expect more to surface. Consider a deliberate sweep (see §4).
+- When an error names a specific Postgres table, trust that over env/build theories.
+- Claude Code's in-chat "test render" is NOT the real app — only the Vercel preview in a browser is proof.
+- Several confident fix proposals this session rested on unverified DB assumptions that were FALSE; DB verification from the planning chat caught each. Keep verifying before applying.
+- Per-role testing (Working Rule #7) is the cheapest catch for RLS bugs.
+
+### ✅ SESSION 4 (2026-06-16) — PHASE 4A FRONTEND + PRODUCTION OUTAGE FIX
+- Phase 4a frontend merged (onboarding defaults, OnboardingTab, status badges, eligibility-error handling).
+- Production outage fixed: `orders_select` RLS referenced `auth.users` (unreadable by `authenticated`), throwing "permission denied for table users" across many screens. Rewrote to resolve staff id via `user_profiles`. Migration `fix_orders_select_auth_users_perm`. (Note: Session 5's logistics work later replaced orders_select again — current version includes logistics_manager + store_officer.)
 
 ### ✅ SESSION 3 (2026-06-15) — PHASE 4A DB LAYER
-1. `staff.employment_status`: NOT NULL, CHECK (onboarding|active|suspended|terminated), default 'active'.
-2. `staff.is_active`: converted to GENERATED column (= employment_status = 'active'). Read-only.
-3. `onboarding_checklist_templates` (6 seeded items) + `staff_onboarding_checklist` (per-staff, RLS:
-   md/hr_officer write). 17 active staff backfilled as fully checklisted.
-4. Eligibility triggers: BEFORE INSERT on `attendance` + `payroll_lines` reject non-active staff.
-5. Onboarding gate trigger: BEFORE UPDATE on `staff` blocks transition into 'active' unless all
-   required checklist items complete. (NOTE: only gates the onboarding→active transition; the INSERT
-   default + Add Staff form is what routes new hires through onboarding — now handled in Session 4.)
+- `staff.employment_status` NOT NULL + CHECK (onboarding|active|suspended|terminated); `is_active` now GENERATED.
+- `onboarding_checklist_templates` (now 7 items incl. 'photo') + `staff_onboarding_checklist`.
+- Eligibility triggers on attendance + payroll_lines; onboarding gate trigger on staff.
 
-### ✅ SESSION 2 (2026-06-15)
-1. **Payroll RPC cutover (#0/#2) — COMPLETE & LIVE-PROVEN.** Handlers cut over to
-   `advance_weekly_payroll` RPC. Real ICO approval by KAYODE OJO 2026-06-15 wrote the first
-   `weekly_payroll_audit` row (draft→ico_approved). Removed a buggy post-RPC payment_date write.
-2. **Payroll duplication FIXED.** Deduped 26 duplicate status rows; added UNIQUE(week_ending,
-   payroll_type). Migration `..064205`.
-3. **Create/"Load Week" idempotent.** All 4 INSERT sites → upsert(onConflict week_ending,payroll_type).
-4. **RLS sweep (#3) — COMPLETE.** Dropped 26 permissive `allow all` overrides; widened `attendance`
-   writes to production_manager/assistant_production_manager. Migration `..104254`.
+### ✅ SESSION 2 (2026-06-15) — PAYROLL
+- `advance_weekly_payroll` RPC cutover, live-proven (first ICO approval by Kayode Ojo). Dedupe + UNIQUE(week_ending,payroll_type). RLS sweep: dropped 26 `allow all` overrides.
 
-### ✅ SESSION 1 (2026-06-11/12)
-RLS restricted to authenticated; storage policies + definer function access locked; legacy policies
-dropped/normalized; role RLS write policies on 14 tables; `staff-documents` bucket made private.
+### ✅ SESSION 1 (2026-06-11/12) — SECURITY BASELINE
+- RLS to authenticated; storage locked; role write policies; staff-documents bucket private.
 
 ---
 
-## 2. VERIFIED LIVE STATE (queried 2026-06-16)
-### Payroll engine
-- `trg_weekly_payroll_guard`: ENABLED. Blocks direct status writes; md_approved/paid immutable. Only
-  `advance_weekly_payroll` (SECURITY DEFINER) transitions.
-- `advance_weekly_payroll(p_payroll_id, p_action, p_reason)`: live. Actions ico_approve | md_approve |
-  mark_paid | recall. Resolves actor role+name from user_profiles WHERE id=auth.uid(). mark_paid sets
-  payment_date server-side. recall requires reason, NULLs approver fields (history kept in audit).
-- `weekly_payroll_audit`: live (1+ rows). Read policy only, no write policy (RPC-only, tamper-resistant).
-- `weekly_labour_payroll`: 6 rows, UNIQUE(week_ending,payroll_type) enforced.
-
-### Staff lifecycle
-- `staff.employment_status`: NOT NULL, default 'active', CHECK (onboarding|active|suspended|terminated).
-  17 staff, all 'active'.
-- `staff.is_active`: GENERATED (= employment_status='active'). Read-only — never write it.
-- `onboarding_checklist_templates`: 6 required items. `staff_onboarding_checklist`: per-staff,
-  UNIQUE(staff_id,item_key), ON DELETE CASCADE from staff.
-- `check_staff_active_for_insert()` (INVOKER): trigger on attendance + payroll_lines BEFORE INSERT.
-- `check_onboarding_complete_for_active()` (INVOKER): trigger on staff BEFORE UPDATE (onboarding gate).
+## 2. VERIFIED LIVE STATE (queried 2026-06-18)
+- Staff: 19 (18 active, 1 onboarding — Ransom APC-EMP-018). Invoices: 25.
+- **0 policies reference auth.users. 0 allow-all overrides.**
+- Money-free `order_items_delivery` view: live. Waybills: 4 policies (insert/update md+logistics+store, delete md, select broad). No `waybills_write` loophole.
+- Payroll engine intact (trg_weekly_payroll_guard enabled, advance_weekly_payroll RPC, weekly_payroll_audit RPC-write-only).
+- Card support: `staff.job_title`, `staff.photo_path`, private `staff-photos` bucket, `public/logo-icon.png` (icon-only logo).
+- Invoice generation: `getNextNumber()` numeric-max + 23505 retry; 4-digit suffix going forward.
 
 ### ⚠️ ARCHITECTURE NOTE
-`weekly_labour_payroll` is only a status header, one row per (week_ending, payroll_type). The worker
-list and money come from daily operational tables joined by week+type, NOT by FK: production from
-`daily_roster_entries`, loading from `truck_loading_log`/`truck_loading_loaders`. Status and displayed
-amounts are decoupled. The `attendance` table is for STAFF attendance; daily-labour attendance lives in
-the roster/loading tables. (This is why `attendance` can show 0 rows while payroll data exists.)
+`weekly_labour_payroll` is a status header only (one row per week_ending+payroll_type). Worker lists/amounts come from daily tables joined by week+type: production `daily_roster_entries`; loading `truck_loading_log`/`truck_loading_loaders`. The `attendance` table is for STAFF attendance; daily-labour attendance lives in roster/loading tables.
 
-### Security / RLS posture
-- 63 tables enforce role-based writes via `get_user_role()` helper (intact, verified: `SELECT role
-  FROM user_profiles WHERE id = auth.uid()`, STABLE SECURITY DEFINER).
-- **0 `allow all` overrides remain. 0 policies reference `auth.users`** (fixed Session 4).
-- 11 user_profiles, all with valid non-null roles (incl. md). Anon access closed. `staff-documents`
-  bucket private (signed URLs).
-- Supabase anon key confirmed active (not rotated/disabled), valid through 2034.
-- Staff-id-referencing tables (only 5): attendance, payroll_lines, staff_documents,
-  staff_onboarding_checklist, user_profiles.
-
-### Ingestion engine — Phase 0 (APPLIED, parked)
-`staging_transactions` quarantine + ingestion_source/updated_at on the 4 money tables. Unused,
-non-destructive, waiting (see §4 item #5).
-
-### Migrations (tracked) — full history
-session1 (x4, 2026-06-11/12) · phase0_ingestion (06-14) · dedupe_weekly_labour_payroll (06-15) ·
-session2_widen_attendance_and_drop_allow_all_overrides (06-15) · staff_lifecycle_status ·
-onboarding_checklist_tables · staff_eligibility_triggers · fix_eligibility_function_security ·
-staff_onboarding_gate_trigger (all 06-15) · **fix_orders_select_auth_users_perm (06-16)**.
+### Migrations (tracked) — Session 5 additions
+`logistics_delivery_view_and_orders_read`, `waybills_remove_broad_write_loophole`
+(plus Session 3 staff/onboarding migrations, Session 4 `fix_orders_select_auth_users_perm`, Session 2 dedupe/sweep, Session 1 baseline.)
 
 ---
 
 ## 3. UNIFIED PRIORITY ORDER
 | # | Work | State |
 |---|---|---|
-| 0 | Payroll RPC cutover + state machine | ✅ COMPLETE & live-proven |
-| 1 | G.1 quick-fixes | ✅ COMPLETE (rls_policies.sql removed via PR #4) |
-| 2 | Payroll state machine client cutover | ✅ COMPLETE (folded into #0) |
-| 3 | RLS for remaining tables | ✅ COMPLETE (26 overrides dropped; orders_select auth.users fixed) |
-| 4 | HR modules / unified staff table | 4a (lifecycle/onboarding) ✅ COMPLETE (DB + frontend live). 4b/4c/4d pending |
-| 5 | Payment-request (revenue) workflow + ingestion engine (Phase 1+) | Parked; Phase 0 done; after #4 |
+| 0 | Payroll RPC + state machine | ✅ COMPLETE & live-proven |
+| 1 | G.1 quick-fixes | ✅ COMPLETE |
+| 2 | Payroll client cutover | ✅ COMPLETE |
+| 3 | RLS for remaining tables | ✅ COMPLETE (0 overrides, 0 auth.users refs) |
+| 4 | HR modules | 4a ✅ (DB+frontend). 4d ✅ (cards/photo, merged; visual polish near-final). 4b/4c pending |
+| 5 | Payment-request (revenue) + ingestion engine (Phase 1+) | Parked; Phase 0 done; after #4 |
 
-### Phase 4 sub-roadmap (HR)
-- **4a Employee lifecycle / onboarding** — ✅ DONE (DB + frontend).
-- **4b Leave & salary-advance requests** — pending. Depends on payroll approval-workflow decision
-  (staff payroll has no state machine yet) + attendance integration.
-- **4c Disciplinary / queries + staff self-service portal** — pending. Depends on auth/access decision
-  (most staff have no login; user_profiles.staff_id mostly null).
-- **4d Staff ID card + complimentary (business) card generation** — NEW, requested Session 4. Generate
-  + download from staff profile after activation/approval (hr or md). NOT YET SCOPED. Design decisions
-  outstanding: card fields, branding, and a likely schema gap (staff photo storage — not currently a
-  staff column). Scope fresh before any build.
+### Phase 4 sub-roadmap
+- 4a lifecycle/onboarding — ✅ DONE.
+- 4d ID + business cards + photo — ✅ DONE (merged). Visual polish: accepted as functional; minor header-size nit optional.
+- 4b leave & salary-advance requests — PENDING (needs staff-payroll state-machine decision; payroll deduction + attendance integration).
+- 4c disciplinary/queries + staff self-service portal — PENDING (needs auth/access decision; most staff lack logins).
 
 ---
 
 ## 4. KNOWN GAPS / FORWARD ITEMS
-- **Staff payroll (`payroll_runs`/`payroll_lines`) has role-scoped RLS but NO server-side status
-  enforcement / state machine.** If given an approval workflow, needs the SAME trigger+RPC+audit
-  pattern as Labour. Blocks 4b salary-advance deduction. MD decision pending.
-- **Silent Supabase client fallback (latent landmine).** `src/lib/supabase.js` falls back to
-  placeholder URL/key if env vars are absent, failing silently as anonymous instead of erroring loudly.
-  Did not cause the Session 4 outage but is a real hazard on any future build with a missing var.
-  FORWARD FIX (own branch, not urgent): make the client fail fast/visibly if env vars are missing.
-- **Per-role testing not yet systematic.** Adopt: after any RLS/policy change, smoke-test the app as
-  each role before promoting.
-- **Original payroll trigger/RPC/audit objects are NOT in tracked migration history** (applied via raw
-  SQL pre-Session-2). Live + verified, but no migration artifact. Optional: capture as no-op migration.
-- **`updated_at` auto-update trigger** on the 4 money tables — deliberately deferred.
+- **Latent-bug sweep (recommended).** Payroll, invoices, and logistics each had a pre-existing generation/RLS bug surface this session. Proactively audit other number generators (LPO/quote/receipt/waybill) and per-role RLS rather than waiting for breakage.
+- **Silent Supabase client fallback.** `src/lib/supabase.js` falls back to placeholder URL/key if env vars are missing, failing silently as anon. FORWARD FIX (own branch): make it fail loudly.
+- **Staff payroll (`payroll_runs`/`payroll_lines`)** has role-scoped RLS but no state machine; needs the trigger+RPC+audit pattern if/when it gets an approval workflow. Blocks 4b advance deduction.
+- **Orphaned staff photo files** in `staff-photos` bucket from deleted test staff — harmless; clear via Supabase dashboard (SQL delete blocked).
+- **Ransom (APC-EMP-018)** in onboarding — HR to complete checklist + activate when ready.
+- Original payroll trigger/RPC/audit objects not in tracked migration history (pre-discipline). Live & verified. Optional: capture as no-op migration.
 
 ---
 
 ## 5. DECISIONS / MILESTONES PENDING (MD)
-- **Go-live data re-entry milestone (parked).** Resolves dust kg→tons gap (~16.3-ton discrepancy) and
-  beta entry errors via clean opening balances. Trigger when ready.
-- **Correction-as-adjustment-movement rule (LOCKED).** Corrections = new logged offsetting entry, never
-  a silent edit/delete. Full controlled-correction feature at go-live (trigger+RPC+audit pattern).
-- **Attendance automation (future, #4 era).** Replace manual attendance with biometric/fingerprint.
-- **Dust kg→tons conversion** — only after stock gap closed (defer to go-live re-entry).
+- Go-live data re-entry milestone (parked) — clean opening balances; resolves dust kg→tons (~16.3t) gap & beta errors.
+- Correction-as-adjustment-movement rule (LOCKED) — corrections are new logged offsetting entries, never silent edits.
+- Attendance automation (future) — biometric/fingerprint capture.
 
 ---
 
-## 6. WORKING RULES (binding on all windows)
-1. One session = one scope = one branch off `main`. Prefix commits with the workstream.
-2. Claude Code writes code + SQL FILES; does NOT apply migrations.
-3. Migrations reviewed + applied through the planning chat via `apply_migration` (tracked),
-   before/after verified.
+## 6. WORKING RULES (binding)
+1. One session = one scope = one branch off `main`. Keep unrelated fixes on separate branches/PRs.
+2. Claude Code writes code + SQL files; does NOT apply migrations.
+3. Migrations applied from the planning chat via `apply_migration` (tracked), before/after verified.
 4. No window changes bucket visibility / RLS / DB config except via the planning chat.
-5. Test on preview before merge. **MD reviews before merge — no self-merge to `main` by Claude Code.**
+5. Test on preview before merge. **MD merges — no self-merge to main by Claude Code.** MD's live test counts as review.
 6. End every session by updating THIS document.
-7. **(NEW) After any RLS/policy change, smoke-test the app as each affected role before promoting.**
+7. After any RLS/policy change, smoke-test the app AS EACH affected role before promoting.
+8. Verify fix proposals against the live DB before applying — several "confident" diagnoses this session were wrong on the facts.
 
 ---
 
 ## 7. STATUS BOARD
 | Stream | State | Next |
 |---|---|---|
-| Payroll RPC cutover (#0/#2) | ✅ live-proven | none — closed |
-| Payroll duplication + constraint | ✅ fixed | none |
-| RLS sweep (#3) | ✅ complete (0 overrides, 0 auth.users refs) | none |
-| G.1 quick-fixes (#1) | ✅ complete | none — closed |
-| HR 4a lifecycle/onboarding | ✅ DB + frontend live | none — closed |
-| HR 4b leave/advances | pending | needs staff-payroll state-machine decision |
-| HR 4c disciplinary/self-service | pending | needs auth/access decision |
-| HR 4d ID + complimentary cards | requested, not scoped | scope design first |
-| Production outage (orders_select) | ✅ fixed & verified | none — closed |
-| Supabase client silent fallback | latent hazard | forward fix, own branch |
+| Payroll RPC (#0/#2) | ✅ live-proven | — |
+| RLS sweep (#3) | ✅ complete | — |
+| HR 4a lifecycle | ✅ live | — |
+| HR 4d cards/photo | ✅ merged | optional header-size polish |
+| HR 4b leave/advances | pending | staff-payroll state-machine decision |
+| HR 4c disciplinary/self-service | pending | auth/access decision |
+| Invoice numbering | ✅ fixed & live | — |
+| Logistics delivery access | ✅ fixed & live | — |
+| Waybill write loophole | ✅ closed | — |
+| Silent supabase fallback | latent hazard | forward fix, own branch |
+| Latent-bug sweep | recommended | audit other generators/RLS |
 | Payment-request + ingestion (#5) | Phase 0 parked | after #4 |
 | Go-live re-entry / dust gap | parked | MD triggers |
