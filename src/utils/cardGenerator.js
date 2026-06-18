@@ -183,9 +183,9 @@ function drawIDFront(doc, staff, iconUrl, photoUrl, photoFmt, barcode, W, H, SB,
   if (staff.email)          detailRow('Email', staff.email);
   if (staff.phone?.trim())  detailRow('Phone', staff.phone.trim());
 
-  // Barcode — spans nearly full content width
+  // Barcode — spans nearly full content width, raised clear of corner accent
   const BW = CW - 4, BH = 7;
-  doc.addImage(barcode, 'PNG', 2, H - BH - 4, BW, BH);
+  doc.addImage(barcode, 'PNG', 2, H - BH - 10, BW, BH);
 
   // Bottom-left corner: two stacked CYAN squares (decorative)
   doc.setFillColor(...CYAN);
@@ -215,12 +215,15 @@ function drawIDBack(doc, iconUrl, W, H) {
   // Bottom-left small square
   doc.rect(0, H - 4.5, 4.5, 4.5, 'F');
 
-  // Logo: icon mark + company name
+  // Logo: icon mark + two-line company name as strong header
   if (iconUrl) doc.addImage(iconUrl, 'PNG', 3, 5, 10, 10);
-  doc.setTextColor(...CYAN);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(5.5);
-  doc.text('Abuja Precast Concrete Limited', 15, 9.5);
+  doc.setFontSize(7.5);
+  doc.setTextColor(...DARK);
+  doc.text('ABUJA PRECAST', 15, 8.5);
+  doc.setFontSize(6);
+  doc.setTextColor(...CYAN);
+  doc.text('CONCRETE LIMITED', 15, 13.5);
 
   // TERMS & CONDITIONS — left-aligned bold black heading
   doc.setFont('helvetica', 'bold');
@@ -305,13 +308,13 @@ function drawBizFront(doc, staff, iconUrl, W, H) {
   doc.setTextColor(...MID);
   doc.text('PRECAST CONCRETE', 18, 13);
 
-  // Decorative header lines top-right — equal length, equal weight, evenly spaced
-  const lnX1 = 35, lnX2 = W - 4;
-  doc.setLineWidth(0.5);
-  doc.setDrawColor(190, 195, 215);   // grey top segment
-  doc.line(lnX1, 6.5, lnX2, 6.5);
-  doc.setDrawColor(...CYAN);          // cyan bottom segment
-  doc.line(lnX1, 10.5, lnX2, 10.5);
+  // Single divider line: grey left half → brand blue right half
+  const lnX1 = 35, lnX2 = W - 4, lnMid = (lnX1 + lnX2) / 2, lnY = 9.5;
+  doc.setLineWidth(0.8);
+  doc.setDrawColor(190, 195, 215);   // grey left segment
+  doc.line(lnX1, lnY, lnMid, lnY);
+  doc.setDrawColor(...BLUE);         // brand blue right segment
+  doc.line(lnMid, lnY, lnX2, lnY);
 
   // Header divider
   doc.setDrawColor(225, 230, 245); doc.setLineWidth(0.3);
@@ -400,14 +403,14 @@ function drawBizBack(doc, iconUrl, W, H) {
   if (iconUrl) doc.addImage(iconUrl, 'PNG', lx, 3, ICON_W, ICON_H);
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(12);
+  doc.setFontSize(11);
   doc.setTextColor(...DARK);
-  doc.text('ABUJA', lx + 16, 9.5);
+  doc.text('ABUJA PRECAST', lx + 16, 9);
 
-  doc.setFont('helvetica', 'normal');
+  doc.setFont('helvetica', 'bold');
   doc.setFontSize(6.5);
-  doc.setTextColor(...MID);
-  doc.text('PRECAST CONCRETE', lx + 16, 15);
+  doc.setTextColor(...CYAN);
+  doc.text('CONCRETE LIMITED', lx + 16, 14.5);
 
   // OUR PRODUCTS heading (no divider line between logo and products)
   doc.setFont('helvetica', 'bold');
