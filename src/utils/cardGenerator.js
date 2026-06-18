@@ -218,10 +218,10 @@ function drawIDBack(doc, iconUrl, W, H) {
   // Logo: icon mark + two-line company name as strong header
   if (iconUrl) doc.addImage(iconUrl, 'PNG', 3, 5, 10, 10);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7.5);
+  doc.setFontSize(9);
   doc.setTextColor(...DARK);
   doc.text('ABUJA PRECAST', 15, 8.5);
-  doc.setFontSize(6);
+  doc.setFontSize(7);
   doc.setTextColor(...MID);
   doc.text('CONCRETE LIMITED', 15, 13.5);
 
@@ -403,12 +403,12 @@ function drawBizBack(doc, iconUrl, W, H) {
   if (iconUrl) doc.addImage(iconUrl, 'PNG', lx, 3, ICON_W, ICON_H);
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(11);
+  doc.setFontSize(13);
   doc.setTextColor(...DARK);
   doc.text('ABUJA PRECAST', lx + 16, 9);
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(6.5);
+  doc.setFontSize(8);
   doc.setTextColor(...MID);
   doc.text('CONCRETE LIMITED', lx + 16, 14.5);
 
