@@ -134,7 +134,7 @@ function drawIDFront(doc, staff, iconUrl, photoUrl, photoFmt, barcode, W, H, SB,
   // Photo with prominent CYAN border
   const PW = 28, PH = 28;
   const PX = (CW - PW) / 2;
-  const PY = 13;
+  const PY = 14.5;
   const B  = 1.2; // border thickness (mm)
 
   doc.setFillColor(...CYAN);
@@ -151,10 +151,10 @@ function drawIDFront(doc, staff, iconUrl, photoUrl, photoFmt, barcode, W, H, SB,
     doc.text('PHOTO', PX + PW / 2, PY + PH / 2 + 1, { align: 'center' });
   }
 
-  // Employee name below photo (CYAN bold)
+  // Employee name below photo — dark navy bold (CYAN was too light to read)
   const nameParts = (staff.full_name || '').trim().split(/\s+/);
   const nameY = PY + PH + 5;
-  doc.setTextColor(...CYAN);
+  doc.setTextColor(...NAVY);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8.5);
 
@@ -305,11 +305,13 @@ function drawBizFront(doc, staff, iconUrl, W, H) {
   doc.setTextColor(...MID);
   doc.text('PRECAST CONCRETE', 18, 13);
 
-  // Decorative horizontal lines (top-right of header)
-  doc.setDrawColor(185, 190, 210); doc.setLineWidth(0.4);
-  doc.line(50, 5.5, W - 4, 5.5);
-  doc.setDrawColor(...CYAN); doc.setLineWidth(0.8);
-  doc.line(50, 8.5, W - 4, 8.5);
+  // Decorative header lines top-right — equal length, equal weight, evenly spaced
+  const lnX1 = 35, lnX2 = W - 4;
+  doc.setLineWidth(0.5);
+  doc.setDrawColor(190, 195, 215);   // grey top segment
+  doc.line(lnX1, 6.5, lnX2, 6.5);
+  doc.setDrawColor(...CYAN);          // cyan bottom segment
+  doc.line(lnX1, 10.5, lnX2, 10.5);
 
   // Header divider
   doc.setDrawColor(225, 230, 245); doc.setLineWidth(0.3);
