@@ -528,7 +528,6 @@ const StaffProfile = ({ staffId, onBack, onUpdated, roles, userProfile }) => {
   const [uploading, setUploading] = useState(false);
   const [uploadLabel, setUploadLabel] = useState("Offer Letter");
   const fileInputRef = useRef(null);
-  // Photo upload (phase 4d)
   const [photoSignedUrl, setPhotoSignedUrl] = useState(null);
   const [photoUploading, setPhotoUploading] = useState(false);
   const [generatingIDCard, setGeneratingIDCard] = useState(false);

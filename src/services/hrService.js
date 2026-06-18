@@ -154,6 +154,7 @@ export const photoService = {
       completed_by: completedBy,
     };
 
+
     if (existing) {
       await supabase.from('staff_onboarding_checklist').update(payload).eq('id', existing.id);
     } else {
