@@ -42,7 +42,9 @@ async function fetchAsDataUrl(url) {
   });
 }
 
-// Crop logo.png to just the graphical icon mark (left 31 % × top 87 %).
+// Crop logo.png to just the graphical icon mark (left 31 % × top 65 %).
+// The full logo contains "ABUJA PRECAST CONCRETE" text (right ~70%) and
+// "RC: 1838184" at the bottom (~68–100% height). We keep only the icon bars.
 // Returns null on any failure so callers can skip the logo rather than abort.
 function fetchLogoIconAsDataUrl() {
   return new Promise((resolve) => {
@@ -52,10 +54,10 @@ function fetchLogoIconAsDataUrl() {
     img.onload = () => {
       clearTimeout(timer);
       try {
-        const nw = img.naturalWidth  || 850;
-        const nh = img.naturalHeight || 310;
-        const cw = Math.round(nw * 0.31);
-        const ch = Math.round(nh * 0.87);
+        const nw = img.naturalWidth  || 1600;
+        const nh = img.naturalHeight || 656;
+        const cw = Math.round(nw * 0.31);   // icon occupies left ~30 % of width
+        const ch = Math.round(nh * 0.65);   // icon bars end ~63 %, RC text starts ~68 %
         const canvas = document.createElement('canvas');
         canvas.width  = cw;
         canvas.height = ch;
