@@ -55,22 +55,18 @@ const PRODUCTS  = [
 ];
 
 // ─── Helpers ─────────────────────────────────────────────────────
-function fetchLogoIconAsDataUrl() {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => {
-      const nw = img.naturalWidth  || 850;
-      const nh = img.naturalHeight || 310;
-      const cw = Math.round(nw * 0.31);
-      const ch = Math.round(nh * 0.87);
-      const canvas = document.createElement('canvas');
-      canvas.width = cw; canvas.height = ch;
-      canvas.getContext('2d').drawImage(img, 0, 0);
-      resolve(canvas.toDataURL('image/png'));
-    };
-    img.onerror = reject;
-    img.src = '/logo.png';
-  });
+async function fetchLogoIconAsDataUrl() {
+  try {
+    const res = await fetch('/logo-icon.png');
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    return await new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(fr.result);
+      fr.onerror = reject;
+      fr.readAsDataURL(blob);
+    });
+  } catch { return null; }
 }
 
 function makeBarcodeDataUrl(value) {
@@ -98,7 +94,7 @@ function drawIDFront(doc, staff, iconUrl, photoUrl, photoFmt, barcode, W, H, SB,
   doc.setTextColor(...CYAN); doc.setFont('helvetica','bold'); doc.setFontSize(5.5);
   doc.text('Abuja Precast',12.5,5);
   doc.text('Concrete Ltd',12.5,8.5);
-  const PW=28,PH=28,PX=(CW-PW)/2,PY=13,B=1.2;
+  const PW=28,PH=28,PX=(CW-PW)/2,PY=14.5,B=1.2;
   doc.setFillColor(...CYAN); doc.rect(PX-B,PY-B,PW+2*B,PH+2*B,'F');
   if (photoUrl) { doc.addImage(photoUrl,photoFmt,PX,PY,PW,PH); }
   else {
@@ -108,7 +104,7 @@ function drawIDFront(doc, staff, iconUrl, photoUrl, photoFmt, barcode, W, H, SB,
   }
   const nameParts=(staff.full_name||'').trim().split(/\s+/);
   const nameY=PY+PH+5;
-  doc.setTextColor(...CYAN); doc.setFont('helvetica','bold'); doc.setFontSize(8.5);
+  doc.setTextColor(...NAVY); doc.setFont('helvetica','bold'); doc.setFontSize(8.5);
   const mid=Math.ceil(nameParts.length/2);
   if (nameParts.length<=2) { doc.text(staff.full_name||'',CW/2,nameY,{align:'center'}); }
   else {
@@ -181,8 +177,10 @@ function drawBizFront(doc, staff, iconUrl, W, H) {
   doc.text('ABUJA',18,8.5);
   doc.setFont('helvetica','normal'); doc.setFontSize(6); doc.setTextColor(...MID);
   doc.text('PRECAST CONCRETE',18,13);
-  doc.setDrawColor(185,190,210); doc.setLineWidth(0.4); doc.line(50,5.5,W-4,5.5);
-  doc.setDrawColor(...CYAN); doc.setLineWidth(0.8); doc.line(50,8.5,W-4,8.5);
+  const lnX1=35, lnX2=W-4;
+  doc.setLineWidth(0.5);
+  doc.setDrawColor(190,195,215); doc.line(lnX1,6.5,lnX2,6.5);
+  doc.setDrawColor(...CYAN);     doc.line(lnX1,10.5,lnX2,10.5);
   doc.setDrawColor(225,230,245); doc.setLineWidth(0.3); doc.line(4,17,W-4,17);
   const name=(staff.full_name||'').toUpperCase();
   doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(...DARK);
