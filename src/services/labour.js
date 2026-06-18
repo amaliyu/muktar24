@@ -232,7 +232,13 @@ export const payrollService = {
   },
 
   async create(payroll) {
-    const { data, error } = await supabase.from('weekly_labour_payroll').insert(payroll).select().single()
+    const { error: upErr } = await supabase.from('weekly_labour_payroll').upsert(
+      payroll,
+      { onConflict: 'week_ending,payroll_type', ignoreDuplicates: true }
+    )
+    if (upErr) throw upErr
+    const { data, error } = await supabase.from('weekly_labour_payroll')
+      .select('*').eq('week_ending', payroll.week_ending).eq('payroll_type', payroll.payroll_type).single()
     if (error) throw error
     return data
   },

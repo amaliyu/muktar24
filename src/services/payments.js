@@ -44,6 +44,22 @@ export const paymentsService = {
 }
 
 export const invoicesService = {
+  async getNextNumber() {
+    const year = new Date().getFullYear();
+    const prefix = `APC-INV-${year}-`;
+    const { data, error } = await supabase
+      .from('invoices')
+      .select('invoice_number')
+      .like('invoice_number', `${prefix}%`);
+    if (error) throw error;
+    const maxN = (data || []).reduce((m, row) => {
+      const n = parseInt(row.invoice_number?.match(/(\d+)$/)?.[1] ?? '0', 10);
+      return Math.max(m, n);
+    }, 0);
+    // 4-digit suffix — above both existing series (max is 2361), consistent going forward
+    return `${prefix}${String(maxN + 1).padStart(4, '0')}`;
+  },
+
   async create(invoice) {
     const { data, error } = await supabase
       .from('invoices')

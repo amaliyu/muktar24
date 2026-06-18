@@ -3,7 +3,7 @@ import JsBarcode from 'jsbarcode';
 
 // ── Brand palette ────────────────────────────────────────────────
 const NAVY  = [13, 27, 75];     // #0d1b4b — sidebar, headings
-const CYAN  = [0, 188, 212];    // #00bcd4 — ID card company name & employee name
+const CYAN  = [0, 188, 212];    // #00bcd4 — accents & borders
 const BLUE  = [25, 82, 163];    // #1952a3 — business card job title & icons
 const WHITE = [255, 255, 255];
 const DARK  = [15, 22, 55];
@@ -347,28 +347,23 @@ function drawBizFront(doc, staff, iconUrl, W, H) {
   const LINE_H  = 6.5 * 1.2 / 2.8346; // ≈ 2.76 mm
 
   const drawIconCircle = (x, y, type) => {
-    // Background circle
     doc.setFillColor(...BLUE);
     doc.circle(x, y, R, 'F');
 
-    // White icon drawn with primitives
     doc.setFillColor(...WHITE);
     doc.setDrawColor(...WHITE);
 
     if (type === 'phone') {
-      // Simplified handset: diagonal bar with rounded ends
       doc.setLineWidth(0.5);
       doc.line(x - 1.0, y + 0.85, x + 1.0, y - 0.85);
       doc.circle(x - 0.85, y + 0.75, 0.32, 'F');
       doc.circle(x + 0.85, y - 0.75, 0.32, 'F');
     } else if (type === 'email') {
-      // Simplified envelope: rectangle + V flap
       doc.setLineWidth(0.28);
       doc.rect(x - 1.1, y - 0.65, 2.2, 1.4);
       doc.line(x - 1.1, y - 0.65, x, y + 0.15);
       doc.line(x + 1.1, y - 0.65, x, y + 0.15);
     } else if (type === 'location') {
-      // Simplified pin: filled circle + downward triangle
       doc.circle(x, y - 0.5, 0.75, 'F');
       doc.setLineWidth(0.4);
       doc.line(x - 0.55, y + 0.15, x,      y + 1.1);
@@ -412,7 +407,6 @@ function drawBizBack(doc, iconUrl, W, H) {
   doc.setTextColor(...MID);
   doc.text('CONCRETE LIMITED', lx + 16, 14.5);
 
-  // OUR PRODUCTS heading (no divider line between logo and products)
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
   doc.setTextColor(...DARK);
@@ -420,7 +414,6 @@ function drawBizBack(doc, iconUrl, W, H) {
   doc.setDrawColor(...DARK); doc.setLineWidth(0.4);
   doc.line(5, 26.5, 47, 26.5);
 
-  // Products list
   doc.setFont('helvetica', 'italic');
   doc.setFontSize(7.5);
   doc.setTextColor(...DARK);

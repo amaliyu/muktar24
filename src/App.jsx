@@ -1084,9 +1084,7 @@ const Orders = ({ onNavigate, userProfile }) => {
         _existingId: existingInvoice.id,
       });
     } else {
-      const count = orders.reduce((s, o) => s + (o.invoices || []).length, 0);
-      const year = new Date().getFullYear();
-      const invoiceNumber = `APC-INV-${year}-${String((count || 0) + 1).padStart(3, "0")}`;
+      const invoiceNumber = await invoicesService.getNextNumber();
       const editorItems = buildItems(selected.order_items || []);
       setInvoiceEditor({
         invoice_number: invoiceNumber,
@@ -1106,6 +1104,7 @@ const Orders = ({ onNavigate, userProfile }) => {
     setInvoicing(true);
     try {
       const { _existingId, invoice_number, issued_date, due_date, items, delivery_cost, include_vat, discount } = invoiceEditor;
+      let invNum = invoice_number;
       const itemSubtotal = items.reduce((s, i) => s + (Number(i.quantity) || 0) * (Number(i.unit_price) || 0), 0);
       const delivN = Number(delivery_cost) || 0;
       const discN = Number(discount) || 0;
@@ -1119,18 +1118,28 @@ const Orders = ({ onNavigate, userProfile }) => {
       if (_existingId) {
         await invoicesService.update(_existingId, { invoice_number, issued_date, due_date, total_amount: total });
       } else {
-        const newInvoice = await invoicesService.create({ order_id: orderId, invoice_number, issued_date, due_date, total_amount: total });
+        let newInvoice;
+        try {
+          newInvoice = await invoicesService.create({ order_id: orderId, invoice_number: invNum, issued_date, due_date, total_amount: total });
+        } catch (createErr) {
+          if (createErr.code === '23505') {
+            invNum = await invoicesService.getNextNumber();
+            newInvoice = await invoicesService.create({ order_id: orderId, invoice_number: invNum, issued_date, due_date, total_amount: total });
+          } else {
+            throw createErr;
+          }
+        }
         invoiceId = newInvoice.id;
         await ordersService.updateStatus(orderId, "invoiced");
       }
 
       const customer = selected.customer || { name: selected.customerName, location: selected.customerLocation, phone: selected.customerPhone };
-      await generateInvoicePDF({ invoice_number, issued_date, due_date, items, delivery_cost: delivN, include_vat, discount: discN }, customer);
+      await generateInvoicePDF({ invoice_number: invNum, issued_date, due_date, items, delivery_cost: delivN, include_vat, discount: discN }, customer);
 
       setInvoiceEditor(null);
       const newOrders = await load();
       if (newOrders) setSelected(newOrders.find(o => o.id === orderId) || null);
-      setAlert({ type: "success", msg: `Invoice ${invoice_number} saved and downloaded!` });
+      setAlert({ type: "success", msg: `Invoice ${invNum} saved and downloaded!` });
     } catch (e) {
       if (e.message?.includes('invoices_order_id_fkey')) {
         setInvoiceEditor(null);
@@ -1505,8 +1514,8 @@ const Orders = ({ onNavigate, userProfile }) => {
                               {p.status === "confirmed" && (
                                 <button style={{ ...styles.btn("primary"), padding: "3px 8px", fontSize: "11px" }} onClick={() => generatePaymentReceiptPDF({ payment: p, customer: selected.customer, invoiceNumber: p._invoiceNumber, invoiceTotal: p._invoiceTotal || null, totalPaidSoFar: totalConfirmed })}>Receipt</button>
                               )}
-                              {userProfile?.role !== 'ico' && <button style={{ ...styles.btn("secondary"), padding: "3px 8px", fontSize: "11px" }} onClick={() => { setEditPayment(p); setPayForm({ amount: String(p.amount_paid), date: p.payment_date }); setShowPayForm(true); }}>Edit</button>}
-                              {userProfile?.role !== 'ico' && <button style={{ ...styles.btn("danger"), padding: "3px 8px", fontSize: "11px" }} onClick={() => setConfirmDelete({ ...p, type: "payment" })}>Remove</button>}
+                              {['md','accountant'].includes(userProfile?.role) && <button style={{ ...styles.btn("secondary"), padding: "3px 8px", fontSize: "11px" }} onClick={() => { setEditPayment(p); setPayForm({ amount: String(p.amount_paid), date: p.payment_date }); setShowPayForm(true); }}>Edit</button>}
+                              {userProfile?.role === 'md' && <button style={{ ...styles.btn("danger"), padding: "3px 8px", fontSize: "11px" }} onClick={() => setConfirmDelete({ ...p, type: "payment" })}>Remove</button>}
                             </div>
                           </div>
                         ))}
@@ -1516,14 +1525,14 @@ const Orders = ({ onNavigate, userProfile }) => {
                   <div style={{ marginTop: "16px" }}>
                     <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
                       {(selected.invoices || []).length === 0 ? (
-                        userProfile?.role !== 'ico' && <button style={styles.btn("primary")} onClick={handleGenerateInvoice} disabled={invoicing}>{invoicing ? "Generating…" : "Generate Invoice"}</button>
+                        ['md','accountant','bdm'].includes(userProfile?.role) && <button style={styles.btn("primary")} onClick={handleGenerateInvoice} disabled={invoicing}>{invoicing ? "Generating…" : "Generate Invoice"}</button>
                       ) : (
                         <>
                           <div style={{ width: "100%", fontSize: "12px", color: theme.textMuted, marginBottom: "6px" }}>
                             Invoice: <strong style={{ color: theme.accent }}>{selected.invoices[0].invoice_number}</strong>
                           </div>
                           <button style={styles.btn("primary")} onClick={handleGenerateInvoice} disabled={invoicing}>{invoicing ? "Downloading…" : "Download Invoice PDF"}</button>
-                          {userProfile?.role !== 'ico' && <button style={styles.btn("secondary")} onClick={() => setShowPayForm(!showPayForm)}>+ Record Payment</button>}
+                          {['md','accountant'].includes(userProfile?.role) && <button style={styles.btn("secondary")} onClick={() => setShowPayForm(!showPayForm)}>+ Record Payment</button>}
                         </>
                       )}
                       <button style={styles.btn("secondary")} onClick={() => onNavigate("waybills")}>View Waybills</button>
@@ -1600,7 +1609,7 @@ const Waybills = ({ userProfile }) => {
     if (isDriverRole) { setLoading(false); return; } // drivers don't need orders/batches/schedules
     try {
       const [orders, activeBatches, allBatches, approvedScheds] = await Promise.all([
-        ordersService.getAll(),
+        ordersService.getForDelivery().catch(() => []),
         batchesService.getActive().catch(() => []),
         batchesService.getAll().catch(() => []),
         schedulesService.getApproved().catch(() => []),
@@ -1917,7 +1926,7 @@ const Waybills = ({ userProfile }) => {
                     </option>
                   ))}
                 </select>
-                {activeOrders.length === 0 && <div style={{ fontSize: "11px", color: theme.red, marginTop: "4px" }}>No customers with active invoices. Generate an invoice first.</div>}
+                {activeOrders.length === 0 && <div style={{ fontSize: "11px", color: theme.red, marginTop: "4px" }}>No invoiced orders found. Contact your administrator if an order should appear here.</div>}
               </div>
             )}
             <div style={styles.formGroup}>
@@ -2792,7 +2801,7 @@ const Inventory = ({ onLowStockChange }) => {
           <div style={styles.pageTitle}>Inventory Management</div>
           <div style={styles.pageSubtitle}>Raw materials, consumables, and stock movements</div>
         </div>
-        <button style={styles.btn("primary")} onClick={() => { setShowItemForm(true); setEditItem(null); setItemForm(emptyItem); setTab("registry"); }}>+ Add Item</button>
+        {tab === "registry" && <button style={styles.btn("primary")} onClick={() => { setShowItemForm(true); setEditItem(null); setItemForm(emptyItem); setTab("registry"); }}>+ Add Item</button>}
       </div>
 
       {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
@@ -6409,7 +6418,19 @@ const MyProfile = ({ userProfile }) => {
   const loadDocs = async () => {
     if (!userProfile?.id) return;
     const { data } = await supabase.from('staff_documents').select('*').eq('user_id', userProfile.id).order('uploaded_at', { ascending: false });
-    setDocuments(data || []);
+    const docs = data || [];
+    await Promise.all(docs.map(async (doc) => {
+      const path = doc.file_url?.startsWith('http')
+        ? doc.file_url.match(/staff-documents\/(.+)$/)?.[1]
+        : doc.file_url;
+      if (path) {
+        const { data: sd } = await supabase.storage.from('staff-documents').createSignedUrl(path, 3600);
+        doc.displayUrl = sd?.signedUrl || null;
+      } else {
+        doc.displayUrl = null;
+      }
+    }));
+    setDocuments(docs);
   };
 
   const handleUpload = async (e) => {
@@ -6419,14 +6440,13 @@ const MyProfile = ({ userProfile }) => {
     try {
       const ext = file.name.split('.').pop();
       const path = `${userProfile.id}/${Date.now()}.${ext}`;
-      const { error: upErr } = await supabase.storage.from('staff-documents').upload(path, file);
+      const { data: storageData, error: upErr } = await supabase.storage.from('staff-documents').upload(path, file);
       if (upErr) throw upErr;
-      const { data: { publicUrl } } = supabase.storage.from('staff-documents').getPublicUrl(path);
       await supabase.from('staff_documents').insert({
         user_id: userProfile.id,
         staff_id: userProfile.staff_id || null,
         file_name: file.name,
-        file_url: publicUrl,
+        file_url: storageData.path,
         file_size: file.size,
         document_type: ext.toLowerCase() === 'pdf' ? 'pdf' : ['jpg','jpeg','png'].includes(ext.toLowerCase()) ? 'image' : 'other',
       });
@@ -6442,7 +6462,9 @@ const MyProfile = ({ userProfile }) => {
 
   const handleDeleteDoc = async (doc) => {
     try {
-      const pathPart = doc.file_url.split('/staff-documents/')[1];
+      const pathPart = doc.file_url?.startsWith('http')
+        ? doc.file_url.split('/staff-documents/')[1]
+        : doc.file_url;
       if (pathPart) await supabase.storage.from('staff-documents').remove([pathPart]);
       await supabase.from('staff_documents').delete().eq('id', doc.id);
       setDocAlert({ type: 'success', msg: 'Document deleted.' });
@@ -6535,7 +6557,7 @@ const MyProfile = ({ userProfile }) => {
                 <tbody>
                   {documents.map(doc => (
                     <tr key={doc.id}>
-                      <td style={styles.td}><a href={doc.file_url} target="_blank" rel="noreferrer" style={{ color: theme.blue, textDecoration: 'none', fontWeight: '600' }}>{doc.file_name}</a></td>
+                      <td style={styles.td}><a href={doc.displayUrl || '#'} target="_blank" rel="noreferrer" style={{ color: theme.blue, textDecoration: 'none', fontWeight: '600' }}>{doc.file_name}</a></td>
                       <td style={styles.td}><span style={styles.badge(theme.blue)}>{doc.document_type}</span></td>
                       <td style={styles.td}>{doc.file_size ? fmtBytes(doc.file_size) : '—'}</td>
                       <td style={styles.td}>{doc.uploaded_at ? new Date(doc.uploaded_at).toLocaleDateString('en-GB') : '—'}</td>
@@ -7012,7 +7034,7 @@ export default function App() {
     batches: <Batches />,
     waybills: <Waybills userProfile={userProfile} />,
     vehicles: <VehicleRegistry />,
-    staff: <Staff />,
+    staff: <Staff userProfile={userProfile} />,
     customers: <Customers userProfile={userProfile} />,
     orders: <Orders onNavigate={setActive} userProfile={userProfile} />,
     pending_register: <PendingDeliveryRegister />,
