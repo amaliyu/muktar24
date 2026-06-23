@@ -170,7 +170,7 @@ const prevPeriod = (from, to) => {
 const PALETTE = [theme.accent, theme.blue, theme.green, theme.purple, theme.red, '#e67e22', '#1abc9c']
 
 // ── MAIN COMPONENT ─────────────────────────────────────────────────
-export default function KPIDashboard({ userRole }) {
+export default function KPIDashboard() {
   const [tab, setTab]         = useState('overview')
   const [preset, setPreset]   = useState('month')
   const [range, setRange]     = useState(getRange('month'))
@@ -183,7 +183,6 @@ export default function KPIDashboard({ userRole }) {
   const [targetForm, setTargetForm]   = useState({})
 
   const saveTargets = (t) => { setTargets(t); localStorage.setItem('kpi_targets', JSON.stringify(t)) }
-  const isSalaryRole = ['md', 'ico', 'accountant', 'hr_officer'].includes(userRole)
 
   const applyPreset = (p) => {
     setPreset(p)
@@ -226,10 +225,8 @@ export default function KPIDashboard({ userRole }) {
         supabase.from('pending_delivery_register').select('block_type,remaining_qty,total_qty,status,added_at,customer:customer_id(name)').neq('status','completed'),
         // Attendance — no staff embed; staff_type resolved via separate staff_public lookup below
         supabase.from('attendance').select('date,present,staff_id').gte('date', from).lte('date', to),
-        // Staff — monthly_salary for finance-tier roles; type/active only for others
-        isSalaryRole
-          ? supabase.from('staff_payroll').select('id,role,staff_type,is_active,monthly_salary')
-          : supabase.from('staff_payroll').select('id,role,staff_type,is_active'),
+        // Staff — type/active counts only; no salary columns needed
+        supabase.from('staff_payroll').select('id,role,staff_type,is_active'),
         // Expenses
         supabase.from('expenses').select('amount,expense_date,status,category:category_id(name,parent_category),vendor').eq('status','approved').gte('expense_date', from).lte('expense_date', to),
         // Bank accounts

@@ -7042,7 +7042,7 @@ export default function App() {
     lpo_approvals: <LPOApprovals />,
     schedule_approvals: <ScheduleApprovals />,
     reports: <Reports userProfile={userProfile} />,
-    kpi_dashboard: <KPIDashboard userRole={userProfile?.role} />,
+    kpi_dashboard: <KPIDashboard />,
     products: <Products />,
     suppliers: <SupplierRegistry />,
     accounting: <Accounting userProfile={userProfile} />,
