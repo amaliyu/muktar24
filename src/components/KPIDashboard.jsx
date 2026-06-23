@@ -225,8 +225,8 @@ export default function KPIDashboard() {
         supabase.from('pending_delivery_register').select('block_type,remaining_qty,total_qty,status,added_at,customer:customer_id(name)').neq('status','completed'),
         // Attendance — no staff embed; staff_type resolved via separate staff_public lookup below
         supabase.from('attendance').select('date,present,staff_id').gte('date', from).lte('date', to),
-        // Staff — type/active counts only; no salary columns needed
-        supabase.from('staff_payroll').select('id,role,staff_type,is_active'),
+        // Staff — staff_public is readable by all authenticated roles
+        supabase.from('staff_public').select('id,role,staff_type,is_active'),
         // Expenses
         supabase.from('expenses').select('amount,expense_date,status,category:category_id(name,parent_category),vendor').eq('status','approved').gte('expense_date', from).lte('expense_date', to),
         // Bank accounts
