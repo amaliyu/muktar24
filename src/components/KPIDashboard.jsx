@@ -225,11 +225,11 @@ export default function KPIDashboard({ userRole }) {
         supabase.from('waybills').select('waybill_date,block_type,quantity_loaded,quantity_received,quantity_damaged,vehicle_id,truck_number').gte('waybill_date', from).lte('waybill_date', to),
         // Pending register
         supabase.from('pending_delivery_register').select('block_type,remaining_qty,total_qty,status,added_at,customer:customer_id(name)').neq('status','completed'),
-        // Attendance
-        supabase.from('attendance').select('date,present,staff_id,staff:staff_id(daily_rate,staff_type)').gte('date', from).lte('date', to),
-        // Staff — salary columns only for finance-tier roles; others get counts/types only
+        // Attendance — no staff embed; staff_type resolved via separate staff_public lookup below
+        supabase.from('attendance').select('date,present,staff_id').gte('date', from).lte('date', to),
+        // Staff — salary + daily_rate for finance-tier roles; type/active only for others
         isSalaryRole
-          ? supabase.from('staff_payroll').select('id,role,staff_type,is_active,monthly_salary')
+          ? supabase.from('staff_payroll').select('id,role,staff_type,is_active,monthly_salary,daily_rate')
           : supabase.from('staff_payroll').select('id,role,staff_type,is_active'),
         // Expenses
         supabase.from('expenses').select('amount,expense_date,status,category:category_id(name,parent_category),vendor').eq('status','approved').gte('expense_date', from).lte('expense_date', to),
@@ -249,12 +249,22 @@ export default function KPIDashboard({ userRole }) {
         const d = wageSummary.value?.data
         return Array.isArray(d) ? (d[0] || null) : (d || null)
       })()
+
+      // Resolve staff_type for attendance rows via staff_public (no base-staff embed)
+      const attendanceRows = g(attendance)
+      const attStaffIds = [...new Set(attendanceRows.map(a => a.staff_id).filter(Boolean))]
+      const { data: attStaffRows } = attStaffIds.length
+        ? await supabase.from('staff_public').select('id,staff_type').in('id', attStaffIds)
+        : { data: [] }
+      const attStaffTypeMap = Object.fromEntries((attStaffRows || []).map(s => [s.id, s.staff_type]))
+      const attendanceWithType = attendanceRows.map(a => ({ ...a, _staff_type: attStaffTypeMap[a.staff_id] || null }))
+
       setData({
         prodCurr: g(prodCurr), prodPrev: g(prodPrev), dmgLog: g(dmgLog),
         payCurr: g(payCurr), payPrev: g(payPrev), invoices: g(invoices),
         orders: g(orders), customers: g(customers),
         waybills: g(waybills), pendingReg: g(pendingReg),
-        attendance: g(attendance), staff: g(staff),
+        attendance: attendanceWithType, staff: g(staff),
         expenses: g(expenses), bankAccts: g(bankAccts),
         monthlyProd: g(monthlyProd), monthlyRev: g(monthlyRev),
         wageSummary: wageBill,
@@ -329,11 +339,13 @@ export default function KPIDashboard({ userRole }) {
     const activeStaff        = staff.filter(s => s.is_active)
     const dailyStaff         = activeStaff.filter(s => s.staff_type === 'daily')
     const permStaff          = activeStaff.filter(s => s.staff_type === 'permanent')
-    const attendanceRecords  = attendance.filter(a => a.present && a.staff?.staff_type === 'daily')
-    const totalDailySlots    = attendance.filter(a => a.staff?.staff_type === 'daily').length
+    const attendanceRecords  = attendance.filter(a => a.present && a._staff_type === 'daily')
+    const totalDailySlots    = attendance.filter(a => a._staff_type === 'daily').length
     const attendanceRate     = totalDailySlots > 0 ? (attendanceRecords.length / totalDailySlots * 100).toFixed(1) : 0
+    // For salary roles: daily_rate comes from staff_payroll rows (no base-staff read)
+    const staffRateMap       = Object.fromEntries(staff.filter(st => st.daily_rate != null).map(st => [st.id, Number(st.daily_rate)]))
     const wagesCost          = isSalaryRole
-      ? attendanceRecords.reduce((s, a) => s + Number(a.staff?.daily_rate || 0), 0)
+      ? attendanceRecords.reduce((s, a) => s + (staffRateMap[a.staff_id] || 0), 0)
       : Number(wageSummary?.total_daily_cost || 0)
     const permWages          = isSalaryRole
       ? permStaff.reduce((s, st) => s + Number(st.monthly_salary || 0), 0) / 30 * workingDays
