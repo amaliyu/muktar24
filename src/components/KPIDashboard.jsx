@@ -170,7 +170,7 @@ const prevPeriod = (from, to) => {
 const PALETTE = [theme.accent, theme.blue, theme.green, theme.purple, theme.red, '#e67e22', '#1abc9c']
 
 // ── MAIN COMPONENT ─────────────────────────────────────────────────
-export default function KPIDashboard() {
+export default function KPIDashboard({ userRole }) {
   const [tab, setTab]         = useState('overview')
   const [preset, setPreset]   = useState('month')
   const [range, setRange]     = useState(getRange('month'))
@@ -183,6 +183,7 @@ export default function KPIDashboard() {
   const [targetForm, setTargetForm]   = useState({})
 
   const saveTargets = (t) => { setTargets(t); localStorage.setItem('kpi_targets', JSON.stringify(t)) }
+  const isSalaryRole = ['md', 'ico', 'accountant', 'hr_officer'].includes(userRole)
 
   const applyPreset = (p) => {
     setPreset(p)
@@ -204,6 +205,7 @@ export default function KPIDashboard() {
         attendance, staff,
         expenses, bankAccts,
         monthlyProd, monthlyRev,
+        wageSummary,
       ] = await Promise.allSettled([
         // Production current + prev
         supabase.from('production_log').select('date,block_type,quantity_produced,cement_bags,diesel_litres,granite_dust_kg').gte('date', from).lte('date', to),
@@ -225,8 +227,10 @@ export default function KPIDashboard() {
         supabase.from('pending_delivery_register').select('block_type,remaining_qty,total_qty,status,added_at,customer:customer_id(name)').neq('status','completed'),
         // Attendance
         supabase.from('attendance').select('date,present,staff_id,staff:staff_id(daily_rate,staff_type)').gte('date', from).lte('date', to),
-        // Staff
-        supabase.from('staff').select('id,full_name,role,staff_type,is_active,daily_rate,monthly_salary'),
+        // Staff — salary columns only for finance-tier roles; others get counts/types only
+        isSalaryRole
+          ? supabase.from('staff_payroll').select('id,role,staff_type,is_active,monthly_salary')
+          : supabase.from('staff_payroll').select('id,role,staff_type,is_active'),
         // Expenses
         supabase.from('expenses').select('amount,expense_date,status,category:category_id(name,parent_category),vendor').eq('status','approved').gte('expense_date', from).lte('expense_date', to),
         // Bank accounts
@@ -235,9 +239,16 @@ export default function KPIDashboard() {
         supabase.from('production_log').select('date,quantity_produced').gte('date', new Date(new Date().setFullYear(new Date().getFullYear() - 1)).toISOString().split('T')[0]),
         // Monthly revenue (last 12 months)
         supabase.from('payments').select('amount_paid,payment_date').eq('status','confirmed').gte('payment_date', new Date(new Date().setFullYear(new Date().getFullYear() - 1)).toISOString().split('T')[0]),
+        // Wage bill summary — aggregate totals for non-finance roles (no per-person rows)
+        isSalaryRole ? Promise.resolve({ data: null }) : supabase.rpc('get_wage_bill_summary'),
       ])
 
       const g = r => r.status === 'fulfilled' ? (r.value.data || []) : []
+      const wageBill = (() => {
+        if (wageSummary?.status !== 'fulfilled') return null
+        const d = wageSummary.value?.data
+        return Array.isArray(d) ? (d[0] || null) : (d || null)
+      })()
       setData({
         prodCurr: g(prodCurr), prodPrev: g(prodPrev), dmgLog: g(dmgLog),
         payCurr: g(payCurr), payPrev: g(payPrev), invoices: g(invoices),
@@ -246,6 +257,7 @@ export default function KPIDashboard() {
         attendance: g(attendance), staff: g(staff),
         expenses: g(expenses), bankAccts: g(bankAccts),
         monthlyProd: g(monthlyProd), monthlyRev: g(monthlyRev),
+        wageSummary: wageBill,
         range, pRange: { from: pFrom, to: pTo },
       })
     } finally { setLoading(false) }
@@ -258,7 +270,8 @@ export default function KPIDashboard() {
     if (!data.prodCurr) return {}
     const { prodCurr, prodPrev, dmgLog, payCurr, payPrev, invoices,
             orders, customers, waybills, pendingReg, attendance, staff,
-            expenses, bankAccts, monthlyProd, monthlyRev, range: r } = data
+            expenses, bankAccts, monthlyProd, monthlyRev, wageSummary,
+            range: r } = data
 
     // Production
     const totalProduced      = prodCurr.reduce((s, p) => s + (p.quantity_produced || 0), 0)
@@ -319,8 +332,12 @@ export default function KPIDashboard() {
     const attendanceRecords  = attendance.filter(a => a.present && a.staff?.staff_type === 'daily')
     const totalDailySlots    = attendance.filter(a => a.staff?.staff_type === 'daily').length
     const attendanceRate     = totalDailySlots > 0 ? (attendanceRecords.length / totalDailySlots * 100).toFixed(1) : 0
-    const wagesCost          = attendanceRecords.reduce((s, a) => s + Number(a.staff?.daily_rate || 0), 0)
-    const permWages          = permStaff.reduce((s, st) => s + Number(st.monthly_salary || 0), 0) / 30 * workingDays
+    const wagesCost          = isSalaryRole
+      ? attendanceRecords.reduce((s, a) => s + Number(a.staff?.daily_rate || 0), 0)
+      : Number(wageSummary?.total_daily_cost || 0)
+    const permWages          = isSalaryRole
+      ? permStaff.reduce((s, st) => s + Number(st.monthly_salary || 0), 0) / 30 * workingDays
+      : Number(wageSummary?.total_monthly_cost || 0) / 30 * workingDays
     const totalLabour        = wagesCost + permWages
     const labourPerBlock     = totalProduced > 0 ? (totalLabour / totalProduced).toFixed(2) : 0
 
