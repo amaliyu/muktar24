@@ -335,7 +335,18 @@ const StaffFormModal = ({ onClose, onSaved, editTarget, roles }) => {
       if (editTarget) {
         result = await staffService.update(editTarget.id, payload);
       } else {
-        result = await staffService.create(payload);
+        try {
+          result = await staffService.create(payload);
+        } catch (createErr) {
+          if (createErr.code === '23505') {
+            const nextEmpNum = await hrStaffService.getNextEmployeeNumber();
+            payload.employee_number = nextEmpNum;
+            setForm(f => ({ ...f, employee_number: nextEmpNum }));
+            result = await staffService.create(payload);
+          } else {
+            throw createErr;
+          }
+        }
       }
       onSaved(result);
       onClose();
