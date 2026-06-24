@@ -119,7 +119,7 @@ const ROLE_PAGES = {
   md:                 'all',
   ico:                ['dashboard','production','inventory','batches','waybills','vehicles','staff','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile'],
   accountant:         ['dashboard','customers','orders','reports','kpi_dashboard','accounting','suppliers','products','my_profile','data_import','labour','waybills'],
-  board_member:       ['dashboard','production','inventory','batches','waybills','vehicles','staff','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile'],
+  board_member:       ['dashboard','production','inventory','batches','waybills','vehicles','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile'],
   bdm:                ['dashboard','customers','orders','pending_register','daily_schedule','lpo_approvals','reports','kpi_dashboard','my_profile'],
   store_officer:      ['dashboard','inventory','batches','waybills','pending_register','daily_schedule','products','reports','my_profile'],
   logistics_manager:  ['dashboard','waybills','vehicles','labour','pending_register','daily_schedule','customers','my_profile'],
@@ -344,7 +344,7 @@ const Dashboard = ({ onNavigate, userProfile }) => {
 
       try {
         const [staffList, productions, orders, waybills] = await Promise.all([
-          needsStaff    ? staffService.getAll()                              : Promise.resolve([]),
+          needsStaff    ? staffService.getPublicList()                        : Promise.resolve([]),
           productionService.getAll({ from: dateRange.from, to: dateRange.to }),
           needsOrders   ? ordersService.getAll({ from: dateRange.from, to: dateRange.to })   : Promise.resolve([]),
           needsWaybills ? waybillsService.getAll({ from: dateRange.from, to: dateRange.to }) : Promise.resolve([]),
@@ -957,7 +957,7 @@ const Orders = ({ onNavigate, userProfile }) => {
       const fetchCustomers = isMarketerRole
         ? customersService.getAllForMarketer(userProfile.id)
         : customersService.getAll();
-      const [o, s, c] = await Promise.all([fetchOrders, staffService.getActive(), fetchCustomers]);
+      const [o, s, c] = await Promise.all([fetchOrders, staffService.getPublicActive(), fetchCustomers]);
       setOrders(o);
       setStaff(s);
       setAllCustomers(c);
@@ -1599,7 +1599,7 @@ const Waybills = ({ userProfile }) => {
         : isDriverRole && !driverStaffId
           ? Promise.resolve([])
           : waybillsService.getAll();
-      const [w, s, v] = await Promise.all([fetchWaybills, staffService.getActive(), vehiclesService.getActive().catch(() => [])]);
+      const [w, s, v] = await Promise.all([fetchWaybills, staffService.getPublicActive(), vehiclesService.getActive().catch(() => [])]);
       setWaybills(w);
       setStaff(s);
       setVehicles(v);
@@ -2137,7 +2137,7 @@ const Customers = ({ userProfile }) => {
       const fetchCustomers = isMarketer
         ? customersService.getAllWithStatsForMarketer(userProfile.id)
         : customersService.getAllWithStats();
-      const [c, s] = await Promise.all([fetchCustomers, staffService.getAll()]);
+      const [c, s] = await Promise.all([fetchCustomers, staffService.getPublicList()]);
       setCustomers(c);
       setStaff(s);
       return c;
@@ -2617,7 +2617,7 @@ const Inventory = ({ onLowStockChange }) => {
   const load = async () => {
     setLoading(true);
     try {
-      const [its, s, sups] = await Promise.all([inventoryService.getAllItems(), staffService.getActive(), suppliersService.getActive().catch(() => [])]);
+      const [its, s, sups] = await Promise.all([inventoryService.getAllItems(), staffService.getPublicActive(), suppliersService.getActive().catch(() => [])]);
       setItems(its);
       setStaff(s);
       setSuppliersList(sups);
@@ -6410,7 +6410,7 @@ const MyProfile = ({ userProfile }) => {
 
   useEffect(() => {
     if (userProfile?.staff_id) {
-      supabase.from('staff').select('*').eq('id', userProfile.staff_id).single().then(({ data }) => setStaffRecord(data));
+      supabase.from('staff_public').select('id, full_name, role, staff_type, profile_photo_url').eq('id', userProfile.staff_id).single().then(({ data }) => setStaffRecord(data));
     }
     loadDocs();
   }, [userProfile]);

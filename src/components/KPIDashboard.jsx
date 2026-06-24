@@ -223,10 +223,10 @@ export default function KPIDashboard() {
         supabase.from('waybills').select('waybill_date,block_type,quantity_loaded,quantity_received,quantity_damaged,vehicle_id,truck_number').gte('waybill_date', from).lte('waybill_date', to),
         // Pending register
         supabase.from('pending_delivery_register').select('block_type,remaining_qty,total_qty,status,added_at,customer:customer_id(name)').neq('status','completed'),
-        // Attendance
-        supabase.from('attendance').select('date,present,staff_id,staff:staff_id(daily_rate,staff_type)').gte('date', from).lte('date', to),
-        // Staff
-        supabase.from('staff').select('id,full_name,role,staff_type,is_active,daily_rate,monthly_salary'),
+        // Attendance — no staff embed; staff_type resolved via separate staff_public lookup below
+        supabase.from('attendance').select('date,present,staff_id').gte('date', from).lte('date', to),
+        // Staff — staff_public is readable by all authenticated roles
+        supabase.from('staff_public').select('id,role,staff_type,is_active'),
         // Expenses
         supabase.from('expenses').select('amount,expense_date,status,category:category_id(name,parent_category),vendor').eq('status','approved').gte('expense_date', from).lte('expense_date', to),
         // Bank accounts
@@ -238,12 +238,22 @@ export default function KPIDashboard() {
       ])
 
       const g = r => r.status === 'fulfilled' ? (r.value.data || []) : []
+
+      // Resolve staff_type for attendance rows via staff_public (no base-staff embed)
+      const attendanceRows = g(attendance)
+      const attStaffIds = [...new Set(attendanceRows.map(a => a.staff_id).filter(Boolean))]
+      const { data: attStaffRows } = attStaffIds.length
+        ? await supabase.from('staff_public').select('id,staff_type').in('id', attStaffIds)
+        : { data: [] }
+      const attStaffTypeMap = Object.fromEntries((attStaffRows || []).map(s => [s.id, s.staff_type]))
+      const attendanceWithType = attendanceRows.map(a => ({ ...a, _staff_type: attStaffTypeMap[a.staff_id] || null }))
+
       setData({
         prodCurr: g(prodCurr), prodPrev: g(prodPrev), dmgLog: g(dmgLog),
         payCurr: g(payCurr), payPrev: g(payPrev), invoices: g(invoices),
         orders: g(orders), customers: g(customers),
         waybills: g(waybills), pendingReg: g(pendingReg),
-        attendance: g(attendance), staff: g(staff),
+        attendance: attendanceWithType, staff: g(staff),
         expenses: g(expenses), bankAccts: g(bankAccts),
         monthlyProd: g(monthlyProd), monthlyRev: g(monthlyRev),
         range, pRange: { from: pFrom, to: pTo },
@@ -258,7 +268,8 @@ export default function KPIDashboard() {
     if (!data.prodCurr) return {}
     const { prodCurr, prodPrev, dmgLog, payCurr, payPrev, invoices,
             orders, customers, waybills, pendingReg, attendance, staff,
-            expenses, bankAccts, monthlyProd, monthlyRev, range: r } = data
+            expenses, bankAccts, monthlyProd, monthlyRev,
+            range: r } = data
 
     // Production
     const totalProduced      = prodCurr.reduce((s, p) => s + (p.quantity_produced || 0), 0)
@@ -316,13 +327,9 @@ export default function KPIDashboard() {
     const activeStaff        = staff.filter(s => s.is_active)
     const dailyStaff         = activeStaff.filter(s => s.staff_type === 'daily')
     const permStaff          = activeStaff.filter(s => s.staff_type === 'permanent')
-    const attendanceRecords  = attendance.filter(a => a.present && a.staff?.staff_type === 'daily')
-    const totalDailySlots    = attendance.filter(a => a.staff?.staff_type === 'daily').length
+    const attendanceRecords  = attendance.filter(a => a.present && a._staff_type === 'daily')
+    const totalDailySlots    = attendance.filter(a => a._staff_type === 'daily').length
     const attendanceRate     = totalDailySlots > 0 ? (attendanceRecords.length / totalDailySlots * 100).toFixed(1) : 0
-    const wagesCost          = attendanceRecords.reduce((s, a) => s + Number(a.staff?.daily_rate || 0), 0)
-    const permWages          = permStaff.reduce((s, st) => s + Number(st.monthly_salary || 0), 0) / 30 * workingDays
-    const totalLabour        = wagesCost + permWages
-    const labourPerBlock     = totalProduced > 0 ? (totalLabour / totalProduced).toFixed(2) : 0
 
     // Financial
     const totalExpenses      = expenses.reduce((s, e) => s + Number(e.amount), 0)
@@ -360,7 +367,7 @@ export default function KPIDashboard() {
       totalTrips, totalLoaded, totalReceived, totalDamaged, damageRate,
       vehicleMap, pendingTotal, oldestPending,
       activeStaff, dailyStaff, permStaff,
-      attendanceRate, wagesCost, totalLabour, labourPerBlock,
+      attendanceRate,
       totalExpenses, cashPosition, grossProfit, grossMargin, expByCategory, expCategories,
       prodTrend, revTrend,
     }
@@ -426,8 +433,6 @@ export default function KPIDashboard() {
     section('STAFF & OPERATIONS'); kv([
       ['Active Staff', M.activeStaff?.length],
       ['Attendance Rate', M.attendanceRate + '%'],
-      ['Daily Wage Cost', naira(M.wagesCost)],
-      ['Labour per Block', '₦' + M.labourPerBlock],
     ])
     section('FINANCIAL'); kv([
       ['Revenue', naira(M.revenue)],
@@ -560,8 +565,6 @@ export default function KPIDashboard() {
                   sub={M.totalProduced > 0 ? `${(M.dieselUsed / M.totalProduced * 1000).toFixed(1)} litres per 1,000 blocks` : ''} />
                 <KPICard label="Granite Dust" value={`${fmt(M.graniteUsed)} kg`} accent={theme.textMuted}
                   sub={M.totalProduced > 0 ? `${(M.graniteUsed / M.totalProduced * 1000).toFixed(1)} kg per 1,000 blocks` : ''} />
-                <KPICard label="Labour Cost per Block" value={`₦${M.labourPerBlock}`} accent={theme.purple}
-                  sub={`Total wages: ${naira(M.totalLabour)}`} />
               </div>
               <div style={s.section}>Damage Analysis</div>
               <div style={s.grid(3)}>
@@ -714,16 +717,12 @@ export default function KPIDashboard() {
           {/* ── STAFF TAB ────────────────────────────────────── */}
           {tab === 'staff' && (
             <div>
-              <div style={s.grid(4)}>
+              <div style={s.grid(2)}>
                 <KPICard label="Active Staff" value={M.activeStaff?.length || 0} accent={theme.blue}
                   sub={`${M.permStaff?.length || 0} permanent · ${M.dailyStaff?.length || 0} daily`} />
                 <KPICard label="Attendance Rate" value={`${M.attendanceRate}%`}
                   accent={Number(M.attendanceRate) >= 80 ? theme.green : theme.red}
                   sub="Daily workers in period" />
-                <KPICard label="Daily Wages Cost" value={naira(M.wagesCost)} accent={theme.accent}
-                  sub="Total daily worker wages" />
-                <KPICard label="Labour per Block" value={`₦${M.labourPerBlock}`} accent={theme.purple}
-                  sub="All wages ÷ blocks produced" />
               </div>
               <div style={s.section}>Staff by Role</div>
               <div style={s.card}>

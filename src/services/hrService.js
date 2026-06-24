@@ -4,10 +4,7 @@ export const rolesService = {
   async getAll() {
     const { data, error } = await supabase
       .from('staff_roles')
-      .select(`
-        *,
-        staff_count:staff(count)
-      `)
+      .select('*')
       .order('department')
       .order('role_name')
     if (error) throw error
@@ -165,18 +162,9 @@ export const photoService = {
 
 export const hrStaffService = {
   async getNextEmployeeNumber() {
-    const { data } = await supabase
-      .from('staff')
-      .select('employee_number')
-      .order('created_at', { ascending: false })
-      .limit(50)
-    if (!data?.length) return 'APC-EMP-001'
-    const nums = data
-      .map(s => s.employee_number?.match(/(\d+)$/)?.[1])
-      .filter(Boolean)
-      .map(Number)
-    const max = nums.length > 0 ? Math.max(...nums) : 0
-    return `APC-EMP-${String(max + 1).padStart(3, '0')}`
+    const { data, error } = await supabase.rpc('get_next_employee_number')
+    if (error) throw error
+    return data
   },
 
   async getById(id) {
