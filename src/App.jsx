@@ -117,7 +117,7 @@ const APP_ROLES = [
 // Pages each role is allowed to access. 'all' = unrestricted.
 const ROLE_PAGES = {
   md:                 'all',
-  ico:                ['dashboard','production','inventory','batches','waybills','vehicles','staff','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile'],
+  ico:                ['dashboard','production','inventory','batches','waybills','vehicles','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile'],
   accountant:         ['dashboard','customers','orders','reports','kpi_dashboard','accounting','suppliers','products','my_profile','data_import','labour','waybills'],
   board_member:       ['dashboard','production','inventory','batches','waybills','vehicles','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile'],
   bdm:                ['dashboard','customers','orders','pending_register','daily_schedule','lpo_approvals','reports','kpi_dashboard','my_profile'],
@@ -129,7 +129,7 @@ const ROLE_PAGES = {
   production_manager:           ['dashboard','production','inventory','batches','reports','products','labour','my_profile'],
   assistant_production_manager: ['dashboard','production','inventory','batches','reports','products','labour','my_profile'],
   // legacy roles — kept for any existing users
-  operations:         ['dashboard','production','inventory','batches','waybills','vehicles','staff','pending_register','daily_schedule','lpo_approvals','my_profile'],
+  operations:         ['dashboard','production','inventory','batches','waybills','vehicles','pending_register','daily_schedule','lpo_approvals','my_profile'],
   sales:              ['dashboard','customers','orders','my_profile'],
   staff:              ['dashboard','my_profile'],
 };
@@ -3247,9 +3247,17 @@ const LPOApprovals = () => {
         const existing = await invoicesService.getByOrder(lpo.order.id);
         if (existing.length === 0) {
           const total = (lpo.order.order_items || []).reduce((s, i) => s + i.quantity * i.unit_price, 0);
-          const count = lpos.length;
-          const year = new Date().getFullYear();
-          await invoicesService.create({ order_id: lpo.order.id, invoice_number: `APC-LPO-${year}-${String(count + 1).padStart(3, "0")}`, total_amount: total, issued_date: today, due_date: due });
+          let invNum = await invoicesService.getNextNumber();
+          try {
+            await invoicesService.create({ order_id: lpo.order.id, invoice_number: invNum, total_amount: total, issued_date: today, due_date: due });
+          } catch (createErr) {
+            if (createErr.code === '23505') {
+              invNum = await invoicesService.getNextNumber();
+              await invoicesService.create({ order_id: lpo.order.id, invoice_number: invNum, total_amount: total, issued_date: today, due_date: due });
+            } else {
+              throw createErr;
+            }
+          }
         }
         await pendingDeliveryService.addFromOrder(lpo.order);
         setAlert({ type: "success", msg: `LPO approved — ${lpo.order?.customer?.name} added to Pending Delivery Register.` });
