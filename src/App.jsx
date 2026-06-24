@@ -2130,6 +2130,8 @@ const Customers = ({ userProfile }) => {
   const [stmtSiteId, setStmtSiteId] = useState("");
 
   const isMarketer = userProfile?.role === 'marketer';
+  const AMOUNT_ROLES = ['md','accountant','ico','board_member','bdm','marketer'];
+  const canSeeAmounts = AMOUNT_ROLES.includes(userProfile?.role);
 
   const load = async () => {
     setLoading(true);
@@ -2350,8 +2352,8 @@ const Customers = ({ userProfile }) => {
                     <div style={{ fontSize: "11px", color: theme.textMuted, marginTop: "2px" }}>{c.phone}{c.location ? ` · ${c.location}` : ""}</div>
                     <div style={{ display: "flex", gap: "12px", marginTop: "6px", fontSize: "11px" }}>
                       <span style={{ color: theme.textMuted }}>{orderCount} order{orderCount !== 1 ? "s" : ""}</span>
-                      <span style={{ color: theme.accent }}>{naira(totalValue)}</span>
-                      {outstanding > 0 && <span style={{ color: theme.red }}>Owes {naira(outstanding)}</span>}
+                      {canSeeAmounts && (<span style={{ color: theme.accent }}>{naira(totalValue)}</span>)}
+                      {canSeeAmounts && outstanding > 0 && <span style={{ color: theme.red }}>Owes {naira(outstanding)}</span>}
                     </div>
                   </div>
                 );
@@ -2395,9 +2397,9 @@ const Customers = ({ userProfile }) => {
 
                 <div style={styles.grid(4)}>
                   <StatCard label="Orders" value={orderCount} sub="All time" accent={theme.blue} />
-                  <StatCard label="Total Value" value={naira(totalValue)} sub="All orders" accent={theme.accent} />
-                  <StatCard label="Total Paid" value={naira(totalPaid)} sub="Confirmed" accent={theme.green} />
-                  <StatCard label="Outstanding" value={naira(outstanding)} sub="Balance due" accent={outstanding > 0 ? theme.red : theme.green} />
+                  {canSeeAmounts && (<StatCard label="Total Value" value={naira(totalValue)} sub="All orders" accent={theme.accent} />)}
+                  {canSeeAmounts && (<StatCard label="Total Paid" value={naira(totalPaid)} sub="Confirmed" accent={theme.green} />)}
+                  {canSeeAmounts && (<StatCard label="Outstanding" value={naira(outstanding)} sub="Balance due" accent={outstanding > 0 ? theme.red : theme.green} />)}
                 </div>
 
                 {/* ── SITES ── */}
@@ -2537,7 +2539,7 @@ const Customers = ({ userProfile }) => {
                   )}
                 </div>
 
-                <div style={{ marginTop: "20px", paddingTop: "16px", borderTop: `1px solid ${theme.border}` }}>
+                {canSeeAmounts && (<div style={{ marginTop: "20px", paddingTop: "16px", borderTop: `1px solid ${theme.border}` }}>
                   <div style={{ ...styles.sectionTitle, marginBottom: "10px" }}>Download Statement</div>
                   <div style={{ display: "flex", gap: "10px", alignItems: "flex-end", flexWrap: "wrap" }}>
                     {sites.length > 1 && (
@@ -2569,7 +2571,7 @@ const Customers = ({ userProfile }) => {
                   <div style={{ fontSize: "11px", color: theme.textMuted, marginTop: "6px" }}>
                     {stmtFrom || stmtTo ? `Showing: ${stmtFrom || "all time"} → ${stmtTo || "present"}` : "Showing: all time (set dates to filter)"}
                   </div>
-                </div>
+                </div>)}
               </div>
             );
           })()}
