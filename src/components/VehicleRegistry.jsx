@@ -827,7 +827,7 @@ const VehicleRegistry = () => {
   const load = async () => {
     setLoading(true)
     try {
-      const [v, s] = await Promise.all([vehiclesService.getAll(), staffService.getAll()])
+      const [v, s] = await Promise.all([vehiclesService.getAll(), staffService.getPublicList()])
       setVehicles(v)
       setStaff(s)
     } catch (e) { setAlert({ type: 'error', msg: 'Could not load vehicles: ' + e.message }) }

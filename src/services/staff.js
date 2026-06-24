@@ -20,6 +20,26 @@ export const staffService = {
     return data || []
   },
 
+  // Safe reads from staff_public — readable by every authenticated role
+  async getPublicList() {
+    const { data, error } = await supabase
+      .from('staff_public')
+      .select('id, full_name, role, staff_type')
+      .order('full_name')
+    if (error) throw error
+    return data || []
+  },
+
+  async getPublicActive() {
+    const { data, error } = await supabase
+      .from('staff_public')
+      .select('id, full_name, role, staff_type')
+      .eq('is_active', true)
+      .order('full_name')
+    if (error) throw error
+    return data || []
+  },
+
   async create(staff) {
     const { data, error } = await supabase
       .from('staff')
