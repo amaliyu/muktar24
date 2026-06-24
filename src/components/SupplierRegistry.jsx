@@ -73,8 +73,17 @@ const SupplierForm = ({ supplier, onSave, onCancel }) => {
       if (supplier) {
         await suppliersService.update(supplier.id, form)
       } else {
-        const num = await suppliersService.getNextNumber()
-        await suppliersService.create({ ...form, supplier_number: num })
+        let num = await suppliersService.getNextNumber()
+        try {
+          await suppliersService.create({ ...form, supplier_number: num })
+        } catch (createErr) {
+          if (createErr.code === '23505') {
+            num = await suppliersService.getNextNumber()
+            await suppliersService.create({ ...form, supplier_number: num })
+          } else {
+            throw createErr
+          }
+        }
       }
       onSave()
     } catch (e) { setAlert(e.message) }

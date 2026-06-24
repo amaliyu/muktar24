@@ -1708,11 +1708,20 @@ const Waybills = ({ userProfile }) => {
         await load();
         setAlert({ type: "success", msg: `Waybill ${editTarget.waybill_number} updated and stock adjusted.` });
       } else {
-        const nextNum = await waybillsService.getNextNumber();
-        const waybillNumber = `APC-WB-${String(nextNum).padStart(3, "0")}`;
+        let waybillNumber = `APC-WB-${String(await waybillsService.getNextNumber()).padStart(3, "0")}`;
         const qtyLoaded = parseInt(form.quantityLoaded) || 0;
         const qtyReceived = parseInt(form.quantityReceived) || 0;
-        const created = await waybillsService.create({ ...waybillData, batch_id: form.batchId || null, waybill_number: waybillNumber, receiver_name: selectedOrder?.customer?.name || null, order_id: selectedOrder?.id || null });
+        let created;
+        try {
+          created = await waybillsService.create({ ...waybillData, batch_id: form.batchId || null, waybill_number: waybillNumber, receiver_name: selectedOrder?.customer?.name || null, order_id: selectedOrder?.id || null });
+        } catch (createErr) {
+          if (createErr.code === '23505') {
+            waybillNumber = `APC-WB-${String(await waybillsService.getNextNumber()).padStart(3, "0")}`;
+            created = await waybillsService.create({ ...waybillData, batch_id: form.batchId || null, waybill_number: waybillNumber, receiver_name: selectedOrder?.customer?.name || null, order_id: selectedOrder?.id || null });
+          } else {
+            throw createErr;
+          }
+        }
         if (damaged > 0) {
           await productionService.logDamage({ date: form.waybillDate, block_type: form.blockType, stage: "delivery", quantity_damaged: damaged, notes: `Transit damage on waybill ${waybillNumber}` });
         }
@@ -3932,12 +3941,25 @@ const Batches = () => {
     if (!form.qtyAccepted || !form.dateCured) return setAlert({ type: "error", msg: "Quantity accepted and cure date are required." });
     setSaving(true);
     try {
-      const batchNum = await batchesService.getNextNumber();
-      const batch = await batchesService.create({
-        batch_number: batchNum, block_type: form.blockType, date_cured: form.dateCured,
-        qty_accepted: parseInt(form.qtyAccepted), qty_remaining: parseInt(form.qtyAccepted),
-        status: "active", notes: form.notes || null, created_by: form.createdBy || null,
-      }, form.linkedProds);
+      let batchNum = await batchesService.getNextNumber();
+      try {
+        await batchesService.create({
+          batch_number: batchNum, block_type: form.blockType, date_cured: form.dateCured,
+          qty_accepted: parseInt(form.qtyAccepted), qty_remaining: parseInt(form.qtyAccepted),
+          status: "active", notes: form.notes || null, created_by: form.createdBy || null,
+        }, form.linkedProds);
+      } catch (createErr) {
+        if (createErr.code === '23505') {
+          batchNum = await batchesService.getNextNumber();
+          await batchesService.create({
+            batch_number: batchNum, block_type: form.blockType, date_cured: form.dateCured,
+            qty_accepted: parseInt(form.qtyAccepted), qty_remaining: parseInt(form.qtyAccepted),
+            status: "active", notes: form.notes || null, created_by: form.createdBy || null,
+          }, form.linkedProds);
+        } else {
+          throw createErr;
+        }
+      }
       // Increase finished goods stock
       try { await finishedGoodsService.increase(form.blockType, parseInt(form.qtyAccepted)); } catch {}
       await load();
