@@ -1328,7 +1328,7 @@ const AttendanceTab = () => {
 };
 
 // ── PAYROLL TAB ───────────────────────────────────────────────
-const PayrollTab = () => {
+const PayrollTab = ({ userProfile }) => {
   const today = new Date().toISOString().split("T")[0];
   const firstOfMonth = today.slice(0, 8) + "01";
   const [view, setView] = useState("new");
@@ -1346,6 +1346,8 @@ const PayrollTab = () => {
   const [runLines, setRunLines] = useState([]);
   const [paymentEdits, setPaymentEdits] = useState({});
   const [pdfLoading, setPdfLoading] = useState(false);
+  const [recallReason, setRecallReason] = useState("");
+  const [actionSaving, setActionSaving] = useState(false);
 
   const loadRuns = async () => {
     setRunsLoading(true);
@@ -1391,10 +1393,10 @@ const PayrollTab = () => {
   const handleApprove = async () => {
     setSaving(true); setAlert(null);
     try {
-      const run = { period_from: periodFrom, period_to: periodTo, run_date: today, total_daily_wages: totalDaily, total_permanent_salaries: totalPerm, total_payroll: grandTotal, prepared_by: preparedBy, status: "approved" };
+      const run = { period_from: periodFrom, period_to: periodTo, run_date: today, total_daily_wages: totalDaily, total_permanent_salaries: totalPerm, total_payroll: grandTotal, prepared_by: preparedBy, status: "draft" };
       const lines = calcLines.map(l => ({ staff_id: l.staff_id, staff_type: l.staff_type, days_present: l.days_present, daily_rate: l.daily_rate, monthly_salary: l.monthly_salary, amount_due: l.amount_due }));
       await payrollService.createRun(run, lines);
-      setAlert({ type: "success", msg: `Payroll approved — ${naira(grandTotal)} total for ${calcLines.length} staff.` });
+      setAlert({ type: "success", msg: `Payroll run submitted for approval — ${naira(grandTotal)} total for ${calcLines.length} staff.` });
       setStep(1); setCalcLines([]); setView("history"); loadRuns();
     } catch (e) {
       const msg = e.message?.includes('not active') || e.message?.includes('not eligible')
@@ -1415,6 +1417,17 @@ const PayrollTab = () => {
     } catch (e) { setAlert({ type: "error", msg: e.message }); }
   };
 
+  const handleAdvanceRun = async (action, reason = null) => {
+    setActionSaving(true); setAlert(null);
+    try {
+      await payrollService.advanceRun(selectedRun.id, action, reason || null);
+      setRecallReason("");
+      await loadRuns();
+      setSelectedRun(null);
+    } catch (e) { setAlert({ type: "error", msg: e.message }); }
+    finally { setActionSaving(false); }
+  };
+
   const handleRecordPayments = async () => {
     setSaving(true);
     try {
@@ -1422,7 +1435,7 @@ const PayrollTab = () => {
         const e = paymentEdits[l.id] || {};
         return payrollService.updateLine(l.id, { amount_paid: parseFloat(e.amount_paid) || 0, payment_date: e.payment_date || today, payment_method: e.payment_method || "cash" });
       }));
-      await payrollService.updateRun(selectedRun.id, { status: "paid" });
+      await payrollService.advanceRun(selectedRun.id, 'mark_paid');
       setAlert({ type: "success", msg: "Payments recorded — payroll marked as PAID." });
       loadRuns(); setSelectedRun(null);
     } catch (e) { setAlert({ type: "error", msg: "Failed to record payments: " + e.message }); }
@@ -1436,7 +1449,7 @@ const PayrollTab = () => {
     finally { setPdfLoading(false); }
   };
 
-  const statusColor = s => s === "paid" ? theme.green : s === "approved" ? theme.blue : theme.accent;
+  const statusColor = s => s === "paid" ? theme.green : s === "md_approved" ? theme.blue : s === "ico_approved" ? theme.accent : theme.textMuted;
 
   return (
     <div>
@@ -1588,6 +1601,43 @@ const PayrollTab = () => {
               <button style={{ ...styles.btn("primary"), fontSize: "12px" }} onClick={() => handleDownloadPDF(selectedRun, runLines)} disabled={pdfLoading}>{pdfLoading ? "Generating…" : "↓ Download PDF"}</button>
             </div>
           </div>
+          {(() => {
+            const role = userProfile?.role;
+            const status = selectedRun.status;
+            const canRecall = ['ico','md','accountant'].includes(role) && ['ico_approved','md_approved'].includes(status);
+            if (status === 'paid' || (!canRecall && !(status === 'draft' && role === 'ico') && !(status === 'ico_approved' && role === 'md'))) return null;
+            return (
+              <div style={{ ...styles.card, marginBottom: "16px", display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+                {status === 'draft' && role === 'ico' && (
+                  <button style={styles.btn("primary")} onClick={() => handleAdvanceRun('ico_approve')} disabled={actionSaving}>
+                    {actionSaving ? "Saving…" : "✓ ICO Approve"}
+                  </button>
+                )}
+                {status === 'ico_approved' && role === 'md' && (
+                  <button style={styles.btn("primary")} onClick={() => handleAdvanceRun('md_approve')} disabled={actionSaving}>
+                    {actionSaving ? "Saving…" : "✓ MD Approve"}
+                  </button>
+                )}
+                {canRecall && (
+                  <>
+                    <input
+                      style={{ ...styles.input, width: "260px" }}
+                      placeholder="Recall reason (required)…"
+                      value={recallReason}
+                      onChange={e => setRecallReason(e.target.value)}
+                    />
+                    <button
+                      style={styles.btn("danger")}
+                      onClick={() => recallReason.trim() && handleAdvanceRun('recall', recallReason.trim())}
+                      disabled={actionSaving || !recallReason.trim()}
+                    >
+                      {actionSaving ? "Saving…" : "↩ Recall to Draft"}
+                    </button>
+                  </>
+                )}
+              </div>
+            );
+          })()}
           <div style={styles.grid(3)}>
             <StatCard label="Daily Wages" value={naira(selectedRun.total_daily_wages)} sub="Daily workers" accent={theme.accent} />
             <StatCard label="Salaries" value={naira(selectedRun.total_permanent_salaries)} sub="Permanent staff" accent={theme.blue} />
@@ -1596,7 +1646,7 @@ const PayrollTab = () => {
           <div style={styles.card}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
               <div style={styles.sectionTitle}>Payment Details</div>
-              {selectedRun.status !== "paid" && (
+              {selectedRun.status === 'md_approved' && ['accountant','md'].includes(userProfile?.role) && (
                 <button style={styles.btn("primary")} onClick={handleRecordPayments} disabled={saving}>{saving ? "Saving…" : "Record Payments & Mark Paid"}</button>
               )}
             </div>
@@ -1811,7 +1861,7 @@ const Staff = ({ userProfile }) => {
       {tab === "directory"  && <StaffDirectory onViewProfile={setProfileStaffId} roles={roles} />}
       {tab === "onboarding" && <OnboardingTab />}
       {tab === "attendance" && <AttendanceTab />}
-      {tab === "payroll"    && <PayrollTab />}
+      {tab === "payroll"    && <PayrollTab userProfile={userProfile} />}
       {tab === "roles"      && <RolesTab />}
     </div>
   );
