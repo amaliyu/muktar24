@@ -1416,7 +1416,10 @@ const PayrollTab = ({ userProfile }) => {
       const { lines } = await payrollService.getRunWithLines(run.id);
       setRunLines(lines);
       const edits = {};
-      lines.forEach(l => { edits[l.id] = { amount_paid: String(l.amount_paid || l.amount_due || ""), payment_date: l.payment_date || today, payment_method: l.payment_method || "cash" }; });
+      lines.forEach(l => {
+        const net = Math.max(0, (l.amount_due || 0) - (l.deductions || 0));
+        edits[l.id] = { amount_paid: String(l.amount_paid || net), payment_date: l.payment_date || today, payment_method: l.payment_method || "cash" };
+      });
       setPaymentEdits(edits);
     } catch (e) { setAlert({ type: "error", msg: e.message }); }
   };
@@ -1659,7 +1662,7 @@ const PayrollTab = ({ userProfile }) => {
               )}
             </div>
             <table style={styles.table}>
-              <thead><tr>{["Name","Role","Type","Amount Due","Amount Paid","Date","Method","Notes"].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
+              <thead><tr>{["Name","Role","Type","Amount Due","Deduction","Amount Paid","Date","Method","Notes"].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
               <tbody>
                 {runLines.map(l => {
                   const e = paymentEdits[l.id] || {};
@@ -1670,6 +1673,7 @@ const PayrollTab = ({ userProfile }) => {
                       <td style={styles.td}>{l.staff?.role || "—"}</td>
                       <td style={styles.td}><span style={styles.badge(l.staff_type === "permanent" ? theme.blue : theme.accent)}>{l.staff_type}</span></td>
                       <td style={styles.td}><strong style={{ color: theme.accent }}>{naira(l.amount_due)}</strong></td>
+                      <td style={styles.td}>{(l.deductions || 0) > 0 ? <span style={{ color: theme.red }}>−{naira(l.deductions)}</span> : <span style={{ color: theme.textMuted }}>—</span>}</td>
                       <td style={styles.td}>{editable ? <input style={{ ...styles.input, width: "110px" }} type="number" value={e.amount_paid} onChange={ev => setPaymentEdits(pe => ({ ...pe, [l.id]: { ...pe[l.id], amount_paid: ev.target.value } }))} /> : naira(l.amount_paid)}</td>
                       <td style={styles.td}>{editable ? <input type="date" style={{ ...styles.input, width: "130px" }} value={e.payment_date} onChange={ev => setPaymentEdits(pe => ({ ...pe, [l.id]: { ...pe[l.id], payment_date: ev.target.value } }))} /> : l.payment_date || "—"}</td>
                       <td style={styles.td}>{editable ? <select style={{ ...styles.input, width: "110px" }} value={e.payment_method} onChange={ev => setPaymentEdits(pe => ({ ...pe, [l.id]: { ...pe[l.id], payment_method: ev.target.value } }))}><option value="cash">Cash</option><option value="transfer">Transfer</option></select> : l.payment_method || "—"}</td>
