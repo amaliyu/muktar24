@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { staffService } from '../services/staff';
 import { attendanceService, payrollService } from '../services/attendance';
+import { advancesService } from '../services/advances';
 import { rolesService, documentsService, hrStaffService, photoService } from '../services/hrService';
 import { generatePayrollPDF } from '../utils/generatePayrollPDF';
 import { generateIDCardPDF, generateBusinessCardPDF } from '../utils/cardGenerator';
@@ -1361,9 +1362,10 @@ const PayrollTab = ({ userProfile }) => {
     if (!periodFrom || !periodTo) return setAlert({ type: "error", msg: "Select a period." });
     setCalcLoading(true); setAlert(null);
     try {
-      const [allStaff, attendanceCounts] = await Promise.all([
+      const [allStaff, attendanceCounts, advanceMap] = await Promise.all([
         staffService.getActive(),
         attendanceService.getCountsByRange(periodFrom, periodTo),
+        advancesService.getOutstandingByStaff(),
       ]);
       const lines = allStaff.map(s => {
         const daysPresent = attendanceCounts[s.id] || 0;
@@ -1376,7 +1378,9 @@ const PayrollTab = ({ userProfile }) => {
           const daysInPeriod = Math.round((to - from) / 86400000) + 1;
           amountDue = ((s.monthly_salary || 0) / daysInMonth) * daysInPeriod;
         }
-        return { staff_id: s.id, full_name: s.full_name, role: s.staffRole?.role_name || s.role || "—", staff_type: s.staff_type, days_present: daysPresent, daily_rate: s.daily_rate || 0, monthly_salary: s.monthly_salary || 0, amount_due: Math.round(amountDue) };
+        const adv = advanceMap[s.id];
+        const deductions = adv ? Math.min(adv.installment_amount, adv.outstanding_balance) : 0;
+        return { staff_id: s.id, full_name: s.full_name, role: s.staffRole?.role_name || s.role || "—", staff_type: s.staff_type, days_present: daysPresent, daily_rate: s.daily_rate || 0, monthly_salary: s.monthly_salary || 0, amount_due: Math.round(amountDue), deductions };
       });
       setCalcLines(lines);
       setStep(2);
@@ -1394,7 +1398,7 @@ const PayrollTab = ({ userProfile }) => {
     setSaving(true); setAlert(null);
     try {
       const run = { period_from: periodFrom, period_to: periodTo, run_date: today, total_daily_wages: totalDaily, total_permanent_salaries: totalPerm, total_payroll: grandTotal, prepared_by: preparedBy, status: "draft" };
-      const lines = calcLines.map(l => ({ staff_id: l.staff_id, staff_type: l.staff_type, days_present: l.days_present, daily_rate: l.daily_rate, monthly_salary: l.monthly_salary, amount_due: l.amount_due }));
+      const lines = calcLines.map(l => ({ staff_id: l.staff_id, staff_type: l.staff_type, days_present: l.days_present, daily_rate: l.daily_rate, monthly_salary: l.monthly_salary, amount_due: l.amount_due, deductions: l.deductions || 0 }));
       await payrollService.createRun(run, lines);
       setAlert({ type: "success", msg: `Payroll run submitted for approval — ${naira(grandTotal)} total for ${calcLines.length} staff.` });
       setStep(1); setCalcLines([]); setView("history"); loadRuns();
@@ -1495,7 +1499,7 @@ const PayrollTab = ({ userProfile }) => {
                 <div style={{ ...styles.card, marginBottom: "16px" }}>
                   <div style={styles.sectionTitle}>Daily Workers</div>
                   <table style={styles.table}>
-                    <thead><tr>{["Name","Role","Days Present","Daily Rate","Amount Due"].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
+                    <thead><tr>{["Name","Role","Days Present","Daily Rate","Amount Due","Deductions","Net Pay"].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
                     <tbody>
                       {dailyLines.map(l => (
                         <tr key={l.staff_id}>
@@ -1504,6 +1508,8 @@ const PayrollTab = ({ userProfile }) => {
                           <td style={styles.td}><span style={{ color: theme.accent, fontWeight: "700" }}>{l.days_present} days</span></td>
                           <td style={styles.td}>{naira(l.daily_rate)}/day</td>
                           <td style={styles.td}><strong style={{ color: theme.green }}>{naira(l.amount_due)}</strong></td>
+                          <td style={styles.td}>{l.deductions > 0 ? <span style={{ color: theme.red }}>−{naira(l.deductions)}</span> : <span style={{ color: theme.textMuted }}>—</span>}</td>
+                          <td style={styles.td}><strong style={{ color: theme.blue }}>{naira(l.amount_due - l.deductions)}</strong></td>
                         </tr>
                       ))}
                     </tbody>
@@ -1514,7 +1520,7 @@ const PayrollTab = ({ userProfile }) => {
                 <div style={{ ...styles.card, marginBottom: "16px" }}>
                   <div style={styles.sectionTitle}>Permanent Staff</div>
                   <table style={styles.table}>
-                    <thead><tr>{["Name","Role","Monthly Salary","Pro-rated Amount"].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
+                    <thead><tr>{["Name","Role","Monthly Salary","Pro-rated Amount","Deductions","Net Pay"].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
                     <tbody>
                       {permLines.map(l => (
                         <tr key={l.staff_id}>
@@ -1522,6 +1528,8 @@ const PayrollTab = ({ userProfile }) => {
                           <td style={styles.td}>{l.role}</td>
                           <td style={styles.td}>{naira(l.monthly_salary)}/mo</td>
                           <td style={styles.td}><strong style={{ color: theme.blue }}>{naira(l.amount_due)}</strong></td>
+                          <td style={styles.td}>{l.deductions > 0 ? <span style={{ color: theme.red }}>−{naira(l.deductions)}</span> : <span style={{ color: theme.textMuted }}>—</span>}</td>
+                          <td style={styles.td}><strong style={{ color: theme.green }}>{naira(l.amount_due - l.deductions)}</strong></td>
                         </tr>
                       ))}
                     </tbody>

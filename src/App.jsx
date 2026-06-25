@@ -40,6 +40,7 @@ import { vehiclesService, fuelLogService } from './services/vehicles'
 import SupplierRegistry from './components/SupplierRegistry'
 import { suppliersService, supplierTransactionsService } from './services/suppliers'
 import Labour from './components/Labour'
+import { advancesService } from './services/advances'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 
@@ -117,15 +118,15 @@ const APP_ROLES = [
 // Pages each role is allowed to access. 'all' = unrestricted.
 const ROLE_PAGES = {
   md:                 'all',
-  ico:                ['dashboard','production','inventory','batches','waybills','vehicles','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile'],
-  accountant:         ['dashboard','customers','orders','reports','kpi_dashboard','accounting','suppliers','products','my_profile','data_import','labour','waybills'],
+  ico:                ['dashboard','production','inventory','batches','waybills','vehicles','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','advances'],
+  accountant:         ['dashboard','customers','orders','reports','kpi_dashboard','accounting','suppliers','products','my_profile','data_import','labour','waybills','advances'],
   board_member:       ['dashboard','production','inventory','batches','waybills','vehicles','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile'],
   bdm:                ['dashboard','customers','orders','pending_register','daily_schedule','lpo_approvals','reports','kpi_dashboard','my_profile'],
   store_officer:      ['dashboard','inventory','batches','waybills','pending_register','daily_schedule','products','reports','my_profile'],
   logistics_manager:  ['dashboard','waybills','vehicles','labour','pending_register','daily_schedule','customers','my_profile'],
   marketer:           ['dashboard','customers','orders','products','my_profile'],
   driver:             ['dashboard','waybills','my_profile'],
-  hr_officer:         ['dashboard','staff','reports','labour','my_profile'],
+  hr_officer:         ['dashboard','staff','reports','labour','my_profile','advances'],
   production_manager:           ['dashboard','production','inventory','batches','reports','products','labour','my_profile'],
   assistant_production_manager: ['dashboard','production','inventory','batches','reports','products','labour','my_profile'],
   // legacy roles — kept for any existing users
@@ -6631,6 +6632,188 @@ const MyProfile = ({ userProfile }) => {
   );
 };
 
+// ── ADVANCES ──────────────────────────────────────────────────
+const AdvancesPage = ({ userProfile }) => {
+  const [advances, setAdvances] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [alert, setAlert] = useState(null);
+  const [actionSaving, setActionSaving] = useState(false);
+  const [staffList, setStaffList] = useState([]);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ staff_id: '', amount: '', reason: '', installments: '1' });
+  const [saving, setSaving] = useState(false);
+  const [rejectTarget, setRejectTarget] = useState(null);
+  const [rejectReason, setRejectReason] = useState('');
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [adv, staff] = await Promise.all([
+        advancesService.list(),
+        staffService.getPublicActive(),
+      ]);
+      setAdvances(adv);
+      setStaffList(staff);
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const handleCreate = async () => {
+    if (!form.staff_id || !form.amount || !form.reason)
+      return setAlert({ type: 'error', msg: 'Staff, amount, and reason are required.' });
+    setSaving(true); setAlert(null);
+    try {
+      await advancesService.create({
+        staff_id: form.staff_id,
+        amount: Number(form.amount),
+        reason: form.reason,
+        installments: Number(form.installments) || 1,
+        requested_by: userProfile?.full_name || 'Admin',
+      });
+      setForm({ staff_id: '', amount: '', reason: '', installments: '1' });
+      setShowForm(false);
+      setAlert({ type: 'success', msg: 'Advance request recorded.' });
+      load();
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setSaving(false); }
+  };
+
+  const handleAction = async (id, action, reason = null) => {
+    setActionSaving(true); setAlert(null);
+    try {
+      await advancesService.advance(id, action, reason);
+      setRejectTarget(null); setRejectReason('');
+      await load();
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setActionSaving(false); }
+  };
+
+  const role = userProfile?.role;
+  const canRecord = ['hr_officer', 'accountant', 'md'].includes(role);
+  const advStatusColor = s =>
+    s === 'disbursed' ? theme.green :
+    s === 'md_approved' ? theme.blue :
+    s === 'ico_approved' ? theme.accent :
+    s === 'settled' ? theme.textMuted :
+    (s === 'rejected' || s === 'cancelled') ? theme.red :
+    theme.textMuted;
+
+  return (
+    <div>
+      {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
+      <div style={styles.header}>
+        <div>
+          <div style={styles.pageTitle}>Salary Advances</div>
+          <div style={styles.pageSubtitle}>Track and approve staff advance requests</div>
+        </div>
+        {canRecord && (
+          <button style={styles.btn('primary')} onClick={() => setShowForm(v => !v)}>
+            {showForm ? '✕ Cancel' : '+ New Request'}
+          </button>
+        )}
+      </div>
+
+      {showForm && (
+        <div style={{ ...styles.card, marginBottom: '20px' }}>
+          <div style={styles.sectionTitle}>New Advance Request</div>
+          <div style={styles.grid(2)}>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Staff Member</label>
+              <select style={styles.input} value={form.staff_id} onChange={e => setForm(f => ({ ...f, staff_id: e.target.value }))}>
+                <option value="">Select staff…</option>
+                {staffList.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
+              </select>
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Amount (₦)</label>
+              <input style={styles.input} type="number" placeholder="0" value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} />
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Installments</label>
+              <input style={styles.input} type="number" min="1" placeholder="1" value={form.installments} onChange={e => setForm(f => ({ ...f, installments: e.target.value }))} />
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Reason</label>
+              <input style={styles.input} placeholder="Reason for advance…" value={form.reason} onChange={e => setForm(f => ({ ...f, reason: e.target.value }))} />
+            </div>
+          </div>
+          <button style={styles.btn('primary')} onClick={handleCreate} disabled={saving}>{saving ? 'Saving…' : 'Submit Request'}</button>
+        </div>
+      )}
+
+      {rejectTarget && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ ...styles.card, width: '420px' }}>
+            <div style={{ ...styles.sectionTitle, marginBottom: '12px' }}>
+              {rejectTarget.action === 'reject' ? 'Reject' : 'Cancel'} Advance — Reason Required
+            </div>
+            <textarea
+              style={{ ...styles.input, height: '80px', resize: 'vertical' }}
+              placeholder="Enter reason…"
+              value={rejectReason}
+              onChange={e => setRejectReason(e.target.value)}
+            />
+            <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+              <button
+                style={styles.btn('danger')}
+                disabled={!rejectReason.trim() || actionSaving}
+                onClick={() => handleAction(rejectTarget.id, rejectTarget.action, rejectReason.trim())}
+              >{actionSaving ? 'Saving…' : rejectTarget.action === 'reject' ? 'Reject' : 'Cancel Advance'}</button>
+              <button style={styles.btn('secondary')} onClick={() => { setRejectTarget(null); setRejectReason(''); }}>Back</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div style={styles.card}>
+        {loading ? <Spinner /> : advances.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '30px', color: theme.textMuted }}>No advance requests yet.</div>
+        ) : (
+          <table style={styles.table}>
+            <thead>
+              <tr>
+                {['Staff','Amount','Installments','Outstanding','Reason','Requested By','Status','Actions'].map(h => (
+                  <th key={h} style={styles.th}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {advances.map(adv => {
+                const status = adv.status;
+                const actions = [];
+                if (status === 'requested' && role === 'ico')
+                  actions.push(<button key="ico" style={{ ...styles.btn('primary'), padding: '4px 10px', fontSize: '11px' }} onClick={() => handleAction(adv.id, 'ico_approve')} disabled={actionSaving}>✓ ICO Approve</button>);
+                if (status === 'ico_approved' && role === 'md')
+                  actions.push(<button key="md" style={{ ...styles.btn('primary'), padding: '4px 10px', fontSize: '11px' }} onClick={() => handleAction(adv.id, 'md_approve')} disabled={actionSaving}>✓ MD Approve</button>);
+                if (status === 'md_approved' && ['accountant', 'md'].includes(role))
+                  actions.push(<button key="disburse" style={{ ...styles.btn('primary'), padding: '4px 10px', fontSize: '11px', background: theme.green, color: '#000' }} onClick={() => handleAction(adv.id, 'disburse')} disabled={actionSaving}>↑ Disburse</button>);
+                if (['requested','ico_approved','md_approved'].includes(status) && ['ico','md'].includes(role))
+                  actions.push(<button key="reject" style={{ ...styles.btn('danger'), padding: '4px 10px', fontSize: '11px' }} onClick={() => setRejectTarget({ id: adv.id, action: 'reject' })}>✕ Reject</button>);
+                if (status === 'requested' && ['hr_officer','accountant','md'].includes(role))
+                  actions.push(<button key="cancel" style={{ ...styles.btn('secondary'), padding: '4px 10px', fontSize: '11px' }} onClick={() => setRejectTarget({ id: adv.id, action: 'cancel' })}>✕ Cancel</button>);
+                return (
+                  <tr key={adv.id}>
+                    <td style={styles.td}><strong>{adv.staff?.full_name || '—'}</strong></td>
+                    <td style={styles.td}><strong style={{ color: theme.accent }}>{naira(adv.amount)}</strong></td>
+                    <td style={styles.td}>{adv.installments || 1}</td>
+                    <td style={styles.td}>{(adv.outstanding_balance || 0) > 0 ? <strong style={{ color: theme.red }}>{naira(adv.outstanding_balance)}</strong> : <span style={{ color: theme.textMuted }}>—</span>}</td>
+                    <td style={styles.td}>{adv.reason || '—'}</td>
+                    <td style={styles.td}>{adv.requested_by || '—'}</td>
+                    <td style={styles.td}><span style={styles.badge(advStatusColor(status))}>{status}</span></td>
+                    <td style={styles.td}><div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>{actions.length ? actions : <span style={{ color: theme.textMuted, fontSize: '11px' }}>—</span>}</div></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+};
+
 // ── NAV ───────────────────────────────────────────────────────
 const navItems = [
   { section: "Overview", items: [{ id: "dashboard", label: "Dashboard", icon: "dashboard" }] },
@@ -6656,7 +6839,7 @@ const navItems = [
     { id: "reports", label: "Reports", icon: "reports" },
     { id: "kpi_dashboard", label: "KPI Dashboard", icon: "reports" },
   ]},
-  { section: "Finance", items: [{ id: "accounting", label: "Accounting", icon: "orders" }] },
+  { section: "Finance", items: [{ id: "accounting", label: "Accounting", icon: "orders" }, { id: "advances", label: "Salary Advances", icon: "orders" }] },
   { section: "Settings", items: [
     { id: "products", label: "Products", icon: "products" },
     { id: "suppliers", label: "Suppliers", icon: "supplier" },
@@ -7085,6 +7268,7 @@ export default function App() {
     data_import: <DataImport />,
     user_management: <UserManagement userProfile={userProfile} />,
     labour: <Labour userProfile={userProfile} />,
+    advances: <AdvancesPage userProfile={userProfile} />,
     my_profile: <MyProfile userProfile={userProfile} />,
   };
 
