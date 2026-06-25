@@ -41,6 +41,7 @@ import SupplierRegistry from './components/SupplierRegistry'
 import { suppliersService, supplierTransactionsService } from './services/suppliers'
 import Labour from './components/Labour'
 import { advancesService } from './services/advances'
+import { leaveService } from './services/leave'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 
@@ -118,15 +119,15 @@ const APP_ROLES = [
 // Pages each role is allowed to access. 'all' = unrestricted.
 const ROLE_PAGES = {
   md:                 'all',
-  ico:                ['dashboard','production','inventory','batches','waybills','vehicles','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','advances'],
-  accountant:         ['dashboard','customers','orders','reports','kpi_dashboard','accounting','suppliers','products','my_profile','data_import','labour','waybills','advances'],
+  ico:                ['dashboard','production','inventory','batches','waybills','vehicles','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','advances','leave'],
+  accountant:         ['dashboard','customers','orders','reports','kpi_dashboard','accounting','suppliers','products','my_profile','data_import','labour','waybills','advances','leave'],
   board_member:       ['dashboard','production','inventory','batches','waybills','vehicles','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile'],
   bdm:                ['dashboard','customers','orders','pending_register','daily_schedule','lpo_approvals','reports','kpi_dashboard','my_profile'],
   store_officer:      ['dashboard','inventory','batches','waybills','pending_register','daily_schedule','products','reports','my_profile'],
   logistics_manager:  ['dashboard','waybills','vehicles','labour','pending_register','daily_schedule','customers','my_profile'],
   marketer:           ['dashboard','customers','orders','products','my_profile'],
   driver:             ['dashboard','waybills','my_profile'],
-  hr_officer:         ['dashboard','staff','reports','labour','my_profile','advances'],
+  hr_officer:         ['dashboard','staff','reports','labour','my_profile','advances','leave'],
   production_manager:           ['dashboard','production','inventory','batches','reports','products','labour','my_profile'],
   assistant_production_manager: ['dashboard','production','inventory','batches','reports','products','labour','my_profile'],
   // legacy roles — kept for any existing users
@@ -6814,6 +6815,223 @@ const AdvancesPage = ({ userProfile }) => {
   );
 };
 
+// ── LEAVE ─────────────────────────────────────────────────────
+const LEAVE_TYPES = ['annual','sick','unpaid','compassionate','maternity'];
+const calcLeaveDays = (start, end) => {
+  if (!start || !end) return '';
+  const diff = Math.round((new Date(end) - new Date(start)) / 86400000) + 1;
+  return diff > 0 ? String(diff) : '';
+};
+
+const LeavePage = ({ userProfile }) => {
+  const [requests, setRequests] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [alert, setAlert] = useState(null);
+  const [actionSaving, setActionSaving] = useState(false);
+  const [staffList, setStaffList] = useState([]);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ staff_id: '', leave_type: 'annual', is_paid: true, start_date: '', end_date: '', days: '', reason: '' });
+  const [saving, setSaving] = useState(false);
+  const [modalTarget, setModalTarget] = useState(null);
+  const [modalReason, setModalReason] = useState('');
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [reqs, staff] = await Promise.all([
+        leaveService.list(),
+        staffService.getPublicActive(),
+      ]);
+      setRequests(reqs);
+      setStaffList(staff);
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const setFormField = (field, value) => {
+    setForm(f => {
+      const next = { ...f, [field]: value };
+      if (field === 'start_date' || field === 'end_date') {
+        const auto = calcLeaveDays(next.start_date, next.end_date);
+        if (auto) next.days = auto;
+      }
+      return next;
+    });
+  };
+
+  const handleCreate = async () => {
+    if (!form.staff_id || !form.leave_type || !form.start_date || !form.end_date || !form.days)
+      return setAlert({ type: 'error', msg: 'Staff, type, dates, and days are required.' });
+    setSaving(true); setAlert(null);
+    try {
+      await leaveService.create({
+        staff_id: form.staff_id,
+        leave_type: form.leave_type,
+        is_paid: form.is_paid,
+        start_date: form.start_date,
+        end_date: form.end_date,
+        days: Number(form.days),
+        reason: form.reason,
+        requested_by: userProfile?.full_name || 'Admin',
+      });
+      setForm({ staff_id: '', leave_type: 'annual', is_paid: true, start_date: '', end_date: '', days: '', reason: '' });
+      setShowForm(false);
+      setAlert({ type: 'success', msg: 'Leave request recorded.' });
+      load();
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setSaving(false); }
+  };
+
+  const handleAction = async (id, action, reason = null) => {
+    setActionSaving(true); setAlert(null);
+    try {
+      await leaveService.advance(id, action, reason);
+      setModalTarget(null); setModalReason('');
+      await load();
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setActionSaving(false); }
+  };
+
+  const role = userProfile?.role;
+  const canRecord = ['hr_officer', 'md'].includes(role);
+  const leaveStatusColor = s =>
+    s === 'md_approved' ? theme.green :
+    s === 'ico_approved' ? theme.blue :
+    (s === 'rejected' || s === 'cancelled') ? theme.red :
+    theme.textMuted;
+
+  return (
+    <div>
+      {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
+      <div style={styles.header}>
+        <div>
+          <div style={styles.pageTitle}>Leave Requests</div>
+          <div style={styles.pageSubtitle}>Record and approve staff leave</div>
+        </div>
+        {canRecord && (
+          <button style={styles.btn('primary')} onClick={() => setShowForm(v => !v)}>
+            {showForm ? '✕ Cancel' : '+ New Request'}
+          </button>
+        )}
+      </div>
+
+      {showForm && (
+        <div style={{ ...styles.card, marginBottom: '20px' }}>
+          <div style={styles.sectionTitle}>New Leave Request</div>
+          <div style={styles.grid(3)}>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Staff Member</label>
+              <select style={styles.input} value={form.staff_id} onChange={e => setFormField('staff_id', e.target.value)}>
+                <option value="">Select staff…</option>
+                {staffList.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
+              </select>
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Leave Type</label>
+              <select style={styles.input} value={form.leave_type} onChange={e => setFormField('leave_type', e.target.value)}>
+                {LEAVE_TYPES.map(t => <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>)}
+              </select>
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Paid Leave?</label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', paddingTop: '10px' }}>
+                <input type="checkbox" id="is_paid" checked={form.is_paid} onChange={e => setFormField('is_paid', e.target.checked)} style={{ width: '16px', height: '16px', accentColor: theme.accent }} />
+                <label htmlFor="is_paid" style={{ ...styles.label, marginBottom: 0, cursor: 'pointer' }}>Yes — paid leave</label>
+              </div>
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Start Date</label>
+              <input type="date" style={styles.input} value={form.start_date} onChange={e => setFormField('start_date', e.target.value)} />
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>End Date</label>
+              <input type="date" style={styles.input} value={form.end_date} onChange={e => setFormField('end_date', e.target.value)} />
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Days</label>
+              <input type="number" min="1" style={styles.input} value={form.days} onChange={e => setFormField('days', e.target.value)} placeholder="Auto-filled from dates" />
+            </div>
+          </div>
+          <div style={styles.formGroup}>
+            <label style={styles.label}>Reason</label>
+            <input style={styles.input} placeholder="Reason for leave…" value={form.reason} onChange={e => setFormField('reason', e.target.value)} />
+          </div>
+          <button style={styles.btn('primary')} onClick={handleCreate} disabled={saving}>{saving ? 'Saving…' : 'Submit Request'}</button>
+        </div>
+      )}
+
+      {modalTarget && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ ...styles.card, width: '420px' }}>
+            <div style={{ ...styles.sectionTitle, marginBottom: '12px' }}>
+              {modalTarget.action === 'reject' ? 'Reject' : 'Cancel'} Leave — Reason Required
+            </div>
+            <textarea
+              style={{ ...styles.input, height: '80px', resize: 'vertical' }}
+              placeholder="Enter reason…"
+              value={modalReason}
+              onChange={e => setModalReason(e.target.value)}
+            />
+            <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+              <button
+                style={styles.btn('danger')}
+                disabled={!modalReason.trim() || actionSaving}
+                onClick={() => handleAction(modalTarget.id, modalTarget.action, modalReason.trim())}
+              >{actionSaving ? 'Saving…' : modalTarget.action === 'reject' ? 'Reject' : 'Cancel Leave'}</button>
+              <button style={styles.btn('secondary')} onClick={() => { setModalTarget(null); setModalReason(''); }}>Back</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div style={styles.card}>
+        {loading ? <Spinner /> : requests.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '30px', color: theme.textMuted }}>No leave requests yet.</div>
+        ) : (
+          <table style={styles.table}>
+            <thead>
+              <tr>
+                {['Staff','Type','Paid?','Start','End','Days','Reason','Status','Actions'].map(h => (
+                  <th key={h} style={styles.th}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {requests.map(req => {
+                const status = req.status;
+                const actions = [];
+                if (status === 'requested' && role === 'ico')
+                  actions.push(<button key="ico" style={{ ...styles.btn('primary'), padding: '4px 10px', fontSize: '11px' }} onClick={() => handleAction(req.id, 'ico_approve')} disabled={actionSaving}>✓ ICO Approve</button>);
+                if (status === 'ico_approved' && role === 'md')
+                  actions.push(<button key="md" style={{ ...styles.btn('primary'), padding: '4px 10px', fontSize: '11px' }} onClick={() => handleAction(req.id, 'md_approve')} disabled={actionSaving}>✓ MD Approve</button>);
+                if (['requested','ico_approved'].includes(status) && ['ico','md'].includes(role))
+                  actions.push(<button key="reject" style={{ ...styles.btn('danger'), padding: '4px 10px', fontSize: '11px' }} onClick={() => setModalTarget({ id: req.id, action: 'reject' })}>✕ Reject</button>);
+                if (['requested','ico_approved','md_approved'].includes(status) && ['hr_officer','md'].includes(role))
+                  actions.push(<button key="cancel" style={{ ...styles.btn('secondary'), padding: '4px 10px', fontSize: '11px' }} onClick={() => setModalTarget({ id: req.id, action: 'cancel' })}>✕ Cancel</button>);
+                return (
+                  <tr key={req.id}>
+                    <td style={styles.td}><strong>{req.staff?.full_name || '—'}</strong></td>
+                    <td style={styles.td}><span style={styles.badge(theme.accent)}>{req.leave_type}</span></td>
+                    <td style={styles.td}>{req.is_paid ? <span style={{ color: theme.green, fontWeight: '600' }}>Yes</span> : <span style={{ color: theme.textMuted }}>No</span>}</td>
+                    <td style={styles.td}>{req.start_date || '—'}</td>
+                    <td style={styles.td}>{req.end_date || '—'}</td>
+                    <td style={styles.td}><strong>{req.days ?? '—'}</strong></td>
+                    <td style={styles.td}>{req.reason || '—'}</td>
+                    <td style={styles.td}><span style={styles.badge(leaveStatusColor(status))}>{status}</span></td>
+                    <td style={styles.td}><div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>{actions.length ? actions : <span style={{ color: theme.textMuted, fontSize: '11px' }}>—</span>}</div></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+};
+
 // ── NAV ───────────────────────────────────────────────────────
 const navItems = [
   { section: "Overview", items: [{ id: "dashboard", label: "Dashboard", icon: "dashboard" }] },
@@ -6839,7 +7057,7 @@ const navItems = [
     { id: "reports", label: "Reports", icon: "reports" },
     { id: "kpi_dashboard", label: "KPI Dashboard", icon: "reports" },
   ]},
-  { section: "Finance", items: [{ id: "accounting", label: "Accounting", icon: "orders" }, { id: "advances", label: "Salary Advances", icon: "orders" }] },
+  { section: "Finance", items: [{ id: "accounting", label: "Accounting", icon: "orders" }, { id: "advances", label: "Salary Advances", icon: "orders" }, { id: "leave", label: "Leave Requests", icon: "staff" }] },
   { section: "Settings", items: [
     { id: "products", label: "Products", icon: "products" },
     { id: "suppliers", label: "Suppliers", icon: "supplier" },
@@ -7269,6 +7487,7 @@ export default function App() {
     user_management: <UserManagement userProfile={userProfile} />,
     labour: <Labour userProfile={userProfile} />,
     advances: <AdvancesPage userProfile={userProfile} />,
+    leave: <LeavePage userProfile={userProfile} />,
     my_profile: <MyProfile userProfile={userProfile} />,
   };
 
