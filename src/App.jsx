@@ -3253,8 +3253,8 @@ const LPOApprovals = () => {
     try {
       await lpoService.decide(lpo.id, decision, note.trim() || null);
       if (decision === "approved") {
-        await ordersService.updateStatus(lpo.order.id, "in_progress");
-        // Auto-create invoice if none exists
+        // 1) Ensure the invoice exists FIRST — a billing failure must not leave the
+        //    order in_progress-but-uninvoiced.
         const existing = await invoicesService.getByOrder(lpo.order.id);
         if (existing.length === 0) {
           const total = (lpo.order.order_items || []).reduce((s, i) => s + i.quantity * i.unit_price, 0);
@@ -3266,10 +3266,14 @@ const LPOApprovals = () => {
               invNum = await invoicesService.getNextNumber();
               await invoicesService.create({ order_id: lpo.order.id, invoice_number: invNum, total_amount: total, issued_date: today, due_date: due });
             } else {
-              throw createErr;
+              setAlert({ type: "error", msg: `LPO approved, but invoice creation failed (${createErr.message}). The order was NOT moved to processing — generate the invoice manually from Orders, then it will proceed.` });
+              await load();
+              return; // finally{} still clears saving
             }
           }
         }
+        // 2) Only after the invoice is confirmed, advance the order + delivery register.
+        await ordersService.updateStatus(lpo.order.id, "in_progress");
         await pendingDeliveryService.addFromOrder(lpo.order);
         setAlert({ type: "success", msg: `LPO approved — ${lpo.order?.customer?.name} added to Pending Delivery Register.` });
       } else {
