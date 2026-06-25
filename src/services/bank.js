@@ -140,10 +140,8 @@ export const receiptsService = {
     const { error: uploadErr } = await supabase.storage.from('receipts').upload(path, file);
     if (uploadErr) throw uploadErr;
     const { data: { publicUrl } } = supabase.storage.from('receipts').getPublicUrl(path);
-    const receiptNumber = await receiptsService.getNextNumber();
-    const { data, error } = await supabase.from('receipts').insert({
+    const basePayload = {
       expense_id: metadata.expense_id || null,
-      receipt_number: receiptNumber,
       receipt_date: metadata.receipt_date,
       vendor_name: metadata.vendor_name || '',
       amount: Number(metadata.amount) || 0,
@@ -154,7 +152,15 @@ export const receiptsService = {
       uploaded_at: new Date().toISOString(),
       tax_category: metadata.tax_category || '',
       notes: metadata.notes || '',
-    }).select('*').single();
+    };
+    let receiptNumber = await receiptsService.getNextNumber();
+    let { data, error } = await supabase.from('receipts')
+      .insert({ ...basePayload, receipt_number: receiptNumber }).select('*').single();
+    if (error?.code === '23505') {
+      receiptNumber = await receiptsService.getNextNumber();
+      ({ data, error } = await supabase.from('receipts')
+        .insert({ ...basePayload, receipt_number: receiptNumber }).select('*').single());
+    }
     if (error) throw error;
     return data;
   },
