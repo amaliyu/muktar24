@@ -1387,9 +1387,10 @@ const PayrollTab = ({ userProfile }) => {
           leaveDeduction = Math.round(totalUnpaidDays * ((s.monthly_salary || 0) / daysInMonth));
         }
         const adv = advanceMap[s.id];
-        let advance_deduction = adv ? Math.min(adv.installment_amount, adv.outstanding_balance) : 0;
         const roundedDue = Math.round(amountDue);
-        if (advance_deduction + leaveDeduction > roundedDue) advance_deduction = Math.max(0, roundedDue - leaveDeduction);
+        leaveDeduction = Math.min(leaveDeduction, roundedDue);                                   // leave can't exceed gross
+        let advance_deduction = adv ? Math.min(adv.installment_amount, adv.outstanding_balance) : 0;
+        advance_deduction = Math.max(0, Math.min(advance_deduction, roundedDue - leaveDeduction)); // advance absorbs remainder, never negative
         const deductions = advance_deduction + leaveDeduction;
         return { staff_id: s.id, full_name: s.full_name, role: s.staffRole?.role_name || s.role || "—", staff_type: s.staff_type, days_present: daysPresent, daily_rate: s.daily_rate || 0, monthly_salary: s.monthly_salary || 0, amount_due: roundedDue, deductions, advance_deduction, leave_deduction: leaveDeduction };
       });
