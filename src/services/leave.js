@@ -26,4 +26,21 @@ export const leaveService = {
     if (error) throw error;
     return data;
   },
+
+  async getUnpaidApprovedOverlapping(from, to) {
+    const { data, error } = await supabase
+      .from('leave_requests')
+      .select('staff_id, start_date, end_date')
+      .eq('status', 'md_approved')
+      .eq('is_paid', false)
+      .lte('start_date', to)
+      .gte('end_date', from);
+    if (error) throw error;
+    const map = {};
+    for (const row of data || []) {
+      if (!map[row.staff_id]) map[row.staff_id] = [];
+      map[row.staff_id].push(row);
+    }
+    return map;
+  },
 };

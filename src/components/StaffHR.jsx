@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { staffService } from '../services/staff';
 import { attendanceService, payrollService } from '../services/attendance';
 import { advancesService } from '../services/advances';
+import { leaveService } from '../services/leave';
 import { rolesService, documentsService, hrStaffService, photoService } from '../services/hrService';
 import { generatePayrollPDF } from '../utils/generatePayrollPDF';
 import { generateIDCardPDF, generateBusinessCardPDF } from '../utils/cardGenerator';
@@ -1362,25 +1363,35 @@ const PayrollTab = ({ userProfile }) => {
     if (!periodFrom || !periodTo) return setAlert({ type: "error", msg: "Select a period." });
     setCalcLoading(true); setAlert(null);
     try {
-      const [allStaff, attendanceCounts, advanceMap] = await Promise.all([
+      const [allStaff, attendanceCounts, advanceMap, unpaidLeaveMap] = await Promise.all([
         staffService.getActive(),
         attendanceService.getCountsByRange(periodFrom, periodTo),
         advancesService.getOutstandingByStaff(),
+        leaveService.getUnpaidApprovedOverlapping(periodFrom, periodTo),
       ]);
+      const periodFromDate = new Date(periodFrom), periodToDate = new Date(periodTo);
       const lines = allStaff.map(s => {
         const daysPresent = attendanceCounts[s.id] || 0;
-        let amountDue = 0;
+        let amountDue = 0, leaveDeduction = 0;
         if (s.staff_type === "daily") {
           amountDue = daysPresent * (s.daily_rate || 0);
         } else {
-          const from = new Date(periodFrom), to = new Date(periodTo);
-          const daysInMonth = new Date(from.getFullYear(), from.getMonth() + 1, 0).getDate();
-          const daysInPeriod = Math.round((to - from) / 86400000) + 1;
+          const daysInMonth = new Date(periodFromDate.getFullYear(), periodFromDate.getMonth() + 1, 0).getDate();
+          const daysInPeriod = Math.round((periodToDate - periodFromDate) / 86400000) + 1;
           amountDue = ((s.monthly_salary || 0) / daysInMonth) * daysInPeriod;
+          const leaveRows = unpaidLeaveMap[s.id] || [];
+          const totalUnpaidDays = leaveRows.reduce((sum, lr) => {
+            const overlap = Math.floor((Math.min(new Date(lr.end_date), periodToDate) - Math.max(new Date(lr.start_date), periodFromDate)) / 86400000) + 1;
+            return sum + Math.max(0, overlap);
+          }, 0);
+          leaveDeduction = Math.round(totalUnpaidDays * ((s.monthly_salary || 0) / daysInMonth));
         }
         const adv = advanceMap[s.id];
-        const deductions = adv ? Math.min(adv.installment_amount, adv.outstanding_balance) : 0;
-        return { staff_id: s.id, full_name: s.full_name, role: s.staffRole?.role_name || s.role || "—", staff_type: s.staff_type, days_present: daysPresent, daily_rate: s.daily_rate || 0, monthly_salary: s.monthly_salary || 0, amount_due: Math.round(amountDue), deductions, advance_deduction: deductions };
+        let advance_deduction = adv ? Math.min(adv.installment_amount, adv.outstanding_balance) : 0;
+        const roundedDue = Math.round(amountDue);
+        if (advance_deduction + leaveDeduction > roundedDue) advance_deduction = Math.max(0, roundedDue - leaveDeduction);
+        const deductions = advance_deduction + leaveDeduction;
+        return { staff_id: s.id, full_name: s.full_name, role: s.staffRole?.role_name || s.role || "—", staff_type: s.staff_type, days_present: daysPresent, daily_rate: s.daily_rate || 0, monthly_salary: s.monthly_salary || 0, amount_due: roundedDue, deductions, advance_deduction, leave_deduction: leaveDeduction };
       });
       setCalcLines(lines);
       setStep(2);
@@ -1531,7 +1542,7 @@ const PayrollTab = ({ userProfile }) => {
                           <td style={styles.td}>{l.role}</td>
                           <td style={styles.td}>{naira(l.monthly_salary)}/mo</td>
                           <td style={styles.td}><strong style={{ color: theme.blue }}>{naira(l.amount_due)}</strong></td>
-                          <td style={styles.td}>{l.deductions > 0 ? <span style={{ color: theme.red }}>−{naira(l.deductions)}</span> : <span style={{ color: theme.textMuted }}>—</span>}</td>
+                          <td style={styles.td}>{l.deductions > 0 ? <span style={{ color: theme.red }}>−{naira(l.deductions)}{l.leave_deduction > 0 && <span style={{ fontSize: "11px", color: theme.textMuted, display: "block" }}>{l.advance_deduction > 0 && <>Loan {naira(l.advance_deduction)} + </>}Leave {naira(l.leave_deduction)}</span>}</span> : <span style={{ color: theme.textMuted }}>—</span>}</td>
                           <td style={styles.td}><strong style={{ color: theme.green }}>{naira(l.amount_due - l.deductions)}</strong></td>
                         </tr>
                       ))}
@@ -1667,13 +1678,14 @@ const PayrollTab = ({ userProfile }) => {
                 {runLines.map(l => {
                   const e = paymentEdits[l.id] || {};
                   const editable = selectedRun.status !== "paid";
+                  const leaveDeductionDerived = (l.deductions || 0) - (l.advance_deduction || 0);
                   return (
                     <tr key={l.id}>
                       <td style={styles.td}><strong>{l.staff?.full_name || "—"}</strong></td>
                       <td style={styles.td}>{l.staff?.role || "—"}</td>
                       <td style={styles.td}><span style={styles.badge(l.staff_type === "permanent" ? theme.blue : theme.accent)}>{l.staff_type}</span></td>
                       <td style={styles.td}><strong style={{ color: theme.accent }}>{naira(l.amount_due)}</strong></td>
-                      <td style={styles.td}>{(l.deductions || 0) > 0 ? <span style={{ color: theme.red }}>−{naira(l.deductions)}</span> : <span style={{ color: theme.textMuted }}>—</span>}</td>
+                      <td style={styles.td}>{(l.deductions || 0) > 0 ? <span style={{ color: theme.red }}>−{naira(l.deductions)}{leaveDeductionDerived > 0 && <span style={{ fontSize: "11px", color: theme.textMuted, display: "block" }}>{(l.advance_deduction || 0) > 0 && <>Loan {naira(l.advance_deduction)} + </>}Leave {naira(leaveDeductionDerived)}</span>}</span> : <span style={{ color: theme.textMuted }}>—</span>}</td>
                       <td style={styles.td}>{editable ? <input style={{ ...styles.input, width: "110px" }} type="number" value={e.amount_paid} onChange={ev => setPaymentEdits(pe => ({ ...pe, [l.id]: { ...pe[l.id], amount_paid: ev.target.value } }))} /> : naira(l.amount_paid)}</td>
                       <td style={styles.td}>{editable ? <input type="date" style={{ ...styles.input, width: "130px" }} value={e.payment_date} onChange={ev => setPaymentEdits(pe => ({ ...pe, [l.id]: { ...pe[l.id], payment_date: ev.target.value } }))} /> : l.payment_date || "—"}</td>
                       <td style={styles.td}>{editable ? <select style={{ ...styles.input, width: "110px" }} value={e.payment_method} onChange={ev => setPaymentEdits(pe => ({ ...pe, [l.id]: { ...pe[l.id], payment_method: ev.target.value } }))}><option value="cash">Cash</option><option value="transfer">Transfer</option></select> : l.payment_method || "—"}</td>
