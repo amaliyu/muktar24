@@ -1467,8 +1467,8 @@ const LeaveBalancesTab = ({ userProfile }) => {
             <tbody>
               {staffRows.map(([staffId, row]) => {
                 const ann = row.annual, sick = row.sick;
-                const annBal = ann ? ann.entitled_days - ann.used_days : null;
-                const sickBal = sick ? sick.entitled_days - sick.used_days : null;
+                const annBal = ann != null ? ann.balance : null;
+                const sickBal = sick != null ? sick.balance : null;
                 const annKey = `${staffId}_annual`, sickKey = `${staffId}_sick`;
                 return (
                   <tr key={staffId}>

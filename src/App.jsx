@@ -7169,7 +7169,7 @@ const MyHRPage = ({ userProfile }) => {
         ) : (
           <div style={{ display: 'flex', gap: '28px', flexWrap: 'wrap' }}>
             {myBalance.filter(b => b.leave_type === 'annual' || b.leave_type === 'sick').map(b => {
-              const bal = b.entitled_days - b.used_days;
+              const bal = b.balance;
               return (
                 <div key={b.leave_type}>
                   <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{b.leave_type.charAt(0).toUpperCase() + b.leave_type.slice(1)}</div>

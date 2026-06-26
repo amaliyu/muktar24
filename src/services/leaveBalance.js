@@ -15,7 +15,7 @@ export const leaveBalanceService = {
     const { data, error } = await supabase
       .from('staff_leave_balances')
       .select('*, staff:staff_id(full_name, staff_type)')
-      .eq('year', year)
+      .eq('leave_year', year)
       .order('staff_id');
     if (error) throw error;
     return data || [];
@@ -25,7 +25,7 @@ export const leaveBalanceService = {
     const { data, error } = await supabase
       .from('staff_leave_balances')
       .select('*')
-      .eq('year', year);
+      .eq('leave_year', year);
     if (error) throw error;
     return data || [];
   },
