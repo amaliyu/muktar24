@@ -19,12 +19,13 @@ App: APC Manager — internal ERP for Abuja Precast Concrete Limited
 
 ## 1. SESSION HISTORY (most recent first)
 
-### 🔄 SESSION 8 (2026-06-26) — HR 4b PHASE B: ADVANCE-DEDUCTION COLUMN PLUMBING
-**Scope: HR 4b Phase B, step 1 of 2 (advance-deduction column wiring). No leave-deduction logic yet.**
-- **Migration 1 (applied separately, not in this PR):** Added `payroll_lines.advance_deduction numeric not null default 0`; backfilled existing rows from `deductions`; added CHECK constraint for unpaid-leave deduction field (future).
-- **PR-1 (this PR — `claude/b1-advance-deduction-plumbing`):** `src/components/StaffHR.jsx` — `handleCalculate` now sets `advance_deduction: deductions` on each computed line object; `handleApprove` now persists `advance_deduction: l.advance_deduction ?? l.deductions ?? 0` into each `payroll_line` row. No net-pay math changed. `deductions` column left intact.
-- **Pending — Migration 2:** Switch `realize_advance_repayments` trigger to read `advance_deduction` instead of `deductions` when settling advances after `mark_paid`.
-- **Pending — PR-2:** Unpaid-leave deduction on a calendar-day basis (approved `md_approved` leave requests with `is_paid = false` overlapping the payroll period → prorate daily rate × overlap days, store in a new `leave_deduction` column; total `deductions = advance_deduction + leave_deduction`).
+### ✅ SESSION 8 (2026-06-26) — HR 4b PHASE B: ADVANCE vs LEAVE DEDUCTION SEPARATION
+**Scope: HR 4b Phase B complete (B-1 + B-2). No leave-balance tracking (B-2 deferred).**
+- **Migration 1 (applied before PR-1):** Added `payroll_lines.advance_deduction numeric not null default 0`; backfilled existing rows from `deductions`; added CHECK constraint for future leave deduction field.
+- **Migration 2 (applied before PR-2):** Switched `realize_advance_repayments` trigger to read `advance_deduction` instead of `deductions` — advance settlement now correctly ignores leave withholding.
+- **PR-1 (`claude/b1-advance-deduction-plumbing` / PR #26 merged):** `handleCalculate` sets `advance_deduction = installment`; `handleApprove` persists it. No net-pay math changed.
+- **PR-2 (this PR — `claude/b1-unpaid-leave-deduction`):** Unpaid-leave deduction live on calendar-day basis. `leaveService.getUnpaidApprovedOverlapping(from, to)` fetches `md_approved + is_paid=false` leave rows whose date range overlaps the payroll period. For permanent staff: `leaveDeduction = totalOverlapDays × monthly_salary/daysInMonth` (same divisor as proration). Cap: if `advance_deduction + leaveDeduction > amount_due`, advance is reduced so net pay ≥ 0 (leave takes priority). `deductions = advance_deduction + leaveDeduction` stored in the existing `deductions` column; `advance_deduction` column holds the loan portion only. Breakdown visible in step-2 review table (Loan ₦X + Leave ₦Y) and in the run-detail payment table (derived as `deductions − advance_deduction`). Daily workers unchanged — absence already removes pay. No new DB column needed for `leave_deduction`; it is derived in the UI.
+- **Deferred — B-2 (leave-balance tracking):** Annual/sick leave balance accrual and carry-over tracking remains the next HR scope.
 
 ### ✅ SESSION 7 (2026-06-26) — PAYROLL STATE MACHINE, ADVANCES, LEAVE, SELF-SERVICE FOUNDATION
 - **Staff payroll (`payroll_runs`) state machine (PR #20).** draft → ico_approved → md_approved → paid (+recall) via `advance_staff_payroll` SECURITY DEFINER RPC + `trg_staff_payroll_guard` + `staff_payroll_audit`. UI gates per role: accountant creates (draft), ICO approves, MD approves, accountant/MD records payments. Net-pay default fixed (PR #22): `openRun` now pre-fills `amount_paid` as `max(0, amount_due − deductions)` so advance deductions are not double-counted; payment table shows read-only Deduction column.
