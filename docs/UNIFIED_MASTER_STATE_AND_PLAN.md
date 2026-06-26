@@ -19,6 +19,13 @@ App: APC Manager — internal ERP for Abuja Precast Concrete Limited
 
 ## 1. SESSION HISTORY (most recent first)
 
+### 🔄 SESSION 8 (2026-06-26) — HR 4b PHASE B: ADVANCE-DEDUCTION COLUMN PLUMBING
+**Scope: HR 4b Phase B, step 1 of 2 (advance-deduction column wiring). No leave-deduction logic yet.**
+- **Migration 1 (applied separately, not in this PR):** Added `payroll_lines.advance_deduction numeric not null default 0`; backfilled existing rows from `deductions`; added CHECK constraint for unpaid-leave deduction field (future).
+- **PR-1 (this PR — `claude/b1-advance-deduction-plumbing`):** `src/components/StaffHR.jsx` — `handleCalculate` now sets `advance_deduction: deductions` on each computed line object; `handleApprove` now persists `advance_deduction: l.advance_deduction ?? l.deductions ?? 0` into each `payroll_line` row. No net-pay math changed. `deductions` column left intact.
+- **Pending — Migration 2:** Switch `realize_advance_repayments` trigger to read `advance_deduction` instead of `deductions` when settling advances after `mark_paid`.
+- **Pending — PR-2:** Unpaid-leave deduction on a calendar-day basis (approved `md_approved` leave requests with `is_paid = false` overlapping the payroll period → prorate daily rate × overlap days, store in a new `leave_deduction` column; total `deductions = advance_deduction + leave_deduction`).
+
 ### ✅ SESSION 7 (2026-06-26) — PAYROLL STATE MACHINE, ADVANCES, LEAVE, SELF-SERVICE FOUNDATION
 - **Staff payroll (`payroll_runs`) state machine (PR #20).** draft → ico_approved → md_approved → paid (+recall) via `advance_staff_payroll` SECURITY DEFINER RPC + `trg_staff_payroll_guard` + `staff_payroll_audit`. UI gates per role: accountant creates (draft), ICO approves, MD approves, accountant/MD records payments. Net-pay default fixed (PR #22): `openRun` now pre-fills `amount_paid` as `max(0, amount_due − deductions)` so advance deductions are not double-counted; payment table shows read-only Deduction column.
 - **Salary advances — HR 4b-i (PR #21).** `salary_advances` table: `requested → ico_approved → md_approved → disbursed → settled` + `rejected` / `cancelled`. State machine via `advance_salary_advance` RPC + guard trigger + audit table. Repayment: `payroll_lines.deductions` column + AFTER-paid trigger `realize_advance_repayments` auto-settles on `mark_paid`. One outstanding disbursed advance per staff enforced by guard. Chain: HR officer/accountant/MD records request → ICO approves → MD approves → accountant/MD disburses. `AdvancesPage` in App.jsx; `src/services/advances.js`.
