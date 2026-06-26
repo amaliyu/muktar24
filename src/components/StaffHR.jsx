@@ -1380,7 +1380,7 @@ const PayrollTab = ({ userProfile }) => {
         }
         const adv = advanceMap[s.id];
         const deductions = adv ? Math.min(adv.installment_amount, adv.outstanding_balance) : 0;
-        return { staff_id: s.id, full_name: s.full_name, role: s.staffRole?.role_name || s.role || "—", staff_type: s.staff_type, days_present: daysPresent, daily_rate: s.daily_rate || 0, monthly_salary: s.monthly_salary || 0, amount_due: Math.round(amountDue), deductions };
+        return { staff_id: s.id, full_name: s.full_name, role: s.staffRole?.role_name || s.role || "—", staff_type: s.staff_type, days_present: daysPresent, daily_rate: s.daily_rate || 0, monthly_salary: s.monthly_salary || 0, amount_due: Math.round(amountDue), deductions, advance_deduction: deductions };
       });
       setCalcLines(lines);
       setStep(2);
@@ -1398,7 +1398,7 @@ const PayrollTab = ({ userProfile }) => {
     setSaving(true); setAlert(null);
     try {
       const run = { period_from: periodFrom, period_to: periodTo, run_date: today, total_daily_wages: totalDaily, total_permanent_salaries: totalPerm, total_payroll: grandTotal, prepared_by: preparedBy, status: "draft" };
-      const lines = calcLines.map(l => ({ staff_id: l.staff_id, staff_type: l.staff_type, days_present: l.days_present, daily_rate: l.daily_rate, monthly_salary: l.monthly_salary, amount_due: l.amount_due, deductions: l.deductions || 0 }));
+      const lines = calcLines.map(l => ({ staff_id: l.staff_id, staff_type: l.staff_type, days_present: l.days_present, daily_rate: l.daily_rate, monthly_salary: l.monthly_salary, amount_due: l.amount_due, deductions: l.deductions || 0, advance_deduction: l.advance_deduction ?? l.deductions ?? 0 }));
       await payrollService.createRun(run, lines);
       setAlert({ type: "success", msg: `Payroll run submitted for approval — ${naira(grandTotal)} total for ${calcLines.length} staff.` });
       setStep(1); setCalcLines([]); setView("history"); loadRuns();
