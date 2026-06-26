@@ -3,7 +3,7 @@
 
 Repo: `amaliyu/muktar24` (PRIVATE) · Prod branch: `main` · Stack: React 18 + Vite 5 + Supabase (PostgreSQL, RLS) + Vercel
 App: APC Manager — internal ERP for Abuja Precast Concrete Limited
-**Updated: 2026-06-25 (Session 6).** All DB state verified by live query, not memory.
+**Updated: 2026-06-26 (Session 7).** All DB state verified by live query, not memory.
 **Status: BETA. A physical/manual backup system runs in parallel — NO downtime pressure.**
 **Operating mode: SLOW AND VERIFIED — fix on a branch → test on the branch's Vercel preview AS THE AFFECTED ROLE → confirm with own eyes → MD merges → re-verify production.**
 
@@ -18,6 +18,14 @@ App: APC Manager — internal ERP for Abuja Precast Concrete Limited
 ---
 
 ## 1. SESSION HISTORY (most recent first)
+
+### ✅ SESSION 7 (2026-06-26) — PAYROLL STATE MACHINE, ADVANCES, LEAVE, SELF-SERVICE FOUNDATION
+- **Staff payroll (`payroll_runs`) state machine (PR #20).** draft → ico_approved → md_approved → paid (+recall) via `advance_staff_payroll` SECURITY DEFINER RPC + `trg_staff_payroll_guard` + `staff_payroll_audit`. UI gates per role: accountant creates (draft), ICO approves, MD approves, accountant/MD records payments. Net-pay default fixed (PR #22): `openRun` now pre-fills `amount_paid` as `max(0, amount_due − deductions)` so advance deductions are not double-counted; payment table shows read-only Deduction column.
+- **Salary advances — HR 4b-i (PR #21).** `salary_advances` table: `requested → ico_approved → md_approved → disbursed → settled` + `rejected` / `cancelled`. State machine via `advance_salary_advance` RPC + guard trigger + audit table. Repayment: `payroll_lines.deductions` column + AFTER-paid trigger `realize_advance_repayments` auto-settles on `mark_paid`. One outstanding disbursed advance per staff enforced by guard. Chain: HR officer/accountant/MD records request → ICO approves → MD approves → accountant/MD disburses. `AdvancesPage` in App.jsx; `src/services/advances.js`.
+- **Leave requests — HR 4b-ii (PR #23).** `leave_requests` table: `requested → ico_approved → md_approved` + `rejected` / `cancelled`. State machine via `advance_leave_request` RPC + guard + audit. Types: annual/sick/unpaid/compassionate/maternity; `is_paid` per request. Chain: HR/MD records → ICO approves → MD approves. `LeavePage` in App.jsx; `src/services/leave.js`. Attendance/payroll integration (Phase B — auto-deduct from salary on leave days, carry-over balance tracking) deferred.
+- **Self-service foundation (PR #24).** `user_profiles.staff_id` is the employee link; `current_staff_id()` resolver. Self-scoped RLS on `salary_advances` / `leave_requests` / `staff` (own-row SELECT + self-INSERT) — verified: own rows visible, others blocked. `on_auth_user_created` defaults new logins to role `staff`. `MyHRPage` (self-service, no staff picker, no approve buttons): profile header with name/title/employee number, ID Card + Business Card download, Request Advance form, Request Leave form, own advances and leave lists (all RLS-scoped). `src/services/me.js` (`getMyStaff()` via RLS). Role `staff` now routes to `my_hr` as landing page. Scope: permanent/salaried staff; daily workers remain HR-mediated.
+- **Also completed this session:** receipts UNIQUE + retry (PR #16), number-generator sweep (PR #15), `supabase.js` fail-loud on missing env vars (PR #18), LPO partial-state hardening (PR #17), invoices/payments amount leak (PR #14).
+- **Decisions recorded:** self-service for permanent staff only; logins tied to employee via `user_profiles.staff_id`; FUTURE: replace the 7 working role logins with official `@abujaprecast.com` manager emails (MD/ICO/BDM/logistics/production/store).
 
 ### ✅ SESSION 6 (2026-06-25) — SECURITY LEAK CLOSURES + LATENT-BUG GENERATOR SWEEP
 A focused hardening session executing the §4 latent-bug sweep and closing two RLS leaks the plan had not known about. All items per-role verified; DB changes applied via `apply_migration`.
@@ -116,21 +124,24 @@ A long, multi-workstream session. All items below tested and merged unless noted
 | 1 | G.1 quick-fixes | ✅ COMPLETE |
 | 2 | Payroll client cutover | ✅ COMPLETE |
 | 3 | RLS for remaining tables | ✅ baseline complete; **2 deeper leaks (staff-PII, invoices/payments) found & CLOSED in Session 6** |
-| 4 | HR modules | 4a ✅, 4d ✅. 4b/4c pending (decision-blocked) |
+| 4 | HR modules | 4a ✅, 4d ✅, 4b ✅ (DB+UI; Phase B deferred), 4c partial (self-service foundation ✅; disciplinary pending) |
 | 5 | Payment-request (revenue) + ingestion engine (Phase 1+) | Parked; Phase 0 done; after #4 |
 
 ### Phase 4 sub-roadmap
 - 4a lifecycle/onboarding — ✅ DONE.
 - 4d ID + business cards + photo — ✅ DONE (merged). Visual polish: accepted as functional; minor header-size nit optional.
-- 4b leave & salary-advance requests — PENDING (needs staff-payroll state-machine decision; payroll deduction + attendance integration).
-- 4c disciplinary/queries + staff self-service portal — PENDING (needs auth/access decision; most staff lack logins).
+- 4b leave & salary-advance requests — ✅ DB+UI DONE (Session 7). Phase B (attendance auto-deduction, leave-balance tracking) deferred.
+- 4c disciplinary/queries + staff self-service portal — **Self-service foundation ✅ (Session 7):** RLS, `current_staff_id()`, `MyHRPage`, `my_hr` page key, `meService`. Disciplinary/query module still pending.
 
 ---
 
 ## 4. KNOWN GAPS / FORWARD ITEMS
 - ✅ **Latent-bug sweep — DONE (Session 6).** All six number generators (invoice/waybill/receipt/supplier/batch/employee) audited and given collision handling; no quote/proforma/PO generator exists. Two RLS leaks (staff-PII, invoices/payments) found and closed. Per-role RLS verified for each.
-- **Silent Supabase client fallback** — `src/lib/supabase.js` falls back to placeholder URL/key if env vars are missing, failing silently as anon. NEXT FIX (own branch): make it throw on missing env. (Specced Session 6.)
-- **Staff payroll (`payroll_runs`/`payroll_lines`)** has role-scoped RLS but NO state machine; needs the trigger+RPC+audit pattern (mirror `advance_weekly_payroll`) if/when it gets an approval workflow. **This is the prerequisite that unblocks 4b.**
+- ✅ **Silent Supabase client fallback — DONE (PR #18, Session 6/7).** `src/lib/supabase.js` now throws immediately on missing `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` instead of falling back to placeholder.
+- ✅ **Staff payroll state machine — DONE (PR #20, Session 7).** `advance_staff_payroll` RPC + `trg_staff_payroll_guard` + `staff_payroll_audit`. Approval chain: accountant creates (draft) → ICO → MD → accountant/MD marks paid. Advance deductions integrated into `payroll_lines.deductions`; net-pay fix in `openRun`.
+- **HR 4b Phase B (deferred).** Leave attendance auto-deduction (salary reduced for unpaid leave days) and leave-balance tracking (annual leave entitlement carry-over) not yet built. Requires schema additions and integration with `attendanceService.getCountsByRange`.
+- **Disciplinary/query module (HR 4c).** Self-service foundation is live; the disciplinary notice / query-and-response flow is still pending.
+- **Manager email migration (future).** Current manager logins use personal emails. Planned: replace 7 role accounts with official `@abujaprecast.com` addresses (MD/ICO/BDM/logistics/production/store/HR).
 - **Orphaned staff photo files** in `staff-photos` bucket from deleted test staff — harmless; clear via Supabase dashboard (SQL delete blocked).
 - **Ransom (APC-EMP-018)** in onboarding — HR to complete checklist + activate when ready.
 - Original payroll trigger/RPC/audit objects not in tracked migration history (pre-discipline). Live & verified. Optional: capture as no-op migration.
@@ -138,7 +149,7 @@ A long, multi-workstream session. All items below tested and merged unless noted
 ---
 
 ## 5. DECISIONS / MILESTONES PENDING (MD)
-- **Staff-payroll approval chain (NEW — blocks 4b).** Decide who approves staff payroll runs (e.g., accountant → ICO → MD, mirroring weekly labour) before the state machine can be built.
+- ✅ **Staff-payroll approval chain — DECIDED & BUILT (Session 7).** accountant creates (draft) → ICO approves → MD approves → accountant/MD marks paid + records per-line amounts.
 - Go-live data re-entry milestone (parked) — clean opening balances; resolves dust kg→tons (~16.3t) gap & beta errors.
 - Correction-as-adjustment-movement rule (LOCKED) — corrections are new logged offsetting entries, never silent edits.
 - Attendance automation — design active (shared offline-first Android kiosk, face-as-token using enrolled ID-card photos, mandatory human confirmation before any pay sanction). Not built.
@@ -169,10 +180,11 @@ A long, multi-workstream session. All items below tested and merged unless noted
 | LPO partial-state | ✅ hardened (S6) | — |
 | HR 4a lifecycle | ✅ live | — |
 | HR 4d cards/photo | ✅ merged | optional header-size polish |
-| HR 4b leave/advances | pending | staff-payroll state-machine + approval-chain decision |
-| HR 4c disciplinary/self-service | pending | auth/access decision |
+| HR 4b advances | ✅ DB+UI (S7, PR #21/#22) | Phase B (payroll deduction live; leave-balance tracking deferred) |
+| HR 4b leave | ✅ DB+UI (S7, PR #23) | Phase B (attendance auto-deduction) deferred |
+| HR 4c self-service foundation | ✅ Stages 1+3 (S7, PR #24) | Stage 4 (disciplinary/query module) pending |
 | Invoice/logistics/waybill | ✅ fixed & live | — |
-| Silent supabase fallback | latent hazard | **NEXT** — fail-loud fix, own branch |
-| Staff-payroll state machine | not started | unblocks 4b; needs approval-chain decision |
-| Payment-request + ingestion (#5) | Phase 0 parked | after #4 |
+| Silent supabase fallback | ✅ fixed (PR #18) | — |
+| Staff-payroll state machine | ✅ live (S7, PR #20) | — |
+| Payment-request + ingestion (#5) | Phase 0 parked — **NEXT** | after #4 complete |
 | Go-live re-entry / dust gap | parked | MD triggers |
