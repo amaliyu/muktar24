@@ -20,7 +20,7 @@ App: APC Manager — internal ERP for Abuja Precast Concrete Limited
 ## 1. SESSION HISTORY (most recent first)
 
 ### ✅ SESSION 8 (2026-06-26) — HR 4b PHASE B: ADVANCE vs LEAVE DEDUCTION SEPARATION
-**Scope: HR 4b Phase B complete (B-1 + B-2). No leave-balance tracking (B-2 deferred).**
+**Scope: HR 4b Phase B-1 complete — unpaid-leave payroll deduction (calendar-day basis), advance vs leave deductions cleanly separated. B-2 (leave-balance tracking) NOT built — deferred to next session.**
 - **Migration 1 (applied before PR-1):** Added `payroll_lines.advance_deduction numeric not null default 0`; backfilled existing rows from `deductions`; added CHECK constraint for future leave deduction field.
 - **Migration 2 (applied before PR-2):** Switched `realize_advance_repayments` trigger to read `advance_deduction` instead of `deductions` — advance settlement now correctly ignores leave withholding.
 - **PR-1 (`claude/b1-advance-deduction-plumbing` / PR #26 merged):** `handleCalculate` sets `advance_deduction = installment`; `handleApprove` persists it. No net-pay math changed.
@@ -132,7 +132,7 @@ A long, multi-workstream session. All items below tested and merged unless noted
 | 1 | G.1 quick-fixes | ✅ COMPLETE |
 | 2 | Payroll client cutover | ✅ COMPLETE |
 | 3 | RLS for remaining tables | ✅ baseline complete; **2 deeper leaks (staff-PII, invoices/payments) found & CLOSED in Session 6** |
-| 4 | HR modules | 4a ✅, 4d ✅, 4b ✅ (DB+UI; Phase B deferred), 4c partial (self-service foundation ✅; disciplinary pending) |
+| 4 | HR modules | 4a ✅, 4d ✅, 4b ✅ (DB+UI + B-1 unpaid-leave deduction); B-2 leave-balance tracking deferred, 4c partial (self-service foundation ✅; disciplinary pending) |
 | 5 | Payment-request (revenue) + ingestion engine (Phase 1+) | Parked; Phase 0 done; after #4 |
 
 ### Phase 4 sub-roadmap
