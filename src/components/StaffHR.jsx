@@ -3,6 +3,7 @@ import { staffService } from '../services/staff';
 import { attendanceService, payrollService } from '../services/attendance';
 import { advancesService } from '../services/advances';
 import { leaveService } from '../services/leave';
+import { leaveBalanceService } from '../services/leaveBalance';
 import { rolesService, documentsService, hrStaffService, photoService } from '../services/hrService';
 import { generatePayrollPDF } from '../utils/generatePayrollPDF';
 import { generateIDCardPDF, generateBusinessCardPDF } from '../utils/cardGenerator';
@@ -1329,6 +1330,196 @@ const AttendanceTab = () => {
   );
 };
 
+// ── LEAVE BALANCES TAB ────────────────────────────────────────
+const LeaveBalancesTab = ({ userProfile }) => {
+  const isMD = userProfile?.role === 'md';
+  const currentYear = new Date().getFullYear();
+
+  const [policy, setPolicy] = useState(null);
+  const [balances, setBalances] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [alert, setAlert] = useState(null);
+  const [seeding, setSeeding] = useState(false);
+  const [activating, setActivating] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(null);
+  const [entitlementEdits, setEntitlementEdits] = useState({});
+  const [savingKey, setSavingKey] = useState(null);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [p, b] = await Promise.all([
+        leaveBalanceService.getPolicySettings(),
+        leaveBalanceService.getBalances(currentYear),
+      ]);
+      setPolicy(p);
+      setBalances(b);
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const handleSeed = async () => {
+    setSeeding(true); setAlert(null);
+    try {
+      await leaveBalanceService.seedDraft(currentYear);
+      await load();
+      setAlert({ type: 'success', msg: `Draft balances seeded for ${currentYear} — review and edit entitlements, then activate.` });
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setSeeding(false); }
+  };
+
+  const handleSetActive = async (active) => {
+    setActivating(true); setAlert(null); setShowConfirm(null);
+    try {
+      await leaveBalanceService.setPolicyActive(active);
+      await load();
+      setAlert({ type: 'success', msg: active ? 'Leave policy is now active — balances will update as leave is approved.' : 'Leave policy deactivated.' });
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setActivating(false); }
+  };
+
+  const handleSaveEntitlement = async (staffId, leaveType, days) => {
+    const key = `${staffId}_${leaveType}`;
+    setSavingKey(key); setAlert(null);
+    try {
+      await leaveBalanceService.setEntitlement(staffId, currentYear, leaveType, Number(days));
+      setEntitlementEdits(ed => { const n = { ...ed }; delete n[key]; return n; });
+      await load();
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setSavingKey(null); }
+  };
+
+  const byStaff = {};
+  for (const row of balances) {
+    const sid = row.staff_id;
+    if (!byStaff[sid]) byStaff[sid] = { name: row.staff?.full_name || '—', annual: null, sick: null };
+    if (row.leave_type === 'annual') byStaff[sid].annual = row;
+    if (row.leave_type === 'sick') byStaff[sid].sick = row;
+  }
+  const staffRows = Object.entries(byStaff);
+  const policyActive = policy?.active === true;
+
+  return (
+    <div>
+      {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
+
+      {isMD && (
+        <div style={{ ...styles.card, marginBottom: '20px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
+            <div>
+              <div style={styles.sectionTitle}>Leave Policy — {currentYear}</div>
+              <div style={{ fontSize: '13px', color: theme.textMuted }}>Defaults: 15 annual days / 12 sick days / 5 carry-over days</div>
+            </div>
+            <span style={styles.badge(policyActive ? theme.green : theme.textMuted)}>{policyActive ? '● Active' : '○ Inactive'}</span>
+          </div>
+          {policyActive && policy?.activated_at && (
+            <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '12px' }}>
+              Activated {new Date(policy.activated_at).toLocaleString()}
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+            {!policyActive && (
+              <button style={styles.btn('secondary')} onClick={handleSeed} disabled={seeding}>
+                {seeding ? 'Seeding…' : `⊕ Seed Draft (${currentYear})`}
+              </button>
+            )}
+            {showConfirm === 'activate' ? (
+              <>
+                <span style={{ fontSize: '13px', color: theme.text }}>Activate for {currentYear}? Balances will start tracking from now.</span>
+                <button style={styles.btn('primary')} onClick={() => handleSetActive(true)} disabled={activating}>{activating ? 'Activating…' : 'Confirm Activate'}</button>
+                <button style={styles.btn('secondary')} onClick={() => setShowConfirm(null)}>Cancel</button>
+              </>
+            ) : showConfirm === 'deactivate' ? (
+              <>
+                <span style={{ fontSize: '13px', color: theme.text }}>Deactivate leave policy?</span>
+                <button style={{ ...styles.btn('secondary'), borderColor: theme.red, color: theme.red }} onClick={() => handleSetActive(false)} disabled={activating}>{activating ? 'Deactivating…' : 'Confirm Deactivate'}</button>
+                <button style={styles.btn('secondary')} onClick={() => setShowConfirm(null)}>Cancel</button>
+              </>
+            ) : (
+              <>
+                {!policyActive && balances.length > 0 && (
+                  <button style={styles.btn('primary')} onClick={() => setShowConfirm('activate')}>✓ Activate Policy</button>
+                )}
+                {policyActive && (
+                  <button style={{ ...styles.btn('secondary'), borderColor: theme.red, color: theme.red }} onClick={() => setShowConfirm('deactivate')}>Deactivate</button>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div style={styles.card}>
+        <div style={styles.sectionTitle}>Leave Balances {currentYear}</div>
+        {loading ? <Spinner /> : staffRows.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '32px', color: theme.textMuted }}>
+            {isMD ? `No balances yet — click "Seed Draft (${currentYear})" to create entries for all permanent staff.` : 'Leave balances not yet set up.'}
+          </div>
+        ) : (
+          <table style={styles.table}>
+            <thead>
+              <tr>
+                {['Staff','Ann. Entitled','Ann. Used','Ann. Balance','Sick Entitled','Sick Used','Sick Balance'].map(h => <th key={h} style={styles.th}>{h}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {staffRows.map(([staffId, row]) => {
+                const ann = row.annual, sick = row.sick;
+                const annBal = ann != null ? ann.balance : null;
+                const sickBal = sick != null ? sick.balance : null;
+                const annKey = `${staffId}_annual`, sickKey = `${staffId}_sick`;
+                return (
+                  <tr key={staffId}>
+                    <td style={styles.td}><strong>{row.name}</strong></td>
+                    <td style={styles.td}>
+                      {isMD && !policyActive && ann ? (
+                        <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                          <input style={{ ...styles.input, width: '60px', padding: '4px 6px' }} type="number" min="0"
+                            value={entitlementEdits[annKey] ?? ann.entitled_days}
+                            onChange={e => setEntitlementEdits(ed => ({ ...ed, [annKey]: e.target.value }))} />
+                          {entitlementEdits[annKey] !== undefined && (
+                            <button style={{ ...styles.btn('primary'), fontSize: '11px', padding: '3px 7px' }}
+                              onClick={() => handleSaveEntitlement(staffId, 'annual', entitlementEdits[annKey])}
+                              disabled={savingKey === annKey}>{savingKey === annKey ? '…' : '✓'}</button>
+                          )}
+                        </div>
+                      ) : <span>{ann?.entitled_days ?? '—'}</span>}
+                    </td>
+                    <td style={styles.td}>{ann?.used_days ?? '—'}</td>
+                    <td style={styles.td}>
+                      {annBal !== null ? <strong style={{ color: annBal < 0 ? theme.red : theme.green }}>{annBal}{annBal < 0 ? ' ⚠' : ''}</strong> : '—'}
+                    </td>
+                    <td style={styles.td}>
+                      {isMD && !policyActive && sick ? (
+                        <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                          <input style={{ ...styles.input, width: '60px', padding: '4px 6px' }} type="number" min="0"
+                            value={entitlementEdits[sickKey] ?? sick.entitled_days}
+                            onChange={e => setEntitlementEdits(ed => ({ ...ed, [sickKey]: e.target.value }))} />
+                          {entitlementEdits[sickKey] !== undefined && (
+                            <button style={{ ...styles.btn('primary'), fontSize: '11px', padding: '3px 7px' }}
+                              onClick={() => handleSaveEntitlement(staffId, 'sick', entitlementEdits[sickKey])}
+                              disabled={savingKey === sickKey}>{savingKey === sickKey ? '…' : '✓'}</button>
+                          )}
+                        </div>
+                      ) : <span>{sick?.entitled_days ?? '—'}</span>}
+                    </td>
+                    <td style={styles.td}>{sick?.used_days ?? '—'}</td>
+                    <td style={styles.td}>
+                      {sickBal !== null ? <strong style={{ color: sickBal < 0 ? theme.red : theme.green }}>{sickBal}{sickBal < 0 ? ' ⚠' : ''}</strong> : '—'}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+};
+
 // ── PAYROLL TAB ───────────────────────────────────────────────
 const PayrollTab = ({ userProfile }) => {
   const today = new Date().toISOString().split("T")[0];
@@ -1879,15 +2070,16 @@ const Staff = ({ userProfile }) => {
         </div>
       </div>
       <div style={{ display: "flex", gap: "8px", marginBottom: "24px", borderBottom: `1px solid ${theme.border}`, paddingBottom: "12px" }}>
-        {[["directory","Staff Directory"],["onboarding","Onboarding"],["attendance","Attendance"],["payroll","Payroll"],["roles","Roles"]].map(([id, label]) => (
+        {[["directory","Staff Directory"],["onboarding","Onboarding"],["attendance","Attendance"],["payroll","Payroll"],["leave_balances","Leave Balances"],["roles","Roles"]].map(([id, label]) => (
           <button key={id} style={{ ...styles.btn(tab === id ? "primary" : "secondary"), fontSize: "13px" }} onClick={() => setTab(id)}>{label}</button>
         ))}
       </div>
-      {tab === "directory"  && <StaffDirectory onViewProfile={setProfileStaffId} roles={roles} />}
-      {tab === "onboarding" && <OnboardingTab />}
-      {tab === "attendance" && <AttendanceTab />}
-      {tab === "payroll"    && <PayrollTab userProfile={userProfile} />}
-      {tab === "roles"      && <RolesTab />}
+      {tab === "directory"     && <StaffDirectory onViewProfile={setProfileStaffId} roles={roles} />}
+      {tab === "onboarding"    && <OnboardingTab />}
+      {tab === "attendance"    && <AttendanceTab />}
+      {tab === "payroll"       && <PayrollTab userProfile={userProfile} />}
+      {tab === "leave_balances" && <LeaveBalancesTab userProfile={userProfile} />}
+      {tab === "roles"         && <RolesTab />}
     </div>
   );
 };

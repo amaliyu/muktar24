@@ -19,13 +19,16 @@ App: APC Manager — internal ERP for Abuja Precast Concrete Limited
 
 ## 1. SESSION HISTORY (most recent first)
 
-### ✅ SESSION 8 (2026-06-26) — HR 4b PHASE B: ADVANCE vs LEAVE DEDUCTION SEPARATION
-**Scope: HR 4b Phase B-1 complete — unpaid-leave payroll deduction (calendar-day basis), advance vs leave deductions cleanly separated. B-2 (leave-balance tracking) NOT built — deferred to next session.**
-- **Migration 1 (applied before PR-1):** Added `payroll_lines.advance_deduction numeric not null default 0`; backfilled existing rows from `deductions`; added CHECK constraint for future leave deduction field.
-- **Migration 2 (applied before PR-2):** Switched `realize_advance_repayments` trigger to read `advance_deduction` instead of `deductions` — advance settlement now correctly ignores leave withholding.
-- **PR-1 (`claude/b1-advance-deduction-plumbing` / PR #26 merged):** `handleCalculate` sets `advance_deduction = installment`; `handleApprove` persists it. No net-pay math changed.
-- **PR-2 (this PR — `claude/b1-unpaid-leave-deduction`):** Unpaid-leave deduction live on calendar-day basis. `leaveService.getUnpaidApprovedOverlapping(from, to)` fetches `md_approved + is_paid=false` leave rows whose date range overlaps the payroll period. For permanent staff: `leaveDeduction = totalOverlapDays × monthly_salary/daysInMonth` (same divisor as proration). Cap: if `advance_deduction + leaveDeduction > amount_due`, advance is reduced so net pay ≥ 0 (leave takes priority). `deductions = advance_deduction + leaveDeduction` stored in the existing `deductions` column; `advance_deduction` column holds the loan portion only. Breakdown visible in step-2 review table (Loan ₦X + Leave ₦Y) and in the run-detail payment table (derived as `deductions − advance_deduction`). Daily workers unchanged — absence already removes pay. No new DB column needed for `leave_deduction`; it is derived in the UI.
-- **Deferred — B-2 (leave-balance tracking):** Annual/sick leave balance accrual and carry-over tracking remains the next HR scope.
+### 🔄 SESSION 8 (2026-06-26) — HR 4b PHASE B: PAYROLL DEDUCTIONS + LEAVE-BALANCE UI
+**Scope: B-1 (payroll deductions) complete; B-2 (leave-balance tracking) underway this session.**
+- **Migration 1 (applied before PR-1):** Added `payroll_lines.advance_deduction numeric not null default 0`; backfilled from `deductions`.
+- **Migration 2 (applied before PR-2):** Switched `realize_advance_repayments` to read `advance_deduction` — advance settlement ignores leave withholding.
+- **PR-1 (PR #26, merged):** `handleCalculate` sets `advance_deduction = installment`; `handleApprove` persists it.
+- **PR-2 (PR #27, merged):** Unpaid-leave deduction on calendar-day basis. `deductions = advance_deduction + leaveDeduction`; breakdown shown in step-2 review and payment table.
+- **B-2 Migration (applied before PR-3):** Inert leave-balance ledger — `leave_policy_settings` (active=false), `staff_leave_balances`, RLS, `seed_leave_balances_draft`, `set_leave_entitlement`, `set_leave_policy_active` RPCs, `md_approved` trigger (no-ops while active=false).
+- **PR-3 (this PR — `claude/b2-leave-balances`):** `src/services/leaveBalance.js` wraps the six DB objects. `LeaveBalancesTab` added to StaffHR: MD policy panel (status, Seed Draft, editable entitlement table, Activate/Deactivate confirm); manager read-only balance table (entitled/used/balance, overdraw ⚠ flag — visual only, never blocks). `MyHRPage` gains "My Leave Balance" card: annual + sick entitled/used/balance, or "Leave balances not yet activated" if inactive or no row. Payroll handleCalculate/handleApprove untouched.
+- **MD activation pending post-merge:** Clicking "Activate Policy" in StaffHR → Leave Balances tab calls `set_leave_policy_active(true)` → trigger goes live.
+- **Deferred — carry-over automation:** Year-boundary carry-over script and future-hire pro-ration not yet built.
 
 ### ✅ SESSION 7 (2026-06-26) — PAYROLL STATE MACHINE, ADVANCES, LEAVE, SELF-SERVICE FOUNDATION
 - **Staff payroll (`payroll_runs`) state machine (PR #20).** draft → ico_approved → md_approved → paid (+recall) via `advance_staff_payroll` SECURITY DEFINER RPC + `trg_staff_payroll_guard` + `staff_payroll_audit`. UI gates per role: accountant creates (draft), ICO approves, MD approves, accountant/MD records payments. Net-pay default fixed (PR #22): `openRun` now pre-fills `amount_paid` as `max(0, amount_due − deductions)` so advance deductions are not double-counted; payment table shows read-only Deduction column.
