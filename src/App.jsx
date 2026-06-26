@@ -42,6 +42,7 @@ import { suppliersService, supplierTransactionsService } from './services/suppli
 import Labour from './components/Labour'
 import { advancesService } from './services/advances'
 import { leaveService } from './services/leave'
+import { leaveBalanceService } from './services/leaveBalance'
 import { meService } from './services/me'
 import { photoService } from './services/hrService'
 import { generateIDCardPDF, generateBusinessCardPDF } from './utils/cardGenerator'
@@ -7037,12 +7038,16 @@ const LeavePage = ({ userProfile }) => {
 
 // ── MY HR (SELF-SERVICE) ──────────────────────────────────────
 const MyHRPage = ({ userProfile }) => {
+  const currentYear = new Date().getFullYear();
   const [myStaff, setMyStaff] = useState(null);
   const [staffLoading, setStaffLoading] = useState(true);
   const [alert, setAlert] = useState(null);
   const [advances, setAdvances] = useState([]);
   const [leaves, setLeaves] = useState([]);
   const [listLoading, setListLoading] = useState(true);
+  const [myBalance, setMyBalance] = useState([]);
+  const [policyActive, setPolicyActive] = useState(false);
+  const [balanceLoading, setBalanceLoading] = useState(true);
   const [showAdvForm, setShowAdvForm] = useState(false);
   const [advForm, setAdvForm] = useState({ amount: '', reason: '', installments: '1' });
   const [advSaving, setAdvSaving] = useState(false);
@@ -7053,7 +7058,7 @@ const MyHRPage = ({ userProfile }) => {
   const [bizCardLoading, setBizCardLoading] = useState(false);
 
   const loadAll = async () => {
-    setStaffLoading(true); setListLoading(true);
+    setStaffLoading(true); setListLoading(true); setBalanceLoading(true);
     try {
       const staff = await meService.getMyStaff();
       setMyStaff(staff);
@@ -7064,6 +7069,15 @@ const MyHRPage = ({ userProfile }) => {
       setAdvances(adv); setLeaves(leave);
     } catch (e) { setAlert({ type: 'error', msg: e.message }); }
     finally { setListLoading(false); }
+    try {
+      const [pol, bal] = await Promise.all([
+        leaveBalanceService.getPolicySettings(),
+        leaveBalanceService.getMyBalance(currentYear),
+      ]);
+      setPolicyActive(pol?.active === true);
+      setMyBalance(bal);
+    } catch (_) { /* leave balance not critical — fail silently */ }
+    finally { setBalanceLoading(false); }
   };
 
   useEffect(() => { loadAll(); }, []);
@@ -7146,6 +7160,27 @@ const MyHRPage = ({ userProfile }) => {
           </div>
         </div>
       )}
+
+      <div style={{ ...styles.card, marginBottom: '20px' }}>
+        <div style={styles.sectionTitle}>My Leave Balance ({currentYear})</div>
+        {balanceLoading ? <div style={{ color: theme.textMuted, fontSize: '13px' }}>Loading…</div>
+          : (!policyActive || myBalance.length === 0) ? (
+          <div style={{ color: theme.textMuted, fontSize: '13px' }}>Leave balances not yet activated.</div>
+        ) : (
+          <div style={{ display: 'flex', gap: '28px', flexWrap: 'wrap' }}>
+            {myBalance.filter(b => b.leave_type === 'annual' || b.leave_type === 'sick').map(b => {
+              const bal = b.entitled_days - b.used_days;
+              return (
+                <div key={b.leave_type}>
+                  <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{b.leave_type.charAt(0).toUpperCase() + b.leave_type.slice(1)}</div>
+                  <div style={{ fontSize: '26px', fontWeight: '700', color: bal < 0 ? theme.red : theme.green, marginTop: '4px' }}>{bal}{bal < 0 ? ' ⚠' : ''}</div>
+                  <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '2px' }}>{b.used_days} used / {b.entitled_days} entitled</div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
         <div style={styles.sectionTitle}>My Advances</div>
