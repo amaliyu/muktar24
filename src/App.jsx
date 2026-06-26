@@ -42,6 +42,9 @@ import { suppliersService, supplierTransactionsService } from './services/suppli
 import Labour from './components/Labour'
 import { advancesService } from './services/advances'
 import { leaveService } from './services/leave'
+import { meService } from './services/me'
+import { photoService } from './services/hrService'
+import { generateIDCardPDF, generateBusinessCardPDF } from './utils/cardGenerator'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 
@@ -133,7 +136,7 @@ const ROLE_PAGES = {
   // legacy roles — kept for any existing users
   operations:         ['dashboard','production','inventory','batches','waybills','vehicles','pending_register','daily_schedule','lpo_approvals','my_profile'],
   sales:              ['dashboard','customers','orders','my_profile'],
-  staff:              ['dashboard','my_profile'],
+  staff:              ['my_hr','my_profile'],
 };
 
 // ── UI HELPERS ───────────────────────────────────────────────
@@ -7032,6 +7035,198 @@ const LeavePage = ({ userProfile }) => {
   );
 };
 
+// ── MY HR (SELF-SERVICE) ──────────────────────────────────────
+const MyHRPage = ({ userProfile }) => {
+  const [myStaff, setMyStaff] = useState(null);
+  const [staffLoading, setStaffLoading] = useState(true);
+  const [alert, setAlert] = useState(null);
+  const [advances, setAdvances] = useState([]);
+  const [leaves, setLeaves] = useState([]);
+  const [listLoading, setListLoading] = useState(true);
+  const [showAdvForm, setShowAdvForm] = useState(false);
+  const [advForm, setAdvForm] = useState({ amount: '', reason: '', installments: '1' });
+  const [advSaving, setAdvSaving] = useState(false);
+  const [showLeaveForm, setShowLeaveForm] = useState(false);
+  const [leaveForm, setLeaveForm] = useState({ leave_type: 'annual', is_paid: true, start_date: '', end_date: '', days: '', reason: '' });
+  const [leaveSaving, setLeaveSaving] = useState(false);
+  const [cardLoading, setCardLoading] = useState(false);
+  const [bizCardLoading, setBizCardLoading] = useState(false);
+
+  const loadAll = async () => {
+    setStaffLoading(true); setListLoading(true);
+    try {
+      const staff = await meService.getMyStaff();
+      setMyStaff(staff);
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setStaffLoading(false); }
+    try {
+      const [adv, leave] = await Promise.all([advancesService.list(), leaveService.list()]);
+      setAdvances(adv); setLeaves(leave);
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setListLoading(false); }
+  };
+
+  useEffect(() => { loadAll(); }, []);
+
+  const setLeaveField = (field, value) => {
+    setLeaveForm(f => {
+      const next = { ...f, [field]: value };
+      if (field === 'start_date' || field === 'end_date') {
+        const auto = calcLeaveDays(next.start_date, next.end_date);
+        if (auto) next.days = auto;
+      }
+      return next;
+    });
+  };
+
+  const handleCreateAdvance = async () => {
+    if (!advForm.amount || !advForm.reason)
+      return setAlert({ type: 'error', msg: 'Amount and reason are required.' });
+    setAdvSaving(true); setAlert(null);
+    try {
+      await advancesService.create({ staff_id: myStaff.id, amount: Number(advForm.amount), reason: advForm.reason, installments: Number(advForm.installments) || 1, requested_by: userProfile?.full_name || 'Admin' });
+      setAdvForm({ amount: '', reason: '', installments: '1' });
+      setShowAdvForm(false);
+      setAlert({ type: 'success', msg: 'Advance request submitted.' });
+      advancesService.list().then(setAdvances).catch(() => {});
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setAdvSaving(false); }
+  };
+
+  const handleCreateLeave = async () => {
+    if (!leaveForm.start_date || !leaveForm.end_date || !leaveForm.days)
+      return setAlert({ type: 'error', msg: 'Dates and days are required.' });
+    setLeaveSaving(true); setAlert(null);
+    try {
+      await leaveService.create({ staff_id: myStaff.id, leave_type: leaveForm.leave_type, is_paid: leaveForm.is_paid, start_date: leaveForm.start_date, end_date: leaveForm.end_date, days: Number(leaveForm.days), reason: leaveForm.reason, requested_by: userProfile?.full_name || 'Admin' });
+      setLeaveForm({ leave_type: 'annual', is_paid: true, start_date: '', end_date: '', days: '', reason: '' });
+      setShowLeaveForm(false);
+      setAlert({ type: 'success', msg: 'Leave request submitted.' });
+      leaveService.list().then(setLeaves).catch(() => {});
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setLeaveSaving(false); }
+  };
+
+  const handleDownloadIDCard = async () => {
+    setCardLoading(true); setAlert(null);
+    try {
+      let photoUrl = null;
+      if (myStaff?.photo_path) photoUrl = await photoService.getSignedUrl(myStaff.photo_path);
+      await generateIDCardPDF(myStaff, photoUrl);
+    } catch (e) { setAlert({ type: 'error', msg: 'ID card error: ' + e.message }); }
+    finally { setCardLoading(false); }
+  };
+
+  const handleDownloadBizCard = async () => {
+    setBizCardLoading(true); setAlert(null);
+    try { await generateBusinessCardPDF(myStaff); }
+    catch (e) { setAlert({ type: 'error', msg: 'Business card error: ' + e.message }); }
+    finally { setBizCardLoading(false); }
+  };
+
+  const advStatusColor = s => s === 'disbursed' ? theme.green : s === 'md_approved' ? theme.blue : s === 'ico_approved' ? theme.accent : s === 'settled' ? theme.textMuted : (s === 'rejected' || s === 'cancelled') ? theme.red : theme.textMuted;
+  const leaveStatusColor = s => s === 'md_approved' ? theme.green : s === 'ico_approved' ? theme.blue : (s === 'rejected' || s === 'cancelled') ? theme.red : theme.textMuted;
+
+  return (
+    <div>
+      {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
+      <div style={styles.header}>
+        <div><div style={styles.pageTitle}>My HR</div><div style={styles.pageSubtitle}>Your leave and advance requests</div></div>
+      </div>
+
+      {!staffLoading && myStaff && (
+        <div style={{ ...styles.card, marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+          <div>
+            <div style={{ fontSize: '18px', fontWeight: '700' }}>{myStaff.full_name}</div>
+            <div style={{ fontSize: '13px', color: theme.textMuted, marginTop: '4px' }}>{myStaff.job_title || myStaff.role || '—'} · {myStaff.employee_number || '—'}</div>
+          </div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button style={{ ...styles.btn('secondary'), fontSize: '12px' }} onClick={handleDownloadIDCard} disabled={cardLoading}>{cardLoading ? 'Generating…' : '↓ ID Card'}</button>
+            <button style={{ ...styles.btn('secondary'), fontSize: '12px' }} onClick={handleDownloadBizCard} disabled={bizCardLoading}>{bizCardLoading ? 'Generating…' : '↓ Business Card'}</button>
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+        <div style={styles.sectionTitle}>My Advances</div>
+        <button style={{ ...styles.btn(showAdvForm ? 'secondary' : 'primary'), fontSize: '12px' }} onClick={() => setShowAdvForm(v => !v)} disabled={!myStaff}>{showAdvForm ? '✕ Cancel' : '+ Request Advance'}</button>
+      </div>
+      {showAdvForm && (
+        <div style={{ ...styles.card, marginBottom: '16px' }}>
+          <div style={styles.grid(3)}>
+            <div style={styles.formGroup}><label style={styles.label}>Amount (₦)</label><input style={styles.input} type="number" placeholder="0" value={advForm.amount} onChange={e => setAdvForm(f => ({ ...f, amount: e.target.value }))} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Installments</label><input style={styles.input} type="number" min="1" placeholder="1" value={advForm.installments} onChange={e => setAdvForm(f => ({ ...f, installments: e.target.value }))} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Reason</label><input style={styles.input} placeholder="Reason…" value={advForm.reason} onChange={e => setAdvForm(f => ({ ...f, reason: e.target.value }))} /></div>
+          </div>
+          <button style={styles.btn('primary')} onClick={handleCreateAdvance} disabled={advSaving}>{advSaving ? 'Submitting…' : 'Submit'}</button>
+        </div>
+      )}
+      <div style={{ ...styles.card, marginBottom: '24px' }}>
+        {listLoading ? <Spinner /> : advances.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '20px', color: theme.textMuted }}>No advance requests yet.</div>
+        ) : (
+          <table style={styles.table}>
+            <thead><tr>{['Amount','Installments','Outstanding','Reason','Status'].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
+            <tbody>{advances.map(adv => (
+              <tr key={adv.id}>
+                <td style={styles.td}><strong style={{ color: theme.accent }}>{naira(adv.amount)}</strong></td>
+                <td style={styles.td}>{adv.installments || 1}</td>
+                <td style={styles.td}>{(adv.outstanding_balance || 0) > 0 ? <strong style={{ color: theme.red }}>{naira(adv.outstanding_balance)}</strong> : <span style={{ color: theme.textMuted }}>—</span>}</td>
+                <td style={styles.td}>{adv.reason || '—'}</td>
+                <td style={styles.td}><span style={styles.badge(advStatusColor(adv.status))}>{adv.status}</span></td>
+              </tr>
+            ))}</tbody>
+          </table>
+        )}
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+        <div style={styles.sectionTitle}>My Leave</div>
+        <button style={{ ...styles.btn(showLeaveForm ? 'secondary' : 'primary'), fontSize: '12px' }} onClick={() => setShowLeaveForm(v => !v)} disabled={!myStaff}>{showLeaveForm ? '✕ Cancel' : '+ Request Leave'}</button>
+      </div>
+      {showLeaveForm && (
+        <div style={{ ...styles.card, marginBottom: '16px' }}>
+          <div style={styles.grid(3)}>
+            <div style={styles.formGroup}><label style={styles.label}>Leave Type</label><select style={styles.input} value={leaveForm.leave_type} onChange={e => setLeaveField('leave_type', e.target.value)}>{LEAVE_TYPES.map(t => <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>)}</select></div>
+            <div style={styles.formGroup}><label style={styles.label}>Start Date</label><input type="date" style={styles.input} value={leaveForm.start_date} onChange={e => setLeaveField('start_date', e.target.value)} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>End Date</label><input type="date" style={styles.input} value={leaveForm.end_date} onChange={e => setLeaveField('end_date', e.target.value)} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Days</label><input type="number" min="1" style={styles.input} value={leaveForm.days} onChange={e => setLeaveField('days', e.target.value)} placeholder="Auto-filled" /></div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Paid Leave?</label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', paddingTop: '10px' }}>
+                <input type="checkbox" checked={leaveForm.is_paid} onChange={e => setLeaveField('is_paid', e.target.checked)} style={{ width: '16px', height: '16px', accentColor: theme.accent }} />
+                <span style={{ fontSize: '13px', color: theme.text }}>Yes — paid</span>
+              </div>
+            </div>
+            <div style={styles.formGroup}><label style={styles.label}>Reason</label><input style={styles.input} placeholder="Reason…" value={leaveForm.reason} onChange={e => setLeaveField('reason', e.target.value)} /></div>
+          </div>
+          <button style={styles.btn('primary')} onClick={handleCreateLeave} disabled={leaveSaving}>{leaveSaving ? 'Submitting…' : 'Submit'}</button>
+        </div>
+      )}
+      <div style={styles.card}>
+        {listLoading ? <Spinner /> : leaves.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '20px', color: theme.textMuted }}>No leave requests yet.</div>
+        ) : (
+          <table style={styles.table}>
+            <thead><tr>{['Type','Paid?','Start','End','Days','Reason','Status'].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
+            <tbody>{leaves.map(req => (
+              <tr key={req.id}>
+                <td style={styles.td}><span style={styles.badge(theme.accent)}>{req.leave_type}</span></td>
+                <td style={styles.td}>{req.is_paid ? <span style={{ color: theme.green, fontWeight: '600' }}>Yes</span> : <span style={{ color: theme.textMuted }}>No</span>}</td>
+                <td style={styles.td}>{req.start_date || '—'}</td>
+                <td style={styles.td}>{req.end_date || '—'}</td>
+                <td style={styles.td}><strong>{req.days ?? '—'}</strong></td>
+                <td style={styles.td}>{req.reason || '—'}</td>
+                <td style={styles.td}><span style={styles.badge(leaveStatusColor(req.status))}>{req.status}</span></td>
+              </tr>
+            ))}</tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+};
+
 // ── NAV ───────────────────────────────────────────────────────
 const navItems = [
   { section: "Overview", items: [{ id: "dashboard", label: "Dashboard", icon: "dashboard" }] },
@@ -7065,6 +7260,7 @@ const navItems = [
     { id: "user_management", label: "User Management", icon: "staff" },
   ]},
   { section: "Account", items: [
+    { id: "my_hr", label: "My HR", icon: "staff" },
     { id: "my_profile", label: "My Profile", icon: "staff" },
   ]},
 ];
@@ -7462,7 +7658,7 @@ export default function App() {
   const visibleNav = navItems
     .map(s => ({ ...s, items: s.items.filter(it => canSee(it.id)) }))
     .filter(s => s.items.length > 0);
-  const safePage = canSee(active) ? active : 'dashboard';
+  const safePage = canSee(active) ? active : (visibleNav[0]?.items[0]?.id || 'dashboard');
 
   const pages = {
     dashboard: isBoard ? <BoardDashboard userProfile={userProfile} /> : <Dashboard onNavigate={setActive} userProfile={userProfile} />,
@@ -7488,6 +7684,7 @@ export default function App() {
     labour: <Labour userProfile={userProfile} />,
     advances: <AdvancesPage userProfile={userProfile} />,
     leave: <LeavePage userProfile={userProfile} />,
+    my_hr: <MyHRPage userProfile={userProfile} />,
     my_profile: <MyProfile userProfile={userProfile} />,
   };
 
