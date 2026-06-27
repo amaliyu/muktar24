@@ -4,10 +4,17 @@ export const leaveService = {
   async list() {
     const { data, error } = await supabase
       .from('leave_requests')
-      .select('*, staff:staff_id(full_name)')
+      .select('*')
       .order('created_at', { ascending: false });
     if (error) throw error;
-    return data || [];
+    const rows = data || [];
+    const ids = [...new Set(rows.map(r => r.staff_id).filter(Boolean))];
+    if (ids.length) {
+      const { data: staffRows } = await supabase.from('staff_public').select('id, full_name').in('id', ids);
+      const map = Object.fromEntries((staffRows || []).map(s => [s.id, s.full_name]));
+      for (const row of rows) row.staff = { full_name: map[row.staff_id] || null };
+    }
+    return rows;
   },
 
   async create({ staff_id, leave_type, is_paid, start_date, end_date, days, reason, requested_by }) {

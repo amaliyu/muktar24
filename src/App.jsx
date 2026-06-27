@@ -7160,6 +7160,11 @@ const MyHRPage = ({ userProfile }) => {
           </div>
         </div>
       )}
+      {!staffLoading && !myStaff && (
+        <div style={{ ...styles.card, marginBottom: '20px', color: theme.textMuted, fontSize: '13px' }}>
+          No staff profile is linked to this account.
+        </div>
+      )}
 
       <div style={{ ...styles.card, marginBottom: '20px' }}>
         <div style={styles.sectionTitle}>My Leave Balance ({currentYear})</div>
@@ -7783,7 +7788,7 @@ export default function App() {
         </div>
       </div>
       {showChangePwd && <ChangePasswordModal onClose={() => setShowChangePwd(false)} />}
-      <main style={{ ...styles.main, ...(isMobile ? { marginLeft: 0, padding: '16px 14px', paddingTop: '58px' } : {}) }} {...(isBoard ? { 'data-board-view': 'true' } : {})} {...(isICO && safePage !== 'labour' && safePage !== 'schedule_approvals' ? { 'data-ico-view': 'true' } : {})}>
+      <main style={{ ...styles.main, ...(isMobile ? { marginLeft: 0, padding: '16px 14px', paddingTop: '58px' } : {}) }} {...(isBoard ? { 'data-board-view': 'true' } : {})} {...(isICO && safePage !== 'labour' && safePage !== 'schedule_approvals' && safePage !== 'advances' && safePage !== 'leave' ? { 'data-ico-view': 'true' } : {})}>
         {/* Mobile hamburger */}
         {isMobile && (
           <button data-board-allow data-ico-allow onClick={() => setSidebarOpen(s => !s)} style={{ position: 'fixed', top: '12px', left: '12px', zIndex: 250, background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '8px', padding: '8px 12px', cursor: 'pointer', fontSize: '18px', color: theme.text, lineHeight: 1, boxShadow: '0 2px 8px rgba(0,0,0,0.3)' }}>☰</button>
@@ -7814,7 +7819,7 @@ export default function App() {
             👁 View Only Mode — Board Member access
           </div>
         )}
-        {isICO && active !== 'dashboard' && active !== 'schedule_approvals' && active !== 'labour' && (
+        {isICO && active !== 'dashboard' && active !== 'schedule_approvals' && active !== 'labour' && active !== 'advances' && active !== 'leave' && (
           <div style={{ background: theme.blue+'22', border: `1px solid ${theme.blue}44`, borderRadius: '8px', padding: '8px 16px', margin: '0 0 16px', fontSize: '12px', color: theme.blue, fontWeight: '600' }}>
             🔒 Read-Only Mode — Internal Control Officer. Approvals available in Schedule Approvals and Labour modules.
           </div>
