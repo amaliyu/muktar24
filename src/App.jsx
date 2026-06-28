@@ -118,6 +118,7 @@ const APP_ROLES = [
   { id: 'hr_officer',         label: 'HR Officer' },
   { id: 'production_manager',           label: 'Production Manager' },
   { id: 'assistant_production_manager', label: 'Assistant Production Manager' },
+  { id: 'staff',                        label: 'Staff (Employee — Self-Service Only)' },
 ];
 
 // Pages each role is allowed to access. 'all' = unrestricted.
@@ -7694,7 +7695,11 @@ export default function App() {
   const isMD    = role === 'md';
 
   const allowedPages = ROLE_PAGES[role] || ['dashboard'];
-  const canSee = (pageId) => pageId === 'my_profile' || allowedPages === 'all' || allowedPages.includes(pageId);
+  const canSee = (pageId) => {
+    if (pageId === 'my_profile') return true;
+    if (pageId === 'my_hr') return !!userProfile?.staff_id;
+    return allowedPages === 'all' || allowedPages.includes(pageId);
+  };
   const visibleNav = navItems
     .map(s => ({ ...s, items: s.items.filter(it => canSee(it.id)) }))
     .filter(s => s.items.length > 0);
