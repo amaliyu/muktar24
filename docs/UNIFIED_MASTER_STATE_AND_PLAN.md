@@ -3,7 +3,7 @@
 
 Repo: `amaliyu/muktar24` (PRIVATE) · Prod branch: `main` · Stack: React 18 + Vite 5 + Supabase (PostgreSQL, RLS) + Vercel
 App: APC Manager — internal ERP for Abuja Precast Concrete Limited
-**Updated: 2026-06-26 (Session 7).** All DB state verified by live query, not memory.
+**Updated: 2026-06-28 (Session 9).** All DB state verified by live query, not memory.
 **Status: BETA. A physical/manual backup system runs in parallel — NO downtime pressure.**
 **Operating mode: SLOW AND VERIFIED — fix on a branch → test on the branch's Vercel preview AS THE AFFECTED ROLE → confirm with own eyes → MD merges → re-verify production.**
 
@@ -19,7 +19,26 @@ App: APC Manager — internal ERP for Abuja Precast Concrete Limited
 
 ## 1. SESSION HISTORY (most recent first)
 
-### 🔄 SESSION 8 (2026-06-26) — HR 4b PHASE B: PAYROLL DEDUCTIONS + LEAVE-BALANCE UI
+### ✅ SESSION 9 (2026-06-28) — HR BUG-FIX PACK + SELF-SERVICE ROLLOUT
+**PRs #20–#25 all confirmed merged. HR 4b Phase B declared COMPLETE (B-2 activation live-proven).**
+
+**HR bug-fix pack (PR #30, merged):**
+- ICO read-only CSS mask (`[data-ico-view] button:not([data-ico-allow]) { display:none }`) now exempts `advances` and `leave` pages — ICO Approve/Reject buttons are no longer hidden there.
+- `advancesService.list()` and `leaveService.list()`: replaced PostgREST `staff:staff_id(full_name)` embed with a separate `staff_public` query joined in JS — ico and accountant now see staff names on request lists.
+- `meService.getMyStaff()`: replaced `.limit(1)` with a lookup via `auth.getUser()` → `user_profiles.staff_id` → `staff.id` — MD now sees their own profile in My HR, not a random colleague. Null guard added: accounts with no linked staff record see "No staff profile is linked to this account."
+
+**Self-service rollout (PR #31, merged):**
+- `canSee('my_hr')` decoupled from role — now gated on `!!userProfile.staff_id`. Any employee-linked account (any role: store_officer, driver, logistics_manager, production_manager, etc.) sees "My HR" in the sidebar and can file their own leave/advance requests.
+- Unlinked accounts (board chairman intentionally unlinked) do not see My HR.
+- `staff` role added to `APP_ROLES` dropdown for the add/edit-user modal. `ROLE_PAGES.staff` (`['my_hr','my_profile']`) was already present.
+- `user_profiles.staff_id` link status: 10 of 11 accounts linked. MD → APC-EMP-001 and logistics_manager → APC-EMP-015 linked this session. Board chairman intentionally unlinked.
+
+**Pending:**
+- `date_hired` missing for APC-EMP-015, 016, 019, 006.
+- Deferred B-2 items: carry-over automation (Jan boundary) + future-hire pro-ration.
+- HR 4c — disciplinary/query module. Open decision: do employees see their own queries in My HR?
+
+### ✅ SESSION 8 (2026-06-26) — HR 4b PHASE B: PAYROLL DEDUCTIONS + LEAVE-BALANCE UI
 **Scope: B-1 (payroll deductions) complete; B-2 (leave-balance tracking) underway this session.**
 - **Migration 1 (applied before PR-1):** Added `payroll_lines.advance_deduction numeric not null default 0`; backfilled from `deductions`.
 - **Migration 2 (applied before PR-2):** Switched `realize_advance_repayments` to read `advance_deduction` — advance settlement ignores leave withholding.
@@ -27,7 +46,7 @@ App: APC Manager — internal ERP for Abuja Precast Concrete Limited
 - **PR-2 (PR #27, merged):** Unpaid-leave deduction on calendar-day basis. `deductions = advance_deduction + leaveDeduction`; breakdown shown in step-2 review and payment table.
 - **B-2 Migration (applied before PR-3):** Inert leave-balance ledger — `leave_policy_settings` (active=false), `staff_leave_balances`, RLS, `seed_leave_balances_draft`, `set_leave_entitlement`, `set_leave_policy_active` RPCs, `md_approved` trigger (no-ops while active=false).
 - **PR-3 (this PR — `claude/b2-leave-balances`):** `src/services/leaveBalance.js` wraps the six DB objects. `LeaveBalancesTab` added to StaffHR: MD policy panel (status, Seed Draft, editable entitlement table, Activate/Deactivate confirm); manager read-only balance table (entitled/used/balance, overdraw ⚠ flag — visual only, never blocks). `MyHRPage` gains "My Leave Balance" card: annual + sick entitled/used/balance, or "Leave balances not yet activated" if inactive or no row. Payroll handleCalculate/handleApprove untouched.
-- **MD activation pending post-merge:** Clicking "Activate Policy" in StaffHR → Leave Balances tab calls `set_leave_policy_active(true)` → trigger goes live.
+- **MD activation complete:** `set_leave_policy_active(true)` triggered; 38 rows seeded (19 annual @15 days / 19 sick @12 days). End-to-end proven: an `md_approved` annual leave request decremented the ledger correctly.
 - **Deferred — carry-over automation:** Year-boundary carry-over script and future-hire pro-ration not yet built.
 
 ### ✅ SESSION 7 (2026-06-26) — PAYROLL STATE MACHINE, ADVANCES, LEAVE, SELF-SERVICE FOUNDATION
@@ -135,14 +154,14 @@ A long, multi-workstream session. All items below tested and merged unless noted
 | 1 | G.1 quick-fixes | ✅ COMPLETE |
 | 2 | Payroll client cutover | ✅ COMPLETE |
 | 3 | RLS for remaining tables | ✅ baseline complete; **2 deeper leaks (staff-PII, invoices/payments) found & CLOSED in Session 6** |
-| 4 | HR modules | 4a ✅, 4d ✅, 4b ✅ (DB+UI + B-1 unpaid-leave deduction); B-2 leave-balance tracking deferred, 4c partial (self-service foundation ✅; disciplinary pending) |
+| 4 | HR modules | 4a ✅, 4d ✅, 4b ✅ **COMPLETE** (DB+UI + B-1 unpaid-leave deduction + B-2 leave-balance ledger live, 38 rows activated); 4c partial (self-service rollout ✅ S9; disciplinary pending) |
 | 5 | Payment-request (revenue) + ingestion engine (Phase 1+) | Parked; Phase 0 done; after #4 |
 
 ### Phase 4 sub-roadmap
 - 4a lifecycle/onboarding — ✅ DONE.
 - 4d ID + business cards + photo — ✅ DONE (merged). Visual polish: accepted as functional; minor header-size nit optional.
-- 4b leave & salary-advance requests — ✅ DB+UI DONE (Session 7). Phase B (attendance auto-deduction, leave-balance tracking) deferred.
-- 4c disciplinary/queries + staff self-service portal — **Self-service foundation ✅ (Session 7):** RLS, `current_staff_id()`, `MyHRPage`, `my_hr` page key, `meService`. Disciplinary/query module still pending.
+- 4b leave & salary-advance requests — ✅ **COMPLETE** (Session 7–8). B-1 unpaid-leave payroll deduction live. B-2 leave-balance ledger live (38 rows, activation proven end-to-end). Deferred: carry-over automation (Jan boundary), future-hire pro-ration.
+- 4c disciplinary/queries + staff self-service portal — **Self-service rollout ✅ (Session 9, PR #31):** My HR now gated on `staff_id` link, not role; all linked employees get it; `staff` role in dropdown. Disciplinary/query module still pending. Open decision: employees see own queries in My HR?
 
 ---
 
@@ -150,7 +169,8 @@ A long, multi-workstream session. All items below tested and merged unless noted
 - ✅ **Latent-bug sweep — DONE (Session 6).** All six number generators (invoice/waybill/receipt/supplier/batch/employee) audited and given collision handling; no quote/proforma/PO generator exists. Two RLS leaks (staff-PII, invoices/payments) found and closed. Per-role RLS verified for each.
 - ✅ **Silent Supabase client fallback — DONE (PR #18, Session 6/7).** `src/lib/supabase.js` now throws immediately on missing `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` instead of falling back to placeholder.
 - ✅ **Staff payroll state machine — DONE (PR #20, Session 7).** `advance_staff_payroll` RPC + `trg_staff_payroll_guard` + `staff_payroll_audit`. Approval chain: accountant creates (draft) → ICO → MD → accountant/MD marks paid. Advance deductions integrated into `payroll_lines.deductions`; net-pay fix in `openRun`.
-- **HR 4b Phase B (deferred).** Leave attendance auto-deduction (salary reduced for unpaid leave days) and leave-balance tracking (annual leave entitlement carry-over) not yet built. Requires schema additions and integration with `attendanceService.getCountsByRange`.
+- **HR 4b Phase B — COMPLETE.** B-1 (unpaid-leave deduction, `advance_deduction` column) and B-2 (leave-balance ledger, 38 rows, activation trigger proven) both live. Remaining deferred items: carry-over automation (Jan boundary roll) and future-hire pro-ration.
+- **`date_hired` gaps.** APC-EMP-015, 016, 019, 006 are missing `date_hired` — HR to fill in via Staff tab.
 - **Disciplinary/query module (HR 4c).** Self-service foundation is live; the disciplinary notice / query-and-response flow is still pending.
 - **Manager email migration (future).** Current manager logins use personal emails. Planned: replace 7 role accounts with official `@abujaprecast.com` addresses (MD/ICO/BDM/logistics/production/store/HR).
 - **Orphaned staff photo files** in `staff-photos` bucket from deleted test staff — harmless; clear via Supabase dashboard (SQL delete blocked).
@@ -191,9 +211,12 @@ A long, multi-workstream session. All items below tested and merged unless noted
 | LPO partial-state | ✅ hardened (S6) | — |
 | HR 4a lifecycle | ✅ live | — |
 | HR 4d cards/photo | ✅ merged | optional header-size polish |
-| HR 4b advances | ✅ DB+UI (S7, PR #21/#22) | Phase B (payroll deduction live; leave-balance tracking deferred) |
-| HR 4b leave | ✅ DB+UI (S7, PR #23) | Phase B (attendance auto-deduction) deferred |
-| HR 4c self-service foundation | ✅ Stages 1+3 (S7, PR #24) | Stage 4 (disciplinary/query module) pending |
+| HR 4b advances | ✅ DB+UI (S7, PR #21/#22) | — |
+| HR 4b leave | ✅ DB+UI (S7, PR #23) | — |
+| HR 4b Phase B-1 (unpaid deduction) | ✅ live (S8, PR #26/#27) | — |
+| HR 4b Phase B-2 (leave-balance ledger) | ✅ live + activated (S8, PR #29; 38 rows proven) | carry-over automation + future-hire pro-ration deferred |
+| HR bug-fix pack | ✅ merged (S9, PR #30) | — |
+| HR 4c self-service rollout | ✅ merged (S9, PR #31) — any linked employee gets My HR | disciplinary/query module pending (open decision: employee visibility) |
 | Invoice/logistics/waybill | ✅ fixed & live | — |
 | Silent supabase fallback | ✅ fixed (PR #18) | — |
 | Staff-payroll state machine | ✅ live (S7, PR #20) | — |
