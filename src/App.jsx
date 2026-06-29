@@ -44,6 +44,7 @@ import { advancesService } from './services/advances'
 import { leaveService } from './services/leave'
 import { leaveBalanceService } from './services/leaveBalance'
 import { meService } from './services/me'
+import { disciplinaryService } from './services/disciplinary'
 import { photoService } from './services/hrService'
 import { generateIDCardPDF, generateBusinessCardPDF } from './utils/cardGenerator'
 import jsPDF from 'jspdf'
@@ -132,7 +133,7 @@ const ROLE_PAGES = {
   logistics_manager:  ['dashboard','waybills','vehicles','labour','pending_register','daily_schedule','customers','my_profile'],
   marketer:           ['dashboard','customers','orders','products','my_profile'],
   driver:             ['dashboard','waybills','my_profile'],
-  hr_officer:         ['dashboard','staff','reports','labour','my_profile','advances','leave'],
+  hr_officer:         ['dashboard','staff','reports','labour','my_profile','advances','leave','disciplinary'],
   production_manager:           ['dashboard','production','inventory','batches','reports','products','labour','my_profile'],
   assistant_production_manager: ['dashboard','production','inventory','batches','reports','products','labour','my_profile'],
   // legacy roles — kept for any existing users
@@ -6822,6 +6823,20 @@ const AdvancesPage = ({ userProfile }) => {
 
 // ── LEAVE ─────────────────────────────────────────────────────
 const LEAVE_TYPES = ['annual','sick','unpaid','compassionate','maternity'];
+
+const DISC_TYPES = [
+  { id: 'formal_query',        label: 'Formal Query' },
+  { id: 'verbal_warning_log',  label: 'Verbal Warning (Log)' },
+  { id: 'written_warning',     label: 'Written Warning' },
+];
+
+const DISC_SANCTIONS = [
+  { id: 'none',           label: 'No further action' },
+  { id: 'verbal_warning', label: 'Verbal warning' },
+  { id: 'written_warning',label: 'Written warning' },
+  { id: 'final_warning',  label: 'Final written warning' },
+  { id: 'termination',    label: 'Termination' },
+];
 const calcLeaveDays = (start, end) => {
   if (!start || !end) return '';
   const diff = Math.round((new Date(end) - new Date(start)) / 86400000) + 1;
@@ -7057,9 +7072,15 @@ const MyHRPage = ({ userProfile }) => {
   const [leaveSaving, setLeaveSaving] = useState(false);
   const [cardLoading, setCardLoading] = useState(false);
   const [bizCardLoading, setBizCardLoading] = useState(false);
+  const [myCases, setMyCases]           = useState([]);
+  const [casesLoading, setCasesLoading] = useState(true);
+  const [respondTarget, setRespondTarget] = useState(null);
+  const [respondText, setRespondText]   = useState('');
+  const [respondSaving, setRespondSaving] = useState(false);
+  const [ackSaving, setAckSaving]       = useState(null);
 
   const loadAll = async () => {
-    setStaffLoading(true); setListLoading(true); setBalanceLoading(true);
+    setStaffLoading(true); setListLoading(true); setBalanceLoading(true); setCasesLoading(true);
     try {
       const staff = await meService.getMyStaff();
       setMyStaff(staff);
@@ -7079,6 +7100,11 @@ const MyHRPage = ({ userProfile }) => {
       setMyBalance(bal);
     } catch (_) { /* leave balance not critical — fail silently */ }
     finally { setBalanceLoading(false); }
+    try {
+      const cases = await disciplinaryService.getMine();
+      setMyCases(cases);
+    } catch (_) { /* fail silently — self-service view may not exist for all deployments */ }
+    finally { setCasesLoading(false); }
   };
 
   useEffect(() => { loadAll(); }, []);
@@ -7264,6 +7290,356 @@ const MyHRPage = ({ userProfile }) => {
           </table>
         )}
       </div>
+
+      <div style={{ marginTop: '28px' }}>
+        <div style={styles.sectionTitle}>Queries &amp; Warnings</div>
+        {casesLoading ? <Spinner /> : myCases.length === 0 ? (
+          <div style={{ ...styles.card, color: theme.textMuted, fontSize: '13px', textAlign: 'center', padding: '20px' }}>
+            No queries or warnings on record.
+          </div>
+        ) : myCases.map(c => {
+          const canRespond = c.type === 'formal_query' && c.status === 'issued';
+          const needsAck   = !c.acknowledged_at;
+          const discStatusColor = s =>
+            s === 'closed' ? theme.textMuted : s === 'reviewed' ? theme.blue :
+            s === 'responded' ? theme.green : theme.accent;
+          return (
+            <div key={c.id} style={{ ...styles.card, marginBottom: '12px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
+                <div>
+                  <div style={{ fontWeight: '600', fontSize: '14px', color: theme.text }}>{c.title}</div>
+                  <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '2px' }}>
+                    {DISC_TYPES.find(t => t.id === c.type)?.label || c.type} · {c.incident_date || '—'}
+                    {c.response_deadline ? ` · Respond by ${c.response_deadline}` : ''}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                  <span style={styles.badge(discStatusColor(c.status))}>{c.status}</span>
+                  {needsAck && (
+                    <button
+                      style={{ ...styles.btn('secondary'), fontSize: '11px', padding: '4px 10px' }}
+                      disabled={ackSaving === c.id}
+                      onClick={async () => {
+                        setAckSaving(c.id); setAlert(null);
+                        try {
+                          await disciplinaryService.advance(c.id, 'acknowledge', null, null);
+                          setMyCases(prev => prev.map(x => x.id === c.id ? { ...x, acknowledged_at: new Date().toISOString() } : x));
+                        } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+                        finally { setAckSaving(null); }
+                      }}>
+                      {ackSaving === c.id ? 'Acknowledging…' : 'Acknowledge'}
+                    </button>
+                  )}
+                </div>
+              </div>
+              {c.allegation && (
+                <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '8px' }}>
+                  <strong style={{ color: theme.text }}>Allegation:</strong> {c.allegation}
+                </div>
+              )}
+              {c.sanction && c.sanction !== 'none' && (
+                <div style={{ fontSize: '12px', color: theme.red, marginTop: '4px' }}>
+                  <strong>Outcome:</strong> {DISC_SANCTIONS.find(s => s.id === c.sanction)?.label || c.sanction}
+                </div>
+              )}
+              {canRespond && respondTarget !== c.id && (
+                <button
+                  style={{ ...styles.btn('primary'), fontSize: '12px', marginTop: '10px' }}
+                  onClick={() => { setRespondTarget(c.id); setRespondText(''); }}>
+                  Submit Response
+                </button>
+              )}
+              {respondTarget === c.id && (
+                <div style={{ marginTop: '10px' }}>
+                  <textarea
+                    style={{ ...styles.input, height: '80px', resize: 'vertical', marginBottom: '8px' }}
+                    placeholder="Your response to this query…"
+                    value={respondText}
+                    onChange={e => setRespondText(e.target.value)} />
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button
+                      style={{ ...styles.btn('primary'), fontSize: '12px' }}
+                      disabled={respondSaving || !respondText.trim()}
+                      onClick={async () => {
+                        setRespondSaving(true); setAlert(null);
+                        try {
+                          await disciplinaryService.advance(c.id, 'respond', respondText, null);
+                          setRespondTarget(null); setRespondText('');
+                          const updated = await disciplinaryService.getMine();
+                          setMyCases(updated);
+                        } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+                        finally { setRespondSaving(false); }
+                      }}>
+                      {respondSaving ? 'Submitting…' : 'Submit'}
+                    </button>
+                    <button style={{ ...styles.btn('secondary'), fontSize: '12px' }}
+                      onClick={() => { setRespondTarget(null); setRespondText(''); }}>Cancel</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+// ── DISCIPLINARY ──────────────────────────────────────────────
+const DisciplinaryPage = ({ userProfile }) => {
+  const role = userProfile?.role;
+  const canIssue  = ['md', 'hr_officer'].includes(role);
+  const canReview = ['md', 'hr_officer'].includes(role);
+  const canClose  = role === 'md';
+
+  const [cases, setCases]         = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [alert, setAlert]         = useState(null);
+  const [staffList, setStaffList] = useState([]);
+  const [showForm, setShowForm]   = useState(false);
+  const [form, setForm]           = useState({ staff_id: '', type: 'formal_query', title: '', allegation: '', incident_date: '', response_deadline: '' });
+  const [saving, setSaving]       = useState(false);
+  const [expandedId, setExpandedId] = useState(null);
+  const [audit, setAudit]         = useState({});
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [reviewTarget, setReviewTarget] = useState(null);
+  const [reviewNotes, setReviewNotes]   = useState('');
+  const [reviewSaving, setReviewSaving] = useState(false);
+  const [closeTarget, setCloseTarget]   = useState(null);
+  const [closeSanction, setCloseSanction] = useState('none');
+  const [closeSaving, setCloseSaving]   = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [c, s] = await Promise.all([disciplinaryService.listAll(), staffService.getPublicActive()]);
+      setCases(c); setStaffList(s);
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const toggleExpand = async (caseId) => {
+    if (expandedId === caseId) { setExpandedId(null); return; }
+    setExpandedId(caseId);
+    if (!audit[caseId]) {
+      setAuditLoading(true);
+      try {
+        const rows = await disciplinaryService.getAudit(caseId);
+        setAudit(a => ({ ...a, [caseId]: rows }));
+      } catch (_) {}
+      finally { setAuditLoading(false); }
+    }
+  };
+
+  const refreshAudit = async (caseId) => {
+    try {
+      const rows = await disciplinaryService.getAudit(caseId);
+      setAudit(a => ({ ...a, [caseId]: rows }));
+    } catch (_) {}
+  };
+
+  const handleIssue = async () => {
+    if (!form.staff_id || !form.title || !form.allegation || !form.incident_date)
+      return setAlert({ type: 'error', msg: 'Staff, title, allegation, and incident date are required.' });
+    setSaving(true); setAlert(null);
+    try {
+      await disciplinaryService.issue({
+        staff_id: form.staff_id, type: form.type, title: form.title,
+        allegation: form.allegation, incident_date: form.incident_date,
+        response_deadline: form.type === 'formal_query' ? (form.response_deadline || null) : null,
+      });
+      setForm({ staff_id: '', type: 'formal_query', title: '', allegation: '', incident_date: '', response_deadline: '' });
+      setShowForm(false);
+      setAlert({ type: 'success', msg: 'Case issued.' });
+      load();
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setSaving(false); }
+  };
+
+  const handleReview = async (caseId) => {
+    setReviewSaving(true); setAlert(null);
+    try {
+      await disciplinaryService.advance(caseId, 'review', reviewNotes || null, null);
+      setReviewTarget(null); setReviewNotes('');
+      await load(); await refreshAudit(caseId);
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setReviewSaving(false); }
+  };
+
+  const handleClose = async (caseId) => {
+    setCloseSaving(true); setAlert(null);
+    try {
+      await disciplinaryService.advance(caseId, 'close', null, closeSanction);
+      setCloseTarget(null); setCloseSanction('none');
+      await load(); await refreshAudit(caseId);
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setCloseSaving(false); }
+  };
+
+  const statusColor = s =>
+    s === 'closed'    ? theme.textMuted :
+    s === 'reviewed'  ? theme.blue :
+    s === 'responded' ? theme.green :
+    s === 'issued'    ? theme.accent : theme.textMuted;
+
+  return (
+    <div>
+      {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
+      <div style={styles.header}>
+        <div>
+          <div style={styles.pageTitle}>Disciplinary</div>
+          <div style={styles.pageSubtitle}>Manage formal queries and warnings</div>
+        </div>
+        {canIssue && (
+          <button style={styles.btn('primary')} onClick={() => setShowForm(v => !v)}>
+            {showForm ? '✕ Cancel' : '+ Issue Case'}
+          </button>
+        )}
+      </div>
+
+      {showForm && (
+        <div style={{ ...styles.card, marginBottom: '20px' }}>
+          <div style={styles.sectionTitle}>Issue New Case</div>
+          <div style={styles.grid(2)}>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Staff Member</label>
+              <select style={styles.input} value={form.staff_id} onChange={e => setForm(f => ({ ...f, staff_id: e.target.value }))}>
+                <option value="">Select staff…</option>
+                {staffList.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
+              </select>
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Case Type</label>
+              <select style={styles.input} value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))}>
+                {DISC_TYPES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+              </select>
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Title</label>
+              <input style={styles.input} placeholder="Brief title of the case…" value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} />
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Incident Date</label>
+              <input type="date" style={styles.input} value={form.incident_date} onChange={e => setForm(f => ({ ...f, incident_date: e.target.value }))} />
+            </div>
+            {form.type === 'formal_query' && (
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Response Deadline</label>
+                <input type="date" style={styles.input} value={form.response_deadline} onChange={e => setForm(f => ({ ...f, response_deadline: e.target.value }))} />
+              </div>
+            )}
+            <div style={{ ...styles.formGroup, gridColumn: '1 / -1' }}>
+              <label style={styles.label}>Allegation / Details</label>
+              <textarea style={{ ...styles.input, height: '80px', resize: 'vertical' }}
+                placeholder="Describe the incident or allegation in full…"
+                value={form.allegation} onChange={e => setForm(f => ({ ...f, allegation: e.target.value }))} />
+            </div>
+          </div>
+          <button style={styles.btn('primary')} onClick={handleIssue} disabled={saving}>{saving ? 'Issuing…' : 'Issue Case'}</button>
+        </div>
+      )}
+
+      <div style={styles.card}>
+        {loading ? <Spinner /> : cases.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '20px', color: theme.textMuted }}>No cases on record.</div>
+        ) : cases.map(c => (
+          <div key={c.id} style={{ borderBottom: `1px solid ${theme.border}`, paddingBottom: '16px', marginBottom: '16px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
+              <div>
+                <div style={{ fontWeight: '600', fontSize: '14px', color: theme.text }}>{c.title}</div>
+                <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '2px' }}>
+                  {c.staff?.full_name || '—'} · {DISC_TYPES.find(t => t.id === c.type)?.label || c.type} · {c.incident_date || '—'}
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+                <span style={styles.badge(statusColor(c.status))}>{c.status}</span>
+                {canReview && (c.status === 'issued' || c.status === 'responded') && reviewTarget !== c.id && closeTarget !== c.id && (
+                  <button style={{ ...styles.btn('secondary'), fontSize: '11px', padding: '4px 10px' }}
+                    onClick={() => { setReviewTarget(c.id); setCloseTarget(null); setReviewNotes(''); }}>Review</button>
+                )}
+                {canClose && c.status === 'reviewed' && closeTarget !== c.id && reviewTarget !== c.id && (
+                  <button style={{ ...styles.btn('primary'), fontSize: '11px', padding: '4px 10px' }}
+                    onClick={() => { setCloseTarget(c.id); setCloseSanction('none'); setReviewTarget(null); }}>Close</button>
+                )}
+                <button style={{ ...styles.btn('secondary'), fontSize: '11px', padding: '4px 10px' }}
+                  onClick={() => toggleExpand(c.id)}>{expandedId === c.id ? '▲ Hide' : '▼ Details'}</button>
+              </div>
+            </div>
+
+            {reviewTarget === c.id && (
+              <div style={{ marginTop: '12px', padding: '12px', background: theme.surface, borderRadius: '8px', border: `1px solid ${theme.border}` }}>
+                <label style={styles.label}>Review Notes</label>
+                <textarea style={{ ...styles.input, height: '64px', resize: 'vertical', marginBottom: '8px' }}
+                  placeholder="Notes on the review (optional)…" value={reviewNotes} onChange={e => setReviewNotes(e.target.value)} />
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button style={{ ...styles.btn('primary'), fontSize: '12px' }} onClick={() => handleReview(c.id)} disabled={reviewSaving}>
+                    {reviewSaving ? 'Saving…' : 'Confirm Review'}
+                  </button>
+                  <button style={{ ...styles.btn('secondary'), fontSize: '12px' }} onClick={() => { setReviewTarget(null); setReviewNotes(''); }}>Cancel</button>
+                </div>
+              </div>
+            )}
+
+            {closeTarget === c.id && (
+              <div style={{ marginTop: '12px', padding: '12px', background: theme.surface, borderRadius: '8px', border: `1px solid ${theme.border}` }}>
+                <label style={styles.label}>Outcome / Sanction</label>
+                <select style={{ ...styles.input, marginBottom: '4px' }} value={closeSanction} onChange={e => setCloseSanction(e.target.value)}>
+                  {DISC_SANCTIONS.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+                </select>
+                <div style={{ fontSize: '11px', color: theme.textMuted, marginBottom: '8px' }}>
+                  Records the outcome only — does not change employment status or payroll.
+                </div>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button style={{ ...styles.btn('primary'), fontSize: '12px' }} onClick={() => handleClose(c.id)} disabled={closeSaving}>
+                    {closeSaving ? 'Closing…' : 'Close Case'}
+                  </button>
+                  <button style={{ ...styles.btn('secondary'), fontSize: '12px' }} onClick={() => setCloseTarget(null)}>Cancel</button>
+                </div>
+              </div>
+            )}
+
+            {expandedId === c.id && (
+              <div style={{ marginTop: '12px' }}>
+                <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '8px' }}>
+                  <strong style={{ color: theme.text }}>Allegation:</strong> {c.allegation || '—'}
+                </div>
+                {c.response_deadline && (
+                  <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '8px' }}>
+                    <strong style={{ color: theme.text }}>Response deadline:</strong> {c.response_deadline}
+                  </div>
+                )}
+                {c.employee_response && (
+                  <div style={{ fontSize: '12px', padding: '8px 10px', background: theme.surface, borderRadius: '6px', border: `1px solid ${theme.border}`, marginBottom: '8px' }}>
+                    <strong style={{ color: theme.green }}>Employee response:</strong>
+                    <div style={{ marginTop: '4px', color: theme.textMuted }}>{c.employee_response}</div>
+                  </div>
+                )}
+                {c.sanction && c.sanction !== 'none' && (
+                  <div style={{ fontSize: '12px', marginBottom: '8px' }}>
+                    <strong style={{ color: theme.text }}>Outcome:</strong>{' '}
+                    <span style={{ color: theme.red }}>{DISC_SANCTIONS.find(s => s.id === c.sanction)?.label || c.sanction}</span>
+                  </div>
+                )}
+                <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textDim, textTransform: 'uppercase', letterSpacing: '0.06em', margin: '8px 0 4px' }}>Audit Trail</div>
+                {auditLoading && !audit[c.id] ? <Spinner /> : (audit[c.id] || []).length === 0 ? (
+                  <div style={{ fontSize: '12px', color: theme.textMuted }}>No audit entries yet.</div>
+                ) : (audit[c.id] || []).map((entry, i) => (
+                  <div key={i} style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '4px' }}>
+                    <span style={{ color: theme.text, fontWeight: '600' }}>{entry.action}</span>
+                    {entry.actor_role ? ` — ${entry.actor_role}` : ''}
+                    {entry.note ? `: "${entry.note}"` : ''}
+                    <span style={{ marginLeft: '8px', fontSize: '11px', color: theme.textDim }}>
+                      {entry.created_at ? new Date(entry.created_at).toLocaleDateString() : ''}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 };
@@ -7279,6 +7655,7 @@ const navItems = [
     { id: "vehicles", label: "Vehicles", icon: "truck" },
     { id: "staff", label: "Staff", icon: "staff" },
     { id: "labour", label: "Labour", icon: "staff" },
+    { id: "disciplinary", label: "Disciplinary", icon: "staff" },
   ]},
   { section: "Deliveries", items: [
     { id: "pending_register", label: "Pending Deliveries", icon: "pending" },
@@ -7729,6 +8106,7 @@ export default function App() {
     labour: <Labour userProfile={userProfile} />,
     advances: <AdvancesPage userProfile={userProfile} />,
     leave: <LeavePage userProfile={userProfile} />,
+    disciplinary: <DisciplinaryPage userProfile={userProfile} />,
     my_hr: <MyHRPage userProfile={userProfile} />,
     my_profile: <MyProfile userProfile={userProfile} />,
   };
