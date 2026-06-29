@@ -7628,8 +7628,8 @@ const DisciplinaryPage = ({ userProfile }) => {
                 ) : (audit[c.id] || []).map((entry, i) => (
                   <div key={i} style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '4px' }}>
                     <span style={{ color: theme.text, fontWeight: '600' }}>{entry.action}</span>
-                    {entry.actor_name ? ` — ${entry.actor_name}` : ''}
-                    {entry.text ? `: "${entry.text}"` : ''}
+                    {entry.actor_role ? ` — ${entry.actor_role}` : ''}
+                    {entry.note ? `: "${entry.note}"` : ''}
                     <span style={{ marginLeft: '8px', fontSize: '11px', color: theme.textDim }}>
                       {entry.created_at ? new Date(entry.created_at).toLocaleDateString() : ''}
                     </span>

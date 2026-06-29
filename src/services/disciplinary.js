@@ -21,7 +21,7 @@ export const disciplinaryService = {
     const { data, error } = await supabase
       .from('disciplinary_self')
       .select('*')
-      .order('created_at', { ascending: false });
+      .order('issued_at', { ascending: false });
     if (error) throw error;
     return data || [];
   },
