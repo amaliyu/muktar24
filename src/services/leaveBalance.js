@@ -49,4 +49,16 @@ export const leaveBalanceService = {
     if (error) throw error;
     return data;
   },
+
+  async runRollover(fromYear) {
+    const { data, error } = await supabase.rpc('run_annual_leave_rollover', { p_from_year: fromYear });
+    if (error) throw error;
+    return data;
+  },
+
+  async expireCarryover(year) {
+    const { data, error } = await supabase.rpc('expire_annual_carryover', { p_year: year });
+    if (error) throw error;
+    return data;
+  },
 };
