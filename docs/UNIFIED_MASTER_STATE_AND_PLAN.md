@@ -3,7 +3,7 @@
 
 Repo: `amaliyu/muktar24` (PRIVATE) · Prod branch: `main` · Stack: React 18 + Vite 5 + Supabase (PostgreSQL, RLS) + Vercel
 App: APC Manager — internal ERP for Abuja Precast Concrete Limited
-**Updated: 2026-06-28 (Session 9).** All DB state verified by live query, not memory.
+**Updated: 2026-06-30 (Session 10).** All DB state verified by live query, not memory.
 **Status: BETA. A physical/manual backup system runs in parallel — NO downtime pressure.**
 **Operating mode: SLOW AND VERIFIED — fix on a branch → test on the branch's Vercel preview AS THE AFFECTED ROLE → confirm with own eyes → MD merges → re-verify production.**
 
@@ -18,6 +18,29 @@ App: APC Manager — internal ERP for Abuja Precast Concrete Limited
 ---
 
 ## 1. SESSION HISTORY (most recent first)
+
+### ✅ SESSION 10 (2026-06-30) — HR 4c DISCIPLINARY / QUERY MODULE
+**HR 4c declared COMPLETE. PR #32 merged (with fix-commit).**
+
+**DB (migration `hr4c_disciplinary_module`, applied before PR):**
+- Tables: `disciplinary_cases` (management-facing, includes `management_review_notes`) + `disciplinary_audit` (action, actor_role, note, created_at).
+- View: `disciplinary_self` (employee-safe; hides `management_review_notes`; orders by `issued_at`).
+- RPCs: `issue_disciplinary_case` (p_staff_id, p_type, p_title, p_allegation, p_incident_date, p_response_deadline) + `advance_disciplinary` (p_case_id, p_action, p_text, p_sanction).
+- Status-guard trigger blocks invalid state transitions.
+- RLS: md + hr_officer read/write `disciplinary_cases`; employee reads own cases via `disciplinary_self` only; no other role sees any row.
+
+**Lifecycle:**
+- `formal_query`: `issued → responded → reviewed → closed`. Respond = subject via My HR; Review = md/hr_officer; Close = MD-only with sanction selection.
+- `verbal_warning_log` / `written_warning`: logged straight to `closed` (no response phase). Employee acknowledges in My HR.
+- Sanctions (5): none / verbal_warning / written_warning / final_warning / termination. **Wall: sanction is RECORDED only — never changes `employment_status`, `is_active`, or payroll.** Proven live (closed case, written_warning sanction, subject remained active).
+
+**Frontend (PR #32 + fix-commit):**
+- `src/services/disciplinary.js`: listAll (staff_public join), getMine (disciplinary_self, ordered by issued_at), getAudit, issue, advance.
+- `DisciplinaryPage`: issue form (response_deadline conditional on formal_query), case list with status badges, inline Review/Close action panels, expandable audit trail (actor_role · action · note · date).
+- "Queries & Warnings" section added to `MyHRPage`: respond textarea for formal_query at `issued`; Acknowledge button for any case without `acknowledged_at`.
+- Verified end-to-end in production preview.
+
+**Open items (unchanged):** `date_hired` missing for APC-EMP-015, 016, 019, 006. B-2 carry-over automation + future-hire pro-ration deferred.
 
 ### ✅ SESSION 9 (2026-06-28) — HR BUG-FIX PACK + SELF-SERVICE ROLLOUT
 **PRs #20–#25 all confirmed merged. HR 4b Phase B declared COMPLETE (B-2 activation live-proven).**
@@ -161,7 +184,7 @@ A long, multi-workstream session. All items below tested and merged unless noted
 - 4a lifecycle/onboarding — ✅ DONE.
 - 4d ID + business cards + photo — ✅ DONE (merged). Visual polish: accepted as functional; minor header-size nit optional.
 - 4b leave & salary-advance requests — ✅ **COMPLETE** (Session 7–8). B-1 unpaid-leave payroll deduction live. B-2 leave-balance ledger live (38 rows, activation proven end-to-end). Deferred: carry-over automation (Jan boundary), future-hire pro-ration.
-- 4c disciplinary/queries + staff self-service portal — **Self-service rollout ✅ (Session 9, PR #31):** My HR now gated on `staff_id` link, not role; all linked employees get it; `staff` role in dropdown. Disciplinary/query module still pending. Open decision: employees see own queries in My HR?
+- 4c disciplinary/queries + staff self-service portal — ✅ **COMPLETE (Session 10, PR #32).** Self-service rollout (S9, PR #31) + disciplinary/query module (S10): issue_disciplinary_case RPC, advance_disciplinary RPC, guard trigger, disciplinary_self view, DisciplinaryPage (md/hr_officer), "Queries & Warnings" in My HR (employee responds/acknowledges). Decision resolved: employees see own cases via disciplinary_self (safe view, no management_review_notes).
 
 ---
 
@@ -171,7 +194,7 @@ A long, multi-workstream session. All items below tested and merged unless noted
 - ✅ **Staff payroll state machine — DONE (PR #20, Session 7).** `advance_staff_payroll` RPC + `trg_staff_payroll_guard` + `staff_payroll_audit`. Approval chain: accountant creates (draft) → ICO → MD → accountant/MD marks paid. Advance deductions integrated into `payroll_lines.deductions`; net-pay fix in `openRun`.
 - **HR 4b Phase B — COMPLETE.** B-1 (unpaid-leave deduction, `advance_deduction` column) and B-2 (leave-balance ledger, 38 rows, activation trigger proven) both live. Remaining deferred items: carry-over automation (Jan boundary roll) and future-hire pro-ration.
 - **`date_hired` gaps.** APC-EMP-015, 016, 019, 006 are missing `date_hired` — HR to fill in via Staff tab.
-- **Disciplinary/query module (HR 4c).** Self-service foundation is live; the disciplinary notice / query-and-response flow is still pending.
+- ✅ **Disciplinary/query module (HR 4c) — COMPLETE (S10, PR #32).** Full lifecycle live. Sanction wall enforced by convention (DB trigger does not auto-update employment_status; that step remains manual/HR-mediated).
 - **Manager email migration (future).** Current manager logins use personal emails. Planned: replace 7 role accounts with official `@abujaprecast.com` addresses (MD/ICO/BDM/logistics/production/store/HR).
 - **Orphaned staff photo files** in `staff-photos` bucket from deleted test staff — harmless; clear via Supabase dashboard (SQL delete blocked).
 - **Ransom (APC-EMP-018)** in onboarding — HR to complete checklist + activate when ready.
@@ -216,7 +239,8 @@ A long, multi-workstream session. All items below tested and merged unless noted
 | HR 4b Phase B-1 (unpaid deduction) | ✅ live (S8, PR #26/#27) | — |
 | HR 4b Phase B-2 (leave-balance ledger) | ✅ live + activated (S8, PR #29; 38 rows proven) | carry-over automation + future-hire pro-ration deferred |
 | HR bug-fix pack | ✅ merged (S9, PR #30) | — |
-| HR 4c self-service rollout | ✅ merged (S9, PR #31) — any linked employee gets My HR | disciplinary/query module pending (open decision: employee visibility) |
+| HR 4c self-service rollout | ✅ merged (S9, PR #31) — any linked employee gets My HR | — |
+| HR 4c disciplinary/query module | ✅ COMPLETE (S10, PR #32) — full lifecycle, sanction wall proven | — |
 | Invoice/logistics/waybill | ✅ fixed & live | — |
 | Silent supabase fallback | ✅ fixed (PR #18) | — |
 | Staff-payroll state machine | ✅ live (S7, PR #20) | — |
