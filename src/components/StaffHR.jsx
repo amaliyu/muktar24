@@ -1344,6 +1344,8 @@ const LeaveBalancesTab = ({ userProfile }) => {
   const [showConfirm, setShowConfirm] = useState(null);
   const [entitlementEdits, setEntitlementEdits] = useState({});
   const [savingKey, setSavingKey] = useState(null);
+  const [yearendConfirm, setYearendConfirm] = useState(null);
+  const [yearendSaving, setYearendSaving] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -1378,6 +1380,26 @@ const LeaveBalancesTab = ({ userProfile }) => {
       setAlert({ type: 'success', msg: active ? 'Leave policy is now active — balances will update as leave is approved.' : 'Leave policy deactivated.' });
     } catch (e) { setAlert({ type: 'error', msg: e.message }); }
     finally { setActivating(false); }
+  };
+
+  const handleRollover = async () => {
+    setYearendSaving(true); setAlert(null); setYearendConfirm(null);
+    try {
+      const count = await leaveBalanceService.runRollover(currentYear);
+      setAlert({ type: 'success', msg: `Rollover complete — ${count} balance row(s) created for ${currentYear + 1}.` });
+      await load();
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setYearendSaving(false); }
+  };
+
+  const handleExpireCarryover = async () => {
+    setYearendSaving(true); setAlert(null); setYearendConfirm(null);
+    try {
+      const count = await leaveBalanceService.expireCarryover(currentYear);
+      setAlert({ type: 'success', msg: `Carry-over expired — ${count} row(s) updated for ${currentYear}.` });
+      await load();
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setYearendSaving(false); }
   };
 
   const handleSaveEntitlement = async (staffId, leaveType, days) => {
@@ -1448,6 +1470,39 @@ const LeaveBalancesTab = ({ userProfile }) => {
               </>
             )}
           </div>
+        </div>
+      )}
+
+      {isMD && (
+        <div style={{ ...styles.card, marginBottom: '20px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+            <div style={styles.sectionTitle}>Year-end Controls</div>
+          </div>
+          <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '12px' }}>
+            Run rollover at the start of a new leave year; expire carry-over after March 31.
+          </div>
+          {yearendConfirm === 'rollover' ? (
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '13px', color: theme.text }}>Create {currentYear + 1} balances from {currentYear}? Unused annual days will carry over.</span>
+              <button style={styles.btn('primary')} onClick={handleRollover} disabled={yearendSaving}>{yearendSaving ? 'Running…' : 'Confirm Rollover'}</button>
+              <button style={styles.btn('secondary')} onClick={() => setYearendConfirm(null)}>Cancel</button>
+            </div>
+          ) : yearendConfirm === 'expire' ? (
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '13px', color: theme.text }}>Zero out remaining carry-over in {currentYear} balances?</span>
+              <button style={{ ...styles.btn('secondary'), borderColor: theme.red, color: theme.red }} onClick={handleExpireCarryover} disabled={yearendSaving}>{yearendSaving ? 'Expiring…' : 'Confirm Expire'}</button>
+              <button style={styles.btn('secondary')} onClick={() => setYearendConfirm(null)}>Cancel</button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <button style={styles.btn('secondary')} onClick={() => setYearendConfirm('rollover')} disabled={yearendSaving}>
+                ↻ Run {currentYear + 1} Rollover
+              </button>
+              <button style={{ ...styles.btn('secondary'), borderColor: theme.red, color: theme.red }} onClick={() => setYearendConfirm('expire')} disabled={yearendSaving}>
+                ✕ Expire {currentYear} Carry-over
+              </button>
+            </div>
+          )}
         </div>
       )}
 
