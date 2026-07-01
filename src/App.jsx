@@ -45,6 +45,8 @@ import { leaveService } from './services/leave'
 import { leaveBalanceService } from './services/leaveBalance'
 import { meService } from './services/me'
 import { disciplinaryService } from './services/disciplinary'
+import { kioskService } from './services/kioskService'
+import AttendanceKiosk from './components/AttendanceKiosk'
 import { photoService } from './services/hrService'
 import { generateIDCardPDF, generateBusinessCardPDF } from './utils/cardGenerator'
 import jsPDF from 'jspdf'
@@ -133,9 +135,9 @@ const ROLE_PAGES = {
   logistics_manager:  ['dashboard','waybills','vehicles','labour','pending_register','daily_schedule','customers','my_profile'],
   marketer:           ['dashboard','customers','orders','products','my_profile'],
   driver:             ['dashboard','waybills','my_profile'],
-  hr_officer:         ['dashboard','staff','reports','labour','my_profile','advances','leave','disciplinary'],
-  production_manager:           ['dashboard','production','inventory','batches','reports','products','labour','my_profile'],
-  assistant_production_manager: ['dashboard','production','inventory','batches','reports','products','labour','my_profile'],
+  hr_officer:         ['dashboard','staff','reports','labour','my_profile','advances','leave','disciplinary','attendance_kiosk','attendance_flags'],
+  production_manager:           ['dashboard','production','inventory','batches','reports','products','labour','my_profile','attendance_flags'],
+  assistant_production_manager: ['dashboard','production','inventory','batches','reports','products','labour','my_profile','attendance_flags'],
   // legacy roles — kept for any existing users
   operations:         ['dashboard','production','inventory','batches','waybills','vehicles','pending_register','daily_schedule','lpo_approvals','my_profile'],
   sales:              ['dashboard','customers','orders','my_profile'],
@@ -7078,9 +7080,17 @@ const MyHRPage = ({ userProfile }) => {
   const [respondText, setRespondText]   = useState('');
   const [respondSaving, setRespondSaving] = useState(false);
   const [ackSaving, setAckSaving]       = useState(null);
+  const [myAttendance, setMyAttendance] = useState([]);
+  const [attLoading, setAttLoading]     = useState(true);
+  const [attFlagTarget, setAttFlagTarget] = useState(null);
+  const [attFlagText, setAttFlagText]   = useState('');
+  const [attFlagSaving, setAttFlagSaving] = useState(false);
+  const [pinMyValue, setPinMyValue]     = useState('');
+  const [pinMyMsg, setPinMyMsg]         = useState(null);
+  const [pinMySaving, setPinMySaving]   = useState(false);
 
   const loadAll = async () => {
-    setStaffLoading(true); setListLoading(true); setBalanceLoading(true); setCasesLoading(true);
+    setStaffLoading(true); setListLoading(true); setBalanceLoading(true); setCasesLoading(true); setAttLoading(true);
     try {
       const staff = await meService.getMyStaff();
       setMyStaff(staff);
@@ -7105,6 +7115,13 @@ const MyHRPage = ({ userProfile }) => {
       setMyCases(cases);
     } catch (_) { /* fail silently — self-service view may not exist for all deployments */ }
     finally { setCasesLoading(false); }
+    try {
+      const to   = new Date().toISOString().slice(0, 10);
+      const from = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+      const att  = await kioskService.getMyAttendance(from, to);
+      setMyAttendance(att);
+    } catch (_) { /* fail silently */ }
+    finally { setAttLoading(false); }
   };
 
   useEffect(() => { loadAll(); }, []);
@@ -7163,6 +7180,33 @@ const MyHRPage = ({ userProfile }) => {
     try { await generateBusinessCardPDF(myStaff); }
     catch (e) { setAlert({ type: 'error', msg: 'Business card error: ' + e.message }); }
     finally { setBizCardLoading(false); }
+  };
+
+  const handleSubmitFlagResponse = async (attendanceId) => {
+    if (!attFlagText.trim()) return;
+    setAttFlagSaving(true); setAlert(null);
+    try {
+      await kioskService.submitFlagResponse(attendanceId, attFlagText.trim());
+      setAttFlagTarget(null); setAttFlagText('');
+      setMyAttendance(prev => prev.map(r => r.id === attendanceId ? { ...r, flag_response: attFlagText.trim() } : r));
+      setAlert({ type: 'success', msg: 'Response submitted.' });
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setAttFlagSaving(false); }
+  };
+
+  const handleSetMyPin = async () => {
+    if (pinMyValue.length < 4) return;
+    setPinMySaving(true); setPinMyMsg(null);
+    try {
+      const { error } = await supabase.rpc('set_my_kiosk_pin', { p_pin: pinMyValue });
+      if (error) throw error;
+      setPinMyMsg({ type: 'success', msg: 'Kiosk PIN set successfully.' });
+      setPinMyValue('');
+    } catch (e) {
+      setPinMyMsg({ type: 'error', msg: e.message });
+    } finally {
+      setPinMySaving(false);
+    }
   };
 
   const advStatusColor = s => s === 'disbursed' ? theme.green : s === 'md_approved' ? theme.blue : s === 'ico_approved' ? theme.accent : s === 'settled' ? theme.textMuted : (s === 'rejected' || s === 'cancelled') ? theme.red : theme.textMuted;
@@ -7381,6 +7425,202 @@ const MyHRPage = ({ userProfile }) => {
           );
         })}
       </div>
+
+      <div style={{ marginTop: '28px' }}>
+        <div style={styles.sectionTitle}>My Attendance (Last 30 Days)</div>
+        {attLoading ? <Spinner /> : myAttendance.length === 0 ? (
+          <div style={{ ...styles.card, color: theme.textMuted, fontSize: '13px', textAlign: 'center', padding: '20px' }}>
+            No attendance records in the last 30 days.
+          </div>
+        ) : (
+          <div style={{ ...styles.card, overflowX: 'auto' }}>
+            <table style={styles.table}>
+              <thead><tr>{['Date','Present','Hours','Flag'].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
+              <tbody>{myAttendance.map(row => (
+                <tr key={row.id}>
+                  <td style={styles.td}>{row.date}</td>
+                  <td style={styles.td}>{row.present ? <span style={{ color: theme.green, fontWeight: 600 }}>Yes</span> : <span style={{ color: theme.red }}>No</span>}</td>
+                  <td style={styles.td}>{row.hours_worked ?? '—'}</td>
+                  <td style={styles.td}>
+                    {row.flagged && !row.flag_response && attFlagTarget !== row.id && (
+                      <div>
+                        <span style={styles.badge(theme.red)}>Flagged</span>
+                        {row.flag_reason && <div style={{ fontSize: '11px', color: theme.textMuted, margin: '3px 0' }}>{row.flag_reason}</div>}
+                        <button style={{ ...styles.btn('secondary'), fontSize: '11px', padding: '3px 8px', marginTop: '4px' }}
+                          onClick={() => { setAttFlagTarget(row.id); setAttFlagText(''); }}>
+                          Respond
+                        </button>
+                      </div>
+                    )}
+                    {row.flagged && attFlagTarget === row.id && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <textarea
+                          style={{ ...styles.input, height: '60px', resize: 'vertical', fontSize: '12px' }}
+                          placeholder="Explain this flag…"
+                          value={attFlagText}
+                          onChange={e => setAttFlagText(e.target.value)} />
+                        <div style={{ display: 'flex', gap: '6px' }}>
+                          <button style={{ ...styles.btn('primary'), fontSize: '11px', padding: '4px 10px' }}
+                            disabled={attFlagSaving || !attFlagText.trim()}
+                            onClick={() => handleSubmitFlagResponse(row.id)}>
+                            {attFlagSaving ? '…' : 'Submit'}
+                          </button>
+                          <button style={{ ...styles.btn('secondary'), fontSize: '11px', padding: '4px 10px' }}
+                            onClick={() => { setAttFlagTarget(null); setAttFlagText(''); }}>
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {row.flagged && row.flag_response && (
+                      <span style={{ fontSize: '11px', color: theme.green }}>Responded</span>
+                    )}
+                    {!row.flagged && <span style={{ color: theme.textMuted, fontSize: '12px' }}>—</span>}
+                  </td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div style={{ ...styles.card, marginTop: '28px' }}>
+        <div style={styles.sectionTitle}>Kiosk PIN</div>
+        <div style={{ fontSize: '13px', color: theme.textMuted, marginBottom: '14px' }}>
+          Set or reset your attendance kiosk PIN. Use this 4–6 digit PIN to clock in/out at the kiosk when your barcode is not available.
+        </div>
+        {pinMyMsg && <Alert msg={pinMyMsg.msg} type={pinMyMsg.type} onClose={() => setPinMyMsg(null)} />}
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end', maxWidth: '340px' }}>
+          <div style={{ ...styles.formGroup, flex: 1, marginBottom: 0 }}>
+            <label style={styles.label}>New PIN (4–6 digits)</label>
+            <input
+              type="password"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              maxLength={6}
+              style={styles.input}
+              placeholder="Enter 4–6 digit PIN"
+              value={pinMyValue}
+              onChange={e => setPinMyValue(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              onKeyDown={e => { if (e.key === 'Enter' && pinMyValue.length >= 4) handleSetMyPin(); }}
+            />
+          </div>
+          <button
+            style={{ ...styles.btn('primary'), flexShrink: 0 }}
+            disabled={pinMySaving || pinMyValue.length < 4}
+            onClick={handleSetMyPin}
+          >
+            {pinMySaving ? 'Saving…' : 'Set PIN'}
+          </button>
+        </div>
+        <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '8px' }}>
+          PIN is hashed server-side. It cannot be retrieved once set.
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ── ATTENDANCE FLAGS PAGE ─────────────────────────────────────
+const AttendanceFlagsPage = ({ userProfile }) => {
+  const [rows, setRows]           = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [alert, setAlert]         = useState(null);
+  const [resolving, setResolving] = useState(null);
+  const [forms, setForms]         = useState({});
+
+  const load = async () => {
+    setLoading(true);
+    try { setRows(await kioskService.getFlagged()); }
+    catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const setField = (id, field, value) =>
+    setForms(f => ({ ...f, [id]: { ...f[id], [field]: value } }));
+
+  const handleResolve = async (id) => {
+    const form = forms[id] || {};
+    setResolving(id); setAlert(null);
+    try {
+      await kioskService.resolveFlag(id, form.hours_worked, form.present);
+      setAlert({ type: 'success', msg: 'Flag resolved.' });
+      load();
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setResolving(null); }
+  };
+
+  return (
+    <div>
+      {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
+      <div style={styles.header}>
+        <div>
+          <div style={styles.pageTitle}>Attendance Flags</div>
+          <div style={styles.pageSubtitle}>Flagged attendance records requiring HR review (last 60 days)</div>
+        </div>
+        <button style={styles.btn('secondary')} onClick={load} disabled={loading}>Refresh</button>
+      </div>
+      {loading ? <Spinner /> : rows.length === 0 ? (
+        <div style={{ ...styles.card, color: theme.textMuted, textAlign: 'center', padding: '40px' }}>
+          No flagged records.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          {rows.map(row => {
+            const form = forms[row.id] || {};
+            return (
+              <div key={row.id} style={styles.card}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
+                  <div>
+                    <div style={{ fontWeight: '600', fontSize: '14px' }}>{row.staff?.full_name || '—'}</div>
+                    <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '2px' }}>
+                      {row.staff?.employee_number || ''} · {row.date}
+                    </div>
+                  </div>
+                  <span style={styles.badge(theme.red)}>Flagged</span>
+                </div>
+                {row.flag_reason && (
+                  <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '8px' }}>
+                    <strong style={{ color: theme.text }}>Reason:</strong> {row.flag_reason}
+                  </div>
+                )}
+                {row.flag_response && (
+                  <div style={{ fontSize: '12px', color: theme.green, marginTop: '4px' }}>
+                    <strong style={{ color: theme.text }}>Employee:</strong> {row.flag_response}
+                  </div>
+                )}
+                <div style={{ marginTop: '12px', display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                  <div style={styles.formGroup}>
+                    <label style={styles.label}>Hours Worked</label>
+                    <input type="number" step="0.5" min="0" max="24"
+                      style={{ ...styles.input, width: '100px' }}
+                      placeholder="e.g. 8"
+                      value={form.hours_worked ?? ''}
+                      onChange={e => setField(row.id, 'hours_worked', e.target.value)} />
+                  </div>
+                  <div style={styles.formGroup}>
+                    <label style={styles.label}>Present?</label>
+                    <select style={{ ...styles.input, width: '90px' }}
+                      value={form.present === undefined ? '' : String(form.present)}
+                      onChange={e => setField(row.id, 'present', e.target.value === '' ? undefined : e.target.value === 'true')}>
+                      <option value="">—</option>
+                      <option value="true">Yes</option>
+                      <option value="false">No</option>
+                    </select>
+                  </div>
+                  <button style={styles.btn('primary')}
+                    disabled={resolving === row.id}
+                    onClick={() => handleResolve(row.id)}>
+                    {resolving === row.id ? 'Resolving…' : 'Resolve Flag'}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 };
@@ -7656,6 +7896,8 @@ const navItems = [
     { id: "staff", label: "Staff", icon: "staff" },
     { id: "labour", label: "Labour", icon: "staff" },
     { id: "disciplinary", label: "Disciplinary", icon: "staff" },
+    { id: "attendance_kiosk", label: "Attendance Kiosk", icon: "staff" },
+    { id: "attendance_flags", label: "Attendance Flags", icon: "staff" },
   ]},
   { section: "Deliveries", items: [
     { id: "pending_register", label: "Pending Deliveries", icon: "pending" },
@@ -8107,6 +8349,8 @@ export default function App() {
     advances: <AdvancesPage userProfile={userProfile} />,
     leave: <LeavePage userProfile={userProfile} />,
     disciplinary: <DisciplinaryPage userProfile={userProfile} />,
+    attendance_kiosk: <AttendanceKiosk userProfile={userProfile} />,
+    attendance_flags: <AttendanceFlagsPage userProfile={userProfile} />,
     my_hr: <MyHRPage userProfile={userProfile} />,
     my_profile: <MyProfile userProfile={userProfile} />,
   };
@@ -8171,7 +8415,7 @@ export default function App() {
         </div>
       </div>
       {showChangePwd && <ChangePasswordModal onClose={() => setShowChangePwd(false)} />}
-      <main style={{ ...styles.main, ...(isMobile ? { marginLeft: 0, padding: '16px 14px', paddingTop: '58px' } : {}) }} {...(isBoard ? { 'data-board-view': 'true' } : {})} {...(isICO && safePage !== 'labour' && safePage !== 'schedule_approvals' && safePage !== 'advances' && safePage !== 'leave' ? { 'data-ico-view': 'true' } : {})}>
+      <main style={{ ...styles.main, ...(isMobile ? { marginLeft: 0, padding: '16px 14px', paddingTop: '58px' } : {}) }} {...(isBoard ? { 'data-board-view': 'true' } : {})} {...(isICO && safePage !== 'labour' && safePage !== 'schedule_approvals' && safePage !== 'advances' && safePage !== 'leave' && safePage !== 'my_hr' ? { 'data-ico-view': 'true' } : {})}>
         {/* Mobile hamburger */}
         {isMobile && (
           <button data-board-allow data-ico-allow onClick={() => setSidebarOpen(s => !s)} style={{ position: 'fixed', top: '12px', left: '12px', zIndex: 250, background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '8px', padding: '8px 12px', cursor: 'pointer', fontSize: '18px', color: theme.text, lineHeight: 1, boxShadow: '0 2px 8px rgba(0,0,0,0.3)' }}>☰</button>
@@ -8202,7 +8446,7 @@ export default function App() {
             👁 View Only Mode — Board Member access
           </div>
         )}
-        {isICO && active !== 'dashboard' && active !== 'schedule_approvals' && active !== 'labour' && active !== 'advances' && active !== 'leave' && (
+        {isICO && active !== 'dashboard' && active !== 'schedule_approvals' && active !== 'labour' && active !== 'advances' && active !== 'leave' && active !== 'my_hr' && (
           <div style={{ background: theme.blue+'22', border: `1px solid ${theme.blue}44`, borderRadius: '8px', padding: '8px 16px', margin: '0 0 16px', fontSize: '12px', color: theme.blue, fontWeight: '600' }}>
             🔒 Read-Only Mode — Internal Control Officer. Approvals available in Schedule Approvals and Labour modules.
           </div>

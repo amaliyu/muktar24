@@ -970,7 +970,7 @@ const StaffProfile = ({ staffId, onBack, onUpdated, roles, userProfile }) => {
 };
 
 // ── STAFF DIRECTORY ───────────────────────────────────────────
-const StaffDirectory = ({ onViewProfile }) => {
+const StaffDirectory = ({ onViewProfile, userProfile }) => {
   const [staff, setStaff] = useState([]);
   const [roles, setRoles] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -982,6 +982,12 @@ const StaffDirectory = ({ onViewProfile }) => {
   const [filterType, setFilterType] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
   const [search, setSearch] = useState("");
+  const [pinTarget, setPinTarget] = useState(null);
+  const [pinValue, setPinValue] = useState('');
+  const [pinMsg, setPinMsg] = useState(null);
+  const [pinSaving, setPinSaving] = useState(false);
+
+  const canSetPin = ['md', 'hr_officer'].includes(userProfile?.role);
 
   const load = async () => {
     setLoading(true);
@@ -995,6 +1001,22 @@ const StaffDirectory = ({ onViewProfile }) => {
   useEffect(() => { load(); }, []);
 
   const handleSave = () => { load(); setShowForm(false); setEditTarget(null); };
+
+  const handleSetPin = async () => {
+    if (!pinTarget || pinValue.length < 4) return;
+    setPinSaving(true); setPinMsg(null);
+    try {
+      const { error } = await supabase.rpc('set_staff_pin', { p_staff_id: pinTarget.id, p_pin: pinValue });
+      if (error) throw error;
+      setPinMsg({ type: 'success', msg: 'PIN set successfully.' });
+      setPinValue('');
+      setTimeout(() => { setPinTarget(null); setPinMsg(null); }, 1500);
+    } catch (e) {
+      setPinMsg({ type: 'error', msg: e.message });
+    } finally {
+      setPinSaving(false);
+    }
+  };
 
   const filtered = staff.filter(s => {
     if (search && !s.full_name?.toLowerCase().includes(search.toLowerCase()) && !s.employee_number?.toLowerCase().includes(search.toLowerCase())) return false;
@@ -1115,6 +1137,7 @@ const StaffDirectory = ({ onViewProfile }) => {
                         <div style={{ display: "flex", gap: "6px" }}>
                           <button style={{ ...styles.btn("primary"), padding: "4px 10px", fontSize: "11px" }} onClick={() => onViewProfile(s.id)}>Profile</button>
                           <button style={{ ...styles.btn("secondary"), padding: "4px 10px", fontSize: "11px" }} onClick={() => { setEditTarget(s); setShowForm(true); }}>Edit</button>
+                          {canSetPin && <button style={{ ...styles.btn("secondary"), padding: "4px 10px", fontSize: "11px" }} onClick={() => { setPinTarget(s); setPinValue(''); setPinMsg(null); }}>Set PIN</button>}
                         </div>
                       </td>
                     </tr>
@@ -1133,6 +1156,43 @@ const StaffDirectory = ({ onViewProfile }) => {
           onClose={() => { setShowForm(false); setEditTarget(null); }}
           onSaved={handleSave}
         />
+      )}
+
+      {pinTarget && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: "12px", padding: "24px", width: "340px", maxWidth: "95vw" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+              <div style={{ fontWeight: "700", fontSize: "15px", color: theme.text }}>Set Kiosk PIN — {pinTarget.full_name}</div>
+              <button onClick={() => { setPinTarget(null); setPinValue(''); setPinMsg(null); }} style={{ background: "none", border: "none", cursor: "pointer", color: theme.textMuted, fontSize: "22px", lineHeight: 1 }}>×</button>
+            </div>
+            {pinMsg && <Alert msg={pinMsg.msg} type={pinMsg.type} onClose={() => setPinMsg(null)} />}
+            <div style={styles.formGroup}>
+              <label style={styles.label}>New PIN (4–6 digits)</label>
+              <input
+                type="password"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={6}
+                autoFocus
+                style={styles.input}
+                placeholder="Enter 4–6 digit PIN"
+                value={pinValue}
+                onChange={e => setPinValue(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                onKeyDown={e => { if (e.key === 'Enter' && pinValue.length >= 4) handleSetPin(); }}
+              />
+              <div style={{ fontSize: "11px", color: theme.textMuted, marginTop: "6px" }}>
+                PIN is hashed server-side via SHA-256. It cannot be retrieved once set.
+              </div>
+            </div>
+            <button
+              style={{ ...styles.btn("primary"), width: "100%" }}
+              disabled={pinSaving || pinValue.length < 4}
+              onClick={handleSetPin}
+            >
+              {pinSaving ? "Saving…" : "Set PIN"}
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -2129,7 +2189,7 @@ const Staff = ({ userProfile }) => {
           <button key={id} style={{ ...styles.btn(tab === id ? "primary" : "secondary"), fontSize: "13px" }} onClick={() => setTab(id)}>{label}</button>
         ))}
       </div>
-      {tab === "directory"     && <StaffDirectory onViewProfile={setProfileStaffId} roles={roles} />}
+      {tab === "directory"     && <StaffDirectory onViewProfile={setProfileStaffId} roles={roles} userProfile={userProfile} />}
       {tab === "onboarding"    && <OnboardingTab />}
       {tab === "attendance"    && <AttendanceTab />}
       {tab === "payroll"       && <PayrollTab userProfile={userProfile} />}
