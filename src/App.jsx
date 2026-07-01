@@ -7509,6 +7509,7 @@ const MyHRPage = ({ userProfile }) => {
             style={{ ...styles.btn('primary'), flexShrink: 0 }}
             disabled={pinMySaving || pinMyValue.length < 4}
             onClick={handleSetMyPin}
+            data-ico-allow
           >
             {pinMySaving ? 'Saving…' : 'Set PIN'}
           </button>
