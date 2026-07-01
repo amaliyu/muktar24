@@ -21,10 +21,11 @@ export const leaveBalanceService = {
     return data || [];
   },
 
-  async getMyBalance(year) {
+  async getMyBalance(staffId, year) {
     const { data, error } = await supabase
       .from('staff_leave_balances')
       .select('*')
+      .eq('staff_id', staffId)
       .eq('leave_year', year);
     if (error) throw error;
     return data || [];
