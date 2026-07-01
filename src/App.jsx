@@ -7081,8 +7081,9 @@ const MyHRPage = ({ userProfile }) => {
 
   const loadAll = async () => {
     setStaffLoading(true); setListLoading(true); setBalanceLoading(true); setCasesLoading(true);
+    let staff = null;
     try {
-      const staff = await meService.getMyStaff();
+      staff = await meService.getMyStaff();
       setMyStaff(staff);
     } catch (e) { setAlert({ type: 'error', msg: e.message }); }
     finally { setStaffLoading(false); }
@@ -7092,12 +7093,11 @@ const MyHRPage = ({ userProfile }) => {
     } catch (e) { setAlert({ type: 'error', msg: e.message }); }
     finally { setListLoading(false); }
     try {
-      const [pol, bal] = await Promise.all([
-        leaveBalanceService.getPolicySettings(),
-        leaveBalanceService.getMyBalance(currentYear),
-      ]);
+      const balPromises = [leaveBalanceService.getPolicySettings()];
+      if (staff?.id) balPromises.push(leaveBalanceService.getMyBalance(staff.id, currentYear));
+      const [pol, bal] = await Promise.all(balPromises);
       setPolicyActive(pol?.active === true);
-      setMyBalance(bal);
+      setMyBalance(bal || []);
     } catch (_) { /* leave balance not critical — fail silently */ }
     finally { setBalanceLoading(false); }
     try {
