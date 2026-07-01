@@ -3,7 +3,7 @@
 
 Repo: `amaliyu/muktar24` (PRIVATE) · Prod branch: `main` · Stack: React 18 + Vite 5 + Supabase (PostgreSQL, RLS) + Vercel
 App: APC Manager — internal ERP for Abuja Precast Concrete Limited
-**Updated: 2026-06-30 (Session 10).** All DB state verified by live query, not memory.
+**Updated: 2026-07-01 (Session 11).** All DB state verified by live query, not memory.
 **Status: BETA. A physical/manual backup system runs in parallel — NO downtime pressure.**
 **Operating mode: SLOW AND VERIFIED — fix on a branch → test on the branch's Vercel preview AS THE AFFECTED ROLE → confirm with own eyes → MD merges → re-verify production.**
 
@@ -18,6 +18,47 @@ App: APC Manager — internal ERP for Abuja Precast Concrete Limited
 ---
 
 ## 1. SESSION HISTORY (most recent first)
+
+### ✅ SESSION 11 (2026-07-01) — LEAVE YEAR-END CONTROLS + ATTENDANCE KIOSK (Phase 4d)
+**Two PRs: #33 (year-end controls, merged) + attendance-kiosk branch (PR pending MD merge). Frontend only — DB is fully live.**
+
+**Leave year-end controls (PR #33, merged):**
+- `src/services/leaveBalance.js`: added `runRollover(fromYear)` → RPC `run_annual_leave_rollover(p_from_year)` and `expireCarryover(year)` → RPC `expire_annual_carryover(p_year)`.
+- `src/components/StaffHR.jsx` (`LeaveBalancesTab`): MD-only "Year-end Controls" card — `runRollover` button (confirm-gate) + `expireCarryover` button (confirm-gate), same pattern as existing Activate/Deactivate.
+
+**Attendance kiosk — Phase 4d (branch `claude/attendance-kiosk`, PR pending):**
+
+**DB (already live — no DB changes this session):**
+- `attendance_punches` table: staff_id, punch_time, punch_type (IN/OUT), verification_method, photo_storage_path, device_source, recorded_by_user; deduplicated via `punch_minute` column (trigger-populated).
+- `staff_pin_cache`: staff_id, pin_hash (SHA-256 hex), is_active.
+- `attendance` table: has flagged, flag_reason, flag_response, flag_responded_at.
+- RPCs: `get_kiosk_pin_sync()` (returns staff_id, employee_number, pin_hash for all active staff), `reconcile_attendance_punches(date)`, `submit_attendance_flag_response(p_attendance_id, p_response)`.
+- `attendance-photos` storage bucket: live.
+- **⚠ PENDING (MD decision):** `reconcile_attendance_punches(date)` needs pg_cron scheduling (daily, after shift end). Noted in code comment.
+
+**Frontend (this session):**
+- `src/services/kioskService.js` (new): 7 methods — `syncPins`, `uploadPunches`, `uploadPhoto`, `getFlagged`, `resolveFlag`, `getMyAttendance`, `submitFlagResponse`.
+- `src/components/AttendanceKiosk.jsx` (new): full offline-first kiosk component.
+  - IndexedDB (`apc_kiosk_v1`): `staff_cache` (keyPath: staff_id) + `punch_queue` (autoIncrement local_id).
+  - SHA-256 offline PIN verification via Web Crypto API (`crypto.subtle.digest`). Assumes `pin_hash` stored as SHA-256 hex.
+  - BarcodeDetector API (CODE128, `{ formats: ['code_128'] }`) in rAF scan loop. Falls back to PIN pad if API unavailable.
+  - Front-camera (`facingMode: 'user'`), photo captured via canvas-toBlob (JPEG 75%) on each punch.
+  - Photo stored in IDB with punch; uploaded to `attendance-photos/punches/{staff_id}/{punch_time}.jpg` on flush.
+  - Sync: `online` event + `visibilitychange` + 5-min `setInterval` poll; IDB queue accumulates offline punches.
+  - HR manual override (hr_officer/md): fetches live `staff_public`, submits directly online; `recorded_by_user = userProfile.id`, `verification_method = 'manual_override'`.
+  - Toast overlay (2.5s auto-dismiss, green/red).
+  - Status bar: online/offline indicator, queue count, last-sync time, manual sync button.
+  - Debounce: 3s between barcode detections (same physical scan).
+  - PIN pad: 4–6 digit entry; dots display; SHA-256 checked at ≥4 digits; accepts up to 6 before clearing with error.
+- `src/App.jsx`:
+  - Imports: `kioskService`, `AttendanceKiosk`.
+  - ROLE_PAGES: `attendance_kiosk` + `attendance_flags` added to `hr_officer`; `attendance_flags` added to `production_manager` + `assistant_production_manager`; `md` gets both via `'all'`.
+  - Nav: two new items under Operations — "Attendance Kiosk" and "Attendance Flags".
+  - `AttendanceFlagsPage` (inline): HR management view of flagged attendance (last 60 days); resolve with `hours_worked` + `present` fields; shows employee response if submitted.
+  - `MyHRPage`: added `myAttendance` / `attLoading` state; loads last 30 days via `kioskService.getMyAttendance`; "My Attendance (Last 30 Days)" table with flagged-row response textarea (submits via `submitFlagResponse` RPC).
+  - Page routing: `attendance_kiosk` → `<AttendanceKiosk>`, `attendance_flags` → `<AttendanceFlagsPage>`.
+
+**Constraints honoured:** DO NOT touch Labour.jsx / payrollService labour.js. DO NOT touch disciplinary module. Frontend only — no DB changes applied. MD merges.
 
 ### ✅ SESSION 10 (2026-06-30) — HR 4c DISCIPLINARY / QUERY MODULE
 **HR 4c declared COMPLETE. PR #32 merged (with fix-commit).**
@@ -195,6 +236,9 @@ A long, multi-workstream session. All items below tested and merged unless noted
 - **HR 4b Phase B — COMPLETE.** B-1 (unpaid-leave deduction, `advance_deduction` column) and B-2 (leave-balance ledger, 38 rows, activation trigger proven) both live. Remaining deferred items: carry-over automation (Jan boundary roll) and future-hire pro-ration.
 - **`date_hired` gaps.** APC-EMP-015, 016, 019, 006 are missing `date_hired` — HR to fill in via Staff tab.
 - ✅ **Disciplinary/query module (HR 4c) — COMPLETE (S10, PR #32).** Full lifecycle live. Sanction wall enforced by convention (DB trigger does not auto-update employment_status; that step remains manual/HR-mediated).
+- ✅ **Leave year-end controls — COMPLETE (S11, PR #33).** `run_annual_leave_rollover` and `expire_annual_carryover` RPCs wired to MD-only buttons in StaffHR LeaveBalancesTab.
+- ✅ **Attendance kiosk — Phase 4d (S11, PR pending MD merge).** `src/services/kioskService.js` + `src/components/AttendanceKiosk.jsx` + App.jsx plumbing (flags page, My HR attendance section). DB fully live. **⚠ pg_cron scheduling for `reconcile_attendance_punches(date)` still needed — MD to decide schedule (recommended: nightly, 30 min after shift end).**
+- **PIN hash algorithm assumption:** `AttendanceKiosk` uses SHA-256 hex for offline PIN verification. If `staff_pin_cache.pin_hash` uses a different algorithm (e.g. bcrypt), the offline comparison will always fail and every PIN user will need network. Confirm pin_hash format before kiosk go-live.
 - **Manager email migration (future).** Current manager logins use personal emails. Planned: replace 7 role accounts with official `@abujaprecast.com` addresses (MD/ICO/BDM/logistics/production/store/HR).
 - **Orphaned staff photo files** in `staff-photos` bucket from deleted test staff — harmless; clear via Supabase dashboard (SQL delete blocked).
 - **Ransom (APC-EMP-018)** in onboarding — HR to complete checklist + activate when ready.
@@ -206,7 +250,8 @@ A long, multi-workstream session. All items below tested and merged unless noted
 - ✅ **Staff-payroll approval chain — DECIDED & BUILT (Session 7).** accountant creates (draft) → ICO approves → MD approves → accountant/MD marks paid + records per-line amounts.
 - Go-live data re-entry milestone (parked) — clean opening balances; resolves dust kg→tons (~16.3t) gap & beta errors.
 - Correction-as-adjustment-movement rule (LOCKED) — corrections are new logged offsetting entries, never silent edits.
-- Attendance automation — design active (shared offline-first Android kiosk, face-as-token using enrolled ID-card photos, mandatory human confirmation before any pay sanction). Not built.
+- ✅ **Attendance kiosk — BUILT (S11, PR pending).** Offline-first barcode + PIN kiosk with IDB queue, front-camera photo, sync triggers. **Open decision: pg_cron schedule for `reconcile_attendance_punches(date)` — MD to confirm timing before go-live.** Note: face-as-token (enrolled photo match) was descoped; ID-card barcode + PIN covers the MVP.
+- ✅ **Leave year-end controls — BUILT (S11, PR #33).**
 
 ---
 
@@ -241,6 +286,8 @@ A long, multi-workstream session. All items below tested and merged unless noted
 | HR bug-fix pack | ✅ merged (S9, PR #30) | — |
 | HR 4c self-service rollout | ✅ merged (S9, PR #31) — any linked employee gets My HR | — |
 | HR 4c disciplinary/query module | ✅ COMPLETE (S10, PR #32) — full lifecycle, sanction wall proven | — |
+| Leave year-end controls | ✅ COMPLETE (S11, PR #33) — rollover + expire-carryover MD buttons | — |
+| Attendance kiosk (Phase 4d) | ✅ BUILT (S11, PR pending MD merge) — barcode+PIN, IDB offline, photos, flags page, My HR section | ⚠ pg_cron for reconcile_attendance_punches; confirm pin_hash algo |
 | Invoice/logistics/waybill | ✅ fixed & live | — |
 | Silent supabase fallback | ✅ fixed (PR #18) | — |
 | Staff-payroll state machine | ✅ live (S7, PR #20) | — |
