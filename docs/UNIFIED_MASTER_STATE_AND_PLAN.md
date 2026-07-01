@@ -28,35 +28,46 @@ App: APC Manager — internal ERP for Abuja Precast Concrete Limited
 
 **Attendance kiosk — Phase 4d (branch `claude/attendance-kiosk`, PR pending):**
 
+**Scope:** Permanent/salaried staff only. Daily workers remain fully manual/analog — this system does not touch Labour.jsx or labour payroll in any way.
+
 **DB (already live — no DB changes this session):**
 - `attendance_punches` table: staff_id, punch_time, punch_type (IN/OUT), verification_method, photo_storage_path, device_source, recorded_by_user; deduplicated via `punch_minute` column (trigger-populated).
-- `staff_pin_cache`: staff_id, pin_hash (SHA-256 hex), is_active.
-- `attendance` table: has flagged, flag_reason, flag_response, flag_responded_at.
-- RPCs: `get_kiosk_pin_sync()` (returns staff_id, employee_number, pin_hash for all active staff), `reconcile_attendance_punches(date)`, `submit_attendance_flag_response(p_attendance_id, p_response)`.
+- `staff_pin_cache`: staff_id, pin_hash (SHA-256 hex), is_active. Partial unique index on `pin_hash WHERE is_active = true` prevents duplicate PINs across active staff — both set-PIN RPCs surface this as a clear error.
+- `attendance` table: existing table extended with flagged, flag_reason, flag_response, flag_responded_at.
+- RPCs:
+  - `get_kiosk_pin_sync()` — returns staff_id, employee_number, pin_hash for all active staff (used by kiosk on startup/sync)
+  - `reconcile_attendance_punches(date)` — **RESOLVED: pg_cron job `reconcile-attendance-punches-nightly` runs nightly at 20:00 UTC (21:00 WAT)**
+  - `submit_attendance_flag_response(p_attendance_id, p_response)` — employee submits explanation
+  - `set_staff_pin(p_staff_id, p_pin)` — HR-managed PIN assignment (md/hr_officer); validates 4–6 digits, hashes server-side
+  - `set_my_kiosk_pin(p_pin)` — self-service PIN; resolves caller's own staff_id server-side; same validation
 - `attendance-photos` storage bucket: live.
-- **⚠ PENDING (MD decision):** `reconcile_attendance_punches(date)` needs pg_cron scheduling (daily, after shift end). Noted in code comment.
+- **pgcrypto schema note:** On this project, pgcrypto lives in the `extensions` schema (not `public`). Any future SECURITY DEFINER function using `digest()` or `crypt()` must include `SET search_path = public, extensions` in its definition or it will throw "function digest() does not exist". Both set-PIN RPCs already handle this.
+
+**Identification method:** The existing staff ID card barcode (CODE128, encodes `employee_number`) is the primary punch method — no new badges required. PIN is the fallback when the barcode is unavailable or the BarcodeDetector API is not supported.
 
 **Frontend (this session):**
 - `src/services/kioskService.js` (new): 7 methods — `syncPins`, `uploadPunches`, `uploadPhoto`, `getFlagged`, `resolveFlag`, `getMyAttendance`, `submitFlagResponse`.
 - `src/components/AttendanceKiosk.jsx` (new): full offline-first kiosk component.
   - IndexedDB (`apc_kiosk_v1`): `staff_cache` (keyPath: staff_id) + `punch_queue` (autoIncrement local_id).
-  - SHA-256 offline PIN verification via Web Crypto API (`crypto.subtle.digest`). Assumes `pin_hash` stored as SHA-256 hex.
+  - SHA-256 offline PIN verification via Web Crypto API (`crypto.subtle.digest`). `pin_hash` is confirmed stored as SHA-256 hex.
   - BarcodeDetector API (CODE128, `{ formats: ['code_128'] }`) in rAF scan loop. Falls back to PIN pad if API unavailable.
   - Front-camera (`facingMode: 'user'`), photo captured via canvas-toBlob (JPEG 75%) on each punch.
   - Photo stored in IDB with punch; uploaded to `attendance-photos/punches/{staff_id}/{punch_time}.jpg` on flush.
   - Sync: `online` event + `visibilitychange` + 5-min `setInterval` poll; IDB queue accumulates offline punches.
-  - HR manual override (hr_officer/md): fetches live `staff_public`, submits directly online; `recorded_by_user = userProfile.id`, `verification_method = 'manual_override'`.
+  - HR manual override (hr_officer/md): fetches live `staff_public`, submits directly online; `recorded_by_user = userProfile.id`, `verification_method = 'hr_manual_override'`.
   - Toast overlay (2.5s auto-dismiss, green/red).
   - Status bar: online/offline indicator, queue count, last-sync time, manual sync button.
   - Debounce: 3s between barcode detections (same physical scan).
   - PIN pad: 4–6 digit entry; dots display; SHA-256 checked at ≥4 digits; accepts up to 6 before clearing with error.
+- `src/components/StaffHR.jsx`: "Set PIN" button added to Staff Directory Actions column (md/hr_officer only). Opens modal calling `set_staff_pin(p_staff_id, p_pin)` — numeric-only, 4–6 digits, Enter-key support, auto-close on success. Recovery path for staff who forget their PIN and cannot self-service a reset.
 - `src/App.jsx`:
   - Imports: `kioskService`, `AttendanceKiosk`.
   - ROLE_PAGES: `attendance_kiosk` + `attendance_flags` added to `hr_officer`; `attendance_flags` added to `production_manager` + `assistant_production_manager`; `md` gets both via `'all'`.
   - Nav: two new items under Operations — "Attendance Kiosk" and "Attendance Flags".
-  - `AttendanceFlagsPage` (inline): HR management view of flagged attendance (last 60 days); resolve with `hours_worked` + `present` fields; shows employee response if submitted.
-  - `MyHRPage`: added `myAttendance` / `attLoading` state; loads last 30 days via `kioskService.getMyAttendance`; "My Attendance (Last 30 Days)" table with flagged-row response textarea (submits via `submitFlagResponse` RPC).
+  - `AttendanceFlagsPage` (inline): HR management view of flagged attendance (last 60 days); resolve with `hours_worked` + `present` fields; shows employee response if submitted. Flag resolution: staff explanation via self-service is optional — HR/MD can resolve regardless of whether a response was submitted. No new approval state machine.
+  - `MyHRPage`: "My Attendance (Last 30 Days)" table (flagged-row response textarea → `submitFlagResponse`); "Kiosk PIN" card — self-service PIN set/reset via `set_my_kiosk_pin(p_pin)`, numeric input, 4–6 digits, hashed server-side. ICO users can fully use this page (leave, advance, Kiosk PIN — see ICO fix below).
   - Page routing: `attendance_kiosk` → `<AttendanceKiosk>`, `attendance_flags` → `<AttendanceFlagsPage>`.
+  - **ICO read-only fix (pre-existing gap, surfaced during kiosk testing):** The `data-ico-view` CSS mask and the read-only banner never exempted `my_hr`, locking ICO out of their own leave/advance/self-service page. Fixed by adding `my_hr` to both exemption lists (same pattern already used for `advances` and `leave`). This is a pre-existing bug unrelated to the kiosk feature.
 
 **Constraints honoured:** DO NOT touch Labour.jsx / payrollService labour.js. DO NOT touch disciplinary module. Frontend only — no DB changes applied. MD merges.
 
@@ -237,8 +248,7 @@ A long, multi-workstream session. All items below tested and merged unless noted
 - **`date_hired` gaps.** APC-EMP-015, 016, 019, 006 are missing `date_hired` — HR to fill in via Staff tab.
 - ✅ **Disciplinary/query module (HR 4c) — COMPLETE (S10, PR #32).** Full lifecycle live. Sanction wall enforced by convention (DB trigger does not auto-update employment_status; that step remains manual/HR-mediated).
 - ✅ **Leave year-end controls — COMPLETE (S11, PR #33).** `run_annual_leave_rollover` and `expire_annual_carryover` RPCs wired to MD-only buttons in StaffHR LeaveBalancesTab.
-- ✅ **Attendance kiosk — Phase 4d (S11, PR pending MD merge).** `src/services/kioskService.js` + `src/components/AttendanceKiosk.jsx` + App.jsx plumbing (flags page, My HR attendance section). DB fully live. **⚠ pg_cron scheduling for `reconcile_attendance_punches(date)` still needed — MD to decide schedule (recommended: nightly, 30 min after shift end).**
-- **PIN hash algorithm assumption:** `AttendanceKiosk` uses SHA-256 hex for offline PIN verification. If `staff_pin_cache.pin_hash` uses a different algorithm (e.g. bcrypt), the offline comparison will always fail and every PIN user will need network. Confirm pin_hash format before kiosk go-live.
+- ✅ **Attendance kiosk — Phase 4d (S11, PR pending MD merge).** `src/services/kioskService.js` + `src/components/AttendanceKiosk.jsx` + App.jsx plumbing (flags page, My HR attendance+PIN sections, ICO exemption fix). DB fully live. pg_cron resolved: `reconcile-attendance-punches-nightly` runs at 20:00 UTC. `pin_hash` confirmed SHA-256 hex. No outstanding items.
 - **Manager email migration (future).** Current manager logins use personal emails. Planned: replace 7 role accounts with official `@abujaprecast.com` addresses (MD/ICO/BDM/logistics/production/store/HR).
 - **Orphaned staff photo files** in `staff-photos` bucket from deleted test staff — harmless; clear via Supabase dashboard (SQL delete blocked).
 - **Ransom (APC-EMP-018)** in onboarding — HR to complete checklist + activate when ready.
@@ -287,7 +297,7 @@ A long, multi-workstream session. All items below tested and merged unless noted
 | HR 4c self-service rollout | ✅ merged (S9, PR #31) — any linked employee gets My HR | — |
 | HR 4c disciplinary/query module | ✅ COMPLETE (S10, PR #32) — full lifecycle, sanction wall proven | — |
 | Leave year-end controls | ✅ COMPLETE (S11, PR #33) — rollover + expire-carryover MD buttons | — |
-| Attendance kiosk (Phase 4d) | ✅ BUILT (S11, PR pending MD merge) — barcode+PIN, IDB offline, photos, flags page, My HR section | ⚠ pg_cron for reconcile_attendance_punches; confirm pin_hash algo |
+| Attendance kiosk (Phase 4d) | ✅ COMPLETE (S11, PR pending MD merge) — barcode+PIN, IDB offline, photos, flags page, My HR attendance+PIN self-service, ICO exemption fix | pg_cron live (20:00 UTC nightly); pin_hash confirmed SHA-256 |
 | Invoice/logistics/waybill | ✅ fixed & live | — |
 | Silent supabase fallback | ✅ fixed (PR #18) | — |
 | Staff-payroll state machine | ✅ live (S7, PR #20) | — |
