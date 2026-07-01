@@ -7085,6 +7085,9 @@ const MyHRPage = ({ userProfile }) => {
   const [attFlagTarget, setAttFlagTarget] = useState(null);
   const [attFlagText, setAttFlagText]   = useState('');
   const [attFlagSaving, setAttFlagSaving] = useState(false);
+  const [pinMyValue, setPinMyValue]     = useState('');
+  const [pinMyMsg, setPinMyMsg]         = useState(null);
+  const [pinMySaving, setPinMySaving]   = useState(false);
 
   const loadAll = async () => {
     setStaffLoading(true); setListLoading(true); setBalanceLoading(true); setCasesLoading(true); setAttLoading(true);
@@ -7189,6 +7192,21 @@ const MyHRPage = ({ userProfile }) => {
       setAlert({ type: 'success', msg: 'Response submitted.' });
     } catch (e) { setAlert({ type: 'error', msg: e.message }); }
     finally { setAttFlagSaving(false); }
+  };
+
+  const handleSetMyPin = async () => {
+    if (pinMyValue.length < 4) return;
+    setPinMySaving(true); setPinMyMsg(null);
+    try {
+      const { error } = await supabase.rpc('set_my_kiosk_pin', { p_pin: pinMyValue });
+      if (error) throw error;
+      setPinMyMsg({ type: 'success', msg: 'Kiosk PIN set successfully.' });
+      setPinMyValue('');
+    } catch (e) {
+      setPinMyMsg({ type: 'error', msg: e.message });
+    } finally {
+      setPinMySaving(false);
+    }
   };
 
   const advStatusColor = s => s === 'disbursed' ? theme.green : s === 'md_approved' ? theme.blue : s === 'ico_approved' ? theme.accent : s === 'settled' ? theme.textMuted : (s === 'rejected' || s === 'cancelled') ? theme.red : theme.textMuted;
@@ -7464,6 +7482,40 @@ const MyHRPage = ({ userProfile }) => {
             </table>
           </div>
         )}
+      </div>
+
+      <div style={{ ...styles.card, marginTop: '28px' }}>
+        <div style={styles.sectionTitle}>Kiosk PIN</div>
+        <div style={{ fontSize: '13px', color: theme.textMuted, marginBottom: '14px' }}>
+          Set or reset your attendance kiosk PIN. Use this 4–6 digit PIN to clock in/out at the kiosk when your barcode is not available.
+        </div>
+        {pinMyMsg && <Alert msg={pinMyMsg.msg} type={pinMyMsg.type} onClose={() => setPinMyMsg(null)} />}
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end', maxWidth: '340px' }}>
+          <div style={{ ...styles.formGroup, flex: 1, marginBottom: 0 }}>
+            <label style={styles.label}>New PIN (4–6 digits)</label>
+            <input
+              type="password"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              maxLength={6}
+              style={styles.input}
+              placeholder="Enter 4–6 digit PIN"
+              value={pinMyValue}
+              onChange={e => setPinMyValue(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              onKeyDown={e => { if (e.key === 'Enter' && pinMyValue.length >= 4) handleSetMyPin(); }}
+            />
+          </div>
+          <button
+            style={{ ...styles.btn('primary'), flexShrink: 0 }}
+            disabled={pinMySaving || pinMyValue.length < 4}
+            onClick={handleSetMyPin}
+          >
+            {pinMySaving ? 'Saving…' : 'Set PIN'}
+          </button>
+        </div>
+        <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '8px' }}>
+          PIN is hashed server-side. It cannot be retrieved once set.
+        </div>
       </div>
     </div>
   );
