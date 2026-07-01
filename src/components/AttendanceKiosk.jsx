@@ -165,7 +165,7 @@ export default function AttendanceKiosk({ userProfile }) {
       punch_time:          new Date().toISOString(),
       punch_type:          punchTypeRef.current,
       verification_method: method,
-      device_source:       'kiosk_web',
+      device_source:       'HR_OFFICE_PHONE_KIOSK',
       photo_blob:          photoBlob || null,
     });
     await refreshCount();
@@ -179,7 +179,7 @@ export default function AttendanceKiosk({ userProfile }) {
     const cached = staffByEmpRef.current[rawValue];
     if (!cached) { showToast(`Barcode "${rawValue}" not in roster`, false); return; }
     captureFrame(videoRef.current).then(blob => {
-      queuePunch(cached.staff_id, blob, 'barcode').then(() => {
+      queuePunch(cached.staff_id, blob, 'qr_code').then(() => {
         showToast(`${punchTypeRef.current}: ${rawValue}`);
       });
     });
@@ -293,7 +293,7 @@ export default function AttendanceKiosk({ userProfile }) {
       pinDigitsRef.current = [];
       setPinDisplay([]);
       const blob = await captureFrame(videoRef.current);
-      await queuePunch(match.staff_id, blob, 'pin');
+      await queuePunch(match.staff_id, blob, 'pin_input');
       showToast(`${punchTypeRef.current}: ${match.employee_number}`);
     } else if (next.length >= 6) {
       pinDigitsRef.current = [];
@@ -337,8 +337,8 @@ export default function AttendanceKiosk({ userProfile }) {
         staff_id:            overStaffId,
         punch_time:          new Date().toISOString(),
         punch_type:          overPunchType,
-        verification_method: 'manual_override',
-        device_source:       'kiosk_web',
+        verification_method: 'hr_manual_override',
+        device_source:       'HR_OFFICE_PHONE_KIOSK',
         recorded_by_user:    userProfile?.id,
       }]);
       showToast(`Manual ${overPunchType} recorded`);
