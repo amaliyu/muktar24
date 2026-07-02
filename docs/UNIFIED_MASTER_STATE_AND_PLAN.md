@@ -3,7 +3,7 @@
 
 Repo: `amaliyu/muktar24` (PRIVATE) · Prod branch: `main` · Stack: React 18 + Vite 5 + Supabase (PostgreSQL, RLS) + Vercel
 App: APC Manager — internal ERP for Abuja Precast Concrete Limited
-**Updated: 2026-07-01 (Session 11).** All DB state verified by live query, not memory.
+**Updated: 2026-07-02 (Session 11 close-out).** All DB state verified by live query, not memory.
 **Status: BETA. A physical/manual backup system runs in parallel — NO downtime pressure.**
 **Operating mode: SLOW AND VERIFIED — fix on a branch → test on the branch's Vercel preview AS THE AFFECTED ROLE → confirm with own eyes → MD merges → re-verify production.**
 
@@ -19,14 +19,14 @@ App: APC Manager — internal ERP for Abuja Precast Concrete Limited
 
 ## 1. SESSION HISTORY (most recent first)
 
-### ✅ SESSION 11 (2026-07-01) — LEAVE YEAR-END CONTROLS + ATTENDANCE KIOSK (Phase 4d)
-**Two PRs: #33 (year-end controls, merged) + attendance-kiosk branch (PR pending MD merge). Frontend only — DB is fully live.**
+### ✅ SESSION 11 (2026-07-01/02) — LEAVE YEAR-END CONTROLS + ATTENDANCE KIOSK (Phase 4d) + FIXES
+**PRs merged: #33 (year-end controls), #34 (docs revert), #35 (attendance kiosk), #37 (leave-balance scoping fix). #36 closed UNMERGED (stale base — see near-miss note below). Frontend only — DB is fully live.**
 
 **Leave year-end controls (PR #33, merged):**
 - `src/services/leaveBalance.js`: added `runRollover(fromYear)` → RPC `run_annual_leave_rollover(p_from_year)` and `expireCarryover(year)` → RPC `expire_annual_carryover(p_year)`.
 - `src/components/StaffHR.jsx` (`LeaveBalancesTab`): MD-only "Year-end Controls" card — `runRollover` button (confirm-gate) + `expireCarryover` button (confirm-gate), same pattern as existing Activate/Deactivate.
 
-**Attendance kiosk — Phase 4d (branch `claude/attendance-kiosk`, PR pending):**
+**Attendance kiosk — Phase 4d (merged: PR #34 revert + PR #35 kiosk):**
 
 **Scope:** Permanent/salaried staff only. Daily workers remain fully manual/analog — this system does not touch Labour.jsx or labour payroll in any way.
 
@@ -71,6 +71,20 @@ App: APC Manager — internal ERP for Abuja Precast Concrete Limited
 
 **Constraints honoured:** DO NOT touch Labour.jsx / payrollService labour.js. DO NOT touch disciplinary module. Frontend only — no DB changes applied. MD merges.
 
+**My HR leave-balance scoping fix (PR #37, merged):**
+- Bug: `getMyBalance(year)` in `src/services/leaveBalance.js` filtered only by `leave_year` — no `staff_id` filter. RLS correctly grants md/ico/accountant (plus hr) global read on `staff_leave_balances` (needed for the management-side all-staff balance table), so the app-level filter was the only guard — and it wasn't there. Result: My HR "My Leave Balance" showed EVERY staff member's balance rows in a repeated grid for those roles.
+- Fix: `getMyBalance(staffId, year)` with `.eq('staff_id', staffId)`; call site in `MyHRPage.loadAll()` guards on `staff?.id` and passes it.
+- **Bug class: missing scoping filter — second occurrence.** First: `getMyStaff()` `.limit(1)` bug (S9, PR #30). This class is now audit category (3) in the Full backend audit stream (§3).
+
+**PR #36 — closed UNMERGED (near-miss, process lesson):**
+- The same fix was first built on a stale branch base forked from main at `07df8b3` — before PRs #34/#35 merged. Merging it would have deleted the entire kiosk feature (946 deletions).
+- Caught by diffing the PR against current main before merge. Rebuilt clean as PR #37 on a fresh branch off current main (2 files, 15 lines).
+- **LESSON (now Working Rule #9):** every PR must be diffed against current main before MD review — branch base verified, not assumed.
+
+**Data hygiene (live DB, S11):**
+- `date_hired` gaps resolved: EMP-017 (Boniface) corrected to 2026-03-18; the other flagged records confirmed correct by MD.
+- "Demo hr" test staff record deleted from live DB with all child rows (onboarding checklist, advance requests, leave requests, leave balances, user profile).
+
 ### ✅ SESSION 10 (2026-06-30) — HR 4c DISCIPLINARY / QUERY MODULE
 **HR 4c declared COMPLETE. PR #32 merged (with fix-commit).**
 
@@ -92,7 +106,7 @@ App: APC Manager — internal ERP for Abuja Precast Concrete Limited
 - "Queries & Warnings" section added to `MyHRPage`: respond textarea for formal_query at `issued`; Acknowledge button for any case without `acknowledged_at`.
 - Verified end-to-end in production preview.
 
-**Open items (unchanged):** `date_hired` missing for APC-EMP-015, 016, 019, 006. B-2 carry-over automation + future-hire pro-ration deferred.
+**Open items (as of S10):** B-2 carry-over automation + future-hire pro-ration deferred. (`date_hired` gaps RESOLVED in S11 — see Session 11 data-hygiene note and §4.)
 
 ### ✅ SESSION 9 (2026-06-28) — HR BUG-FIX PACK + SELF-SERVICE ROLLOUT
 **PRs #20–#25 all confirmed merged. HR 4b Phase B declared COMPLETE (B-2 activation live-proven).**
@@ -229,14 +243,28 @@ A long, multi-workstream session. All items below tested and merged unless noted
 | 1 | G.1 quick-fixes | ✅ COMPLETE |
 | 2 | Payroll client cutover | ✅ COMPLETE |
 | 3 | RLS for remaining tables | ✅ baseline complete; **2 deeper leaks (staff-PII, invoices/payments) found & CLOSED in Session 6** |
-| 4 | HR modules | 4a ✅, 4d ✅, 4b ✅ **COMPLETE** (DB+UI + B-1 unpaid-leave deduction + B-2 leave-balance ledger live, 38 rows activated); 4c partial (self-service rollout ✅ S9; disciplinary pending) |
-| 5 | Payment-request (revenue) + ingestion engine (Phase 1+) | Parked; Phase 0 done; after #4 |
+| 4 | HR modules | ✅ **CLOSED** — 4a ✅ (S3/S4), 4b ✅ incl. B-1/B-2 (S7/S8), 4c ✅ (S10, PR #32), 4d ✅ cards (S5) + attendance kiosk (S11, PRs #34/#35). Remaining HR-adjacent deferrals are standalone line items in §4, not under this stream |
+| 4.5 | **Full backend audit (pre-#5)** | Scoped (S11) — runs BEFORE #5; see audit scope below. Next: execute |
+| 5 | Payment-request (revenue) + ingestion engine (Phase 1+) | Parked; Phase 0 done; **re-plan after audit close** — MD has identified payment/accounting manual processes as the primary operational bottleneck to address from #5 onward |
 
-### Phase 4 sub-roadmap
+### Phase 4 sub-roadmap — ✅ STREAM CLOSED (S11)
+All four sub-phases shipped. HR-adjacent deferrals moved to standalone line items in §4 (carry-over automation, future-hire pro-ration, EMP-018 activation, orphaned photo cleanup, card header polish).
 - 4a lifecycle/onboarding — ✅ DONE.
-- 4d ID + business cards + photo — ✅ DONE (merged). Visual polish: accepted as functional; minor header-size nit optional.
-- 4b leave & salary-advance requests — ✅ **COMPLETE** (Session 7–8). B-1 unpaid-leave payroll deduction live. B-2 leave-balance ledger live (38 rows, activation proven end-to-end). Deferred: carry-over automation (Jan boundary), future-hire pro-ration.
+- 4d ID + business cards + photo — ✅ DONE (merged, S5). Attendance kiosk (barcode + PIN) — ✅ DONE (merged, S11, PRs #34/#35).
+- 4b leave & salary-advance requests — ✅ **COMPLETE** (Session 7–8). B-1 unpaid-leave payroll deduction live. B-2 leave-balance ledger live (38 rows, activation proven end-to-end).
 - 4c disciplinary/queries + staff self-service portal — ✅ **COMPLETE (Session 10, PR #32).** Self-service rollout (S9, PR #31) + disciplinary/query module (S10): issue_disciplinary_case RPC, advance_disciplinary RPC, guard trigger, disciplinary_self view, DisciplinaryPage (md/hr_officer), "Queries & Warnings" in My HR (employee responds/acknowledges). Decision resolved: employees see own cases via disciplinary_self (safe view, no management_review_notes).
+
+### Full backend audit (pre-#5) — scope (S11)
+Bounded audit, five categories:
+1. **All RLS policies vs the role matrix** — every table's policies checked against who should read/write.
+2. **All SECURITY DEFINER function grants** — check for anon/PUBLIC EXECUTE grants.
+3. **Frontend queries for missing scoping filters** — the PR #37 bug class (query relies on RLS that is intentionally permissive for some roles; app-level filter absent).
+4. **Role-exemption lists for missing pages** — the ICO `my_hr` bug class (page added but never added to a role's mask/banner exemption list).
+5. **State-machine guard coverage on money/HR tables** — every table holding money or HR state has a guard trigger or RPC-only write path.
+
+**Out of scope:** runtime/UI behavior — covered separately by the MD role-based smoke test.
+**Method:** findings are collected into a single report for MD decision — EXCEPT confirmed security exposures (data leak / unauthenticated access), which are fixed on discovery and reported after.
+**Position:** runs BEFORE #5 scoping. #5 and all downstream roadmap items get re-planned after audit close.
 
 ---
 
@@ -244,11 +272,14 @@ A long, multi-workstream session. All items below tested and merged unless noted
 - ✅ **Latent-bug sweep — DONE (Session 6).** All six number generators (invoice/waybill/receipt/supplier/batch/employee) audited and given collision handling; no quote/proforma/PO generator exists. Two RLS leaks (staff-PII, invoices/payments) found and closed. Per-role RLS verified for each.
 - ✅ **Silent Supabase client fallback — DONE (PR #18, Session 6/7).** `src/lib/supabase.js` now throws immediately on missing `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` instead of falling back to placeholder.
 - ✅ **Staff payroll state machine — DONE (PR #20, Session 7).** `advance_staff_payroll` RPC + `trg_staff_payroll_guard` + `staff_payroll_audit`. Approval chain: accountant creates (draft) → ICO → MD → accountant/MD marks paid. Advance deductions integrated into `payroll_lines.deductions`; net-pay fix in `openRun`.
-- **HR 4b Phase B — COMPLETE.** B-1 (unpaid-leave deduction, `advance_deduction` column) and B-2 (leave-balance ledger, 38 rows, activation trigger proven) both live. Remaining deferred items: carry-over automation (Jan boundary roll) and future-hire pro-ration.
-- **`date_hired` gaps.** APC-EMP-015, 016, 019, 006 are missing `date_hired` — HR to fill in via Staff tab.
+- **HR 4b Phase B — COMPLETE.** B-1 (unpaid-leave deduction, `advance_deduction` column) and B-2 (leave-balance ledger, 38 rows, activation trigger proven) both live.
+- **Carry-over automation (Jan year-boundary roll)** — deferred; standalone item (HR stream #4 is closed; formerly under 4b).
+- **Future-hire leave pro-ration** — deferred; standalone item (formerly under 4b).
+- **Card header polish** — optional visual nit; standalone item (formerly under 4d cards).
+- ✅ **`date_hired` gaps — RESOLVED (S11).** EMP-017 (Boniface) corrected to 2026-03-18; the other flagged records confirmed correct by MD. "Demo hr" test staff record and all child rows (onboarding checklist, advance/leave requests, balances, user profile) deleted from live DB.
 - ✅ **Disciplinary/query module (HR 4c) — COMPLETE (S10, PR #32).** Full lifecycle live. Sanction wall enforced by convention (DB trigger does not auto-update employment_status; that step remains manual/HR-mediated).
 - ✅ **Leave year-end controls — COMPLETE (S11, PR #33).** `run_annual_leave_rollover` and `expire_annual_carryover` RPCs wired to MD-only buttons in StaffHR LeaveBalancesTab.
-- ✅ **Attendance kiosk — Phase 4d (S11, PR pending MD merge).** `src/services/kioskService.js` + `src/components/AttendanceKiosk.jsx` + App.jsx plumbing (flags page, My HR attendance+PIN sections, ICO exemption fix). DB fully live. pg_cron resolved: `reconcile-attendance-punches-nightly` runs at 20:00 UTC. `pin_hash` confirmed SHA-256 hex. No outstanding items.
+- ✅ **Attendance kiosk — Phase 4d (S11, merged: PR #34 revert + PR #35 kiosk).** `src/services/kioskService.js` + `src/components/AttendanceKiosk.jsx` + App.jsx plumbing (flags page, My HR attendance+PIN sections, ICO exemption fix). DB fully live. pg_cron resolved: `reconcile-attendance-punches-nightly` runs at 20:00 UTC. `pin_hash` confirmed SHA-256 hex. No outstanding items.
 - **Manager email migration (future).** Current manager logins use personal emails. Planned: replace 7 role accounts with official `@abujaprecast.com` addresses (MD/ICO/BDM/logistics/production/store/HR).
 - **Orphaned staff photo files** in `staff-photos` bucket from deleted test staff — harmless; clear via Supabase dashboard (SQL delete blocked).
 - **Ransom (APC-EMP-018)** in onboarding — HR to complete checklist + activate when ready.
@@ -260,7 +291,7 @@ A long, multi-workstream session. All items below tested and merged unless noted
 - ✅ **Staff-payroll approval chain — DECIDED & BUILT (Session 7).** accountant creates (draft) → ICO approves → MD approves → accountant/MD marks paid + records per-line amounts.
 - Go-live data re-entry milestone (parked) — clean opening balances; resolves dust kg→tons (~16.3t) gap & beta errors.
 - Correction-as-adjustment-movement rule (LOCKED) — corrections are new logged offsetting entries, never silent edits.
-- ✅ **Attendance kiosk — BUILT (S11, PR pending).** Offline-first barcode + PIN kiosk with IDB queue, front-camera photo, sync triggers. **Open decision: pg_cron schedule for `reconcile_attendance_punches(date)` — MD to confirm timing before go-live.** Note: face-as-token (enrolled photo match) was descoped; ID-card barcode + PIN covers the MVP.
+- ✅ **Attendance kiosk — merged (PR #34 revert + PR #35 kiosk, S11).** Offline-first barcode + PIN kiosk with IDB queue, front-camera photo, sync triggers. pg_cron decision RESOLVED: `reconcile-attendance-punches-nightly` runs nightly at 20:00 UTC (21:00 WAT). Note: face-as-token (enrolled photo match) was descoped; ID-card barcode + PIN covers the MVP.
 - ✅ **Leave year-end controls — BUILT (S11, PR #33).**
 
 ---
@@ -274,6 +305,7 @@ A long, multi-workstream session. All items below tested and merged unless noted
 6. End every session by updating THIS document.
 7. After any RLS/policy change, smoke-test the app AS EACH affected role before promoting.
 8. Verify fix proposals against the live DB before applying — several "confident" diagnoses have been wrong on the facts.
+9. Every PR must be diffed against current main before MD review — branch base verified, not assumed. (Added after the PR #36 near-miss: a fix built on a stale pre-#34/#35 base would have deleted the entire kiosk feature — 946 deletions — if merged.)
 
 ---
 
@@ -297,9 +329,12 @@ A long, multi-workstream session. All items below tested and merged unless noted
 | HR 4c self-service rollout | ✅ merged (S9, PR #31) — any linked employee gets My HR | — |
 | HR 4c disciplinary/query module | ✅ COMPLETE (S10, PR #32) — full lifecycle, sanction wall proven | — |
 | Leave year-end controls | ✅ COMPLETE (S11, PR #33) — rollover + expire-carryover MD buttons | — |
-| Attendance kiosk (Phase 4d) | ✅ COMPLETE (S11, PR pending MD merge) — barcode+PIN, IDB offline, photos, flags page, My HR attendance+PIN self-service, ICO exemption fix | pg_cron live (20:00 UTC nightly); pin_hash confirmed SHA-256 |
+| Attendance kiosk (Phase 4d) | ✅ MERGED (S11, PR #34 revert + PR #35 kiosk) — barcode+PIN, IDB offline, photos, flags page, My HR attendance+PIN self-service, ICO exemption fix. pg_cron live (20:00 UTC nightly); pin_hash confirmed SHA-256 | — |
+| My HR leave-balance scoping (PR #37) | ✅ MERGED (S11) — getMyBalance now staff_id-scoped; PR #36 predecessor closed unmerged (stale base near-miss → Working Rule #9) | — |
+| **HR modules stream (#4)** | ✅ **CLOSED** — 4a, 4b (incl. B-1/B-2), 4c, 4d all shipped; deferrals moved to standalone §4 items | — |
+| **Full backend audit (pre-#5)** | Scoped (S11) — 5 categories: RLS vs role matrix, SECURITY DEFINER grants, missing scoping filters, role-exemption lists, state-machine guard coverage | **execute** |
 | Invoice/logistics/waybill | ✅ fixed & live | — |
 | Silent supabase fallback | ✅ fixed (PR #18) | — |
 | Staff-payroll state machine | ✅ live (S7, PR #20) | — |
-| Payment-request + ingestion (#5) | Phase 0 parked — **NEXT** | after #4 complete |
+| Payment-request + ingestion (#5) | Phase 0 parked | **re-plan after audit close** — payment/accounting manual processes are the primary target |
 | Go-live re-entry / dust gap | parked | MD triggers |
