@@ -46,11 +46,14 @@ export const kioskService = {
     if (error) throw error;
   },
 
-  // Self-service: employee views own attendance (RLS enforces ownership).
-  async getMyAttendance(from, to) {
+  // Self-service: employee views own attendance. Filters by staff_id —
+  // management-linked roles (md/hr_officer/production_manager) have global
+  // read on `attendance`, so RLS alone does not scope this to the caller.
+  async getMyAttendance(staffId, from, to) {
     const { data, error } = await supabase
       .from('attendance')
       .select('*')
+      .eq('staff_id', staffId)
       .gte('date', from)
       .lte('date', to)
       .order('date', { ascending: false });
