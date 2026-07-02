@@ -144,6 +144,18 @@ const ROLE_PAGES = {
   staff:              ['my_hr','my_profile'],
 };
 
+// Pages where the read-only CSS mask does NOT apply — the role can fully
+// interact (its landing page + self-service + the modules it approves in).
+// SINGLE SOURCE for both the mask and the read-only banner. Add new fully-
+// interactive pages here, in ONE place — the old inline &&-chains are how
+// my_hr got missed (see BACKEND_AUDIT_PRE5.md, Category 4).
+// NOTE: read-only pages where only export/nav buttons should work
+// (accounting, reports, kpi_dashboard, daily_schedule) are NOT listed here —
+// those buttons carry per-element data-ico-allow / data-board-allow instead,
+// so write actions stay hidden.
+const ICO_EXEMPT_PAGES   = ['dashboard', 'labour', 'schedule_approvals', 'advances', 'leave', 'my_hr'];
+const BOARD_EXEMPT_PAGES = ['dashboard', 'my_profile', 'my_hr'];
+
 // ── UI HELPERS ───────────────────────────────────────────────
 const Spinner = () => (
   <div style={{ padding: "40px", textAlign: "center", color: theme.textMuted, fontSize: "13px" }}>Loading…</div>
@@ -3714,7 +3726,7 @@ const DailySchedule = () => {
                 <span style={styles.badge(statusColor(s.status))}>{s.status?.replace(/_/g, " ")}</span>
                 {s.status === "draft" && <button style={{ ...styles.btn("primary"), padding: "4px 12px", fontSize: "11px" }} onClick={e => { e.stopPropagation(); handleSubmit(s.id); }}>Submit for Approval</button>}
                 {['ico_approved','store_notified','in_progress','completed'].includes(s.status) && (
-                  <button data-board-allow style={{ ...styles.btn("secondary"), padding: "4px 12px", fontSize: "11px" }} onClick={e => { e.stopPropagation(); printSchedulePDF(s); }}>Print PDF</button>
+                  <button data-board-allow data-ico-allow style={{ ...styles.btn("secondary"), padding: "4px 12px", fontSize: "11px" }} onClick={e => { e.stopPropagation(); printSchedulePDF(s); }}>Print PDF</button>
                 )}
               </div>
             </div>
@@ -6371,7 +6383,7 @@ const Accounting = ({ userProfile }) => {
       </div>
       <div style={{ display: 'flex', gap: '2px', marginBottom: '24px', borderBottom: `1px solid ${theme.border}`, flexWrap: 'wrap' }}>
         {TABS.map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)} style={{
+          <button key={t.id} data-ico-allow data-board-allow onClick={() => setTab(t.id)} style={{
             padding: '9px 16px', fontSize: '13px', fontWeight: tab === t.id ? '600' : '400',
             color: tab === t.id ? theme.accent : theme.textMuted,
             background: 'transparent', border: 'none', cursor: 'pointer',
@@ -8423,7 +8435,7 @@ export default function App() {
         </div>
       </div>
       {showChangePwd && <ChangePasswordModal onClose={() => setShowChangePwd(false)} />}
-      <main style={{ ...styles.main, ...(isMobile ? { marginLeft: 0, padding: '16px 14px', paddingTop: '58px' } : {}) }} {...(isBoard ? { 'data-board-view': 'true' } : {})} {...(isICO && safePage !== 'labour' && safePage !== 'schedule_approvals' && safePage !== 'advances' && safePage !== 'leave' && safePage !== 'my_hr' ? { 'data-ico-view': 'true' } : {})}>
+      <main style={{ ...styles.main, ...(isMobile ? { marginLeft: 0, padding: '16px 14px', paddingTop: '58px' } : {}) }} {...(isBoard && !BOARD_EXEMPT_PAGES.includes(safePage) ? { 'data-board-view': 'true' } : {})} {...(isICO && !ICO_EXEMPT_PAGES.includes(safePage) ? { 'data-ico-view': 'true' } : {})}>
         {/* Mobile hamburger */}
         {isMobile && (
           <button data-board-allow data-ico-allow onClick={() => setSidebarOpen(s => !s)} style={{ position: 'fixed', top: '12px', left: '12px', zIndex: 250, background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '8px', padding: '8px 12px', cursor: 'pointer', fontSize: '18px', color: theme.text, lineHeight: 1, boxShadow: '0 2px 8px rgba(0,0,0,0.3)' }}>☰</button>
@@ -8449,12 +8461,12 @@ export default function App() {
             [data-ico-view] button:not([data-ico-allow]) { display: none !important; }
           `}</style>
         )}
-        {isBoard && active !== 'dashboard' && (
+        {isBoard && !BOARD_EXEMPT_PAGES.includes(safePage) && (
           <div style={{ background: theme.accent+'22', border: `1px solid ${theme.accent}44`, borderRadius: '8px', padding: '8px 16px', margin: '0 0 16px', fontSize: '12px', color: theme.accent, fontWeight: '600' }}>
             👁 View Only Mode — Board Member access
           </div>
         )}
-        {isICO && active !== 'dashboard' && active !== 'schedule_approvals' && active !== 'labour' && active !== 'advances' && active !== 'leave' && active !== 'my_hr' && (
+        {isICO && !ICO_EXEMPT_PAGES.includes(safePage) && (
           <div style={{ background: theme.blue+'22', border: `1px solid ${theme.blue}44`, borderRadius: '8px', padding: '8px 16px', margin: '0 0 16px', fontSize: '12px', color: theme.blue, fontWeight: '600' }}>
             🔒 Read-Only Mode — Internal Control Officer. Approvals available in Schedule Approvals and Labour modules.
           </div>

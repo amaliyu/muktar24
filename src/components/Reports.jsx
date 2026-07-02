@@ -931,11 +931,11 @@ function GenerateModal({ report, userProfile, onClose, onGenerated }) {
         </div>
 
         <div style={{ display:'flex', gap:'10px', flexWrap:'wrap' }}>
-          <button data-board-allow style={styles.btn('primary')} onClick={()=>handleGenerate('pdf')} disabled={loading}>
+          <button data-board-allow data-ico-allow style={styles.btn('primary')} onClick={()=>handleGenerate('pdf')} disabled={loading}>
             {loading ? 'Generating…' : '⬇ Generate PDF'}
           </button>
           {report.formats.includes('excel') && (
-            <button data-board-allow style={styles.btn('secondary')} onClick={()=>handleGenerate('excel')} disabled={loading}>
+            <button data-board-allow data-ico-allow style={styles.btn('secondary')} onClick={()=>handleGenerate('excel')} disabled={loading}>
               ⬇ Generate Excel
             </button>
           )}
@@ -1033,7 +1033,7 @@ function ReportCard({ report, userRole, schedule, onGenerate, onSchedule }) {
       <div style={{ marginTop:'auto', display:'flex', gap:'8px', alignItems:'center' }}>
         {hasAccess ? (
           <>
-            <button data-board-allow style={{ ...styles.btn('primary'), padding:'6px 14px', fontSize:'12px' }} onClick={onGenerate}>Generate</button>
+            <button data-board-allow data-ico-allow style={{ ...styles.btn('primary'), padding:'6px 14px', fontSize:'12px' }} onClick={onGenerate}>Generate</button>
             <button style={{ ...styles.btn('secondary'), padding:'6px 10px', fontSize:'11px' }} onClick={onSchedule}>Schedule</button>
           </>
         ) : (
