@@ -11,12 +11,15 @@ DB facts verified by live query against production. Frontend facts verified by r
 
 ## 0. HEADLINE
 
-- **1 confirmed unauthenticated exposure — FIXED ON DISCOVERY** (anon could read order line items). Applied via connector, verified closed.
-- **3 new occurrences of the "missing scoping filter" bug class** (the PR #37 class) in My HR self-service — needs code PRs.
-- **8 role-exemption gaps** (the ICO `my_hr` class) — mostly board_member and ICO export/nav buttons — needs code PRs.
-- **2 RLS role-matrix defects** (one functional `'hr'` vs `'hr_officer'` typo; one over-permissive audit read).
+**Status: all MD decisions made; all DB fixes applied to the live database and verified (2026-07-02). Remaining work is one Category-4 code PR.**
+
+- **1 confirmed unauthenticated exposure — FIXED ON DISCOVERY** (anon could read order line items). Applied via connector, recorded in tracked migration `audit_s12_revoke_anon_order_items_delivery`, verified closed.
+- **3 new occurrences of the "missing scoping filter" bug class** (the PR #37 class) in My HR self-service — fixed in a separate code PR.
+- **8 role-exemption gaps** (the ICO `my_hr` class) — mostly board_member and ICO export/nav buttons — remaining Category-4 code PR.
+- **2 RLS role-matrix defects** (functional `'hr'`→`'hr_officer'`; over-permissive audit read) — **✅ APPLIED** (migration `audit_s12_disposition_db_fixes`).
 - **Category 5 (state-machine guards): CLEAN.**
-- **Hardening batch:** ~15 SECURITY DEFINER functions carry needless `anon EXECUTE` (all internally role-guarded, not exploitable).
+- **Hardening batch:** ~15 SECURITY DEFINER functions had needless `anon EXECUTE` — **✅ REVOKED** (same migration); anon-executable SECURITY DEFINER count now zero.
+- **LPO approval MD-only** — **✅ DB-ENFORCED** (migration `audit_s12_lpo_md_only_decision_guard`).
 
 ---
 
@@ -25,29 +28,29 @@ DB facts verified by live query against production. Frontend facts verified by r
 ### ✅ FIXED ON DISCOVERY — anon read of `order_items_delivery`
 - **What:** `public.order_items_delivery` is a postgres-owned view **without `security_invoker`**, so it runs with the owner's rights and **bypasses RLS** on `order_items`. `SELECT` was granted to the `anon` role, and the anon key is public (shipped in the frontend bundle).
 - **Proof:** `SET LOCAL role anon; SELECT count(*) FROM order_items_delivery;` → **47 rows** (order_id, block_type, quantity). No money, PII, or customer names in the view.
-- **Fix applied:** `REVOKE SELECT ON public.order_items_delivery FROM anon;` (+ same for `disciplinary_self`, see below). Verified: anon now gets "permission denied"; `authenticated` retains SELECT. SQL saved to `supabase/audit_s12_revoke_anon_view_select.sql`.
+- **Fix applied:** `REVOKE SELECT ON public.order_items_delivery FROM anon;` (+ same for `disciplinary_self`, see below). Verified: anon now gets "permission denied"; `authenticated` retains SELECT. SQL saved to `supabase/audit_s12_revoke_anon_view_select.sql`, and now also recorded in tracked migration history as `audit_s12_revoke_anon_order_items_delivery`.
 
 ### ✅ FIXED (hardening, same statement) — anon grant on `disciplinary_self`
 - `disciplinary_self` was anon-selectable and also bypasses RLS, but self-scopes via `current_staff_id()`, which is NULL for anon → returned 0 rows. No leak, but anon had no business holding the grant. Revoked alongside the above.
 
-### ⚠ HARDENING (report-only, not exploitable) — `anon EXECUTE` on SECURITY DEFINER functions
-- ~15 SECURITY DEFINER functions still grant `EXECUTE` to `anon`: `advance_leave_request`, `advance_salary_advance`, `advance_staff_payroll`, `advance_disciplinary`, `issue_disciplinary_case`, `run_annual_leave_rollover`, `expire_annual_carryover`, `seed_leave_balances_draft`, `set_leave_entitlement`, `set_leave_policy_active`, `current_staff_id`, `get_next_employee_number`, `apply_leave_balance_usage`, `realize_advance_repayments`.
-- **Not exploitable:** every one guards internally on `get_user_role()` / `auth.uid()` / `user_profiles` lookup, all of which resolve to NULL for anon → the function raises before doing anything.
-- **Recommendation:** `REVOKE EXECUTE ... FROM anon` as defense-in-depth. Low priority.
-- **Note (good):** the sensitive kiosk/payroll functions already have `anon_exec = false` (`get_kiosk_pin_sync`, `set_my_kiosk_pin`, `set_staff_pin`, `submit_attendance_flag_response`, `reconcile_attendance_punches`, `advance_weekly_payroll`, `get_user_role`). `set_my_kiosk_pin`/`set_staff_pin` correctly carry `search_path = public, extensions` (the documented pgcrypto-schema requirement).
+### ✅ APPLIED (hardening) — `anon EXECUTE` on SECURITY DEFINER functions
+- ~15 SECURITY DEFINER functions granted `EXECUTE` to `anon`: `advance_leave_request`, `advance_salary_advance`, `advance_staff_payroll`, `advance_disciplinary`, `issue_disciplinary_case`, `run_annual_leave_rollover`, `expire_annual_carryover`, `seed_leave_balances_draft`, `set_leave_entitlement`, `set_leave_policy_active`, `current_staff_id`, `get_next_employee_number`, `apply_leave_balance_usage`, `realize_advance_repayments`.
+- **Was not exploitable:** every one guards internally on `get_user_role()` / `auth.uid()` / `user_profiles` lookup, all of which resolve to NULL for anon → the function raises before doing anything. Revoked anyway as defense-in-depth.
+- **Fixed** (migration `audit_s12_disposition_db_fixes`): `REVOKE EXECUTE ... FROM anon` across the batch. Verified live — anon-executable SECURITY DEFINER count is now **zero**.
+- **Note (good):** the sensitive kiosk/payroll functions already had `anon_exec = false` (`get_kiosk_pin_sync`, `set_my_kiosk_pin`, `set_staff_pin`, `submit_attendance_flag_response`, `reconcile_attendance_punches`, `advance_weekly_payroll`, `get_user_role`). `set_my_kiosk_pin`/`set_staff_pin` correctly carry `search_path = public, extensions` (the documented pgcrypto-schema requirement).
 
 ---
 
-## CATEGORY 1 — RLS policies vs role matrix  → 2 DEFECTS
+## CATEGORY 1 — RLS policies vs role matrix  → 2 DEFECTS (both ✅ APPLIED)
 
-### ⚠ DEFECT (functional) — `staff_leave_balances` role typo `'hr'`
-- `leave_balances_read` USING: `(staff_id = current_staff_id()) OR (get_user_role() = ANY (ARRAY['md','ico','accountant','hr']))`.
-- The app's HR role is **`hr_officer`** everywhere else; `'hr'` matches no role. So `hr_officer` does **not** get global read here — the management all-staff leave-balance table (StaffHR `LeaveBalancesTab`, `leaveBalanceService.getBalances`) returns only the officer's own row (or nothing).
-- **Not a leak** (under-permissive), but a real functional break for hr_officer. Fix: change `'hr'` → `'hr_officer'` in the policy. **DB change → MD/planning chat.**
+### ✅ APPLIED — `staff_leave_balances` role typo `'hr'`
+- Was: `leave_balances_read` USING `(staff_id = current_staff_id()) OR (get_user_role() = ANY (ARRAY['md','ico','accountant','hr']))`.
+- The app's HR role is **`hr_officer`** everywhere else; `'hr'` matched no role, so `hr_officer` did not get global read — the management all-staff leave-balance table returned only the officer's own row.
+- **Fixed** (migration `audit_s12_disposition_db_fixes`): `'hr'` → `'hr_officer'`. Verified live — policy now reads `['md','ico','accountant','hr_officer']`.
 
-### ⚠ DEFECT (minor over-permissive) — `weekly_payroll_audit` world-readable
-- `wpa_select` USING `true` → readable by **every authenticated role** (driver, marketer, store_officer…). Columns: id, payroll_id, actor_id/name/role, action, old/new_status, reason, created_at. **No money columns**, but it leaks who-approved-what workflow history + actor names.
-- Inconsistent with the three peer audit tables (`leave_request_audit`, `salary_advance_audit`, `staff_payroll_audit`), all restricted to management roles. Fix: restrict `wpa_select` to `['md','accountant','ico','board_member']` (match `staff_payroll_audit`). **DB change → MD/planning chat.**
+### ✅ APPLIED — `weekly_payroll_audit` world-readable
+- Was: `wpa_select` USING `true` → readable by **every authenticated role**. Columns: id, payroll_id, actor_id/name/role, action, old/new_status, reason, created_at (no money columns, but leaked who-approved-what + actor names).
+- **Fixed** (migration `audit_s12_disposition_db_fixes`): restricted to `['md','accountant','ico','board_member']` (matches peer audit tables). Verified live.
 
 ### Notes (acceptable as-is)
 - `leave_policy_settings.leave_settings_read` USING `true` — policy config (annual_days, caps, active flag), no personal data; My HR reads it. Acceptable.
@@ -66,7 +69,7 @@ All three are in `MyHRPage` (`src/App.jsx:7058`), reachable by any role with a l
 
 **Verified clean (no regression):** `getMyStaff` (PR #30 fix intact), `getMyBalance` (PR #37 fix intact, caller passes `staff.id`), `disciplinaryService.getMine` (uses server-scoped `disciplinary_self`), `MyProfile` (filters by id/user_id), driver waybills (`.eq('driver_id')`), marketer orders/customers (`.eq('marketer_id')`/`.eq('added_by')`).
 
-**One item to confirm with MD:** the Dashboard fetches `ordersService.getAll()` for the marketer role (`App.jsx:352`) while OrdersPage scopes marketers to `getAllForMarketer` — if `orders` RLS lets marketers read all rows, the dashboard shows all-company orders to marketers. Confirm intended.
+**MD ruling — INTENDED (decision recorded):** the Dashboard fetches `ordersService.getAll()` for the marketer role (`App.jsx:352`) while OrdersPage scopes marketers to `getAllForMarketer`. MD has ruled that marketers seeing all-company orders on the dashboard is intended. No change.
 
 ---
 
@@ -87,7 +90,7 @@ The board mask (`[data-board-view]`) is applied on **every page with no exemptio
 
 **Structural recommendation:** key both the mask and the banner off the same `safePage` variable and a single shared exempt-set constant (the two ICO lists already diverge in content — `dashboard` is in the banner set but not the mask set — the same drift pattern that produced the original `my_hr` bug).
 
-**Confirm with MD:** `LPOApprovals` has no internal role gating — the CSS mask is the only thing stopping ICO/board from clicking Approve/Reject, and it also hides the "Review" expand button so ICO can't inspect LPO details. View-only appears intended; whether ICO should at least be able to expand/review is an MD call.
+**MD ruling — LPO approval is MD-only (decision recorded + DB-enforced):** `LPOApprovals` previously had no internal role gating — the CSS mask was the only thing stopping ICO/board from clicking Approve/Reject. MD has ruled LPO approval is MD-only, and this is now enforced at the database layer by trigger `trg_guard_lpo_md_decision` on `lpo_orders` (guards `md_decision`, `md_approved_by`, `decided_at`; bdm/ico draft edits are unaffected). Migration: `audit_s12_lpo_md_only_decision_guard`. The CSS mask is no longer the sole guard. Verified live: trigger present + enabled.
 
 ---
 
@@ -98,10 +101,13 @@ Every money/HR state table has an **enabled** guard trigger:
 
 ---
 
-## RECOMMENDED DISPOSITION (for MD)
+## DISPOSITION — ALL CLOSED
 
-1. **Done (this session):** anon view exposure — fixed + verified.
-2. **DB changes (MD via planning chat):** (a) `staff_leave_balances` `'hr'`→`'hr_officer'`; (b) restrict `weekly_payroll_audit` read to management; (c) optional `REVOKE EXECUTE ... FROM anon` hardening batch.
-3. **Code PRs (Claude Code writes, MD merges), one scope each:** (a) My HR scoping filters (3 findings, Category 3); (b) role-exemption gaps (Category 4) with the shared-exempt-set refactor.
-4. **Confirm with MD:** marketer dashboard order visibility; ICO LPO review access.
-5. **After audit close:** re-plan #5 (payment/accounting) per the roadmap.
+All MD decisions are made and all DB fixes are applied to the live database (verified by query 2026-07-02).
+
+1. **✅ APPLIED — anon view exposure.** `REVOKE SELECT ON order_items_delivery / disciplinary_self FROM anon` — fixed on discovery via connector, then recorded in tracked migration history as `audit_s12_revoke_anon_order_items_delivery`. Verified: anon SELECT = false on both, `authenticated` unaffected.
+2. **✅ APPLIED — DB fixes** (migration `audit_s12_disposition_db_fixes`): (a) `staff_leave_balances` role list `'hr'`→`'hr_officer'` — hr_officer regains the all-staff balance view; (b) `weekly_payroll_audit.wpa_select` restricted to `md/accountant/ico/board_member` (matches peer audit tables); (c) `REVOKE EXECUTE ... FROM anon` hardening batch done across the 15 SECURITY DEFINER functions — anon-executable SECURITY DEFINER count now **zero**. Verified live.
+3. **✅ APPLIED — LPO MD-only enforcement** (migration `audit_s12_lpo_md_only_decision_guard`): trigger `trg_guard_lpo_md_decision` on `lpo_orders`. Verified: present + enabled.
+4. **Code PRs (Claude Code writes, MD merges), one scope each:** (a) My HR scoping filters (3 findings, Category 3) — done in a separate PR; (b) role-exemption gaps (Category 4) with the shared-exempt-set refactor — remaining code work.
+5. **MD rulings recorded:** marketer dashboard order visibility → INTENDED (no change); LPO approval → MD-only (DB-enforced, item 3).
+6. **After audit close:** re-plan #5 (payment/accounting) per the roadmap.
