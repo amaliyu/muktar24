@@ -461,9 +461,9 @@ export default function KPIDashboard() {
           <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '2px' }}>Abuja Precast Concrete Limited · {range.from} → {range.to}</div>
         </div>
         <div style={s.row}>
-          <button style={s.btn('primary')} onClick={downloadPDF}>↓ KPI Report PDF</button>
+          <button data-ico-allow data-board-allow style={s.btn('primary')} onClick={downloadPDF}>↓ KPI Report PDF</button>
           <button style={s.btn()} onClick={() => { setTargetForm({ ...targets }); setShowTargets(true) }}>⚙ Set Targets</button>
-          <button style={s.btn()} onClick={load} disabled={loading}>{loading ? '…' : '↺'}</button>
+          <button data-ico-allow data-board-allow style={s.btn()} onClick={load} disabled={loading}>{loading ? '…' : '↺'}</button>
         </div>
       </div>
 
@@ -471,7 +471,7 @@ export default function KPIDashboard() {
       <div style={{ ...s.card, marginBottom: '16px', padding: '12px 16px' }}>
         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
           {PRESETS.map(([p, l]) => (
-            <button key={p} style={s.tab(preset === p)} onClick={() => applyPreset(p)}>{l}</button>
+            <button key={p} data-ico-allow data-board-allow style={s.tab(preset === p)} onClick={() => applyPreset(p)}>{l}</button>
           ))}
           {preset === 'custom' && (
             <>
@@ -485,7 +485,7 @@ export default function KPIDashboard() {
 
       {/* Tabs */}
       <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '16px' }}>
-        {TABS.map(t => <button key={t.id} style={s.tab(tab === t.id)} onClick={() => setTab(t.id)}>{t.label}</button>)}
+        {TABS.map(t => <button key={t.id} data-ico-allow data-board-allow style={s.tab(tab === t.id)} onClick={() => setTab(t.id)}>{t.label}</button>)}
       </div>
 
       {loading && <div style={{ textAlign: 'center', padding: '60px', color: theme.textMuted, fontSize: '13px' }}>Loading KPIs…</div>}
