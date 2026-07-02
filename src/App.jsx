@@ -7098,8 +7098,12 @@ const MyHRPage = ({ userProfile }) => {
     } catch (e) { setAlert({ type: 'error', msg: e.message }); }
     finally { setStaffLoading(false); }
     try {
-      const [adv, leave] = await Promise.all([advancesService.list(), leaveService.list()]);
-      setAdvances(adv); setLeaves(leave);
+      if (staff?.id) {
+        const [adv, leave] = await Promise.all([advancesService.listMine(staff.id), leaveService.listMine(staff.id)]);
+        setAdvances(adv); setLeaves(leave);
+      } else {
+        setAdvances([]); setLeaves([]);
+      }
     } catch (e) { setAlert({ type: 'error', msg: e.message }); }
     finally { setListLoading(false); }
     try {
@@ -7116,10 +7120,14 @@ const MyHRPage = ({ userProfile }) => {
     } catch (_) { /* fail silently — self-service view may not exist for all deployments */ }
     finally { setCasesLoading(false); }
     try {
-      const to   = new Date().toISOString().slice(0, 10);
-      const from = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
-      const att  = await kioskService.getMyAttendance(from, to);
-      setMyAttendance(att);
+      if (staff?.id) {
+        const to   = new Date().toISOString().slice(0, 10);
+        const from = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+        const att  = await kioskService.getMyAttendance(staff.id, from, to);
+        setMyAttendance(att);
+      } else {
+        setMyAttendance([]);
+      }
     } catch (_) { /* fail silently */ }
     finally { setAttLoading(false); }
   };
@@ -7146,7 +7154,7 @@ const MyHRPage = ({ userProfile }) => {
       setAdvForm({ amount: '', reason: '', installments: '1' });
       setShowAdvForm(false);
       setAlert({ type: 'success', msg: 'Advance request submitted.' });
-      advancesService.list().then(setAdvances).catch(() => {});
+      advancesService.listMine(myStaff.id).then(setAdvances).catch(() => {});
     } catch (e) { setAlert({ type: 'error', msg: e.message }); }
     finally { setAdvSaving(false); }
   };
@@ -7160,7 +7168,7 @@ const MyHRPage = ({ userProfile }) => {
       setLeaveForm({ leave_type: 'annual', is_paid: true, start_date: '', end_date: '', days: '', reason: '' });
       setShowLeaveForm(false);
       setAlert({ type: 'success', msg: 'Leave request submitted.' });
-      leaveService.list().then(setLeaves).catch(() => {});
+      leaveService.listMine(myStaff.id).then(setLeaves).catch(() => {});
     } catch (e) { setAlert({ type: 'error', msg: e.message }); }
     finally { setLeaveSaving(false); }
   };

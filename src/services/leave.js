@@ -17,6 +17,18 @@ export const leaveService = {
     return rows;
   },
 
+  // Self-scoped variant for My HR — filters to a single staff member.
+  // (list() above returns all rows and is used by the management LeavePage.)
+  async listMine(staffId) {
+    const { data, error } = await supabase
+      .from('leave_requests')
+      .select('*')
+      .eq('staff_id', staffId)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data || [];
+  },
+
   async create({ staff_id, leave_type, is_paid, start_date, end_date, days, reason, requested_by }) {
     const { data, error } = await supabase
       .from('leave_requests')
