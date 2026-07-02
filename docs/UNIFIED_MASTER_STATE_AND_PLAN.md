@@ -263,7 +263,7 @@ Bounded audit, five categories:
 5. **State-machine guard coverage on money/HR tables** — every table holding money or HR state has a guard trigger or RPC-only write path.
 
 **Out of scope:** runtime/UI behavior — covered separately by the MD role-based smoke test.
-**Method:** findings are collected into a single report for MD decision — EXCEPT confirmed security exposures (data leak / unauthenticated access), which are fixed on discovery and reported after.
+**Method:** findings are collected into a single report for MD decision — EXCEPT confirmed security exposures (data leak / unauthenticated access), which are fixed on discovery **by the planning chat** (the discovering window reports the exposure; the planning chat executes the DB fix via `apply_migration`) and reported after. _Clarified after S12: the S12 `order_items_delivery` anon REVOKE was applied directly via the Supabase connector from the discovering window — this stays consistent with Working Rules #2/#4, which reserve DB changes for the planning chat. Discover-and-report in the window; planning chat applies._
 **Position:** runs BEFORE #5 scoping. #5 and all downstream roadmap items get re-planned after audit close.
 
 ---
