@@ -347,7 +347,7 @@ Bounded audit, five categories:
 | Attendance kiosk (Phase 4d) | ✅ MERGED (S11, PR #34 revert + PR #35 kiosk) — barcode+PIN, IDB offline, photos, flags page, My HR attendance+PIN self-service, ICO exemption fix. pg_cron live (20:00 UTC nightly); pin_hash confirmed SHA-256 | — |
 | My HR leave-balance scoping (PR #37) | ✅ MERGED (S11) — getMyBalance now staff_id-scoped; PR #36 predecessor closed unmerged (stale base near-miss → Working Rule #9) | — |
 | **HR modules stream (#4)** | ✅ **CLOSED** — 4a, 4b (incl. B-1/B-2), 4c, 4d all shipped; deferrals moved to standalone §4 items | — |
-| **Full backend audit (pre-#5)** | ✅ **CLOSED (S12)** — report `docs/BACKEND_AUDIT_PRE5.md`; 1 anon exposure fixed on discovery, DB fixes + 15-func EXECUTE revoke applied, Cat-3/Cat-4 code PRs #40/#41 merged, LPO MD-only DB-enforced | — |
+| **Full backend audit (pre-#5)** | ✅ COMPLETE — DB fixes S12; Category-4 code fixes merged as PR #41 | — |
 | Invoice/logistics/waybill | ✅ fixed & live | — |
 | Silent supabase fallback | ✅ fixed (PR #18) | — |
 | Staff-payroll state machine | ✅ live (S7, PR #20) | — |
@@ -420,10 +420,10 @@ Live-verified (code on main + live DB query 2026-07-03). Disposition per compone
 - Store's stock-in IS the goods receipt — no separate GRN table (two-records-one-truth guard, third occurrence).
 
 ### PRE-SCHEMA VERIFICATION (WR#8 — blocks schema session)
-1. Live column shapes of `stock_movements` and `staging_transactions`. **✅ DONE (Claude Code, S13) — see results below.**
-2. How Phase 0 parser output is wired in `App.jsx` (extend vs re-route). **✅ DONE (Claude Code, S13) — see results below.**
+1. Live column shapes of `stock_movements` and `staging_transactions`. **✅ CLOSED (S13)** — `stock_movements` shape confirmed live (includes `supplier_id` + `reference` columns); `staging_transactions` verified 0 rows and unreferenced by code — legacy scaffolding from the abandoned OCR/alert design, leave in place, out of Phase 5 scope. See results below.
+2. How Phase 0 parser output is wired in `App.jsx` (extend vs re-route). **✅ CLOSED (S13) — see results below.**
 3. Reconfirm Decision 10 posting behavior with accountant. **OPEN — needs the accountant (human).**
-4. ~~Taj PDF balance fields~~ **CLOSED S13** (see Statement Empirics). NEW: run the real Moniepoint xlsx through the app's SheetJS parser — the file has malformed style XML that broke openpyxl; SheetJS tolerance is assumed, not proven. **OPEN — needs the actual xlsx file (not available to the coding window).**
+4. ~~Taj PDF balance fields~~ **CLOSED S13** (see Statement Empirics). Moniepoint xlsx through the app's SheetJS parser: **✅ CLOSED (S13)** — SheetJS parses the real Moniepoint xlsx (2,995 rows, header detected at row 7, malformed styles tolerated).
 
 #### Pre-schema verification results (Claude Code, S13)
 - **Item 1 — column shapes (live DB, 2026-07-03):**
