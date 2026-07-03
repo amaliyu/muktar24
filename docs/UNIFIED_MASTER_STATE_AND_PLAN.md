@@ -291,6 +291,7 @@ Bounded audit, five categories:
 - **Carry-over automation (Jan year-boundary roll)** — deferred; standalone item (HR stream #4 is closed; formerly under 4b).
 - **Future-hire leave pro-ration** — deferred; standalone item (formerly under 4b).
 - **Card header polish** — optional visual nit; standalone item (formerly under 4d cards).
+  - Deleted branch `claude/card-design-polish-hgb4r1` held commits debef70/7063d56; if revived, rebuild on fresh branch, cherry-pick cardGenerator.js visuals only, redo StaffHR.jsx by hand against current main.
 - ✅ **`date_hired` gaps — RESOLVED (S11).** EMP-017 (Boniface) corrected to 2026-03-18; the other flagged records confirmed correct by MD. "Demo hr" test staff record and all child rows (onboarding checklist, advance/leave requests, balances, user profile) deleted from live DB.
 - ✅ **Disciplinary/query module (HR 4c) — COMPLETE (S10, PR #32).** Full lifecycle live. Sanction wall enforced by convention (DB trigger does not auto-update employment_status; that step remains manual/HR-mediated).
 - ✅ **Leave year-end controls — COMPLETE (S11, PR #33).** `run_annual_leave_rollover` and `expire_annual_carryover` RPCs wired to MD-only buttons in StaffHR LeaveBalancesTab.
