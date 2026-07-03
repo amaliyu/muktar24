@@ -3,7 +3,7 @@
 
 Repo: `amaliyu/muktar24` (PRIVATE) · Prod branch: `main` · Stack: React 18 + Vite 5 + Supabase (PostgreSQL, RLS) + Vercel
 App: APC Manager — internal ERP for Abuja Precast Concrete Limited
-**Updated: 2026-07-02 (Session 11 close-out).** All DB state verified by live query, not memory.
+**Updated: 2026-07-03 (Session 13 — Phase 5 re-plan).** All DB state verified by live query, not memory.
 **Status: BETA. A physical/manual backup system runs in parallel — NO downtime pressure.**
 **Operating mode: SLOW AND VERIFIED — fix on a branch → test on the branch's Vercel preview AS THE AFFECTED ROLE → confirm with own eyes → MD merges → re-verify production.**
 
@@ -18,6 +18,21 @@ App: APC Manager — internal ERP for Abuja Precast Concrete Limited
 ---
 
 ## 1. SESSION HISTORY (most recent first)
+
+### 🔵 SESSION 13 (2026-07-03) — PHASE 5 RE-PLAN (payment-request + ingestion) — DESIGN LOCKED
+**No code/schema this session — design only. Full locked design in §8. Schema NOT started (blocked on §8 Pre-schema verification).**
+- MD ratified 13 decisions + a 5-sub-phase map (5a–5e) for the EXPENDITURE-side payment-request + statement-ingestion engine. Revenue matching is committed as **5d** (not a deferral). Old §3 "(revenue)" label was stale — Phase 5 is expenditure-first.
+- **WR#1 gate satisfied:** the audit Category-4 code PR (#41, role-exemption fixes) is **merged** — Phase 5 is unblocked to begin scheduling.
+- **Pre-schema verification (WR#8):** items 1 & 2 discharged by Claude Code this session (live column shapes for `stock_movements`/`staging_transactions`; Phase 0 parser wiring in App.jsx — see §8). Items 3 (accountant posting-behaviour reconfirm) & 4 (real Moniepoint xlsx through SheetJS) remain open — need a human/the file. Schema session stays blocked until all four close.
+- Live-DB re-verified this session (matches §8 claims exactly): `bank_accounts`=4 (dedupe pending), `bank_transactions`=1,277, `expenses`=43, `expense_categories`=13, `expenses` guard trigger=**0** (confirms it is a soft-status column, not a state machine).
+
+### ✅ SESSION 12 (2026-07-02) — BACKEND AUDIT (pre-#5) + AUDIT CODE FIXES
+**PRs merged: #39 (audit report + anon-view REVOKE), #40 (My HR scoping filters, Cat-3), #41 (role-exemption gaps, Cat-4). Audit stream CLOSED.**
+- Executed the five-category backend audit (see §3 scope). Report: `docs/BACKEND_AUDIT_PRE5.md`.
+- **1 confirmed unauthenticated exposure fixed on discovery:** `order_items_delivery` (postgres-owned view, bypassed RLS) was anon-selectable — REVOKEd (also `disciplinary_self`); recorded in migration `audit_s12_revoke_anon_order_items_delivery`.
+- **DB fixes applied** (migration `audit_s12_disposition_db_fixes`): `staff_leave_balances` `'hr'`→`'hr_officer'`; `weekly_payroll_audit` read restricted to management; anon EXECUTE revoked across 15 SECURITY DEFINER funcs (now zero). **LPO approval MD-only** now DB-enforced via `trg_guard_lpo_md_decision` (migration `audit_s12_lpo_md_only_decision_guard`).
+- **Code fixes:** Cat-3 My HR scoping (PR #40 — `advancesService.listMine`/`leaveService.listMine`/`getMyAttendance(staffId,…)`); Cat-4 role-exemption gaps (PR #41 — shared `ICO_EXEMPT_PAGES`/`BOARD_EXEMPT_PAGES` constants + 8 button/exemption fixes).
+- **MD rulings recorded:** marketer dashboard all-orders visibility = INTENDED; LPO approval = MD-only (DB-enforced).
 
 ### ✅ SESSION 11 (2026-07-01/02) — LEAVE YEAR-END CONTROLS + ATTENDANCE KIOSK (Phase 4d) + FIXES
 **PRs merged: #33 (year-end controls), #34 (docs revert), #35 (attendance kiosk), #37 (leave-balance scoping fix). #36 closed UNMERGED (stale base — see near-miss note below). Frontend only — DB is fully live.**
@@ -244,8 +259,8 @@ A long, multi-workstream session. All items below tested and merged unless noted
 | 2 | Payroll client cutover | ✅ COMPLETE |
 | 3 | RLS for remaining tables | ✅ baseline complete; **2 deeper leaks (staff-PII, invoices/payments) found & CLOSED in Session 6** |
 | 4 | HR modules | ✅ **CLOSED** — 4a ✅ (S3/S4), 4b ✅ incl. B-1/B-2 (S7/S8), 4c ✅ (S10, PR #32), 4d ✅ cards (S5) + attendance kiosk (S11, PRs #34/#35). Remaining HR-adjacent deferrals are standalone line items in §4, not under this stream |
-| 4.5 | **Full backend audit (pre-#5)** | Scoped (S11) — runs BEFORE #5; see audit scope below. Next: execute |
-| 5 | Payment-request (revenue) + ingestion engine (Phase 1+) | Parked; Phase 0 done; **re-plan after audit close** — MD has identified payment/accounting manual processes as the primary operational bottleneck to address from #5 onward |
+| 4.5 | **Full backend audit (pre-#5)** | ✅ **CLOSED (S12)** — executed, report `docs/BACKEND_AUDIT_PRE5.md`; all fixes applied (PRs #39/#40/#41 merged + DB migrations). See audit scope below. |
+| 5 | **Payment-request (EXPENDITURE) + ingestion engine** | **RE-PLANNED (S13) — DESIGN LOCKED, see §8.** Old "(revenue)" label was stale; Phase 5 is expenditure-first, revenue matching committed as sub-phase 5d. Sub-phases 5a–5e. Schema NOT started (blocked on §8 pre-schema verification, items 3 & 4 open). |
 
 ### Phase 4 sub-roadmap — ✅ STREAM CLOSED (S11)
 All four sub-phases shipped. HR-adjacent deferrals moved to standalone line items in §4 (carry-over automation, future-hire pro-ration, EMP-018 activation, orphaned photo cleanup, card header polish).
@@ -264,7 +279,7 @@ Bounded audit, five categories:
 
 **Out of scope:** runtime/UI behavior — covered separately by the MD role-based smoke test.
 **Method:** findings are collected into a single report for MD decision — EXCEPT confirmed security exposures (data leak / unauthenticated access), which are fixed on discovery **by the planning chat** (the discovering window reports the exposure; the planning chat executes the DB fix via `apply_migration`) and reported after. _Clarified after S12: the S12 `order_items_delivery` anon REVOKE was applied directly via the Supabase connector from the discovering window — this stays consistent with Working Rules #2/#4, which reserve DB changes for the planning chat. Discover-and-report in the window; planning chat applies._
-**Position:** runs BEFORE #5 scoping. #5 and all downstream roadmap items get re-planned after audit close.
+**Position:** runs BEFORE #5 scoping. #5 and all downstream roadmap items get re-planned after audit close. **✅ Done — audit closed S12; #5 re-planned S13 (see §8).**
 
 ---
 
@@ -332,9 +347,90 @@ Bounded audit, five categories:
 | Attendance kiosk (Phase 4d) | ✅ MERGED (S11, PR #34 revert + PR #35 kiosk) — barcode+PIN, IDB offline, photos, flags page, My HR attendance+PIN self-service, ICO exemption fix. pg_cron live (20:00 UTC nightly); pin_hash confirmed SHA-256 | — |
 | My HR leave-balance scoping (PR #37) | ✅ MERGED (S11) — getMyBalance now staff_id-scoped; PR #36 predecessor closed unmerged (stale base near-miss → Working Rule #9) | — |
 | **HR modules stream (#4)** | ✅ **CLOSED** — 4a, 4b (incl. B-1/B-2), 4c, 4d all shipped; deferrals moved to standalone §4 items | — |
-| **Full backend audit (pre-#5)** | Scoped (S11) — 5 categories: RLS vs role matrix, SECURITY DEFINER grants, missing scoping filters, role-exemption lists, state-machine guard coverage | **execute** |
+| **Full backend audit (pre-#5)** | ✅ COMPLETE — DB fixes S12; Category-4 code fixes merged as PR #41 | — |
 | Invoice/logistics/waybill | ✅ fixed & live | — |
 | Silent supabase fallback | ✅ fixed (PR #18) | — |
 | Staff-payroll state machine | ✅ live (S7, PR #20) | — |
-| Payment-request + ingestion (#5) | Phase 0 parked | **re-plan after audit close** — payment/accounting manual processes are the primary target |
+| Payment-request + ingestion (#5) | **DESIGN LOCKED (S13, §8)** — expenditure-first, 5 sub-phases 5a–5e, revenue matching committed as 5d | close §8 pre-schema verification items 3 & 4 → then 5a schema session |
+| Receipts storage bucket PUBLIC (Phase 5 prereq) | ⚠ **OPEN** — vendor receipts unauthenticated-readable; MD ruled interim-accepted (random slugs + finance-RLS on `file_url`) | signed-URL PR (standalone scope) BEFORE any Phase 5 build; bucket flip from planning chat same day PR merges |
 | Go-live re-entry / dust gap | parked | MD triggers |
+
+---
+
+## 8. PHASE 5 RE-PLAN — PAYMENT-REQUEST + INGESTION (Session 13, 2026-07-03)
+
+**Status: DESIGN LOCKED (13 decisions). Schema NOT started — blocked on §Pre-schema verification.**
+**This section supersedes the §3 line "Payment-request (revenue) + ingestion" — label was stale; Phase 5 is EXPENDITURE-side. Revenue matching is committed as 5d.**
+
+### SUB-PHASE MAP
+
+| Sub | Scope | Depends on |
+|---|---|---|
+| **5a** | Payment-request lifecycle: request → ICO → MD → accountant disburses. Single reference `APC-PR-#####` as matching spine. States include `md_approved` (awaiting funds) → `funded` (5e hook; until 5e ships, funding approval stays on WhatsApp/paper and `funded` is set manually) → `disbursed` → `closed`. | audit Cat-4 PR merged/parked first (WR#1) |
+| **5b** | Attachments (private bucket) + goods-receipt link = existing `stock_movements` row (three-way check: approved/paid/delivered). Evidence-gated closure with logged overrides. | 5a |
+| **5c** | Statement ingestion (both accounts, both directions) + **outflow matching only**. Builds shared engine: statement-lines store, match-state machine (unmatched → suggested → confirmed/rejected), accountant confirm screen. Extends existing Phase 0 parser (`src/utils/parseBankStatement.js`). | 5a live |
+| **5d** | **Revenue matching — COMMITTED**, starts after 5c live-proven. Matches credits banked by 5c against invoices; adds partial/lump-sum rules + payment-record creation from confirmed matches. Open 5d decision: non-block income (cement, dust, chippings, bags, scrap, asset disposal) has no invoice target — widen invoicing vs categorize-and-confirm. | 5c live-proven |
+| **5e** | Treasury funding layer: monthly drawdown revenue→operations, chain accountant → ICO → MD → **board chairman**, against annual budget ceilings (data rows, not a budgeting module). Funding batch moves member requests to `funded`. Inter-account transfer pairs in 5c like top-ups. | 5a; independent of 5b–5d |
+
+**Out of scope (all of Phase 5):** receipt OCR; bank alert email/SMS parsing; depreciation (no bank event — future accounting phase); payroll/labour/advance disbursements (own state machines — tables untouched).
+
+### DECISION LOG (all MD-ratified this session)
+
+1. **Relabel:** #5 = expenditure. Skeleton authoritative over old "(revenue)" label. Revenue = 5d, committed (not a deferral).
+2. **Ingest both directions, match debits only (5c).** Credits stored + parked with category tag; matching screen defaults to debits.
+3. **Sequencing:** 5c = shared engine + outflows; 5d immediately after 5c live-proven, launches against banked credit rows.
+4. **Request boundary = any manually initiated outflow** (incl. supplier purchases, maintenance, tax/levies/fines, medical, capital, bought-in blocks, electricity, diesel). Excluded: state-machine-governed disbursements (staff payroll, labour payroll, advances). Unmatched debits from excluded flows are parked-categorized (payroll/advance/bank-charge/unknown), never anonymous. **Correction on record:** `lpo_orders` is CUSTOMER sales orders (verified in code) — supplier-purchase `source_type` links to `stock_movements`, not `lpo_orders`.
+5. **Categories are data — REUSE `expense_categories` (exists, live, is_active + parent grouping; verified S13).** No new payment_categories table; extend for income direction. Both seed lists in §Seeds.
+6. **Three-account ingestion (corrected S13):** **`bank_accounts` EXISTS (live: 4 rows = two duplicate pairs, revenue + operations; DEDUPE required; add Moniepoint row).** 5c ingests all three (same parser, no extra build); debit-matching runs on operations + Moniepoint only; revenue-account lines are parked (credits = 5d's dataset, banking from day one). Every statement line account-tagged; every disbursement records its account (the big-from-Taj/small-from-Moniepoint norm can be broken with approval — account is recorded per request, never inferred from amount). Revenue↔operations drawdowns and operations↔Moniepoint top-ups pair as internal transfers, excluded from vendor matching.
+7. **Disbursement norm = bank transfer; cash = failsafe** (mechanic/roadside labour). Cash requests run the IDENTICAL approval chain, must reference a logged withdrawal, `disbursement_method='cash'`, close on accountant confirmation (no statement match). Running monthly cash total visible (drift control).
+8. **WhatsApp cutoff = FLOATING:** 14 days after the first real request completes request→ICO→MD→disbursed on PRODUCTION. Calendar date announced the day 5a merges.
+9. **Matching strategy per account/channel:** Taj = schedule-first (expected-disbursement list), narration secondary; Moniepoint = reference-first. Every disbursement records execution channel: `online_transfer` | `bank_letter` (letter ⇒ narration untrusted — bank clerk types it).
+10. **Multi-beneficiary bank letters ⇒ disbursement batch** (one letter = one batch = N requests). Taj posts **one debit per beneficiary — EMPIRICALLY CONFIRMED (S13, real statement: 07-APR-26, three per-beneficiary debits from one instruction).** Line↔request matching primary; line↔batch-total fallback built regardless (posting behavior is bank-internal and can change silently).
+11. **Initiator roles (RPC-enforced, not CSS):** logistics_manager, production_manager, store_officer, hr_officer, accountant, md. **ICO excluded** — gates, never originates (S7 control principle).
+12. **Reference format:** canonical `APC-PR-#####` (server-side, collision-retry like the six existing generators; sequential, NO year segment). Narration convention `PR#####`, **typed at the START of the narration** ("PR00123 diesel") — Taj truncates the details field at fixed width (verified S13), so a trailing reference is destroyed. Matcher normalizes (case/hyphen/space-insensitive, embedded-anywhere, accepts full form). **Amount-agreement gate:** reference match + amount mismatch = flagged discrepancy, never auto-confirm.
+13. **5b closure:** goods categories close on `stock_movements` link; service categories expect receipt attachment; nothing mandatory at initiation (roadside case). **Dual override (accountant OR MD)**, logged with actor; monthly override count split by actor so accountant-overrides-own-disbursement is its own visible line (self-review mitigation).
+
+**Standing rules:** every match is a SUGGESTION until accountant-confirmed (both directions, forever). The payment request is the ONLY money-out truth; `stock_movements.total_cost` is inventory valuation, never "paid".
+
+### EXISTING SUBSYSTEM MAP (S13 — Phase 0 is a full draft of 5c/5d, partly in production use)
+Live-verified (code on main + live DB query 2026-07-03). Disposition per component — Phase 5 EXTENDS this; it does not greenfield:
+- **`bank_accounts`** — REUSE. Live: 4 rows, two duplicate pairs (revenue ×2, ops ×2). ACTION: dedupe, add Moniepoint.
+- **`bank_transactions`** — REUSE/EXTEND as the 5c statement-lines store. Live: 1,277 rows of real ingested history (keep-or-remigrate decision pending). Extend: `suggested`/`confirmed` match states, RPC-guarded confirm (current writes are client-side, unguarded), reconciliation gate at import, account-tagging already present via `bank_account_id`.
+- **`expense_categories`** — REUSE (= Decision 5).
+- **`expenses` (43 rows; dashboards KPI/Board/Reports read it; Labour.jsx inserts payroll costs)** — DO NOT convert or touch. New `payment_requests` table is workflow truth; disbursement writes a linked `expenses` row (accounting projection) so all reporting keeps working. Payroll continues writing expenses directly, outside requests (consistent with Decision 4 boundary).
+- **`receipts` table + flow** — REUSE as 5b attachment store (add request linkage) after bucket fix below.
+- **Parser `autoMatchTransactions`/`detectCategory`** — SUPERSEDED by 5c rules; DataImport UI is the base to extend.
+- **`bank_import_batches`, `bank_reconciliations`** — reuse; reconciliation gate writes into the latter.
+
+#### Live-DB findings (S13 planning-chat verification)
+1. **EXPOSURE — `receipts` storage bucket is PUBLIC** (unauthenticated read of vendor receipts). **MD RULING (S13): coordinate flip with the code PR** — accepted interim risk (exploit requires a leaked URL: random path slugs, `file_url` behind finance-role RLS). BOUNDED: signed-URL PR is a standalone scope queued BEFORE any Phase 5 build session (it is on 5b's critical path regardless); bucket flip applied from the planning chat the same day the PR merges, verified by unauthenticated fetch before/after.
+2. **`expenses` has NO guard trigger** — status is a soft column, not a state machine; S12 audit Category 5's CLEAN claim did not cover this table. Accepted risk short-term; 5a replaces this approval path. _(Re-verified S13: `expenses` guard-trigger count = 0.)_
+3. `bank_accounts` duplicates + 1,277 legacy `bank_transactions` rows — hygiene items gating 5c.
+
+### STATEMENT EMPIRICS (S13 — verified against real Jan–Jun 2026 Taj PDFs, both accounts, + 12-month Moniepoint Excel)
+- **Reconciliation gate confirmed buildable on all three sources.** Taj: identical layout both accounts; opening balance + per-row running balance + TRANS SUMMARY; arithmetic verified to the kobo on both. Moniepoint: opening/closing/total debit/credit header + Balance Before/After per row.
+- **Fee legs:** every Taj transfer spawns companion debit rows (NIP fee 53.75/26.88/10.75, stamp duty 50, levy 50, monthly SMS) **carrying the parent's narration** — a charge-classification pass MUST run before any matching or fee rows keyword-match as phantom payments. Moniepoint pairs fee legs explicitly via Transaction Ref suffix (`_DEBIT_1/_2`); Taj needs keyword + known-amount heuristics.
+- **Reversals:** observed live (06-MAY: 3,000,000 debit + `RevNIP…` credit same day). Match-state machine rule: a reversal credit voids its parent debit's match. Moniepoint exposes a Reversal Status column.
+- **Moniepoint columns are rich:** Beneficiary name + institution, clean free-text narration, unique refs — Moniepoint matching = reference + beneficiary + amount, stronger than reference-alone.
+- **Revenue account is not inflow-only:** loan in/repayment out (Bilaad ₦102.9M in, ₦92M out), Mudaraba investment flows. Moniepoint credits include non-block sales revenue (stone dust trips, plaster sand) — 5d's inflow dataset spans Moniepoint too.
+
+### EXISTING ASSETS (verified in code this session)
+- `src/utils/parseBankStatement.js` (Phase 0): TAJ PDF (pdfjs, DD-Mon-YY, meta-row filter) + CSV + Excel. 5c extends, does not rebuild. **Taj is PDF-ONLY for BOTH accounts (corrected S13 — no Excel option exists); Moniepoint offers Excel or PDF (use Excel).** The Taj parser is therefore a single point of failure for the majority of money out. Mitigation is a MANDATORY reconciliation gate in 5c ingestion: a statement file is accepted only if opening + credits − debits = closing (and per-row running balance validates where present); any mismatch rejects the ENTIRE file loudly — silent partial ingestion is forbidden. A Taj layout redesign = visible ingestion outage + parser patch, never quietly wrong data.
+- `staging_transactions` table exists (per audit).
+- Store's stock-in IS the goods receipt — no separate GRN table (two-records-one-truth guard, third occurrence).
+
+### PRE-SCHEMA VERIFICATION (WR#8 — blocks schema session)
+1. Live column shapes of `stock_movements` and `staging_transactions`. **✅ CLOSED (S13)** — `stock_movements` shape confirmed live (includes `supplier_id` + `reference` columns); `staging_transactions` verified 0 rows and unreferenced by code — legacy scaffolding from the abandoned OCR/alert design, leave in place, out of Phase 5 scope. See results below.
+2. How Phase 0 parser output is wired in `App.jsx` (extend vs re-route). **✅ CLOSED (S13) — see results below.**
+3. Reconfirm Decision 10 posting behavior with accountant. **OPEN — needs the accountant (human).**
+4. ~~Taj PDF balance fields~~ **CLOSED S13** (see Statement Empirics). Moniepoint xlsx through the app's SheetJS parser: **✅ CLOSED (S13)** — SheetJS parses the real Moniepoint xlsx (2,995 rows, header detected at row 7, malformed styles tolerated).
+
+#### Pre-schema verification results (Claude Code, S13)
+- **Item 1 — column shapes (live DB, 2026-07-03):**
+  - `stock_movements`: `id` uuid, `item_id` uuid, `movement_type` text NOT NULL, `quantity` numeric NOT NULL, `unit_cost` numeric, `total_cost` numeric, `supplier` text, `reference` text, `issued_to` text, `staff_name` text, `date` date NOT NULL, `notes` text, `created_at` timestamptz, `supplier_id` uuid. → 5b's supplier-purchase link (Decision 4) has `supplier`/`supplier_id`/`reference`/`total_cost` to key on; `total_cost` is the inventory-valuation column (never "paid" — standing rule).
+  - `staging_transactions`: `id` uuid, `channel` text NN, `content_hash` text NN, `raw_payload` jsonb NN, `file_path` text, `extracted_amount` numeric, `extracted_date` date, `extracted_party` text, `extracted_ref` text, `direction` text, `proposed_target` text, `ocr_confidence` numeric, `status` text NN, `review_mode` text NN, `promoted_to_table` text, `promoted_to_id` uuid, `promoted_by` text, `promoted_at` timestamptz, `reviewed_by` text, `reviewed_at` timestamptz, `reject_reason` text, `created_at` timestamptz NN, `updated_at` timestamptz. → already a generic staging shape with a promote-to-target lifecycle; usable as a model for the 5c match-state machine.
+- **Item 2 — Phase 0 parser wiring (code on main):** the ingest+match flow lives **inline in App.jsx** as an Accounting sub-tab, NOT in the standalone `DataImport` component. Flow: `buildPreview()` → `mapRowsToTransactions` → `bankTransactionsService.checkDuplicates` → `autoMatchTransactions(...)` (App.jsx ~L5242) → `confirmImport()` writes to `bank_transactions`; `detectCategory` used for unmatched debits (~L5896). The separate `DataImport` component (`data_import` route, accountant-only) is the `staging_transactions` OCR/promote path. → **5c extends the inline App.jsx `bank_transactions` reconciliation flow** (add suggested/confirmed states + RPC-guarded confirm + reconciliation gate); the `DataImport`/`staging_transactions` path is a separate lineage, not the 5c base.
+
+### SEEDS
+- **Expenditure:** machine maintenance, truck maintenance, production materials (cement/dust/diesel), delivery/diesel-trucks, electricity (prepaid grid), admin, commission, medical, tax/VAT, levies & fines, capital acquisition, bought-in finished blocks, float replenishment, loan/investment repayment, professional services (consultancy), staff welfare/support, bank charges (system category — fee legs auto-classified, never user-selected).
+- **Income (5d):** block sales, cement sales, stone dust, chippings, empty cement bags, scrap metal, asset disposal, loans/investments received (funding, not revenue — flag for 5e/5d rules), reversals (system — voids parent debit).
