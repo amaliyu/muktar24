@@ -6185,16 +6185,27 @@ const ReceiptsTab = () => {
   const [uploadForm, setUploadForm] = useState({ receipt_date: today, vendor_name: '', amount: '', tax_category: '', notes: '', expense_id: '' });
   const [uploading, setUploading] = useState(false);
   const [viewUrl, setViewUrl] = useState(null);
+  const [viewIsPdf, setViewIsPdf] = useState(false);
+  const [signedMap, setSignedMap] = useState({});
   const [missingCount, setMissingCount] = useState(0);
   const [showMissing, setShowMissing] = useState(false);
   const [exportLoading, setExportLoading] = useState(false);
   const [err, setErr] = useState('');
   const [ok, setOk] = useState('');
 
+  const resolveSignedUrls = async (rows) => {
+    const entries = await Promise.all((rows || []).map(async r => {
+      try { return [r.id, await receiptsService.getSignedUrl(r.file_url)]; }
+      catch { return [r.id, null]; }
+    }));
+    setSignedMap(m => ({ ...m, ...Object.fromEntries(entries) }));
+  };
+
   const loadReceipts = () => {
     setLoading(true);
     receiptsService.getAll(rfrom || null, rto || null, rsearch || null)
-      .then(setReceipts).catch(e => setErr(e?.message || 'An error occurred')).finally(() => setLoading(false));
+      .then(rows => { setReceipts(rows); resolveSignedUrls(rows); })
+      .catch(e => setErr(e?.message || 'An error occurred')).finally(() => setLoading(false));
   };
 
   useEffect(() => {
@@ -6210,6 +6221,7 @@ const ReceiptsTab = () => {
     try {
       const rec = await receiptsService.upload(uploadFile, uploadForm);
       setReceipts(r => [rec, ...r]);
+      resolveSignedUrls([rec]);
       setUploadFile(null);
       setUploadForm({ receipt_date: today, vendor_name: '', amount: '', tax_category: '', notes: '', expense_id: '' });
       setOk(`Receipt ${rec.receipt_number} uploaded`);
@@ -6236,8 +6248,9 @@ const ReceiptsTab = () => {
 
       await Promise.all(receipts.map(async (r) => {
         try {
-          const res = await fetch(r.file_url);
-          if (res.ok) {
+          const signed = signedMap[r.id] || await receiptsService.getSignedUrl(r.file_url);
+          const res = signed ? await fetch(signed) : null;
+          if (res?.ok) {
             const blob = await res.blob();
             folder.file(r.file_name || `${r.receipt_number}.file`, blob);
           }
@@ -6268,7 +6281,7 @@ const ReceiptsTab = () => {
       {viewUrl && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
           onClick={() => setViewUrl(null)}>
-          {viewUrl.endsWith('.pdf') || viewUrl.includes('/pdf')
+          {viewIsPdf
             ? <iframe src={viewUrl} style={{ width: '80vw', height: '80vh', border: 'none' }} onClick={e => e.stopPropagation()} />
             : <img src={viewUrl} style={{ maxWidth: '90vw', maxHeight: '90vh', objectFit: 'contain' }} />}
         </div>
@@ -6334,9 +6347,9 @@ const ReceiptsTab = () => {
                 : receipts.map(r => (
                   <div key={r.id} style={{ ...styles.card, padding: '12px', position: 'relative' }}>
                     <div style={{ height: '100px', background: theme.surface, borderRadius: '6px', marginBottom: '8px', overflow: 'hidden', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                      onClick={() => setViewUrl(r.file_url)}>
+                      onClick={() => { setViewIsPdf(r.receipt_type !== 'photo'); setViewUrl(signedMap[r.id]); }}>
                       {r.receipt_type === 'photo'
-                        ? <img src={r.file_url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => e.target.style.display = 'none'} />
+                        ? <img src={signedMap[r.id]} style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => e.target.style.display = 'none'} />
                         : <div style={{ fontSize: '32px', textAlign: 'center' }}>📄</div>}
                     </div>
                     <div style={{ fontSize: '11px', fontWeight: '700', color: theme.accent }}>{r.receipt_number}</div>
@@ -6344,7 +6357,7 @@ const ReceiptsTab = () => {
                     <div style={{ fontSize: '11px', color: theme.green, fontWeight: '600' }}>{naira(r.amount)}</div>
                     <div style={{ fontSize: '10px', color: theme.textMuted }}>{r.receipt_date}</div>
                     <div style={{ display: 'flex', gap: '4px', marginTop: '8px' }}>
-                      <a href={r.file_url} target="_blank" rel="noreferrer" style={{ ...styles.btn('secondary'), padding: '3px 8px', fontSize: '10px', textDecoration: 'none', display: 'inline-block' }}>↓</a>
+                      <a href={signedMap[r.id] || undefined} target="_blank" rel="noreferrer" style={{ ...styles.btn('secondary'), padding: '3px 8px', fontSize: '10px', textDecoration: 'none', display: 'inline-block' }}>↓</a>
                       <button style={{ ...styles.btn('danger'), padding: '3px 8px', fontSize: '10px' }} onClick={() => handleDelete(r)}>✕</button>
                     </div>
                   </div>
