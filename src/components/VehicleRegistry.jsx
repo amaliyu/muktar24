@@ -166,21 +166,32 @@ const MaintenanceTab = ({ vehicleId, vehicleNumber, vehicleName }) => {
   const [form, setForm] = useState(emptyForm)
   const [uploading, setUploading] = useState(false)
   const [receiptUrl, setReceiptUrl] = useState('')
+  const [receiptSignedUrl, setReceiptSignedUrl] = useState('')
+  const [recUrls, setRecUrls] = useState({})
 
   const load = async () => {
     setLoading(true)
-    try { setRecords(await maintenanceService.getByVehicle(vehicleId)) }
+    try {
+      const rows = await maintenanceService.getByVehicle(vehicleId)
+      setRecords(rows)
+      const entries = await Promise.all(rows.filter(r => r.receipt_url).map(async r => {
+        try { return [r.id, await maintenanceService.getSignedUrl(r.receipt_url)] } catch { return [r.id, null] }
+      }))
+      setRecUrls(Object.fromEntries(entries))
+    }
     catch (e) { setAlert({ type: 'error', msg: e.message }) }
     finally { setLoading(false) }
   }
   useEffect(() => { load() }, [vehicleId])
   useEffect(() => { suppliersService.getActive().then(setSuppliers).catch(() => {}) }, [])
 
-  const openCreate = () => { setEditTarget(null); setForm(emptyForm); setReceiptUrl(''); setShowForm(true) }
+  const openCreate = () => { setEditTarget(null); setForm(emptyForm); setReceiptUrl(''); setReceiptSignedUrl(''); setShowForm(true) }
   const openEdit = (r) => {
     setEditTarget(r)
     setForm({ maintenance_date: r.maintenance_date, maintenance_type: r.maintenance_type, description: r.description || '', cost: String(r.cost || ''), supplierId: r.supplier_id || '', vendor_name: r.vendor_name || '', vendor_phone: r.vendor_phone || '', downtime_days: String(r.downtime_days || ''), next_maintenance_date: r.next_maintenance_date || '', recorded_by: r.recorded_by || '', notes: r.notes || '' })
     setReceiptUrl(r.receipt_url || '')
+    setReceiptSignedUrl(r.receipt_url ? (recUrls[r.id] || '') : '')
+    if (r.receipt_url && !recUrls[r.id]) maintenanceService.getSignedUrl(r.receipt_url).then(u => setReceiptSignedUrl(u || '')).catch(() => {})
     setShowForm(true)
   }
 
@@ -262,7 +273,11 @@ const MaintenanceTab = ({ vehicleId, vehicleNumber, vehicleName }) => {
 
   const handleReceiptUpload = async (file) => {
     setUploading(true)
-    try { setReceiptUrl(await maintenanceService.uploadReceipt(file)) }
+    try {
+      const path = await maintenanceService.uploadReceipt(file)
+      setReceiptUrl(path)
+      setReceiptSignedUrl(await maintenanceService.getSignedUrl(path).catch(() => ''))
+    }
     catch (e) { setAlert({ type: 'error', msg: 'Upload failed: ' + e.message }) }
     finally { setUploading(false) }
   }
@@ -312,8 +327,8 @@ const MaintenanceTab = ({ vehicleId, vehicleNumber, vehicleName }) => {
             <div style={styles.formGroup}><label style={styles.label}>Receipt</label>
               {receiptUrl ? (
                 <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                  <a href={receiptUrl} target="_blank" rel="noreferrer" style={{ fontSize: '12px', color: theme.blue }}>View Receipt</a>
-                  <button style={{ ...styles.btn('danger'), padding: '2px 8px', fontSize: '11px' }} onClick={() => setReceiptUrl('')}>Remove</button>
+                  {receiptSignedUrl && <a href={receiptSignedUrl} target="_blank" rel="noreferrer" style={{ fontSize: '12px', color: theme.blue }}>View Receipt</a>}
+                  <button style={{ ...styles.btn('danger'), padding: '2px 8px', fontSize: '11px' }} onClick={() => { setReceiptUrl(''); setReceiptSignedUrl('') }}>Remove</button>
                 </div>
               ) : (
                 <label style={{ cursor: 'pointer' }}>
@@ -351,7 +366,7 @@ const MaintenanceTab = ({ vehicleId, vehicleNumber, vehicleName }) => {
                 <td style={styles.td}>{r.next_maintenance_date ? <span style={{ color: expiryColor(r.next_maintenance_date) }}>{r.next_maintenance_date}</span> : '—'}</td>
                 <td style={styles.td}>
                   <div style={styles.row}>
-                    {r.receipt_url && <a href={r.receipt_url} target="_blank" rel="noreferrer" style={{ fontSize: '11px', color: theme.blue }}>Receipt</a>}
+                    {r.receipt_url && recUrls[r.id] && <a href={recUrls[r.id]} target="_blank" rel="noreferrer" style={{ fontSize: '11px', color: theme.blue }}>Receipt</a>}
                     <button style={{ ...styles.btn(), padding: '3px 8px', fontSize: '11px' }} onClick={() => openEdit(r)}>Edit</button>
                     <button style={{ ...styles.btn('danger'), padding: '3px 8px', fontSize: '11px' }} onClick={() => handleDelete(r)}>Delete</button>
                   </div>
@@ -470,6 +485,7 @@ const FuelLogTab = ({ vehicleId }) => {
 // ── DOCUMENTS TAB ─────────────────────────────────────────────────
 const DocumentsTab = ({ vehicleId }) => {
   const [docs, setDocs] = useState([])
+  const [docUrls, setDocUrls] = useState({})
   const [loading, setLoading] = useState(true)
   const [alert, setAlert] = useState(null)
   const [uploading, setUploading] = useState(false)
@@ -478,7 +494,14 @@ const DocumentsTab = ({ vehicleId }) => {
 
   const load = async () => {
     setLoading(true)
-    try { setDocs(await vehicleDocumentsService.getByVehicle(vehicleId)) }
+    try {
+      const rows = await vehicleDocumentsService.getByVehicle(vehicleId)
+      setDocs(rows)
+      const entries = await Promise.all(rows.map(async d => {
+        try { return [d.id, await vehicleDocumentsService.getSignedUrl(d.file_url)] } catch { return [d.id, null] }
+      }))
+      setDocUrls(Object.fromEntries(entries))
+    }
     catch { setDocs([]) }
     finally { setLoading(false) }
   }
@@ -535,7 +558,7 @@ const DocumentsTab = ({ vehicleId }) => {
                   {d.expiry_date && <div style={{ fontSize: '11px', color: expiryColor(d.expiry_date), marginTop: '3px' }}>Expires: {d.expiry_date}{expired ? ' — EXPIRED' : expiring ? ` — Expires in ${daysUntil(d.expiry_date)} days` : ''}</div>}
                 </div>
                 <div style={styles.row}>
-                  <a href={d.file_url} target="_blank" rel="noreferrer" style={{ ...styles.btn(), textDecoration: 'none', padding: '6px 12px', fontSize: '12px' }}>View</a>
+                  <a href={docUrls[d.id] || undefined} target="_blank" rel="noreferrer" style={{ ...styles.btn(), textDecoration: 'none', padding: '6px 12px', fontSize: '12px' }}>View</a>
                   <button style={{ ...styles.btn('danger'), padding: '6px 12px', fontSize: '12px' }} onClick={() => handleDelete(d)}>Delete</button>
                 </div>
               </div>

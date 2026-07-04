@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase'
+import { getSignedDocUrl, docStoragePath } from './storage'
 
 export const suppliersService = {
   async getAll() {
@@ -104,18 +105,21 @@ export const supplierDocumentsService = {
     const path = `${supplierId}/${Date.now()}.${ext}`
     const { data: sd, error: se } = await supabase.storage.from('supplier-documents').upload(path, file)
     if (se) throw se
-    const { data: { publicUrl } } = supabase.storage.from('supplier-documents').getPublicUrl(sd.path)
     const { data, error } = await supabase.from('supplier_documents').insert({
       supplier_id: supplierId, document_label: label,
-      file_url: publicUrl, file_name: file.name, file_size: file.size,
+      file_url: sd.path, file_name: file.name, file_size: file.size,
     }).select().single()
     if (error) throw error
     return data
   },
 
+  getSignedUrl(value) {
+    return getSignedDocUrl('supplier-documents', value)
+  },
+
   async delete(id, fileUrl) {
-    const match = fileUrl?.match(/supplier-documents\/(.+)$/)
-    if (match) await supabase.storage.from('supplier-documents').remove([match[1]])
+    const path = docStoragePath('supplier-documents', fileUrl)
+    if (path) await supabase.storage.from('supplier-documents').remove([path])
     const { error } = await supabase.from('supplier_documents').delete().eq('id', id)
     if (error) throw error
   },
