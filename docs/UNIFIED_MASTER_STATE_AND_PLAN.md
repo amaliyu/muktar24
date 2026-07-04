@@ -405,6 +405,7 @@ Live-verified (code on main + live DB query 2026-07-03). Disposition per compone
 
 #### Live-DB findings (S13 planning-chat verification)
 1. **EXPOSURE — `receipts` storage bucket is PUBLIC** (unauthenticated read of vendor receipts). **MD RULING (S13): coordinate flip with the code PR** — accepted interim risk (exploit requires a leaked URL: random path slugs, `file_url` behind finance-role RLS). BOUNDED: signed-URL PR is a standalone scope queued BEFORE any Phase 5 build session (it is on 5b's critical path regardless); bucket flip applied from the planning chat the same day the PR merges, verified by unauthenticated fetch before/after.
+   - receipts bucket flipped private 2026-07-03 ✓ (PR #44); lpo-documents, supplier-documents, vehicle-documents also found PUBLIC — same bounded treatment, this PR + planning-chat flip.
 2. **`expenses` has NO guard trigger** — status is a soft column, not a state machine; S12 audit Category 5's CLEAN claim did not cover this table. Accepted risk short-term; 5a replaces this approval path. _(Re-verified S13: `expenses` guard-trigger count = 0.)_
 3. `bank_accounts` duplicates + 1,277 legacy `bank_transactions` rows — hygiene items gating 5c.
 

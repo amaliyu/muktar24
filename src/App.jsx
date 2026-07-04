@@ -960,6 +960,7 @@ const Orders = ({ onNavigate, userProfile }) => {
   const emptyForm = { customerName: "", customerPhone: "", customerLocation: "", marketerId: "", items: [emptyItem()], isLpo: false, lpoSubmittedBy: "" };
   const [form, setForm] = useState(emptyForm);
   const [lpoDocUrl, setLpoDocUrl] = useState("");
+  const [lpoDocSignedUrl, setLpoDocSignedUrl] = useState("");
   const [lpoDocName, setLpoDocName] = useState("");
   const [lpoDocSize, setLpoDocSize] = useState(0);
   const [lpoDocUploading, setLpoDocUploading] = useState(false);
@@ -1020,8 +1021,9 @@ const Orders = ({ onNavigate, userProfile }) => {
     if (!file) return;
     setLpoDocUploading(true);
     try {
-      const url = await lpoService.uploadDocument(file);
-      setLpoDocUrl(url);
+      const path = await lpoService.uploadDocument(file);
+      setLpoDocUrl(path);
+      setLpoDocSignedUrl(await lpoService.getSignedUrl(path).catch(() => ""));
       setLpoDocName(file.name);
       setLpoDocSize(file.size);
     } catch (e) {
@@ -1062,7 +1064,7 @@ const Orders = ({ onNavigate, userProfile }) => {
       }
       await load();
       setForm(emptyForm);
-      setLpoDocUrl(""); setLpoDocName(""); setLpoDocSize(0);
+      setLpoDocUrl(""); setLpoDocSignedUrl(""); setLpoDocName(""); setLpoDocSize(0);
       setPickedCustomer(null);
       setPickedSiteId("");
       setCustomerSites([]);
@@ -1395,8 +1397,8 @@ const Orders = ({ onNavigate, userProfile }) => {
                   <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
                     <span style={{ fontSize: "12px", color: theme.green }}>✓ {lpoDocName}</span>
                     <span style={{ fontSize: "11px", color: theme.textMuted }}>({(lpoDocSize / 1024).toFixed(1)} KB)</span>
-                    <a href={lpoDocUrl} target="_blank" rel="noreferrer" style={{ fontSize: "11px", color: theme.blue, textDecoration: "underline" }}>Preview</a>
-                    <button style={{ ...styles.btn("danger"), padding: "2px 8px", fontSize: "11px" }} onClick={() => { setLpoDocUrl(""); setLpoDocName(""); setLpoDocSize(0); }}>Remove</button>
+                    {lpoDocSignedUrl && <a href={lpoDocSignedUrl} target="_blank" rel="noreferrer" style={{ fontSize: "11px", color: theme.blue, textDecoration: "underline" }}>Preview</a>}
+                    <button style={{ ...styles.btn("danger"), padding: "2px 8px", fontSize: "11px" }} onClick={() => { setLpoDocUrl(""); setLpoDocSignedUrl(""); setLpoDocName(""); setLpoDocSize(0); }}>Remove</button>
                   </div>
                 ) : (
                   <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
@@ -1412,7 +1414,7 @@ const Orders = ({ onNavigate, userProfile }) => {
           </div>
           <div style={styles.row}>
             <button style={styles.btn(form.isLpo ? "secondary" : "primary")} onClick={handleSave} disabled={saving || lpoDocUploading}>{saving ? "Saving…" : form.isLpo ? "Submit LPO for MD Approval" : "Create Order"}</button>
-            <button style={styles.btn("secondary")} onClick={() => { setShowForm(false); setForm(emptyForm); setLpoDocUrl(""); setLpoDocName(""); setLpoDocSize(0); }}>Cancel</button>
+            <button style={styles.btn("secondary")} onClick={() => { setShowForm(false); setForm(emptyForm); setLpoDocUrl(""); setLpoDocSignedUrl(""); setLpoDocName(""); setLpoDocSize(0); }}>Cancel</button>
           </div>
         </div>
       )}
@@ -3257,12 +3259,20 @@ const LPOApprovals = () => {
   const [alert, setAlert] = useState(null);
   const [selected, setSelected] = useState(null);
   const [note, setNote] = useState("");
+  const [docUrls, setDocUrls] = useState({});
   const today = new Date().toISOString().split("T")[0];
   const due = new Date(Date.now() + 30 * 86400000).toISOString().split("T")[0];
 
   const load = async () => {
     setLoading(true);
-    try { setLpos(await lpoService.getAll()); }
+    try {
+      const rows = await lpoService.getAll();
+      setLpos(rows);
+      const entries = await Promise.all(rows.filter(l => l.document_url).map(async l => {
+        try { return [l.id, await lpoService.getSignedUrl(l.document_url)]; } catch { return [l.id, null]; }
+      }));
+      setDocUrls(Object.fromEntries(entries));
+    }
     catch (e) { setAlert({ type: "error", msg: "Could not load LPO queue: " + e.message }); }
     finally { setLoading(false); }
   };
@@ -3340,8 +3350,8 @@ const LPOApprovals = () => {
                         <span key={i} style={styles.badge(theme.blue)}>{it.quantity?.toLocaleString()} {it.block_type}</span>
                       ))}
                       <span style={{ color: theme.accent, fontWeight: "700" }}>{naira(total)}</span>
-                      {lpo.document_url && (
-                        <a href={lpo.document_url} target="_blank" rel="noreferrer" style={{ ...styles.btn("primary"), fontSize: "11px", padding: "3px 10px", textDecoration: "none", display: "inline-block" }}>📄 View LPO Document</a>
+                      {lpo.document_url && docUrls[lpo.id] && (
+                        <a href={docUrls[lpo.id]} target="_blank" rel="noreferrer" style={{ ...styles.btn("primary"), fontSize: "11px", padding: "3px 10px", textDecoration: "none", display: "inline-block" }}>📄 View LPO Document</a>
                       )}
                     </div>
                   </div>

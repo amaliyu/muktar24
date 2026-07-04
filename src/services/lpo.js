@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase'
+import { getSignedDocUrl } from './storage'
 
 export const lpoService = {
   async getPending() {
@@ -46,7 +47,10 @@ export const lpoService = {
     const path = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
     const { data, error } = await supabase.storage.from('lpo-documents').upload(path, file, { upsert: false })
     if (error) throw error
-    const { data: { publicUrl } } = supabase.storage.from('lpo-documents').getPublicUrl(data.path)
-    return publicUrl
+    return data.path
+  },
+
+  getSignedUrl(value) {
+    return getSignedDocUrl('lpo-documents', value)
   },
 }
