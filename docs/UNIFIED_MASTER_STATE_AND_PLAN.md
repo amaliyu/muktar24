@@ -3,7 +3,7 @@
 
 Repo: `amaliyu/muktar24` (PRIVATE) · Prod branch: `main` · Stack: React 18 + Vite 5 + Supabase (PostgreSQL, RLS) + Vercel
 App: APC Manager — internal ERP for Abuja Precast Concrete Limited
-**Updated: 2026-07-03 (Session 13 — Phase 5 re-plan).** All DB state verified by live query, not memory.
+**Updated: 2026-07-07 (Session 14 — storage-policy cleanup).** All DB state verified by live query, not memory.
 **Status: BETA. A physical/manual backup system runs in parallel — NO downtime pressure.**
 **Operating mode: SLOW AND VERIFIED — fix on a branch → test on the branch's Vercel preview AS THE AFFECTED ROLE → confirm with own eyes → MD merges → re-verify production.**
 
@@ -18,6 +18,19 @@ App: APC Manager — internal ERP for Abuja Precast Concrete Limited
 ---
 
 ## 1. SESSION HISTORY (most recent first)
+
+### ✅ SESSION 14 (2026-07-07) — STORAGE-POLICY CLEANUP (planning-chat SQL, no code PR)
+**Scope: storage-policy cleanup only. Phase 5 schema is the thread after this one — not started here.**
+
+**Kiosk fix verified live (first check this session):** newest `attendance_punches` row (2026-07-06 05:11:06) has `photo_storage_path` populated (`has_photo = true`); the four rows immediately before it (2026-07-04, pre-fix) are null. Confirms the camera-capture fix from the attendance kiosk work is landing correctly in production, not a fluke.
+
+**Storage RLS cleanup — replaced 4 permissive `public_*` policies + 3 receipts-specific leftovers with per-bucket role-scoped policies, one bucket at a time, additive-then-tighten (S6 pattern):**
+- Bucket-level state checked first: all 5 target buckets (`receipts`, `lpo-documents`, `supplier-documents`, `vehicle-documents`, `attendance-photos`) were already `public: false` — no unauthenticated exposure at the bucket level. The gap was entirely at the `storage.objects` RLS layer: `public_insert` had **zero bucket restriction at all** (any authenticated user could write to any bucket, including `staff-documents`), and `public_select`/`update`/`delete` excluded only `staff-documents` — meaning any authenticated user (driver, marketer, etc.) could read/write/delete receipts, LPO docs, supplier docs, and vehicle docs directly via the storage API, bypassing the app UI entirely.
+- Role scoping derived from actual app code (who reaches the page, who's blocked by an explicit role check vs. just CSS-masked): `receipts` → write md/accountant, view +ico/board_member; `lpo-documents` → write md/accountant/bdm/marketer, view +ico/board_member (no delete/update path exists in code, so none granted); `supplier-documents` → write md/accountant, view +ico/board_member; `vehicle-documents` → write md/logistics_manager, view +ico/board_member (covers both `vehicle_documents` table uploads and `vehicle_maintenance` receipts — same bucket); `attendance-photos` → write-only md/hr_officer (ALL, since `upsert:true` needs UPDATE too; no viewer role — nothing in the app displays these photos yet).
+- **Side-effect finding:** dropping the four generic policies also closed two loopholes on buckets outside this scope — `staff-documents`' own folder-ownership INSERT policy and `staff-photos`' own role-scoped policies were both being silently bypassed by the generic `public_insert`/`select`/`update`/`delete` (the former excluded `staff-documents` for 3 of 4 ops but not INSERT; the latter never excluded `staff-photos` at all). Both buckets already had complete, correct dedicated policies — removing the generic override was sufficient, no new policies needed for them.
+- **Verification method:** live DB, not a browser session (container has no Supabase credentials to log in as each role). Instead: (1) isolated the exact role-matching boolean logic per bucket and checked it against real `user_profiles` rows for all 8 app roles; (2) after dropping the generic policies, ran real `SELECT`/`INSERT` queries against `storage.objects` inside rolled-back transactions, switching to the `authenticated` Postgres role and setting `request.jwt.claim.sub` per simulated user (the same GUC `auth.uid()` reads) — confirmed the full 8-role × 7-bucket SELECT matrix matches design exactly (e.g. `driver` = 0 rows on every bucket; `bdm` = access to `lpo-documents` only; `hr_officer` = access to `attendance-photos`/`staff-photos`/`staff-documents` only), plus a positive INSERT (accountant → receipts, succeeds) and negative INSERT (driver → receipts, throws `new row violates row-level security policy`).
+- Applied as tracked migration `storage_policy_cleanup_role_scoped_buckets` (20260707185124) via `apply_migration`, idempotent (`DROP POLICY IF EXISTS` + `CREATE POLICY` pairs) so the migration history matches the already-verified live state exactly.
+- **Stale doc item closed:** the §7 "Receipts storage bucket PUBLIC" row (open since S13) is now fully resolved — bucket flipped private (PR #44), extended to the other 3 doc buckets (PR #45), and the RLS layer tightened this session. See updated §7 row.
 
 ### 🔵 SESSION 13 (2026-07-03) — PHASE 5 RE-PLAN (payment-request + ingestion) — DESIGN LOCKED
 **No code/schema this session — design only. Full locked design in §8. Schema NOT started (blocked on §8 Pre-schema verification).**
@@ -353,7 +366,8 @@ Bounded audit, five categories:
 | Silent supabase fallback | ✅ fixed (PR #18) | — |
 | Staff-payroll state machine | ✅ live (S7, PR #20) | — |
 | Payment-request + ingestion (#5) | **DESIGN LOCKED (S13, §8)** — expenditure-first, 5 sub-phases 5a–5e, revenue matching committed as 5d | close §8 pre-schema verification items 3 & 4 → then 5a schema session |
-| Receipts storage bucket PUBLIC (Phase 5 prereq) | ⚠ **OPEN** — vendor receipts unauthenticated-readable; MD ruled interim-accepted (random slugs + finance-RLS on `file_url`) | signed-URL PR (standalone scope) BEFORE any Phase 5 build; bucket flip from planning chat same day PR merges |
+| Document storage buckets (receipts/lpo/supplier/vehicle) | ✅ **CLOSED** — signed URLs (PR #44 receipts, PR #45 lpo/supplier/vehicle), buckets flipped private, storage RLS role-scoped (S14, migration `storage_policy_cleanup_role_scoped_buckets`) | — |
+| Storage policy cleanup (public_* removal, S14) | ✅ COMPLETE — 4 generic + 3 receipts-legacy permissive policies replaced with 9 per-bucket role-scoped policies across 5 buckets; verified via full 8-role × 7-bucket RLS simulation (SELECT+INSERT, positive+negative) | — |
 | Go-live re-entry / dust gap | parked | MD triggers |
 
 ---
@@ -406,6 +420,7 @@ Live-verified (code on main + live DB query 2026-07-03). Disposition per compone
 #### Live-DB findings (S13 planning-chat verification)
 1. **EXPOSURE — `receipts` storage bucket is PUBLIC** (unauthenticated read of vendor receipts). **MD RULING (S13): coordinate flip with the code PR** — accepted interim risk (exploit requires a leaked URL: random path slugs, `file_url` behind finance-role RLS). BOUNDED: signed-URL PR is a standalone scope queued BEFORE any Phase 5 build session (it is on 5b's critical path regardless); bucket flip applied from the planning chat the same day the PR merges, verified by unauthenticated fetch before/after.
    - receipts bucket flipped private 2026-07-03 ✓ (PR #44); lpo-documents, supplier-documents, vehicle-documents also found PUBLIC — same bounded treatment, this PR + planning-chat flip.
+   - **✅ FULLY CLOSED (S14, 2026-07-07):** all 4 buckets private + signed URLs live (PR #44/#45); storage.objects RLS layer also tightened — the generic `public_*` policies that persisted after the bucket flips (needed at the time so the app kept working) are now replaced with per-bucket role-scoped policies. See Session 14 entry above for the full verification.
 2. **`expenses` has NO guard trigger** — status is a soft column, not a state machine; S12 audit Category 5's CLEAN claim did not cover this table. Accepted risk short-term; 5a replaces this approval path. _(Re-verified S13: `expenses` guard-trigger count = 0.)_
 3. `bank_accounts` duplicates + 1,277 legacy `bank_transactions` rows — hygiene items gating 5c.
 
