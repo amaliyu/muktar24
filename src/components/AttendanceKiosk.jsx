@@ -129,15 +129,21 @@ export default function AttendanceKiosk({ userProfile }) {
   }, []);
 
   // ── Flush IDB queue to Supabase ───────────────────────────────────────────
+  // Each entry is attempted independently — one entry failing (e.g. a bad
+  // staff_id or an expired session) must not block entries queued after it.
+  // A failing entry is written back to punch_queue (never deleted) with
+  // sync_attempts/sync_error so it stays visible/inspectable and is retried
+  // on the next flush, and the operator is toasted on every failed attempt.
   const doFlush = useCallback(async () => {
     if (!navigator.onLine || !dbRef.current || isSyncingRef.current) return;
     const queue = await idbGetAll(dbRef.current, 'punch_queue');
     if (!queue.length) return;
     isSyncingRef.current = true;
     setSyncing(true);
-    try {
-      for (const entry of queue) {
-        const { local_id, photo_blob, ...row } = entry;
+    let succeeded = 0;
+    for (const entry of queue) {
+      const { local_id, photo_blob, sync_error, sync_attempts, last_attempt_at, ...row } = entry;
+      try {
         if (photo_blob) {
           const path = `punches/${row.staff_id}/${row.punch_time.replace(/[:.]/g, '-')}.jpg`;
           const stored = await kioskService.uploadPhoto(photo_blob, path);
@@ -145,15 +151,29 @@ export default function AttendanceKiosk({ userProfile }) {
         }
         await kioskService.uploadPunches([row]);
         await idbDelete(dbRef.current, 'punch_queue', local_id);
+        succeeded++;
+      } catch (err) {
+        const staffLabel = Object.values(staffByEmpRef.current)
+          .find(s => s.staff_id === row.staff_id)?.employee_number
+          || `staff ${String(row.staff_id || '').slice(0, 8)}…`;
+        const attempts = (sync_attempts || 0) + 1;
+        const message = err?.message || 'Unknown sync error';
+        try {
+          await idbPut(dbRef.current, 'punch_queue', {
+            ...entry,
+            sync_attempts: attempts,
+            sync_error: message,
+            last_attempt_at: new Date().toISOString(),
+          });
+        } catch { /* best-effort metadata write — entry stays queued either way */ }
+        showToast(`Sync failed for ${staffLabel} (${row.punch_type}, attempt ${attempts}): ${message}. Still queued.`, false);
       }
-      setLastSync(new Date());
-    } catch { /* leave remaining entries for next sync */ }
-    finally {
-      isSyncingRef.current = false;
-      setSyncing(false);
-      await refreshCount();
     }
-  }, [refreshCount]);
+    if (succeeded > 0) setLastSync(new Date());
+    isSyncingRef.current = false;
+    setSyncing(false);
+    await refreshCount();
+  }, [refreshCount, showToast]);
 
   useEffect(() => { doFlushRef.current = doFlush; }, [doFlush]);
 
