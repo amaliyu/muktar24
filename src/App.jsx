@@ -136,6 +136,7 @@ const ROLE_PAGES = {
   marketer:           ['dashboard','customers','orders','products','my_profile'],
   driver:             ['dashboard','waybills','my_profile'],
   hr_officer:         ['dashboard','staff','reports','labour','my_profile','advances','leave','disciplinary','attendance_kiosk','attendance_flags'],
+  kiosk_device:       ['attendance_kiosk'],
   production_manager:           ['dashboard','production','inventory','batches','reports','products','labour','my_profile','attendance_flags'],
   assistant_production_manager: ['dashboard','production','inventory','batches','reports','products','labour','my_profile','attendance_flags'],
   // legacy roles — kept for any existing users
