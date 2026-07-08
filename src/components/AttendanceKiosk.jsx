@@ -153,6 +153,18 @@ export default function AttendanceKiosk({ userProfile }) {
         await idbDelete(dbRef.current, 'punch_queue', local_id);
         succeeded++;
       } catch (err) {
+        if (err?.code === '23505') {
+          // Row already exists server-side (idx_attendance_punches_dedupe) —
+          // e.g. the app reloaded mid-flush after the insert succeeded but
+          // before the local delete ran. Not a real failure: clear the local
+          // entry and count it as synced.
+          try {
+            await idbDelete(dbRef.current, 'punch_queue', local_id);
+            succeeded++;
+            showToast('Already recorded — cleared', true);
+          } catch { /* best-effort — will retry and self-resolve next flush */ }
+          continue;
+        }
         const staffLabel = Object.values(staffByEmpRef.current)
           .find(s => s.staff_id === row.staff_id)?.employee_number
           || `staff ${String(row.staff_id || '').slice(0, 8)}…`;
