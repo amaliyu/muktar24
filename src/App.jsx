@@ -41,6 +41,7 @@ import SupplierRegistry from './components/SupplierRegistry'
 import { suppliersService, supplierTransactionsService } from './services/suppliers'
 import Labour from './components/Labour'
 import { advancesService } from './services/advances'
+import { paymentRequestsService } from './services/paymentRequests'
 import { leaveService } from './services/leave'
 import { leaveBalanceService } from './services/leaveBalance'
 import { meService } from './services/me'
@@ -127,17 +128,17 @@ const APP_ROLES = [
 // Pages each role is allowed to access. 'all' = unrestricted.
 const ROLE_PAGES = {
   md:                 'all',
-  ico:                ['dashboard','production','inventory','batches','waybills','vehicles','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','advances','leave'],
-  accountant:         ['dashboard','customers','orders','reports','kpi_dashboard','accounting','suppliers','products','my_profile','data_import','labour','waybills','advances','leave'],
+  ico:                ['dashboard','production','inventory','batches','waybills','vehicles','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','advances','leave','payment_requests'],
+  accountant:         ['dashboard','customers','orders','reports','kpi_dashboard','accounting','suppliers','products','my_profile','data_import','labour','waybills','advances','leave','payment_requests'],
   board_member:       ['dashboard','production','inventory','batches','waybills','vehicles','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile'],
-  bdm:                ['dashboard','customers','orders','pending_register','daily_schedule','lpo_approvals','reports','kpi_dashboard','my_profile'],
+  bdm:                ['dashboard','customers','orders','pending_register','daily_schedule','lpo_approvals','reports','kpi_dashboard','my_profile','payment_requests'],
   store_officer:      ['dashboard','inventory','batches','waybills','pending_register','daily_schedule','products','reports','my_profile'],
-  logistics_manager:  ['dashboard','waybills','vehicles','labour','pending_register','daily_schedule','customers','my_profile'],
+  logistics_manager:  ['dashboard','waybills','vehicles','labour','pending_register','daily_schedule','customers','my_profile','payment_requests'],
   marketer:           ['dashboard','customers','orders','products','my_profile'],
   driver:             ['dashboard','waybills','my_profile'],
-  hr_officer:         ['dashboard','staff','reports','labour','my_profile','advances','leave','disciplinary','attendance_kiosk','attendance_flags'],
+  hr_officer:         ['dashboard','staff','reports','labour','my_profile','advances','leave','disciplinary','attendance_kiosk','attendance_flags','payment_requests'],
   kiosk_device:       ['attendance_kiosk'],
-  production_manager:           ['dashboard','production','inventory','batches','reports','products','labour','my_profile','attendance_flags'],
+  production_manager:           ['dashboard','production','inventory','batches','reports','products','labour','my_profile','attendance_flags','payment_requests'],
   assistant_production_manager: ['dashboard','production','inventory','batches','reports','products','labour','my_profile','attendance_flags'],
   // legacy roles — kept for any existing users
   operations:         ['dashboard','production','inventory','batches','waybills','vehicles','pending_register','daily_schedule','lpo_approvals','my_profile'],
@@ -154,7 +155,7 @@ const ROLE_PAGES = {
 // (accounting, reports, kpi_dashboard, daily_schedule) are NOT listed here —
 // those buttons carry per-element data-ico-allow / data-board-allow instead,
 // so write actions stay hidden.
-const ICO_EXEMPT_PAGES   = ['dashboard', 'labour', 'schedule_approvals', 'advances', 'leave', 'my_hr'];
+const ICO_EXEMPT_PAGES   = ['dashboard', 'labour', 'schedule_approvals', 'advances', 'leave', 'my_hr', 'payment_requests'];
 const BOARD_EXEMPT_PAGES = ['dashboard', 'my_profile', 'my_hr'];
 
 // ── UI HELPERS ───────────────────────────────────────────────
@@ -6859,6 +6860,250 @@ const AdvancesPage = ({ userProfile }) => {
   );
 };
 
+// ── PAYMENT REQUESTS ──────────────────────────────────────────
+const PaymentRequestsPage = ({ userProfile }) => {
+  const role = userProfile?.role;
+  const userId = userProfile?.id;
+  const isInitiator = ['production_manager', 'logistics_manager', 'bdm', 'hr_officer'].includes(role);
+
+  const [requests, setRequests] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [alert, setAlert] = useState(null);
+  const [actionSaving, setActionSaving] = useState(false);
+
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ amount: '', purpose: '', expense_category_id: '', disbursement_method: 'bank_transfer' });
+  const [saving, setSaving] = useState(false);
+
+  const [recallTarget, setRecallTarget] = useState(null);
+  const [recallReason, setRecallReason] = useState('');
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [reqs, cats] = await Promise.all([
+        isInitiator ? paymentRequestsService.listMine(userId) : paymentRequestsService.list(),
+        expenseCategoriesService.getActive(),
+      ]);
+      setRequests(reqs);
+      setCategories(cats);
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const catMap = Object.fromEntries(categories.map(c => [c.id, c.name]));
+
+  const handleCreate = async () => {
+    if (!form.amount || !form.purpose)
+      return setAlert({ type: 'error', msg: 'Amount and purpose are required.' });
+    setSaving(true); setAlert(null);
+    try {
+      const createArgs = {
+        amount: Number(form.amount),
+        purpose: form.purpose.trim(),
+        expense_category_id: form.expense_category_id || null,
+        disbursement_method: form.disbursement_method || 'bank_transfer',
+      };
+      let req;
+      try {
+        req = await paymentRequestsService.create(createArgs);
+      } catch (createErr) {
+        if (createErr.code === '23505') {
+          req = await paymentRequestsService.create(createArgs);
+        } else {
+          throw createErr;
+        }
+      }
+      setShowForm(false);
+      setForm({ amount: '', purpose: '', expense_category_id: '', disbursement_method: 'bank_transfer' });
+      setAlert({ type: 'success', msg: `Request submitted — Reference: ${req.reference}` });
+      load();
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setSaving(false); }
+  };
+
+  const handleAction = async (id, action, reason = null) => {
+    setActionSaving(true); setAlert(null);
+    try {
+      await paymentRequestsService.advance(id, action, reason);
+      setRecallTarget(null); setRecallReason('');
+      await load();
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setActionSaving(false); }
+  };
+
+  const statusColor = s => ({
+    draft:        theme.textMuted,
+    ico_approved: theme.accent,
+    md_approved:  theme.blue,
+    funded:       theme.green,
+    disbursed:    theme.green,
+    recalled:     theme.red,
+    cancelled:    theme.red,
+  }[s] || theme.textMuted);
+
+  const sm = { padding: '4px 10px', fontSize: '11px' };
+  const rowActions = (req) => {
+    const { id, status } = req;
+    const btns = [];
+    if (role === 'ico' && status === 'draft') {
+      btns.push(<button key="approve" style={{ ...styles.btn('primary'), ...sm }} onClick={() => handleAction(id, 'ico_approve')} disabled={actionSaving}>✓ Approve</button>);
+      btns.push(<button key="recall" style={{ ...styles.btn('danger'), ...sm }} onClick={() => setRecallTarget({ id })}>↩ Recall</button>);
+    } else if (role === 'md') {
+      if (status === 'ico_approved') {
+        btns.push(<button key="approve" style={{ ...styles.btn('primary'), ...sm }} onClick={() => handleAction(id, 'md_approve')} disabled={actionSaving}>✓ Approve</button>);
+        btns.push(<button key="recall" style={{ ...styles.btn('danger'), ...sm }} onClick={() => setRecallTarget({ id })}>↩ Recall</button>);
+      }
+      if (status === 'funded') {
+        btns.push(<button key="recall" style={{ ...styles.btn('danger'), ...sm }} onClick={() => setRecallTarget({ id })}>↩ Recall</button>);
+      }
+    } else if (role === 'accountant') {
+      if (status === 'md_approved') {
+        btns.push(<button key="fund" style={{ ...styles.btn('primary'), ...sm, background: theme.green, color: '#000' }} onClick={() => handleAction(id, 'mark_funded')} disabled={actionSaving}>↑ Mark Funded</button>);
+      }
+      if (status === 'funded') {
+        btns.push(<button key="disburse" style={{ ...styles.btn('primary'), ...sm }} onClick={() => handleAction(id, 'mark_disbursed')} disabled={actionSaving}>✓ Mark Disbursed</button>);
+      }
+    }
+    return btns;
+  };
+
+  const queue = isInitiator
+    ? requests
+    : role === 'ico'
+    ? requests.filter(r => r.status === 'draft')
+    : role === 'md'
+    ? requests.filter(r => ['ico_approved', 'funded'].includes(r.status))
+    : role === 'accountant'
+    ? requests.filter(r => ['md_approved', 'funded'].includes(r.status))
+    : requests;
+
+  return (
+    <div>
+      {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
+
+      <div style={styles.header}>
+        <div>
+          <div style={styles.pageTitle}>Payment Requests</div>
+          <div style={styles.pageSubtitle}>
+            {isInitiator ? 'Submit and track your payment requests' : 'Review and process payment requests'}
+          </div>
+        </div>
+        {isInitiator && (
+          <button style={styles.btn('primary')} onClick={() => setShowForm(v => !v)}>
+            {showForm ? '✕ Cancel' : '+ New Request'}
+          </button>
+        )}
+      </div>
+
+      {isInitiator && showForm && (
+        <div style={{ ...styles.card, marginBottom: '20px' }}>
+          <div style={styles.sectionTitle}>New Payment Request</div>
+          <div style={styles.grid(2)}>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Amount (₦) *</label>
+              <input style={styles.input} type="number" min="1" placeholder="0"
+                value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} />
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Disbursement Method</label>
+              <select style={styles.input} value={form.disbursement_method}
+                onChange={e => setForm(f => ({ ...f, disbursement_method: e.target.value }))}>
+                <option value="bank_transfer">Bank Transfer</option>
+                <option value="cash">Cash</option>
+              </select>
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Purpose *</label>
+              <input style={styles.input} placeholder="Brief description of the payment purpose…"
+                value={form.purpose} onChange={e => setForm(f => ({ ...f, purpose: e.target.value }))} />
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Expense Category (optional)</label>
+              <select style={styles.input} value={form.expense_category_id}
+                onChange={e => setForm(f => ({ ...f, expense_category_id: e.target.value }))}>
+                <option value="">— None —</option>
+                {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+          </div>
+          <button style={styles.btn('primary')} onClick={handleCreate} disabled={saving}>
+            {saving ? 'Submitting…' : 'Submit Request'}
+          </button>
+        </div>
+      )}
+
+      {recallTarget && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ ...styles.card, width: '420px' }}>
+            <div style={{ ...styles.sectionTitle, marginBottom: '12px' }}>Recall Request — Reason Required</div>
+            <textarea
+              style={{ ...styles.input, height: '80px', resize: 'vertical' }}
+              placeholder="Enter reason for recall…"
+              value={recallReason}
+              onChange={e => setRecallReason(e.target.value)}
+            />
+            <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+              <button style={styles.btn('danger')} disabled={!recallReason.trim() || actionSaving}
+                onClick={() => handleAction(recallTarget.id, 'recall', recallReason.trim())}>
+                {actionSaving ? 'Saving…' : 'Confirm Recall'}
+              </button>
+              <button style={styles.btn('secondary')} onClick={() => { setRecallTarget(null); setRecallReason(''); }}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div style={styles.card}>
+        {loading ? <Spinner /> : queue.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '30px', color: theme.textMuted }}>
+            {isInitiator ? 'No payment requests yet.' : 'No requests pending in this queue.'}
+          </div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={styles.table}>
+              <thead>
+                <tr>
+                  {['Reference', 'Amount', 'Purpose', 'Category', 'Method',
+                    ...(!isInitiator ? ['Requested By'] : []),
+                    'Status', 'Date', 'Actions'].map(h => (
+                    <th key={h} style={styles.th}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {queue.map(req => {
+                  const actions = rowActions(req);
+                  return (
+                    <tr key={req.id}>
+                      <td style={styles.td}><strong style={{ fontFamily: 'monospace', fontSize: '12px' }}>{req.reference}</strong></td>
+                      <td style={styles.td}><strong style={{ color: theme.accent }}>{naira(req.amount)}</strong></td>
+                      <td style={styles.td}>{req.purpose || '—'}</td>
+                      <td style={styles.td}>{req.expense_category_id ? (catMap[req.expense_category_id] || '—') : <span style={{ color: theme.textMuted }}>—</span>}</td>
+                      <td style={styles.td}>{req.disbursement_method === 'bank_transfer' ? 'Bank Transfer' : 'Cash'}</td>
+                      {!isInitiator && <td style={styles.td}>{req.requester?.full_name || '—'}</td>}
+                      <td style={styles.td}><span style={styles.badge(statusColor(req.status))}>{req.status}</span></td>
+                      <td style={styles.td}>{req.created_at ? new Date(req.created_at).toLocaleDateString('en-GB') : '—'}</td>
+                      <td style={styles.td}>
+                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                          {actions.length ? actions : <span style={{ color: theme.textMuted, fontSize: '11px' }}>—</span>}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 // ── LEAVE ─────────────────────────────────────────────────────
 const LEAVE_TYPES = ['annual','sick','unpaid','compassionate','maternity'];
 
@@ -7956,7 +8201,7 @@ const navItems = [
     { id: "reports", label: "Reports", icon: "reports" },
     { id: "kpi_dashboard", label: "KPI Dashboard", icon: "reports" },
   ]},
-  { section: "Finance", items: [{ id: "accounting", label: "Accounting", icon: "orders" }, { id: "advances", label: "Salary Advances", icon: "orders" }, { id: "leave", label: "Leave Requests", icon: "staff" }] },
+  { section: "Finance", items: [{ id: "accounting", label: "Accounting", icon: "orders" }, { id: "advances", label: "Salary Advances", icon: "orders" }, { id: "payment_requests", label: "Payment Requests", icon: "orders" }, { id: "leave", label: "Leave Requests", icon: "staff" }] },
   { section: "Settings", items: [
     { id: "products", label: "Products", icon: "products" },
     { id: "suppliers", label: "Suppliers", icon: "supplier" },
@@ -8391,6 +8636,7 @@ export default function App() {
     user_management: <UserManagement userProfile={userProfile} />,
     labour: <Labour userProfile={userProfile} />,
     advances: <AdvancesPage userProfile={userProfile} />,
+    payment_requests: <PaymentRequestsPage userProfile={userProfile} />,
     leave: <LeavePage userProfile={userProfile} />,
     disciplinary: <DisciplinaryPage userProfile={userProfile} />,
     attendance_kiosk: <AttendanceKiosk userProfile={userProfile} />,
