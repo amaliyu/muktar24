@@ -6901,12 +6901,22 @@ const PaymentRequestsPage = ({ userProfile }) => {
       return setAlert({ type: 'error', msg: 'Amount and purpose are required.' });
     setSaving(true); setAlert(null);
     try {
-      const req = await paymentRequestsService.create({
+      const createArgs = {
         amount: Number(form.amount),
         purpose: form.purpose.trim(),
         expense_category_id: form.expense_category_id || null,
         disbursement_method: form.disbursement_method || 'bank_transfer',
-      });
+      };
+      let req;
+      try {
+        req = await paymentRequestsService.create(createArgs);
+      } catch (createErr) {
+        if (createErr.code === '23505') {
+          req = await paymentRequestsService.create(createArgs);
+        } else {
+          throw createErr;
+        }
+      }
       setShowForm(false);
       setForm({ amount: '', purpose: '', expense_category_id: '', disbursement_method: 'bank_transfer' });
       setAlert({ type: 'success', msg: `Request submitted — Reference: ${req.reference}` });
