@@ -6910,6 +6910,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
   const [actionSaving, setActionSaving] = useState(false);
 
   const [showForm, setShowForm] = useState(false);
+  const [editTarget, setEditTarget] = useState(null);
   const [form, setForm] = useState({ amount: '', purpose: '', expense_category_id: '', disbursement_method: 'bank_transfer', order_item_id: '', _order_id: '', category_other_note: '', payeeMode: 'existing', supplier_id: '', payee_name: '', payee_bank_name: '', payee_account_number: '', payee_account_name: '', saveAsVendor: false });
   const [saving, setSaving] = useState(false);
   const [activeSuppliers, setActiveSuppliers] = useState([]);
@@ -6979,6 +6980,38 @@ const PaymentRequestsPage = ({ userProfile }) => {
     return acc;
   }, {});
 
+  const emptyForm = { amount: '', purpose: '', expense_category_id: '', disbursement_method: 'bank_transfer', order_item_id: '', _order_id: '', category_other_note: '', payeeMode: 'existing', supplier_id: '', payee_name: '', payee_bank_name: '', payee_account_number: '', payee_account_name: '', saveAsVendor: false };
+
+  const openEdit = async (req) => {
+    const payeeMode = req.supplier_id ? 'existing' : 'new';
+    let _order_id = '';
+    if (req.order_item_id && req.expense_category_id === tradingPurchasesId) {
+      try {
+        const { data } = await supabase.from('order_items').select('order_id').eq('id', req.order_item_id).single();
+        _order_id = data?.order_id || '';
+      } catch {}
+      loadResaleItems();
+    }
+    setForm({
+      amount: String(req.amount || ''),
+      purpose: req.purpose || '',
+      expense_category_id: req.expense_category_id || '',
+      disbursement_method: req.disbursement_method || 'bank_transfer',
+      category_other_note: req.category_other_note || '',
+      order_item_id: req.order_item_id || '',
+      _order_id,
+      payeeMode,
+      supplier_id: req.supplier_id || '',
+      payee_name: req.payee_name || '',
+      payee_bank_name: req.payee_bank_name || '',
+      payee_account_number: req.payee_account_number || '',
+      payee_account_name: req.payee_account_name || '',
+      saveAsVendor: false,
+    });
+    setEditTarget(req);
+    setShowForm(true);
+  };
+
   const handleCreate = async () => {
     if (!form.amount || !form.purpose)
       return setAlert({ type: 'error', msg: 'Amount and purpose are required.' });
@@ -7003,7 +7036,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
         supplierId = typeof result === 'string' ? result : (result?.id || null);
       }
       const usePayeeFields = form.payeeMode === 'new' && !supplierId;
-      const createArgs = {
+      const fields = {
         amount: Number(form.amount),
         purpose: form.purpose.trim(),
         expense_category_id: form.expense_category_id || null,
@@ -7016,19 +7049,27 @@ const PaymentRequestsPage = ({ userProfile }) => {
         payee_account_name: usePayeeFields ? (form.payee_account_name.trim() || null) : null,
         order_item_id: form.order_item_id || null,
       };
-      let req;
-      try {
-        req = await paymentRequestsService.create(createArgs);
-      } catch (createErr) {
-        if (createErr.code === '23505') {
-          req = await paymentRequestsService.create(createArgs);
-        } else {
-          throw createErr;
+      if (editTarget) {
+        await paymentRequestsService.update(editTarget.id, fields);
+        setShowForm(false);
+        setEditTarget(null);
+        setForm(emptyForm);
+        setAlert({ type: 'success', msg: `Request ${editTarget.reference} updated.` });
+      } else {
+        let req;
+        try {
+          req = await paymentRequestsService.create(fields);
+        } catch (createErr) {
+          if (createErr.code === '23505') {
+            req = await paymentRequestsService.create(fields);
+          } else {
+            throw createErr;
+          }
         }
+        setShowForm(false);
+        setForm(emptyForm);
+        setAlert({ type: 'success', msg: `Request submitted — Reference: ${req.reference}` });
       }
-      setShowForm(false);
-      setForm({ amount: '', purpose: '', expense_category_id: '', disbursement_method: 'bank_transfer', order_item_id: '', _order_id: '', category_other_note: '', payeeMode: 'existing', supplier_id: '', payee_name: '', payee_bank_name: '', payee_account_number: '', payee_account_name: '', saveAsVendor: false });
-      setAlert({ type: 'success', msg: `Request submitted — Reference: ${req.reference}` });
       load();
     } catch (e) { setAlert({ type: 'error', msg: e.message }); }
     finally { setSaving(false); }
@@ -7115,7 +7156,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
             </div>
           )}
           {isInitiator && (
-            <button style={styles.btn('primary')} onClick={() => setShowForm(v => !v)}>
+            <button style={styles.btn(showForm ? 'secondary' : 'primary')} onClick={() => { setShowForm(v => !v); setEditTarget(null); setForm(emptyForm); }}>
               {showForm ? '✕ Cancel' : '+ New Request'}
             </button>
           )}
@@ -7124,7 +7165,9 @@ const PaymentRequestsPage = ({ userProfile }) => {
 
       {isInitiator && showForm && (
         <div style={{ ...styles.card, marginBottom: '20px' }}>
-          <div style={styles.sectionTitle}>New Payment Request</div>
+          <div style={styles.sectionTitle}>
+            {editTarget ? `Edit Request — ${editTarget.reference}` : 'New Payment Request'}
+          </div>
           <div style={styles.grid(2)}>
             <div style={styles.formGroup}>
               <label style={styles.label}>Amount (₦) *</label>
@@ -7265,7 +7308,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
             )}
           </div>
           <button style={{ ...styles.btn('primary'), marginTop: '12px' }} onClick={handleCreate} disabled={saving}>
-            {saving ? 'Submitting…' : 'Submit Request'}
+            {saving ? (editTarget ? 'Saving…' : 'Submitting…') : (editTarget ? 'Save Changes' : 'Submit Request')}
           </button>
         </div>
       )}
@@ -7393,6 +7436,9 @@ const PaymentRequestsPage = ({ userProfile }) => {
                       <td style={styles.td}>
                         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                           <button style={{ ...styles.btn('secondary'), ...sm }} onClick={() => setDetailReq(req)}>View</button>
+                          {isInitiator && req.status === 'draft' && (
+                            <button style={{ ...styles.btn('secondary'), ...sm }} onClick={() => openEdit(req)}>✏ Edit</button>
+                          )}
                           {actions}
                         </div>
                       </td>

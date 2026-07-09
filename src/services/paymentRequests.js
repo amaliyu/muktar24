@@ -58,6 +58,14 @@ export const paymentRequestsService = {
     return data;
   },
 
+  async update(id, fields) {
+    const { error } = await supabase
+      .from('payment_requests')
+      .update(fields)
+      .eq('id', id);
+    if (error) throw error;
+  },
+
   async advance(id, action, reason = null) {
     const { data, error } = await supabase.rpc('advance_payment_request', {
       p_request_id: id,
