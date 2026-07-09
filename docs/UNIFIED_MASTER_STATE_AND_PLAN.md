@@ -3,7 +3,7 @@
 
 Repo: `amaliyu/muktar24` (PRIVATE) · Prod branch: `main` · Stack: React 18 + Vite 5 + Supabase (PostgreSQL, RLS) + Vercel
 App: APC Manager — internal ERP for Abuja Precast Concrete Limited
-**Updated: 2026-07-07 (Session 14 — storage-policy cleanup).** All DB state verified by live query, not memory.
+**Updated: 2026-07-09 (Session 16 — Phase 5a frontend, trading/resale).** All DB state verified by live query, not memory.
 **Status: BETA. A physical/manual backup system runs in parallel — NO downtime pressure.**
 **Operating mode: SLOW AND VERIFIED — fix on a branch → test on the branch's Vercel preview AS THE AFFECTED ROLE → confirm with own eyes → MD merges → re-verify production.**
 
@@ -18,6 +18,35 @@ App: APC Manager — internal ERP for Abuja Precast Concrete Limited
 ---
 
 ## 1. SESSION HISTORY (most recent first)
+
+### 🔵 SESSION 16 (2026-07-09) — PHASE 5a BUILD: EXPENSE CATEGORIES + PAYMENT REQUESTS + TRADING/RESALE
+**PRs: #51 (docs — Decision 10 Moniepoint empirics), #52 (docs — Decision 11 initiator roles), #53 (Phase 5a payment-request lifecycle frontend), #54 (trading/resale order items). Code PRs carry no DB changes. All DB changes applied via planning-chat migrations.**
+
+*(Pre-note: S15 closed all four §8 pre-schema verification items — real Moniepoint xlsx empirics confirming both bulk-single-debit and per-beneficiary patterns + partial BULK_TRF_RFD refund edge case (Decision 10 updated); MD's initiator-roles ruling (Decision 11 recorded). Docs PRs #51/#52 merged against main after PR #50 landed. S16 is the first Phase 5a build session.)*
+
+**A. expense_categories restructure (DB — planning-chat migration)**
+- Cost-centre grouping: parent/group rows added to `expense_categories` so categories are organised by domain in the payment-request creation form.
+- **Labour/Salaries deactivated** (`is_active = false`) — payroll and labour outflows are Decision 4 boundary items, governed by their own state machines; they must never appear as user-selectable options in the payment-request form. ICO/MD can reactivate if the boundary rule changes.
+- New categories seeded consistent with the §8 Seeds list; notably **Trading Purchases** as the anchor category for resale cost links (§C below).
+- Closure mechanism: the existing `is_active` flag (Decision 5) is the instrument; this restructure applies it to the Labour/Salaries group and documents the deactivation convention going forward — any category that falls inside an existing state-machine flow must be deactivated here, not deleted.
+
+**B. Payee/vendor system (DB already live before S16; frontend — PR #56, separate from Phase 5a lifecycle PR #53)**
+- `payment_requests.supplier_id` / `payee_name` / `payee_bank_name` / `payee_account_number` / `payee_account_name` / `category_other_note` columns live on DB. `create_supplier_from_payment_request(p_company_name, p_bank_name, p_bank_account_number, p_bank_account_name, p_contact_person, p_phone)` RPC live.
+- **Save-as-vendor flow:** the creation form toggles between "Existing Vendor" (dropdown of `status='active'` suppliers, sets `supplier_id`) and "New Payee" (free-text payee fields). In New Payee mode a "Save as vendor for next time" checkbox calls the RPC on submit → new `suppliers` row created with `status='pending_verification'`, returned ID used as `supplier_id` on the request instead of free-text fields.
+- **pending_verification gate:** pending vendors are surfaced in a "Pending Vendors" section within PaymentRequestsPage (md/ico/accountant only); approve button flips `status` to `active`. Pending vendors are excluded from the active-vendor dropdown but the payment request itself is not blocked — gate is on vendor promotion, not submission.
+- **Others category note:** when the "Others" expense category is selected, a required free-text "Please describe" field bound to `category_other_note` is shown; client-side validation blocks submission without it.
+- **Blocking issue (S16):** the DB constraint requiring `supplier_id IS NOT NULL OR payee_name IS NOT NULL` was live before the frontend shipped it — every submission through PR #53's form was failing. PR #56 is the unblocking fix.
+
+**C. Trading/resale order items (DB already live before S16; frontend — PR #54)**
+- `order_items.source_type` (text, NOT NULL, default `'manufactured'`; values `'manufactured'` | `'resale'`) — distinguishes APCL-produced stock from blocks bought in from a third-party partner for resale.
+- `order_items.cost_basis` (numeric, nullable) — what APCL pays the partner for the resale item. Captures purchase cost only; full landed-cost margin deliberately deferred (see §4).
+- `payment_requests.order_item_id` (uuid, nullable FK to `order_items`) — links a Trading Purchases payment request to the specific order item being funded, enabling future cost reconciliation.
+- **Frontend (PR #54):** source-type toggle (Mfg / Resale) on every line item in the new-order and order-edit forms; resale rows highlighted amber; order detail shows a `Resale` badge with cost basis where set. BDM payment-request creation form surfaces an optional order → order-item linking panel when "Trading Purchases" is selected — order dropdown (all orders with resale items) filters to a per-order item sub-dropdown. Both dropdowns are optional; a Trading Purchases request can be submitted without an order link.
+- `paymentRequestsService.create()` updated to thread `order_item_id` through to the insert.
+
+**Two items explicitly deferred — not built, recorded in §4 to prevent re-invention:**
+- Products table naming collision: "9 Inch" ambiguity between APCL-manufactured and local/Nigeria-standard resale variant (not yet a distinct product record).
+- Full landed-cost margin on resale trades: delivery logistics cost attribution to a specific trade is wanted but deliberately not built — `cost_basis` is the foundation; the link to a waybill/delivery for freight attribution is the remaining piece.
 
 ### ✅ SESSION 14 (2026-07-07) — STORAGE-POLICY CLEANUP (planning-chat SQL, no code PR)
 **Scope: storage-policy cleanup only. Phase 5 schema is the thread after this one — not started here.**
@@ -316,6 +345,8 @@ Bounded audit, five categories:
 - ✅ **Leave year-end controls — COMPLETE (S11, PR #33).** `run_annual_leave_rollover` and `expire_annual_carryover` RPCs wired to MD-only buttons in StaffHR LeaveBalancesTab.
 - ✅ **Attendance kiosk — Phase 4d (S11, merged: PR #34 revert + PR #35 kiosk).** `src/services/kioskService.js` + `src/components/AttendanceKiosk.jsx` + App.jsx plumbing (flags page, My HR attendance+PIN sections, ICO exemption fix). DB fully live. pg_cron resolved: `reconcile-attendance-punches-nightly` runs at 20:00 UTC. `pin_hash` confirmed SHA-256 hex. No outstanding items.
 - **Manager email migration (future).** Current manager logins use personal emails. Planned: replace 7 role accounts with official `@abujaprecast.com` addresses (MD/ICO/BDM/logistics/production/store/HR).
+- **Products naming collision (PENDING, S16 — not fixed).** The `products` table currently has a "9 Inch 3 Hole Block" entry representing APCL's own manufactured block. A local/Nigeria-standard resale variant of the same nominal size needs to be a distinct product record — the two have different geometry, spec, and/or sourcing and must be distinguishable at order-item entry time. The resale-variant product row has not been added yet. Until it is, `source_type = 'resale'` items with block_type "9 Inch 3 Hole Block" are ambiguous. Planned resolution options (not decided): add a qualified-name product (e.g. "9 Inch Local"), or a `source_type` discriminator at the product level. **No DB change applied; defer to a dedicated products session.**
+- **Full landed-cost margin on resale trades (DEFERRED, S16).** `order_items.cost_basis` captures what APCL pays the partner (purchase cost). What is NOT tracked: the share of delivery/logistics cost attributable to a specific resale sale (freight, haulage, loading). Current gross margin from `cost_basis` is therefore sale-price-minus-purchase-cost only — not full landed cost. Full landed cost requires attributing a delivery cost to the order item, which in turn requires linking a waybill or logistics run to the line item. This was deliberately not built in S16. `cost_basis` is the foundation; the freight-attribution link is the remaining piece. Defer to a future trading/margin session.
 - **Orphaned staff photo files** in `staff-photos` bucket from deleted test staff — harmless; clear via Supabase dashboard (SQL delete blocked).
 - **Ransom (APC-EMP-018)** in onboarding — HR to complete checklist + activate when ready.
 - Original payroll trigger/RPC/audit objects not in tracked migration history (pre-discipline). Live & verified. Optional: capture as no-op migration.
@@ -371,7 +402,11 @@ Bounded audit, five categories:
 | Invoice/logistics/waybill | ✅ fixed & live | — |
 | Silent supabase fallback | ✅ fixed (PR #18) | — |
 | Staff-payroll state machine | ✅ live (S7, PR #20) | — |
-| Payment-request + ingestion (#5) | **DESIGN LOCKED (S13, §8)** — expenditure-first, 5 sub-phases 5a–5e, revenue matching committed as 5d | close §8 pre-schema verification items 3 & 4 → then 5a schema session |
+| expense_categories restructure (S16) | ✅ DONE — cost-centre grouping, Labour/Salaries deactivated, Trading Purchases + seeds seeded per §8 | — |
+| Payee/vendor system (S16, PR #56) | 🔵 PR #56 open — `supplier_id`/payee fields/Others note on creation form, save-as-vendor RPC, pending-vendors section | MD merges; **unblocks all new payment-request creation** (DB constraint was live with no frontend) |
+| Phase 5a payment-request lifecycle (S16, PR #53) | 🔵 PR #53 open — role-differentiated frontend (initiator form, ICO/MD/accountant queues), 23505 collision retry | MD merges; smoke-test 4 initiator roles + ICO + MD + accountant |
+| Trading/resale order items (S16, PR #54) | 🔵 PR #54 open — source_type toggle + cost_basis in order forms; Resale badge in detail; BDM order-item link in payment requests | MD merges; test Mfg/Resale toggle + BDM Trading Purchases flow |
+| Payment-request + ingestion (#5) | **5a IN PROGRESS (S16, §8)** — PRs #53/#54 open; pre-schema verification fully closed (S15); 5b–5e queued per design | PR #53/#54 MD merge → 5b (attachments + goods-receipt link) |
 | Document storage buckets (receipts/lpo/supplier/vehicle) | ✅ **CLOSED** — signed URLs (PR #44 receipts, PR #45 lpo/supplier/vehicle), buckets flipped private, storage RLS role-scoped (S14, migration `storage_policy_cleanup_role_scoped_buckets`) | — |
 | Storage policy cleanup (public_* removal, S14) | ✅ COMPLETE — 4 generic + 3 receipts-legacy permissive policies replaced with 9 per-bucket role-scoped policies across 5 buckets; verified via full 8-role × 7-bucket RLS simulation (SELECT+INSERT, positive+negative) | — |
 | Go-live re-entry / dust gap | parked | MD triggers |
