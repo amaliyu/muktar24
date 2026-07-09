@@ -6918,6 +6918,8 @@ const PaymentRequestsPage = ({ userProfile }) => {
 
   const [recallTarget, setRecallTarget] = useState(null);
   const [recallReason, setRecallReason] = useState('');
+  const [detailReq, setDetailReq] = useState(null);
+  const [copiedField, setCopiedField] = useState(null);
 
   const [resaleItems, setResaleItems] = useState([]);
   const [resaleOrderMap, setResaleOrderMap] = useState({});
@@ -7274,6 +7276,74 @@ const PaymentRequestsPage = ({ userProfile }) => {
         </div>
       )}
 
+      {detailReq && (() => {
+        const req = detailReq;
+        const bankName = req.supplier_id ? req.supplier?.bank_name : req.payee_bank_name;
+        const acctNum  = req.supplier_id ? req.supplier?.bank_account_number : req.payee_account_number;
+        const acctName = req.supplier_id ? req.supplier?.bank_account_name : req.payee_account_name;
+        const payeeName = req.supplier?.company_name || req.payee_name;
+        const copyAcct = async () => {
+          if (!acctNum) return;
+          try { await navigator.clipboard.writeText(acctNum); setCopiedField('acct'); setTimeout(() => setCopiedField(null), 2000); } catch {}
+        };
+        const DL = ({ label, value, mono }) => value ? (
+          <div style={{ marginBottom: '12px' }}>
+            <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '3px' }}>{label}</div>
+            <div style={{ fontSize: '13px', color: theme.text, fontFamily: mono ? 'monospace' : undefined }}>{value}</div>
+          </div>
+        ) : null;
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+            <div style={{ ...styles.card, width: '500px', maxWidth: '94vw', maxHeight: '90vh', overflowY: 'auto' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '18px' }}>
+                <div>
+                  <div style={{ fontFamily: 'monospace', fontSize: '13px', fontWeight: '700', color: theme.accent }}>{req.reference}</div>
+                  <div style={{ fontSize: '20px', fontWeight: '700', color: theme.text, marginTop: '2px' }}>{naira(req.amount)}</div>
+                </div>
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                  <span style={styles.badge(statusColor(req.status))}>{req.status}</span>
+                  <button style={{ ...styles.btn('secondary'), padding: '5px 10px' }} onClick={() => setDetailReq(null)}>✕</button>
+                </div>
+              </div>
+              <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: '16px' }}>
+                <DL label="Purpose" value={req.purpose} />
+                <DL label="Category" value={req.expense_category_id ? catMap[req.expense_category_id] : null} />
+                {req.category_other_note && <DL label="Category note" value={req.category_other_note} />}
+                <DL label="Disbursement method" value={req.disbursement_method === 'bank_transfer' ? 'Bank Transfer' : req.disbursement_method === 'cash' ? 'Cash' : req.disbursement_method} />
+              </div>
+              <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: '16px', marginTop: '4px' }}>
+                <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '12px' }}>Payee / Bank Details</div>
+                <DL label="Payee" value={payeeName} />
+                <DL label="Bank" value={bankName} />
+                {acctNum ? (
+                  <div style={{ marginBottom: '12px' }}>
+                    <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '3px' }}>Account Number</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <span style={{ fontFamily: 'monospace', fontSize: '15px', fontWeight: '600', color: theme.text, letterSpacing: '0.05em' }}>{acctNum}</span>
+                      <button
+                        style={{ ...styles.btn(copiedField === 'acct' ? 'primary' : 'secondary'), padding: '3px 10px', fontSize: '11px' }}
+                        onClick={copyAcct}>
+                        {copiedField === 'acct' ? '✓ Copied' : 'Copy'}
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+                <DL label="Account Name" value={acctName} />
+                {!payeeName && !bankName && !acctNum && !acctName && (
+                  <div style={{ fontSize: '13px', color: theme.textMuted }}>No payee details recorded.</div>
+                )}
+              </div>
+              {!isInitiator && req.requester?.full_name && (
+                <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: '16px', marginTop: '4px' }}>
+                  <DL label="Requested by" value={req.requester.full_name} />
+                  <DL label="Date" value={req.created_at ? new Date(req.created_at).toLocaleDateString('en-GB') : null} />
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
       <div style={styles.card}>
         {loading ? <Spinner /> : queue.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '30px', color: theme.textMuted }}>
@@ -7307,7 +7377,8 @@ const PaymentRequestsPage = ({ userProfile }) => {
                       <td style={styles.td}>{req.created_at ? new Date(req.created_at).toLocaleDateString('en-GB') : '—'}</td>
                       <td style={styles.td}>
                         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                          {actions.length ? actions : <span style={{ color: theme.textMuted, fontSize: '11px' }}>—</span>}
+                          <button style={{ ...styles.btn('secondary'), ...sm }} onClick={() => setDetailReq(req)}>View</button>
+                          {actions}
                         </div>
                       </td>
                     </tr>
