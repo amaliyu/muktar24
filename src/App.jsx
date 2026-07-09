@@ -8671,6 +8671,7 @@ const TruckLoadingPage = ({ userProfile }) => {
   const canICOApprove  = role === 'ico';
   const canMDApprove   = role === 'md';
   const canMarkPaid    = ['accountant', 'md'].includes(role);
+  const canRecall      = ['ico', 'md', 'logistics_manager'].includes(role);
 
   const defaultTab = canLog ? 'log' : 'payroll';
   const [tab, setTab] = useState(defaultTab);
@@ -9054,7 +9055,7 @@ const TruckLoadingPage = ({ userProfile }) => {
                         disabled={actionSaving}
                         onClick={() => handlePayrollAction(p.id, 'mark_paid')}>Mark Paid</button>
                     )}
-                    {canMDApprove && p.status === 'ico_approved' && recallTarget !== p.id && (
+                    {canRecall && ['ico_approved', 'md_approved'].includes(p.status) && recallTarget !== p.id && (
                       <button style={{ ...styles.btn('danger'), fontSize: '11px', padding: '4px 10px' }}
                         disabled={actionSaving}
                         onClick={() => { setRecallTarget(p.id); setRecallReason(''); }}>Recall</button>
