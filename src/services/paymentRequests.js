@@ -10,10 +10,11 @@ export const paymentRequestsService = {
     const rows = data || [];
     const ids = [...new Set(rows.map(r => r.requested_by).filter(Boolean))];
     if (ids.length) {
-      const { data: profiles } = await supabase
-        .from('user_profiles')
+      const { data: profiles, error: profilesErr } = await supabase
+        .from('user_profiles_directory')
         .select('id, full_name')
         .in('id', ids);
+      if (profilesErr) console.error('paymentRequests.list: requester lookup failed', profilesErr);
       const map = Object.fromEntries((profiles || []).map(p => [p.id, p.full_name]));
       for (const row of rows) row.requester = { full_name: map[row.requested_by] || null };
     }
