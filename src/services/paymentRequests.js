@@ -4,7 +4,7 @@ export const paymentRequestsService = {
   async list() {
     const { data, error } = await supabase
       .from('payment_requests')
-      .select('*')
+      .select('*, supplier:supplier_id(company_name)')
       .order('created_at', { ascending: false });
     if (error) throw error;
     const rows = data || [];
@@ -23,14 +23,14 @@ export const paymentRequestsService = {
   async listMine(userId) {
     const { data, error } = await supabase
       .from('payment_requests')
-      .select('*')
+      .select('*, supplier:supplier_id(company_name)')
       .eq('requested_by', userId)
       .order('created_at', { ascending: false });
     if (error) throw error;
     return data || [];
   },
 
-  async create({ amount, purpose, expense_category_id, disbursement_method, order_item_id }) {
+  async create({ amount, purpose, expense_category_id, disbursement_method, supplier_id, payee_name, payee_bank_name, payee_account_number, payee_account_name, category_other_note, order_item_id }) {
     const { data: ref, error: refErr } = await supabase.rpc('get_next_payment_request_reference');
     if (refErr) throw refErr;
     const { data: { user } } = await supabase.auth.getUser();
@@ -43,6 +43,12 @@ export const paymentRequestsService = {
         purpose: purpose || null,
         expense_category_id: expense_category_id || null,
         disbursement_method: disbursement_method || 'bank_transfer',
+        supplier_id: supplier_id || null,
+        payee_name: payee_name || null,
+        payee_bank_name: payee_bank_name || null,
+        payee_account_number: payee_account_number || null,
+        payee_account_name: payee_account_name || null,
+        category_other_note: category_other_note || null,
         order_item_id: order_item_id || null,
       })
       .select()
@@ -56,6 +62,47 @@ export const paymentRequestsService = {
       p_request_id: id,
       p_action: action,
       p_reason: reason,
+    });
+    if (error) throw error;
+    return data;
+  },
+
+  async getActiveSuppliers() {
+    const { data, error } = await supabase
+      .from('suppliers')
+      .select('id, company_name, bank_name, bank_account_number, bank_account_name')
+      .eq('status', 'active')
+      .order('company_name');
+    if (error) throw error;
+    return data || [];
+  },
+
+  async getPendingVendors() {
+    const { data, error } = await supabase
+      .from('suppliers')
+      .select('id, company_name, bank_name, bank_account_number, bank_account_name, created_at')
+      .eq('status', 'pending_verification')
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data || [];
+  },
+
+  async approveVendor(id) {
+    const { error } = await supabase
+      .from('suppliers')
+      .update({ status: 'active' })
+      .eq('id', id);
+    if (error) throw error;
+  },
+
+  async createSupplierFromPaymentRequest({ company_name, bank_name, bank_account_number, bank_account_name, contact_person, phone }) {
+    const { data, error } = await supabase.rpc('create_supplier_from_payment_request', {
+      p_company_name: company_name,
+      p_bank_name: bank_name || null,
+      p_bank_account_number: bank_account_number || null,
+      p_bank_account_name: bank_account_name || null,
+      p_contact_person: contact_person || null,
+      p_phone: phone || null,
     });
     if (error) throw error;
     return data;

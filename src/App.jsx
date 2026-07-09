@@ -6901,6 +6901,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
   const role = userProfile?.role;
   const userId = userProfile?.id;
   const isInitiator = ['production_manager', 'logistics_manager', 'bdm', 'hr_officer'].includes(role);
+  const canReviewVendors = ['md', 'ico', 'accountant'].includes(role);
 
   const [requests, setRequests] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -6909,8 +6910,11 @@ const PaymentRequestsPage = ({ userProfile }) => {
   const [actionSaving, setActionSaving] = useState(false);
 
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ amount: '', purpose: '', expense_category_id: '', disbursement_method: 'bank_transfer', order_item_id: '', _order_id: '' });
+  const [form, setForm] = useState({ amount: '', purpose: '', expense_category_id: '', disbursement_method: 'bank_transfer', order_item_id: '', _order_id: '', category_other_note: '', payeeMode: 'existing', supplier_id: '', payee_name: '', payee_bank_name: '', payee_account_number: '', payee_account_name: '', saveAsVendor: false });
   const [saving, setSaving] = useState(false);
+  const [activeSuppliers, setActiveSuppliers] = useState([]);
+  const [pendingVendors, setPendingVendors] = useState([]);
+  const [vendorSaving, setVendorSaving] = useState(null);
 
   const [recallTarget, setRecallTarget] = useState(null);
   const [recallReason, setRecallReason] = useState('');
@@ -6953,6 +6957,8 @@ const PaymentRequestsPage = ({ userProfile }) => {
       ]);
       setRequests(reqs);
       setCategories(cats);
+      if (isInitiator) paymentRequestsService.getActiveSuppliers().then(setActiveSuppliers).catch(() => {});
+      if (canReviewVendors) paymentRequestsService.getPendingVendors().then(setPendingVendors).catch(() => {});
     } catch (e) { setAlert({ type: 'error', msg: e.message }); }
     finally { setLoading(false); }
   };
@@ -6961,6 +6967,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
 
   const catMap = Object.fromEntries(categories.map(c => [c.id, c.name]));
   const tradingPurchasesId = categories.find(c => c.name === 'Trading Purchases')?.id;
+  const othersCategoryId = categories.find(c => c.name === 'Others')?.id;
   const isTradingPurchases = !!(form.expense_category_id && form.expense_category_id === tradingPurchasesId);
 
   const resaleItemsByOrder = resaleItems.reduce((acc, item) => {
@@ -6972,13 +6979,38 @@ const PaymentRequestsPage = ({ userProfile }) => {
   const handleCreate = async () => {
     if (!form.amount || !form.purpose)
       return setAlert({ type: 'error', msg: 'Amount and purpose are required.' });
+    if (othersCategoryId && form.expense_category_id === othersCategoryId && !form.category_other_note.trim())
+      return setAlert({ type: 'error', msg: '"Others" category requires a description — please fill in the note.' });
+    if (form.payeeMode === 'existing' && !form.supplier_id)
+      return setAlert({ type: 'error', msg: 'Select an existing vendor, or switch to New Payee.' });
+    if (form.payeeMode === 'new' && !form.payee_name.trim())
+      return setAlert({ type: 'error', msg: 'Payee name is required.' });
     setSaving(true); setAlert(null);
     try {
+      let supplierId = form.payeeMode === 'existing' ? form.supplier_id : null;
+      if (form.payeeMode === 'new' && form.saveAsVendor) {
+        const result = await paymentRequestsService.createSupplierFromPaymentRequest({
+          company_name: form.payee_name.trim(),
+          bank_name: form.payee_bank_name.trim() || null,
+          bank_account_number: form.payee_account_number.trim() || null,
+          bank_account_name: form.payee_account_name.trim() || null,
+          contact_person: null,
+          phone: null,
+        });
+        supplierId = typeof result === 'string' ? result : (result?.id || null);
+      }
+      const usePayeeFields = form.payeeMode === 'new' && !supplierId;
       const createArgs = {
         amount: Number(form.amount),
         purpose: form.purpose.trim(),
         expense_category_id: form.expense_category_id || null,
         disbursement_method: form.disbursement_method || 'bank_transfer',
+        category_other_note: form.category_other_note.trim() || null,
+        supplier_id: supplierId,
+        payee_name: usePayeeFields ? form.payee_name.trim() : null,
+        payee_bank_name: usePayeeFields ? (form.payee_bank_name.trim() || null) : null,
+        payee_account_number: usePayeeFields ? (form.payee_account_number.trim() || null) : null,
+        payee_account_name: usePayeeFields ? (form.payee_account_name.trim() || null) : null,
         order_item_id: form.order_item_id || null,
       };
       let req;
@@ -6992,7 +7024,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
         }
       }
       setShowForm(false);
-      setForm({ amount: '', purpose: '', expense_category_id: '', disbursement_method: 'bank_transfer', order_item_id: '', _order_id: '' });
+      setForm({ amount: '', purpose: '', expense_category_id: '', disbursement_method: 'bank_transfer', order_item_id: '', _order_id: '', category_other_note: '', payeeMode: 'existing', supplier_id: '', payee_name: '', payee_bank_name: '', payee_account_number: '', payee_account_name: '', saveAsVendor: false });
       setAlert({ type: 'success', msg: `Request submitted — Reference: ${req.reference}` });
       load();
     } catch (e) { setAlert({ type: 'error', msg: e.message }); }
@@ -7108,6 +7140,14 @@ const PaymentRequestsPage = ({ userProfile }) => {
               </select>
             </div>
           </div>
+          {othersCategoryId && form.expense_category_id === othersCategoryId && (
+            <div style={{ marginTop: '4px', marginBottom: '4px' }}>
+              <label style={styles.label}>Please describe (required) <span style={{ fontWeight: 400, color: theme.textMuted }}>— what are these "Others" expenses?</span></label>
+              <input style={styles.input} placeholder="e.g. Stationery, miscellaneous office supplies…"
+                value={form.category_other_note}
+                onChange={e => setForm(f => ({ ...f, category_other_note: e.target.value }))} />
+            </div>
+          )}
           {role === 'bdm' && isTradingPurchases && (
             <div style={{ padding: '12px', marginTop: '4px', marginBottom: '4px', background: theme.surface, borderRadius: '8px', border: `1px solid ${theme.blue}33` }}>
               <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
@@ -7149,7 +7189,65 @@ const PaymentRequestsPage = ({ userProfile }) => {
               )}
             </div>
           )}
-          <button style={styles.btn('primary')} onClick={handleCreate} disabled={saving}>
+          <div style={{ marginTop: '16px', padding: '14px', background: theme.surface, borderRadius: '8px', border: `1px solid ${theme.border}` }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <div style={{ fontSize: '12px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Payee *</div>
+              <div style={{ display: 'flex', gap: '4px' }}>
+                {['existing', 'new'].map(m => (
+                  <button key={m} type="button"
+                    style={{ ...styles.btn(form.payeeMode === m ? 'primary' : 'secondary'), padding: '5px 12px', fontSize: '12px' }}
+                    onClick={() => setForm(f => ({ ...f, payeeMode: m, supplier_id: '', payee_name: '', payee_bank_name: '', payee_account_number: '', payee_account_name: '', saveAsVendor: false }))}>
+                    {m === 'existing' ? 'Existing Vendor' : 'New Payee'}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {form.payeeMode === 'existing' ? (
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Vendor</label>
+                <select style={styles.input} value={form.supplier_id}
+                  onChange={e => setForm(f => ({ ...f, supplier_id: e.target.value }))}>
+                  <option value="">— Select vendor —</option>
+                  {activeSuppliers.map(s => <option key={s.id} value={s.id}>{s.company_name}</option>)}
+                </select>
+                {activeSuppliers.length === 0 && (
+                  <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '4px' }}>No active vendors on record — switch to New Payee.</div>
+                )}
+              </div>
+            ) : (
+              <div>
+                <div style={styles.grid(2)}>
+                  <div style={styles.formGroup}>
+                    <label style={styles.label}>Payee name *</label>
+                    <input style={styles.input} placeholder="Person or business name"
+                      value={form.payee_name} onChange={e => setForm(f => ({ ...f, payee_name: e.target.value }))} />
+                  </div>
+                  <div style={styles.formGroup}>
+                    <label style={styles.label}>Bank name</label>
+                    <input style={styles.input} placeholder="e.g. First Bank"
+                      value={form.payee_bank_name} onChange={e => setForm(f => ({ ...f, payee_bank_name: e.target.value }))} />
+                  </div>
+                  <div style={styles.formGroup}>
+                    <label style={styles.label}>Account number</label>
+                    <input style={styles.input} placeholder="10-digit account number"
+                      value={form.payee_account_number} onChange={e => setForm(f => ({ ...f, payee_account_number: e.target.value }))} />
+                  </div>
+                  <div style={styles.formGroup}>
+                    <label style={styles.label}>Account name</label>
+                    <input style={styles.input} placeholder="Name on account"
+                      value={form.payee_account_name} onChange={e => setForm(f => ({ ...f, payee_account_name: e.target.value }))} />
+                  </div>
+                </div>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', marginTop: '4px', color: theme.text }}>
+                  <input type="checkbox" checked={form.saveAsVendor}
+                    onChange={e => setForm(f => ({ ...f, saveAsVendor: e.target.checked }))} />
+                  Save as vendor for next time
+                  {form.saveAsVendor && <span style={{ fontSize: '11px', color: theme.textMuted }}>(will appear in Pending Vendors for verification)</span>}
+                </label>
+              </div>
+            )}
+          </div>
+          <button style={{ ...styles.btn('primary'), marginTop: '12px' }} onClick={handleCreate} disabled={saving}>
             {saving ? 'Submitting…' : 'Submit Request'}
           </button>
         </div>
@@ -7186,7 +7284,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
             <table style={styles.table}>
               <thead>
                 <tr>
-                  {['Reference', 'Amount', 'Purpose', 'Category', 'Method',
+                  {['Reference', 'Amount', 'Purpose', 'Category', 'Method', 'Payee',
                     ...(!isInitiator ? ['Requested By'] : []),
                     'Status', 'Date', 'Actions'].map(h => (
                     <th key={h} style={styles.th}>{h}</th>
@@ -7203,6 +7301,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
                       <td style={styles.td}>{req.purpose || '—'}</td>
                       <td style={styles.td}>{req.expense_category_id ? (catMap[req.expense_category_id] || '—') : <span style={{ color: theme.textMuted }}>—</span>}</td>
                       <td style={styles.td}>{req.disbursement_method === 'bank_transfer' ? 'Bank Transfer' : 'Cash'}</td>
+                      <td style={styles.td}>{req.supplier?.company_name || req.payee_name || <span style={{ color: theme.textMuted }}>—</span>}</td>
                       {!isInitiator && <td style={styles.td}>{req.requester?.full_name || '—'}</td>}
                       <td style={styles.td}><span style={styles.badge(statusColor(req.status))}>{req.status}</span></td>
                       <td style={styles.td}>{req.created_at ? new Date(req.created_at).toLocaleDateString('en-GB') : '—'}</td>
@@ -7219,6 +7318,57 @@ const PaymentRequestsPage = ({ userProfile }) => {
           </div>
         )}
       </div>
+
+      {canReviewVendors && (
+        <div style={{ ...styles.card, marginTop: '20px' }}>
+          <div style={styles.sectionTitle}>
+            Pending Vendors
+            {pendingVendors.length > 0 && <span style={{ fontSize: '12px', fontWeight: 400, color: theme.textMuted, marginLeft: '8px' }}>({pendingVendors.length})</span>}
+          </div>
+          {pendingVendors.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '20px', color: theme.textMuted, fontSize: '13px' }}>No vendors pending verification.</div>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={styles.table}>
+                <thead>
+                  <tr>
+                    {['Company', 'Bank', 'Account No.', 'Account Name', 'Submitted', 'Action'].map(h => (
+                      <th key={h} style={styles.th}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {pendingVendors.map(v => (
+                    <tr key={v.id}>
+                      <td style={styles.td}><strong>{v.company_name}</strong></td>
+                      <td style={styles.td}>{v.bank_name || '—'}</td>
+                      <td style={styles.td}><span style={{ fontFamily: 'monospace', fontSize: '12px' }}>{v.bank_account_number || '—'}</span></td>
+                      <td style={styles.td}>{v.bank_account_name || '—'}</td>
+                      <td style={styles.td}>{v.created_at ? new Date(v.created_at).toLocaleDateString('en-GB') : '—'}</td>
+                      <td style={styles.td}>
+                        <button
+                          style={{ ...styles.btn('primary'), ...sm, background: theme.green, color: '#000' }}
+                          disabled={vendorSaving === v.id}
+                          onClick={async () => {
+                            setVendorSaving(v.id);
+                            try {
+                              await paymentRequestsService.approveVendor(v.id);
+                              setPendingVendors(pv => pv.filter(p => p.id !== v.id));
+                              setAlert({ type: 'success', msg: `${v.company_name} approved as active vendor.` });
+                            } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+                            finally { setVendorSaving(null); }
+                          }}>
+                          {vendorSaving === v.id ? '…' : '✓ Approve'}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };
