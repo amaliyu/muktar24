@@ -6919,9 +6919,15 @@ const PaymentRequestsPage = ({ userProfile }) => {
 
   const [recallTarget, setRecallTarget] = useState(null);
   const [recallReason, setRecallReason] = useState('');
+  const [overrideCloseTarget, setOverrideCloseTarget] = useState(null);
+  const [overrideCloseReason, setOverrideCloseReason] = useState('');
   const [detailReq, setDetailReq] = useState(null);
   const [copiedField, setCopiedField] = useState(null);
   const [showHistory, setShowHistory] = useState(false);
+  const [attachFile, setAttachFile] = useState(null);
+  const [attachNote, setAttachNote] = useState('');
+  const [attachSaving, setAttachSaving] = useState(false);
+  const [attachAlert, setAttachAlert] = useState(null);
 
   const [resaleItems, setResaleItems] = useState([]);
   const [resaleOrderMap, setResaleOrderMap] = useState({});
@@ -7080,9 +7086,22 @@ const PaymentRequestsPage = ({ userProfile }) => {
     try {
       await paymentRequestsService.advance(id, action, reason);
       setRecallTarget(null); setRecallReason('');
+      setOverrideCloseTarget(null); setOverrideCloseReason('');
       await load();
     } catch (e) { setAlert({ type: 'error', msg: e.message }); }
     finally { setActionSaving(false); }
+  };
+
+  const handleUploadAttachment = async (req) => {
+    if (!attachFile) return setAttachAlert({ type: 'error', msg: 'Select a file first.' });
+    setAttachSaving(true); setAttachAlert(null);
+    try {
+      await paymentRequestsService.uploadAttachment(req.id, attachFile, userId, attachNote.trim() || null);
+      setAttachFile(null);
+      setAttachNote('');
+      setAttachAlert({ type: 'success', msg: 'Receipt uploaded successfully.' });
+    } catch (e) { setAttachAlert({ type: 'error', msg: e.message }); }
+    finally { setAttachSaving(false); }
   };
 
   const statusColor = s => ({
@@ -7091,6 +7110,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
     md_approved:  theme.blue,
     funded:       theme.green,
     disbursed:    theme.green,
+    closed:       '#a78bfa',
     recalled:     theme.red,
     cancelled:    theme.red,
   }[s] || theme.textMuted);
@@ -7117,6 +7137,14 @@ const PaymentRequestsPage = ({ userProfile }) => {
       if (status === 'funded') {
         btns.push(<button key="disburse" style={{ ...styles.btn('primary'), ...sm }} onClick={() => handleAction(id, 'mark_disbursed')} disabled={actionSaving}>✓ Mark Disbursed</button>);
       }
+      if (status === 'disbursed') {
+        btns.push(<button key="close" style={{ ...styles.btn('primary'), ...sm, background: '#a78bfa', color: '#000' }} onClick={() => handleAction(id, 'close')} disabled={actionSaving}>✓ Close</button>);
+        btns.push(<button key="override-close" style={{ ...styles.btn('secondary'), ...sm }} onClick={() => setOverrideCloseTarget({ id })}>Override Close</button>);
+      }
+    }
+    if (role === 'md' && status === 'disbursed') {
+      btns.push(<button key="close" style={{ ...styles.btn('primary'), ...sm, background: '#a78bfa', color: '#000' }} onClick={() => handleAction(id, 'close')} disabled={actionSaving}>✓ Close</button>);
+      btns.push(<button key="override-close" style={{ ...styles.btn('secondary'), ...sm }} onClick={() => setOverrideCloseTarget({ id })}>Override Close</button>);
     }
     return btns;
   };
@@ -7126,9 +7154,9 @@ const PaymentRequestsPage = ({ userProfile }) => {
     : role === 'ico'
     ? requests.filter(r => r.status === 'draft')
     : role === 'md'
-    ? requests.filter(r => ['ico_approved', 'funded'].includes(r.status))
+    ? requests.filter(r => ['ico_approved', 'funded', 'disbursed'].includes(r.status))
     : role === 'accountant'
-    ? requests.filter(r => ['md_approved', 'funded'].includes(r.status))
+    ? requests.filter(r => ['md_approved', 'funded', 'disbursed'].includes(r.status))
     : requests;
   const queue = (!isInitiator && showHistory) ? requests : actionQueue;
 
@@ -7334,6 +7362,27 @@ const PaymentRequestsPage = ({ userProfile }) => {
         </div>
       )}
 
+      {overrideCloseTarget && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ ...styles.card, width: '420px' }}>
+            <div style={{ ...styles.sectionTitle, marginBottom: '12px' }}>Override Close — Reason Required</div>
+            <textarea
+              style={{ ...styles.input, height: '80px', resize: 'vertical' }}
+              placeholder="Enter reason for override close…"
+              value={overrideCloseReason}
+              onChange={e => setOverrideCloseReason(e.target.value)}
+            />
+            <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+              <button style={{ ...styles.btn('primary'), background: '#a78bfa', color: '#000' }} disabled={!overrideCloseReason.trim() || actionSaving}
+                onClick={() => handleAction(overrideCloseTarget.id, 'override_close', overrideCloseReason.trim())}>
+                {actionSaving ? 'Saving…' : 'Confirm Override Close'}
+              </button>
+              <button style={styles.btn('secondary')} onClick={() => { setOverrideCloseTarget(null); setOverrideCloseReason(''); }}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {detailReq && (() => {
         const req = detailReq;
         const bankName = req.supplier_id ? req.supplier?.bank_name : req.payee_bank_name;
@@ -7344,6 +7393,11 @@ const PaymentRequestsPage = ({ userProfile }) => {
           if (!acctNum) return;
           try { await navigator.clipboard.writeText(acctNum); setCopiedField('acct'); setTimeout(() => setCopiedField(null), 2000); } catch {}
         };
+        const cat = categories.find(c => c.id === req.expense_category_id);
+        const closureMechanism = cat?.closure_mechanism;
+        const CLOSURE_LABELS = { stock_movements: 'Stock records', vehicle_maintenance: 'Vehicle Maintenance records', vehicle_fuel_log: 'Vehicle Fuel records', truck_loading_log: 'Loading records', external_haulage_log: 'Haulage records' };
+        const canUploadEvidence = closureMechanism === 'receipt' && (isInitiator || ['md', 'accountant'].includes(role));
+        const closureLabel = closureMechanism && closureMechanism !== 'receipt' ? CLOSURE_LABELS[closureMechanism] : null;
         const DL = ({ label, value, mono }) => value ? (
           <div style={{ marginBottom: '12px' }}>
             <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '3px' }}>{label}</div>
@@ -7360,7 +7414,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
                 </div>
                 <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                   <span style={styles.badge(statusColor(req.status))}>{req.status}</span>
-                  <button style={{ ...styles.btn('secondary'), padding: '5px 10px' }} onClick={() => setDetailReq(null)}>✕</button>
+                  <button style={{ ...styles.btn('secondary'), padding: '5px 10px' }} onClick={() => { setDetailReq(null); setAttachFile(null); setAttachNote(''); setAttachAlert(null); }}>✕</button>
                 </div>
               </div>
               <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: '16px' }}>
@@ -7395,6 +7449,39 @@ const PaymentRequestsPage = ({ userProfile }) => {
                 <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: '16px', marginTop: '4px' }}>
                   <DL label="Requested by" value={req.requester.full_name} />
                   <DL label="Date" value={req.created_at ? new Date(req.created_at).toLocaleDateString('en-GB') : null} />
+                </div>
+              )}
+              {(canUploadEvidence || closureLabel) && (
+                <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: '16px', marginTop: '4px' }}>
+                  <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '12px' }}>Closure Evidence</div>
+                  {closureLabel && (
+                    <div style={{ fontSize: '13px', color: theme.textMuted }}>Evidence is recorded in {closureLabel}.</div>
+                  )}
+                  {canUploadEvidence && (
+                    <div>
+                      {attachAlert && (
+                        <div style={{ ...styles.alert(attachAlert.type), marginBottom: '10px' }}>
+                          <span>{attachAlert.msg}</span>
+                          <span style={{ cursor: 'pointer' }} onClick={() => setAttachAlert(null)}>✕</span>
+                        </div>
+                      )}
+                      <div style={styles.formGroup}>
+                        <label style={styles.label}>Receipt / Supporting Document</label>
+                        <input type="file" style={{ ...styles.input, padding: '6px' }}
+                          onChange={e => setAttachFile(e.target.files?.[0] || null)} />
+                      </div>
+                      <div style={styles.formGroup}>
+                        <label style={styles.label}>Note (optional)</label>
+                        <input style={styles.input} placeholder="e.g. Official receipt for delivery…"
+                          value={attachNote} onChange={e => setAttachNote(e.target.value)} />
+                      </div>
+                      <button style={{ ...styles.btn('primary'), background: '#a78bfa', color: '#000' }}
+                        disabled={!attachFile || attachSaving}
+                        onClick={() => handleUploadAttachment(req)}>
+                        {attachSaving ? 'Uploading…' : 'Upload Receipt'}
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

@@ -101,6 +101,24 @@ export const paymentRequestsService = {
     if (error) throw error;
   },
 
+  async uploadAttachment(paymentRequestId, file, uploadedBy, note) {
+    const ext = file.name.split('.').pop();
+    const path = `${paymentRequestId}/${Date.now()}.${ext}`;
+    const { data: storageData, error: upErr } = await supabase.storage
+      .from('payment-request-attachments')
+      .upload(path, file);
+    if (upErr) throw upErr;
+    const { error } = await supabase
+      .from('payment_request_attachments')
+      .insert({
+        payment_request_id: paymentRequestId,
+        file_path: storageData.path,
+        uploaded_by: uploadedBy,
+        note: note || null,
+      });
+    if (error) throw error;
+  },
+
   async createSupplierFromPaymentRequest({ company_name, bank_name, bank_account_number, bank_account_name, contact_person, phone }) {
     const { data, error } = await supabase.rpc('create_supplier_from_payment_request', {
       p_company_name: company_name,
