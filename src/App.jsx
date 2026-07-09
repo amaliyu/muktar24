@@ -938,7 +938,7 @@ const Production = () => {
 };
 
 // ── ORDERS ────────────────────────────────────────────────────
-const emptyItem = () => ({ blockType: "9 Inch 3 Hole Block", quantity: "", unitPrice: "", unit: "pieces" });
+const emptyItem = () => ({ blockType: "9 Inch 3 Hole Block", quantity: "", unitPrice: "", unit: "pieces", sourceType: "manufactured", costBasis: "" });
 
 const Orders = ({ onNavigate, userProfile }) => {
   const [orders, setOrders] = useState([]);
@@ -1057,7 +1057,7 @@ const Orders = ({ onNavigate, userProfile }) => {
       }
       const newOrder = await ordersService.create({
         order: { customer_id: customerId, marketer_id: form.marketerId || null, status: "pending", is_lpo: form.isLpo || false, site_id: siteId },
-        items: form.items.map(i => ({ block_type: i.blockType, quantity: parseInt(i.quantity), unit_price: parseFloat(i.unitPrice) })),
+        items: form.items.map(i => ({ block_type: i.blockType, quantity: parseInt(i.quantity), unit_price: parseFloat(i.unitPrice), source_type: i.sourceType || 'manufactured', cost_basis: (i.sourceType === 'resale' && i.costBasis) ? parseFloat(i.costBasis) : null })),
       });
       if (form.isLpo) {
         try {
@@ -1241,7 +1241,7 @@ const Orders = ({ onNavigate, userProfile }) => {
   };
 
   const startOrderEdit = (order) => {
-    setOrderEditItems((order.order_items || []).map(i => ({ blockType: i.block_type, quantity: String(i.quantity), unitPrice: String(i.unit_price) })));
+    setOrderEditItems((order.order_items || []).map(i => ({ blockType: i.block_type, quantity: String(i.quantity), unitPrice: String(i.unit_price), sourceType: i.source_type || 'manufactured', costBasis: i.cost_basis != null ? String(i.cost_basis) : '' })));
     setOrderEditMarketer(order.marketer_id || "");
     setOrderEditMode(true);
   };
@@ -1251,7 +1251,7 @@ const Orders = ({ onNavigate, userProfile }) => {
     try {
       await ordersService.updateOrder(selected.id, {
         marketerId: orderEditMarketer || null,
-        items: orderEditItems.map(i => ({ block_type: i.blockType, quantity: parseInt(i.quantity), unit_price: parseFloat(i.unitPrice) })),
+        items: orderEditItems.map(i => ({ block_type: i.blockType, quantity: parseInt(i.quantity), unit_price: parseFloat(i.unitPrice), source_type: i.sourceType || 'manufactured', cost_basis: (i.sourceType === 'resale' && i.costBasis) ? parseFloat(i.costBasis) : null })),
       });
       const newOrders = await load();
       if (newOrders) setSelected(newOrders.find(o => o.id === selected.id) || null);
@@ -1354,27 +1354,45 @@ const Orders = ({ onNavigate, userProfile }) => {
           <div style={{ marginBottom: "16px" }}>
             <div style={{ fontSize: "12px", fontWeight: "700", color: theme.textMuted, marginBottom: "10px", textTransform: "uppercase", letterSpacing: "0.06em" }}>Order Items</div>
             {form.items.map((item, idx) => (
-              <div key={idx} style={{ display: "flex", gap: "10px", marginBottom: "10px", alignItems: "flex-end" }}>
-                <div style={{ flex: 1 }}>
-                  {idx === 0 && <label style={styles.label}>Block Type</label>}
-                  <ProductSelect value={item.blockType} onChange={(name, unit) => { const its = [...form.items]; its[idx] = { ...its[idx], blockType: name, unit }; setForm({ ...form, items: its }); }} style={styles.input} />
-                </div>
-                <div style={{ flex: 1 }}>
-                  {idx === 0 && <label style={styles.label}>Quantity</label>}
-                  <input style={styles.input} type="number" placeholder="e.g. 10000" value={item.quantity} onChange={e => updateItem(idx, "quantity", e.target.value)} />
-                </div>
-                <div style={{ flex: 1 }}>
-                  {idx === 0 && <label style={styles.label}>Unit Price (₦)</label>}
-                  <input style={styles.input} type="number" placeholder="e.g. 250" value={item.unitPrice} onChange={e => updateItem(idx, "unitPrice", e.target.value)} />
-                </div>
-                <div style={{ flex: 1 }}>
-                  {idx === 0 && <label style={styles.label}>Subtotal</label>}
-                  <div style={{ ...styles.input, background: "transparent", color: theme.accent, fontWeight: "700" }}>
-                    {item.quantity && item.unitPrice ? naira(parseInt(item.quantity) * parseFloat(item.unitPrice)) : "—"}
+              <div key={idx} style={{ marginBottom: "12px", padding: item.sourceType === 'resale' ? "10px" : "0", background: item.sourceType === 'resale' ? theme.accent + "08" : "transparent", borderRadius: "6px", border: item.sourceType === 'resale' ? `1px solid ${theme.accent}33` : "1px solid transparent" }}>
+                <div style={{ display: "flex", gap: "10px", marginBottom: item.sourceType === 'resale' ? "8px" : "0", alignItems: "flex-end" }}>
+                  <div style={{ flex: 1 }}>
+                    {idx === 0 && <label style={styles.label}>Block Type</label>}
+                    <ProductSelect value={item.blockType} onChange={(name, unit) => { const its = [...form.items]; its[idx] = { ...its[idx], blockType: name, unit }; setForm({ ...form, items: its }); }} style={styles.input} />
                   </div>
+                  <div style={{ flex: 1 }}>
+                    {idx === 0 && <label style={styles.label}>Quantity</label>}
+                    <input style={styles.input} type="number" placeholder="e.g. 10000" value={item.quantity} onChange={e => updateItem(idx, "quantity", e.target.value)} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    {idx === 0 && <label style={styles.label}>Unit Price (₦)</label>}
+                    <input style={styles.input} type="number" placeholder="e.g. 250" value={item.unitPrice} onChange={e => updateItem(idx, "unitPrice", e.target.value)} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    {idx === 0 && <label style={styles.label}>Subtotal</label>}
+                    <div style={{ ...styles.input, background: "transparent", color: theme.accent, fontWeight: "700" }}>
+                      {item.quantity && item.unitPrice ? naira(parseInt(item.quantity) * parseFloat(item.unitPrice)) : "—"}
+                    </div>
+                  </div>
+                  <div style={{ flex: "0 0 auto" }}>
+                    {idx === 0 && <label style={styles.label}>Source</label>}
+                    <div style={{ display: "flex", gap: "3px" }}>
+                      {["manufactured", "resale"].map(t => (
+                        <button key={t} type="button" style={{ ...styles.btn(item.sourceType === t ? "primary" : "secondary"), padding: "6px 9px", fontSize: "11px" }} onClick={() => updateItem(idx, "sourceType", t)}>
+                          {t === "manufactured" ? "Mfg" : "Resale"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {form.items.length > 1 && (
+                    <button style={{ ...styles.btn("danger"), padding: "9px 12px", alignSelf: "flex-end" }} onClick={() => setForm({ ...form, items: form.items.filter((_, i) => i !== idx) })}>✕</button>
+                  )}
                 </div>
-                {form.items.length > 1 && (
-                  <button style={{ ...styles.btn("danger"), padding: "9px 12px", alignSelf: idx === 0 ? "flex-end" : "center" }} onClick={() => setForm({ ...form, items: form.items.filter((_, i) => i !== idx) })}>✕</button>
+                {item.sourceType === 'resale' && (
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    <label style={{ ...styles.label, marginBottom: 0, fontSize: "12px", whiteSpace: "nowrap" }}>Partner cost (₦):</label>
+                    <input style={{ ...styles.input, maxWidth: "200px" }} type="number" min="0" placeholder="Cost basis (optional)" value={item.costBasis} onChange={e => updateItem(idx, "costBasis", e.target.value)} />
+                  </div>
                 )}
               </div>
             ))}
@@ -1481,12 +1499,27 @@ const Orders = ({ onNavigate, userProfile }) => {
                         </select>
                       </div>
                       {orderEditItems.map((item, idx) => (
-                        <div key={idx} style={{ display: "flex", gap: "8px", marginBottom: "8px", alignItems: "center" }}>
-                          <ProductSelect value={item.blockType} onChange={(name, unit) => { const it = [...orderEditItems]; it[idx] = { ...it[idx], blockType: name, unit }; setOrderEditItems(it); }} style={{ ...styles.input, flex: 1 }} />
-                          <input style={{ ...styles.input, flex: 1 }} type="number" placeholder="Qty" value={item.quantity} onChange={e => { const it = [...orderEditItems]; it[idx] = { ...it[idx], quantity: e.target.value }; setOrderEditItems(it); }} />
-                          <input style={{ ...styles.input, flex: 1 }} type="number" placeholder="Unit Price" value={item.unitPrice} onChange={e => { const it = [...orderEditItems]; it[idx] = { ...it[idx], unitPrice: e.target.value }; setOrderEditItems(it); }} />
-                          <div style={{ ...styles.input, flex: 1, background: "transparent", color: theme.accent, fontWeight: "700" }}>{item.quantity && item.unitPrice ? naira(parseInt(item.quantity) * parseFloat(item.unitPrice)) : "—"}</div>
-                          {orderEditItems.length > 1 && <button style={{ ...styles.btn("danger"), padding: "8px 10px" }} onClick={() => setOrderEditItems(orderEditItems.filter((_, i) => i !== idx))}>✕</button>}
+                        <div key={idx} style={{ marginBottom: "10px", padding: item.sourceType === 'resale' ? "8px" : "0", background: item.sourceType === 'resale' ? theme.accent + "08" : "transparent", borderRadius: "6px", border: item.sourceType === 'resale' ? `1px solid ${theme.accent}33` : "1px solid transparent" }}>
+                          <div style={{ display: "flex", gap: "8px", marginBottom: item.sourceType === 'resale' ? "6px" : "0", alignItems: "center" }}>
+                            <ProductSelect value={item.blockType} onChange={(name, unit) => { const it = [...orderEditItems]; it[idx] = { ...it[idx], blockType: name, unit }; setOrderEditItems(it); }} style={{ ...styles.input, flex: 1 }} />
+                            <input style={{ ...styles.input, flex: 1 }} type="number" placeholder="Qty" value={item.quantity} onChange={e => { const it = [...orderEditItems]; it[idx] = { ...it[idx], quantity: e.target.value }; setOrderEditItems(it); }} />
+                            <input style={{ ...styles.input, flex: 1 }} type="number" placeholder="Unit Price" value={item.unitPrice} onChange={e => { const it = [...orderEditItems]; it[idx] = { ...it[idx], unitPrice: e.target.value }; setOrderEditItems(it); }} />
+                            <div style={{ ...styles.input, flex: 1, background: "transparent", color: theme.accent, fontWeight: "700" }}>{item.quantity && item.unitPrice ? naira(parseInt(item.quantity) * parseFloat(item.unitPrice)) : "—"}</div>
+                            <div style={{ display: "flex", gap: "3px", flexShrink: 0 }}>
+                              {["manufactured", "resale"].map(t => (
+                                <button key={t} type="button" style={{ ...styles.btn(item.sourceType === t ? "primary" : "secondary"), padding: "5px 8px", fontSize: "11px" }} onClick={() => { const it = [...orderEditItems]; it[idx] = { ...it[idx], sourceType: t }; setOrderEditItems(it); }}>
+                                  {t === "manufactured" ? "Mfg" : "Resale"}
+                                </button>
+                              ))}
+                            </div>
+                            {orderEditItems.length > 1 && <button style={{ ...styles.btn("danger"), padding: "8px 10px" }} onClick={() => setOrderEditItems(orderEditItems.filter((_, i) => i !== idx))}>✕</button>}
+                          </div>
+                          {item.sourceType === 'resale' && (
+                            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                              <label style={{ ...styles.label, marginBottom: 0, fontSize: "12px", whiteSpace: "nowrap" }}>Partner cost (₦):</label>
+                              <input style={{ ...styles.input, maxWidth: "180px" }} type="number" min="0" placeholder="Cost basis (optional)" value={item.costBasis} onChange={e => { const it = [...orderEditItems]; it[idx] = { ...it[idx], costBasis: e.target.value }; setOrderEditItems(it); }} />
+                            </div>
+                          )}
                         </div>
                       ))}
                       {orderEditItems.length < 5 && <button style={{ ...styles.btn("secondary"), fontSize: "12px", marginBottom: "10px" }} onClick={() => setOrderEditItems([...orderEditItems, emptyItem()])}>+ Add Item</button>}
@@ -1500,7 +1533,10 @@ const Orders = ({ onNavigate, userProfile }) => {
                     <div style={styles.sectionTitle}>Order Items</div>
                     {(selected.order_items || []).map((item, i) => (
                       <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${theme.border}22`, fontSize: "13px" }}>
-                        <span>{item.block_type} × {fmt(item.quantity)}</span>
+                        <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                          {item.block_type} × {fmt(item.quantity)}
+                          {item.source_type === 'resale' && <span style={styles.badge(theme.blue)}>Resale{item.cost_basis != null ? ` · cost ${naira(item.cost_basis)}` : ''}</span>}
+                        </span>
                         <span>{naira(item.subtotal || item.quantity * item.unit_price)}</span>
                       </div>
                     ))}
@@ -6873,11 +6909,40 @@ const PaymentRequestsPage = ({ userProfile }) => {
   const [actionSaving, setActionSaving] = useState(false);
 
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ amount: '', purpose: '', expense_category_id: '', disbursement_method: 'bank_transfer' });
+  const [form, setForm] = useState({ amount: '', purpose: '', expense_category_id: '', disbursement_method: 'bank_transfer', order_item_id: '', _order_id: '' });
   const [saving, setSaving] = useState(false);
 
   const [recallTarget, setRecallTarget] = useState(null);
   const [recallReason, setRecallReason] = useState('');
+
+  const [resaleItems, setResaleItems] = useState([]);
+  const [resaleOrderMap, setResaleOrderMap] = useState({});
+  const [resaleItemsLoading, setResaleItemsLoading] = useState(false);
+
+  const loadResaleItems = async () => {
+    setResaleItemsLoading(true);
+    try {
+      const { data: items } = await supabase
+        .from('order_items')
+        .select('id, order_id, block_type, quantity, unit_price, cost_basis')
+        .eq('source_type', 'resale')
+        .order('created_at', { ascending: false })
+        .limit(100);
+      const rows = items || [];
+      setResaleItems(rows);
+      const orderIds = [...new Set(rows.map(r => r.order_id).filter(Boolean))];
+      if (orderIds.length) {
+        const { data: orders } = await supabase
+          .from('orders')
+          .select('id, created_at, customer:customer_id(name)')
+          .in('id', orderIds);
+        setResaleOrderMap(Object.fromEntries((orders || []).map(o => [o.id, o])));
+      } else {
+        setResaleOrderMap({});
+      }
+    } catch { /* non-fatal — link section stays hidden */ }
+    finally { setResaleItemsLoading(false); }
+  };
 
   const load = async () => {
     setLoading(true);
@@ -6895,6 +6960,14 @@ const PaymentRequestsPage = ({ userProfile }) => {
   useEffect(() => { load(); }, []);
 
   const catMap = Object.fromEntries(categories.map(c => [c.id, c.name]));
+  const tradingPurchasesId = categories.find(c => c.name === 'Trading Purchases')?.id;
+  const isTradingPurchases = !!(form.expense_category_id && form.expense_category_id === tradingPurchasesId);
+
+  const resaleItemsByOrder = resaleItems.reduce((acc, item) => {
+    if (!acc[item.order_id]) acc[item.order_id] = [];
+    acc[item.order_id].push(item);
+    return acc;
+  }, {});
 
   const handleCreate = async () => {
     if (!form.amount || !form.purpose)
@@ -6906,6 +6979,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
         purpose: form.purpose.trim(),
         expense_category_id: form.expense_category_id || null,
         disbursement_method: form.disbursement_method || 'bank_transfer',
+        order_item_id: form.order_item_id || null,
       };
       let req;
       try {
@@ -6918,7 +6992,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
         }
       }
       setShowForm(false);
-      setForm({ amount: '', purpose: '', expense_category_id: '', disbursement_method: 'bank_transfer' });
+      setForm({ amount: '', purpose: '', expense_category_id: '', disbursement_method: 'bank_transfer', order_item_id: '', _order_id: '' });
       setAlert({ type: 'success', msg: `Request submitted — Reference: ${req.reference}` });
       load();
     } catch (e) { setAlert({ type: 'error', msg: e.message }); }
@@ -7024,12 +7098,57 @@ const PaymentRequestsPage = ({ userProfile }) => {
             <div style={styles.formGroup}>
               <label style={styles.label}>Expense Category (optional)</label>
               <select style={styles.input} value={form.expense_category_id}
-                onChange={e => setForm(f => ({ ...f, expense_category_id: e.target.value }))}>
+                onChange={e => {
+                  const val = e.target.value;
+                  setForm(f => ({ ...f, expense_category_id: val, order_item_id: '', _order_id: '' }));
+                  if (role === 'bdm' && tradingPurchasesId && val === tradingPurchasesId) loadResaleItems();
+                }}>
                 <option value="">— None —</option>
                 {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
           </div>
+          {role === 'bdm' && isTradingPurchases && (
+            <div style={{ padding: '12px', marginTop: '4px', marginBottom: '4px', background: theme.surface, borderRadius: '8px', border: `1px solid ${theme.blue}33` }}>
+              <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                Link to Order Item (optional)
+              </div>
+              {resaleItemsLoading ? (
+                <div style={{ fontSize: '12px', color: theme.textMuted }}>Loading resale orders…</div>
+              ) : Object.keys(resaleOrderMap).length === 0 ? (
+                <div style={{ fontSize: '12px', color: theme.textMuted }}>No resale-type order items found.</div>
+              ) : (
+                <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                  <div style={styles.formGroup}>
+                    <label style={styles.label}>Order</label>
+                    <select style={{ ...styles.input, minWidth: '220px' }} value={form._order_id}
+                      onChange={e => setForm(f => ({ ...f, _order_id: e.target.value, order_item_id: '' }))}>
+                      <option value="">— None —</option>
+                      {Object.entries(resaleOrderMap).map(([id, o]) => (
+                        <option key={id} value={id}>
+                          {o.customer?.name || '—'} · {o.created_at ? new Date(o.created_at).toLocaleDateString('en-GB') : '—'}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  {form._order_id && (
+                    <div style={styles.formGroup}>
+                      <label style={styles.label}>Order Item</label>
+                      <select style={{ ...styles.input, minWidth: '260px' }} value={form.order_item_id}
+                        onChange={e => setForm(f => ({ ...f, order_item_id: e.target.value }))}>
+                        <option value="">— Select item —</option>
+                        {(resaleItemsByOrder[form._order_id] || []).map(item => (
+                          <option key={item.id} value={item.id}>
+                            {item.block_type} × {fmt(item.quantity)}{item.cost_basis != null ? ` · cost ${naira(item.cost_basis)}` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
           <button style={styles.btn('primary')} onClick={handleCreate} disabled={saving}>
             {saving ? 'Submitting…' : 'Submit Request'}
           </button>

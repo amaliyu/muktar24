@@ -30,7 +30,7 @@ export const paymentRequestsService = {
     return data || [];
   },
 
-  async create({ amount, purpose, expense_category_id, disbursement_method }) {
+  async create({ amount, purpose, expense_category_id, disbursement_method, order_item_id }) {
     const { data: ref, error: refErr } = await supabase.rpc('get_next_payment_request_reference');
     if (refErr) throw refErr;
     const { data: { user } } = await supabase.auth.getUser();
@@ -43,6 +43,7 @@ export const paymentRequestsService = {
         purpose: purpose || null,
         expense_category_id: expense_category_id || null,
         disbursement_method: disbursement_method || 'bank_transfer',
+        order_item_id: order_item_id || null,
       })
       .select()
       .single();
