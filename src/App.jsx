@@ -6920,6 +6920,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
   const [recallReason, setRecallReason] = useState('');
   const [detailReq, setDetailReq] = useState(null);
   const [copiedField, setCopiedField] = useState(null);
+  const [showHistory, setShowHistory] = useState(false);
 
   const [resaleItems, setResaleItems] = useState([]);
   const [resaleOrderMap, setResaleOrderMap] = useState({});
@@ -7079,7 +7080,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
     return btns;
   };
 
-  const queue = isInitiator
+  const actionQueue = isInitiator
     ? requests
     : role === 'ico'
     ? requests.filter(r => r.status === 'draft')
@@ -7088,6 +7089,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
     : role === 'accountant'
     ? requests.filter(r => ['md_approved', 'funded'].includes(r.status))
     : requests;
+  const queue = (!isInitiator && showHistory) ? requests : actionQueue;
 
   return (
     <div>
@@ -7100,11 +7102,24 @@ const PaymentRequestsPage = ({ userProfile }) => {
             {isInitiator ? 'Submit and track your payment requests' : 'Review and process payment requests'}
           </div>
         </div>
-        {isInitiator && (
-          <button style={styles.btn('primary')} onClick={() => setShowForm(v => !v)}>
-            {showForm ? '✕ Cancel' : '+ New Request'}
-          </button>
-        )}
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          {!isInitiator && (
+            <div style={{ display: 'flex', gap: '4px' }}>
+              {[['Action Queue', false], ['All Requests', true]].map(([label, val]) => (
+                <button key={label}
+                  style={{ ...styles.btn(showHistory === val ? 'primary' : 'secondary'), padding: '7px 14px', fontSize: '12px' }}
+                  onClick={() => setShowHistory(val)}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+          {isInitiator && (
+            <button style={styles.btn('primary')} onClick={() => setShowForm(v => !v)}>
+              {showForm ? '✕ Cancel' : '+ New Request'}
+            </button>
+          )}
+        </div>
       </div>
 
       {isInitiator && showForm && (
@@ -7347,7 +7362,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
       <div style={styles.card}>
         {loading ? <Spinner /> : queue.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '30px', color: theme.textMuted }}>
-            {isInitiator ? 'No payment requests yet.' : 'No requests pending in this queue.'}
+            {isInitiator ? 'No payment requests yet.' : showHistory ? 'No payment requests found.' : 'No requests pending in this queue.'}
           </div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
