@@ -30,10 +30,12 @@ App: APC Manager — internal ERP for Abuja Precast Concrete Limited
 - New categories seeded consistent with the §8 Seeds list; notably **Trading Purchases** as the anchor category for resale cost links (§C below).
 - Closure mechanism: the existing `is_active` flag (Decision 5) is the instrument; this restructure applies it to the Labour/Salaries group and documents the deactivation convention going forward — any category that falls inside an existing state-machine flow must be deactivated here, not deleted.
 
-**B. Payee/vendor system (DB + frontend — PR #53)**
-- `payment_requests.supplier_id` — nullable FK to `suppliers`; records the payee for every disbursement request.
-- **Save-as-vendor flow:** if the payee is not yet a supplier record, the creation form provides an inline path — a `suppliers` row is inserted with `status = 'pending_verification'`. The pending vendor is immediately usable in subsequent payment requests but is excluded from the active-supplier filter on the main Suppliers page until MD or accountant verifies and promotes it. Design intent: new-vendor onboarding must never block an urgent payment.
-- **pending_verification gate:** pending vendors are surfaced in a verification queue visible to MD and accountant; they do not appear in the main Suppliers management list until promoted to `active` (or rejected). The payment request itself is not blocked — the gate is on vendor promotion, not on request submission.
+**B. Payee/vendor system (DB already live before S16; frontend — PR #56, separate from Phase 5a lifecycle PR #53)**
+- `payment_requests.supplier_id` / `payee_name` / `payee_bank_name` / `payee_account_number` / `payee_account_name` / `category_other_note` columns live on DB. `create_supplier_from_payment_request(p_company_name, p_bank_name, p_bank_account_number, p_bank_account_name, p_contact_person, p_phone)` RPC live.
+- **Save-as-vendor flow:** the creation form toggles between "Existing Vendor" (dropdown of `status='active'` suppliers, sets `supplier_id`) and "New Payee" (free-text payee fields). In New Payee mode a "Save as vendor for next time" checkbox calls the RPC on submit → new `suppliers` row created with `status='pending_verification'`, returned ID used as `supplier_id` on the request instead of free-text fields.
+- **pending_verification gate:** pending vendors are surfaced in a "Pending Vendors" section within PaymentRequestsPage (md/ico/accountant only); approve button flips `status` to `active`. Pending vendors are excluded from the active-vendor dropdown but the payment request itself is not blocked — gate is on vendor promotion, not submission.
+- **Others category note:** when the "Others" expense category is selected, a required free-text "Please describe" field bound to `category_other_note` is shown; client-side validation blocks submission without it.
+- **Blocking issue (S16):** the DB constraint requiring `supplier_id IS NOT NULL OR payee_name IS NOT NULL` was live before the frontend shipped it — every submission through PR #53's form was failing. PR #56 is the unblocking fix.
 
 **C. Trading/resale order items (DB already live before S16; frontend — PR #54)**
 - `order_items.source_type` (text, NOT NULL, default `'manufactured'`; values `'manufactured'` | `'resale'`) — distinguishes APCL-produced stock from blocks bought in from a third-party partner for resale.
@@ -401,7 +403,7 @@ Bounded audit, five categories:
 | Silent supabase fallback | ✅ fixed (PR #18) | — |
 | Staff-payroll state machine | ✅ live (S7, PR #20) | — |
 | expense_categories restructure (S16) | ✅ DONE — cost-centre grouping, Labour/Salaries deactivated, Trading Purchases + seeds seeded per §8 | — |
-| Payee/vendor system (S16, PR #53) | 🔵 PR #53 open — `supplier_id` on payment_requests, save-as-vendor flow, `pending_verification` gate | MD merges; verify pending-vendor queue visible to accountant/MD |
+| Payee/vendor system (S16, PR #56) | 🔵 PR #56 open — `supplier_id`/payee fields/Others note on creation form, save-as-vendor RPC, pending-vendors section | MD merges; **unblocks all new payment-request creation** (DB constraint was live with no frontend) |
 | Phase 5a payment-request lifecycle (S16, PR #53) | 🔵 PR #53 open — role-differentiated frontend (initiator form, ICO/MD/accountant queues), 23505 collision retry | MD merges; smoke-test 4 initiator roles + ICO + MD + accountant |
 | Trading/resale order items (S16, PR #54) | 🔵 PR #54 open — source_type toggle + cost_basis in order forms; Resale badge in detail; BDM order-item link in payment requests | MD merges; test Mfg/Resale toggle + BDM Trading Purchases flow |
 | Payment-request + ingestion (#5) | **5a IN PROGRESS (S16, §8)** — PRs #53/#54 open; pre-schema verification fully closed (S15); 5b–5e queued per design | PR #53/#54 MD merge → 5b (attachments + goods-receipt link) |
