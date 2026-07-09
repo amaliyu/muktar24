@@ -88,10 +88,7 @@ export const paymentRequestsService = {
   },
 
   async approveVendor(id) {
-    const { error } = await supabase
-      .from('suppliers')
-      .update({ status: 'active' })
-      .eq('id', id);
+    const { error } = await supabase.rpc('approve_vendor', { p_supplier_id: id });
     if (error) throw error;
   },
 
