@@ -7395,7 +7395,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
         };
         const cat = categories.find(c => c.id === req.expense_category_id);
         const closureMechanism = cat?.closure_mechanism;
-        const CLOSURE_LABELS = { stock: 'Stock records', vehicle_maintenance: 'Vehicle Maintenance records', vehicle_fuel: 'Vehicle Fuel records', loading: 'Loading records', haulage: 'Haulage records' };
+        const CLOSURE_LABELS = { stock_movements: 'Stock records', vehicle_maintenance: 'Vehicle Maintenance records', vehicle_fuel_log: 'Vehicle Fuel records', truck_loading_log: 'Loading records', external_haulage_log: 'Haulage records' };
         const canUploadEvidence = closureMechanism === 'receipt' && (isInitiator || ['md', 'accountant'].includes(role));
         const closureLabel = closureMechanism && closureMechanism !== 'receipt' ? CLOSURE_LABELS[closureMechanism] : null;
         const DL = ({ label, value, mono }) => value ? (
