@@ -252,7 +252,7 @@ export const truckLoadingService = {
   },
 
   async generatePayroll(weekEnding) {
-    const { data, error } = await supabase.rpc('generate_truck_loading_payroll', { week_ending: weekEnding })
+    const { data, error } = await supabase.rpc('generate_truck_loading_payroll', { p_week_ending: weekEnding })
     if (error) throw error
     return data
   },

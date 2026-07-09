@@ -8708,8 +8708,6 @@ const TruckLoadingPage = ({ userProfile }) => {
   const [payrollLogsLoading, setPayrollLogsLoading] = useState({});
   const [recallTarget, setRecallTarget]   = useState(null);
   const [recallReason, setRecallReason]   = useState('');
-  const [markPaidTarget, setMarkPaidTarget] = useState(null);
-  const [payDate, setPayDate]             = useState('');
   const [actionSaving, setActionSaving]   = useState(false);
 
   const loadLogs = async () => {
@@ -8760,7 +8758,7 @@ const TruckLoadingPage = ({ userProfile }) => {
       setLogForm({ vehicle_id: '', product_id: '', date: '', quantity_loaded: '' });
       setSelectedLoaders([]);
       setShowLogForm(false);
-      setLogAlert({ type: 'success', msg: `Trip #${result.trip_number_for_day ?? '?'} logged — Rate: ${naira(result.rate_used)}, Total: ${naira(result.total_amount)}` });
+      setLogAlert({ type: 'success', msg: `Trip #${result.trip_number_for_day ?? '?'} logged — Rate: ${naira(result.computed_rate_used)}, Total: ${naira(result.total_amount)}` });
       await loadLogs();
     } catch (e) { setLogAlert({ type: 'error', msg: e.message }); }
     finally { setLogSaving(false); }
@@ -8798,7 +8796,6 @@ const TruckLoadingPage = ({ userProfile }) => {
     try {
       await truckLoadingService.advancePayroll(payrollId, action, reason);
       setRecallTarget(null); setRecallReason('');
-      setMarkPaidTarget(null); setPayDate('');
       setPayrollAlert({ type: 'success', msg: 'Done.' });
       await loadPayrolls();
     } catch (e) { setPayrollAlert({ type: 'error', msg: e.message }); }
@@ -8820,7 +8817,7 @@ const TruckLoadingPage = ({ userProfile }) => {
 
   const payrollStatusColor = (s) => {
     if (s === 'paid') return theme.green;
-    if (s === 'md_approved' || s === 'approved') return theme.blue;
+    if (s === 'md_approved') return theme.blue;
     if (s === 'ico_approved') return theme.accent;
     if (s === 'recalled' || s === 'rejected') return theme.red;
     return theme.textMuted;
@@ -8934,7 +8931,7 @@ const TruckLoadingPage = ({ userProfile }) => {
                         <td style={styles.td}>{log.vehicle?.vehicle_number || '—'}</td>
                         <td style={styles.td}>{log.trip_number_for_day ?? '—'}</td>
                         <td style={styles.td}>{fmt(log.quantity_loaded)}</td>
-                        <td style={styles.td}>{log.rate_used != null ? naira(log.rate_used) : '—'}</td>
+                        <td style={styles.td}>{log.computed_rate_used != null ? naira(log.computed_rate_used) : '—'}</td>
                         <td style={styles.td}>{log.total_amount != null ? naira(log.total_amount) : '—'}</td>
                       </tr>
                     ))}
@@ -9035,19 +9032,14 @@ const TruckLoadingPage = ({ userProfile }) => {
                   <div>
                     <div style={{ fontWeight: '600', color: theme.text }}>Week ending {p.week_ending}</div>
                     <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '2px' }}>
-                      {p.total_trips ?? 0} trips · {naira(p.total_amount)}
+                      {p.entry_count ?? 0} trips · {naira(p.total_amount)}
                       {p.payment_date ? ` · Paid ${p.payment_date}` : ''}
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
                     <span style={styles.badge(payrollStatusColor(p.status))}>{p.status}</span>
 
-                    {canGenerate && p.status === 'draft' && recallTarget !== p.id && markPaidTarget !== p.id && (
-                      <button style={{ ...styles.btn('primary'), fontSize: '11px', padding: '4px 10px' }}
-                        disabled={actionSaving}
-                        onClick={() => handlePayrollAction(p.id, 'submit')}>Submit for Review</button>
-                    )}
-                    {canICOApprove && p.status === 'pending_ico' && (
+                    {canICOApprove && p.status === 'draft' && (
                       <button style={{ ...styles.btn('primary'), fontSize: '11px', padding: '4px 10px' }}
                         disabled={actionSaving}
                         onClick={() => handlePayrollAction(p.id, 'ico_approve')}>ICO Approve</button>
@@ -9057,12 +9049,12 @@ const TruckLoadingPage = ({ userProfile }) => {
                         disabled={actionSaving}
                         onClick={() => handlePayrollAction(p.id, 'md_approve')}>MD Approve</button>
                     )}
-                    {canMarkPaid && (p.status === 'md_approved' || p.status === 'approved') && markPaidTarget !== p.id && (
+                    {canMarkPaid && p.status === 'md_approved' && (
                       <button style={{ ...styles.btn('primary'), fontSize: '11px', padding: '4px 10px' }}
                         disabled={actionSaving}
-                        onClick={() => { setMarkPaidTarget(p.id); setPayDate(''); }}>Mark Paid</button>
+                        onClick={() => handlePayrollAction(p.id, 'mark_paid')}>Mark Paid</button>
                     )}
-                    {canMDApprove && ['pending_ico', 'ico_approved'].includes(p.status) && recallTarget !== p.id && (
+                    {canMDApprove && p.status === 'ico_approved' && recallTarget !== p.id && (
                       <button style={{ ...styles.btn('danger'), fontSize: '11px', padding: '4px 10px' }}
                         disabled={actionSaving}
                         onClick={() => { setRecallTarget(p.id); setRecallReason(''); }}>Recall</button>
@@ -9074,20 +9066,6 @@ const TruckLoadingPage = ({ userProfile }) => {
                     </button>
                   </div>
                 </div>
-
-                {markPaidTarget === p.id && (
-                  <div style={{ marginTop: '12px', padding: '12px', background: theme.surface, borderRadius: '8px', border: `1px solid ${theme.border}` }}>
-                    <label style={styles.label}>Payment Date</label>
-                    <input type="date" style={{ ...styles.input, maxWidth: '200px', marginBottom: '8px' }} value={payDate} onChange={e => setPayDate(e.target.value)} />
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <button style={{ ...styles.btn('primary'), fontSize: '12px' }} disabled={!payDate || actionSaving}
-                        onClick={() => handlePayrollAction(p.id, 'mark_paid', payDate)}>
-                        {actionSaving ? '…' : 'Confirm Paid'}
-                      </button>
-                      <button style={{ ...styles.btn('secondary'), fontSize: '12px' }} onClick={() => setMarkPaidTarget(null)}>Cancel</button>
-                    </div>
-                  </div>
-                )}
 
                 {recallTarget === p.id && (
                   <div style={{ marginTop: '12px', padding: '12px', background: theme.surface, borderRadius: '8px', border: `1px solid ${theme.border}` }}>
@@ -9130,7 +9108,7 @@ const TruckLoadingPage = ({ userProfile }) => {
                                 <td style={styles.td}>{log.vehicle?.vehicle_number || '—'}</td>
                                 <td style={styles.td}>{log.trip_number_for_day ?? '—'}</td>
                                 <td style={styles.td}>{fmt(log.quantity_loaded)}</td>
-                                <td style={styles.td}>{log.rate_used != null ? naira(log.rate_used) : '—'}</td>
+                                <td style={styles.td}>{log.computed_rate_used != null ? naira(log.computed_rate_used) : '—'}</td>
                                 <td style={styles.td}>{log.total_amount != null ? naira(log.total_amount) : '—'}</td>
                               </tr>
                             ))}
