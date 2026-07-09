@@ -4,7 +4,7 @@ export const paymentRequestsService = {
   async list() {
     const { data, error } = await supabase
       .from('payment_requests')
-      .select('*, supplier:supplier_id(company_name)')
+      .select('*, supplier:supplier_id(company_name, bank_name, bank_account_number, bank_account_name)')
       .order('created_at', { ascending: false });
     if (error) throw error;
     const rows = data || [];
@@ -24,7 +24,7 @@ export const paymentRequestsService = {
   async listMine(userId) {
     const { data, error } = await supabase
       .from('payment_requests')
-      .select('*, supplier:supplier_id(company_name)')
+      .select('*, supplier:supplier_id(company_name, bank_name, bank_account_number, bank_account_name)')
       .eq('requested_by', userId)
       .order('created_at', { ascending: false });
     if (error) throw error;
