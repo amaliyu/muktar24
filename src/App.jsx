@@ -32,7 +32,7 @@ import { generateManagementAccountsPDF } from './utils/generateManagementAccount
 import { bankAccountsService, bankTransactionsService, bankImportBatchesService, bankReconciliationsService, receiptsService } from './services/bank'
 import { generateReconciliationPDF } from './utils/generateReconciliationPDF'
 import { generatePaymentReceiptPDF } from './utils/generatePaymentReceiptPDF'
-import { parseFile, autoMapColumns, mapRowsToTransactions, autoMatchTransactions, detectCategory, extractCustomerFromDesc } from './utils/parseBankStatement';
+import { parseFile, autoMapColumns, mapRowsToTransactions, autoMatchTransactions, detectCategory, extractCustomerFromDesc, extractStatementSummary } from './utils/parseBankStatement';
 import VehicleRegistry from './components/VehicleRegistry'
 import KPIDashboard from './components/KPIDashboard'
 import DataImport from './components/DataImport'
@@ -5277,6 +5277,48 @@ const BankAccountsTab = () => {
   const buildPreview = async () => {
     const txs = mapRowsToTransactions(importRows, colMap);
     if (txs.length === 0) { setErr('No valid transactions found. Check column mapping.'); return; }
+
+    // ── Whole-file reconciliation gate ────────────────────────────────────────
+    // Prefer the bank's own TRANS SUMMARY totals (TAJ); fall back to summing
+    // parsed rows when no summary block is present (e.g. Moniepoint CSV).
+    const summary = extractStatementSummary(importRows, colMap);
+    const { openingBalance, totalCredit, totalDebit, closingBalance } = summary;
+    let chkCredits, chkDebits, chkClosing;
+    if (totalCredit !== null && totalDebit !== null && closingBalance !== null) {
+      // Primary path: bank-stated totals from TRANS SUMMARY
+      chkCredits = totalCredit;
+      chkDebits  = totalDebit;
+      chkClosing = closingBalance;
+    } else {
+      // Fallback: sum every parsed row; use the available running balance as closing.
+      // Check both ends — statements may be ordered ascending or descending by date.
+      const b0 = txs[0]?.balance ?? 0;
+      const bn = txs[txs.length - 1]?.balance ?? 0;
+      if (b0 > 0 || bn > 0) {
+        chkCredits = txs.reduce((s, t) => s + (t.credit || 0), 0);
+        chkDebits  = txs.reduce((s, t) => s + (t.debit  || 0), 0);
+        // Pick whichever end is arithmetically closer to the expected result
+        if (openingBalance !== null) {
+          const exp = openingBalance + chkCredits - chkDebits;
+          chkClosing = Math.abs(exp - b0) <= Math.abs(exp - bn) ? b0 : bn;
+        } else {
+          chkClosing = b0 > 0 ? b0 : bn;
+        }
+      }
+    }
+    if (openingBalance !== null && chkCredits !== undefined && chkClosing !== undefined) {
+      const expected = openingBalance + chkCredits - chkDebits;
+      if (Math.abs(expected - chkClosing) > 1) {
+        const fmtN = n => `₦${parseFloat(Math.abs(n).toFixed(2)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        setErr(
+          `Statement does not reconcile — Opening ${fmtN(openingBalance)} + Credits ${fmtN(chkCredits)} − Debits ${fmtN(chkDebits)} = ${fmtN(expected)}, ` +
+          `but stated closing balance is ${fmtN(chkClosing)} (difference: ${fmtN(expected - chkClosing)}). Import rejected.`
+        );
+        return;
+      }
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     const withDups = await bankTransactionsService.checkDuplicates(importAcct, txs).catch(() => txs.map(t => ({ ...t, isDuplicate: false })));
     const acct = accounts.find(a => a.id === importAcct);
     let payments = [], expenses2 = [], invoices2 = allInvoices, customers2 = allCustomers;
