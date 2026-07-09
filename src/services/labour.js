@@ -204,20 +204,78 @@ export const truckLoadingService = {
   async getLogs() {
     const { data, error } = await supabase
       .from('truck_loading_log')
-      .select('*, waybill:waybill_id(waybill_number, waybill_date, quantity_loaded, truck_number), loaders:truck_loading_loaders(*, worker:labour_id(full_name, labour_number))')
-      .order('created_at', { ascending: false })
+      .select('*, product:product_id(name), vehicle:vehicle_id(vehicle_number, vehicle_name)')
+      .order('date', { ascending: false })
+      .order('trip_number_for_day', { ascending: false })
     if (error) throw error
     return data || []
   },
 
-  async createLog(log, loaderIds) {
-    const { data, error } = await supabase.from('truck_loading_log').insert(log).select().single()
+  async createLog({ vehicle_id, product_id, date, quantity_loaded }, loaderIds = []) {
+    const { data, error } = await supabase
+      .from('truck_loading_log')
+      .insert({ vehicle_id, product_id, date, quantity_loaded })
+      .select('*, product:product_id(name), vehicle:vehicle_id(vehicle_number, vehicle_name)')
+      .single()
     if (error) throw error
     if (loaderIds.length > 0) {
       await supabase.from('truck_loading_loaders')
         .insert(loaderIds.map(lid => ({ loading_log_id: data.id, labour_id: lid })))
     }
     return data
+  },
+
+  async getRates() {
+    const { data, error } = await supabase
+      .from('truck_loading_rates')
+      .select('*, product:product_id(name)')
+      .order('created_at')
+    if (error) throw error
+    return data || []
+  },
+
+  async updateRate(id, fields) {
+    const { error } = await supabase
+      .from('truck_loading_rates')
+      .update(fields)
+      .eq('id', id)
+    if (error) throw error
+  },
+
+  async getPayrolls() {
+    const { data, error } = await supabase
+      .from('truck_loading_payroll')
+      .select('*')
+      .order('week_ending', { ascending: false })
+    if (error) throw error
+    return data || []
+  },
+
+  async generatePayroll(weekEnding) {
+    const { data, error } = await supabase.rpc('generate_truck_loading_payroll', { week_ending: weekEnding })
+    if (error) throw error
+    return data
+  },
+
+  async advancePayroll(payrollId, action, reason = null) {
+    const { data, error } = await supabase.rpc('advance_truck_loading_payroll', {
+      p_payroll_id: payrollId,
+      p_action: action,
+      p_reason: reason,
+    })
+    if (error) throw error
+    return data
+  },
+
+  async getPayrollLogs(payrollId) {
+    const { data, error } = await supabase
+      .from('truck_loading_log')
+      .select('*, product:product_id(name), vehicle:vehicle_id(vehicle_number, vehicle_name)')
+      .eq('payroll_id', payrollId)
+      .order('date')
+      .order('trip_number_for_day')
+    if (error) throw error
+    return data || []
   },
 }
 

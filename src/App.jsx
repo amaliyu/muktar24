@@ -42,6 +42,7 @@ import { suppliersService, supplierTransactionsService } from './services/suppli
 import Labour from './components/Labour'
 import { advancesService } from './services/advances'
 import { paymentRequestsService } from './services/paymentRequests'
+import { truckLoadingService } from './services/labour'
 import { leaveService } from './services/leave'
 import { leaveBalanceService } from './services/leaveBalance'
 import { meService } from './services/me'
@@ -128,18 +129,18 @@ const APP_ROLES = [
 // Pages each role is allowed to access. 'all' = unrestricted.
 const ROLE_PAGES = {
   md:                 'all',
-  ico:                ['dashboard','production','inventory','batches','waybills','vehicles','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','advances','leave','payment_requests'],
-  accountant:         ['dashboard','customers','orders','reports','kpi_dashboard','accounting','suppliers','products','my_profile','data_import','labour','waybills','advances','leave','payment_requests'],
+  ico:                ['dashboard','production','inventory','batches','waybills','vehicles','labour','truck_loading','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','advances','leave','payment_requests'],
+  accountant:         ['dashboard','customers','orders','reports','kpi_dashboard','accounting','suppliers','products','my_profile','data_import','labour','waybills','advances','leave','payment_requests','truck_loading'],
   board_member:       ['dashboard','production','inventory','batches','waybills','vehicles','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile'],
   bdm:                ['dashboard','customers','orders','pending_register','daily_schedule','lpo_approvals','reports','kpi_dashboard','my_profile','payment_requests'],
   store_officer:      ['dashboard','inventory','batches','waybills','pending_register','daily_schedule','products','reports','my_profile'],
-  logistics_manager:  ['dashboard','waybills','vehicles','labour','pending_register','daily_schedule','customers','my_profile','payment_requests'],
+  logistics_manager:  ['dashboard','waybills','vehicles','labour','truck_loading','pending_register','daily_schedule','customers','my_profile','payment_requests'],
   marketer:           ['dashboard','customers','orders','products','my_profile'],
   driver:             ['dashboard','waybills','my_profile'],
   hr_officer:         ['dashboard','staff','reports','labour','my_profile','advances','leave','disciplinary','attendance_kiosk','attendance_flags','payment_requests'],
   kiosk_device:       ['attendance_kiosk'],
-  production_manager:           ['dashboard','production','inventory','batches','reports','products','labour','my_profile','attendance_flags','payment_requests'],
-  assistant_production_manager: ['dashboard','production','inventory','batches','reports','products','labour','my_profile','attendance_flags'],
+  production_manager:           ['dashboard','production','inventory','batches','reports','products','labour','truck_loading','my_profile','attendance_flags','payment_requests'],
+  assistant_production_manager: ['dashboard','production','inventory','batches','reports','products','labour','truck_loading','my_profile','attendance_flags'],
   // legacy roles — kept for any existing users
   operations:         ['dashboard','production','inventory','batches','waybills','vehicles','pending_register','daily_schedule','lpo_approvals','my_profile'],
   sales:              ['dashboard','customers','orders','my_profile'],
@@ -155,7 +156,7 @@ const ROLE_PAGES = {
 // (accounting, reports, kpi_dashboard, daily_schedule) are NOT listed here —
 // those buttons carry per-element data-ico-allow / data-board-allow instead,
 // so write actions stay hidden.
-const ICO_EXEMPT_PAGES   = ['dashboard', 'labour', 'schedule_approvals', 'advances', 'leave', 'my_hr', 'payment_requests'];
+const ICO_EXEMPT_PAGES   = ['dashboard', 'labour', 'truck_loading', 'schedule_approvals', 'advances', 'leave', 'my_hr', 'payment_requests'];
 const BOARD_EXEMPT_PAGES = ['dashboard', 'my_profile', 'my_hr'];
 
 // ── UI HELPERS ───────────────────────────────────────────────
@@ -8661,6 +8662,493 @@ const DisciplinaryPage = ({ userProfile }) => {
   );
 };
 
+// ── TRUCK LOADING ─────────────────────────────────────────────
+const TruckLoadingPage = ({ userProfile }) => {
+  const role = userProfile?.role;
+  const canLog         = ['production_manager', 'assistant_production_manager', 'logistics_manager', 'md'].includes(role);
+  const canManageRates = ['logistics_manager', 'md'].includes(role);
+  const canGenerate    = ['logistics_manager', 'md'].includes(role);
+  const canICOApprove  = role === 'ico';
+  const canMDApprove   = role === 'md';
+  const canMarkPaid    = ['accountant', 'md'].includes(role);
+
+  const defaultTab = canLog ? 'log' : 'payroll';
+  const [tab, setTab] = useState(defaultTab);
+
+  // Shared data
+  const [vehicles, setVehicles]     = useState([]);
+  const [assignments, setAssignments] = useState([]);
+  const [products, setProducts]     = useState([]);
+
+  // Log tab
+  const [logs, setLogs]               = useState([]);
+  const [entriesLoading, setEntriesLoading] = useState(false);
+  const [showLogForm, setShowLogForm] = useState(false);
+  const [logForm, setLogForm]         = useState({ vehicle_id: '', product_id: '', date: '', quantity_loaded: '' });
+  const [selectedLoaders, setSelectedLoaders] = useState([]);
+  const [logSaving, setLogSaving]     = useState(false);
+  const [logAlert, setLogAlert]       = useState(null);
+
+  // Rates tab
+  const [rates, setRates]             = useState([]);
+  const [ratesLoaded, setRatesLoaded] = useState(false);
+  const [editingRate, setEditingRate] = useState(null);
+  const [rateForm, setRateForm]       = useState({});
+  const [rateSaving, setRateSaving]   = useState(false);
+  const [rateAlert, setRateAlert]     = useState(null);
+
+  // Payroll tab
+  const [payrolls, setPayrolls]           = useState([]);
+  const [payrollsLoading, setPayrollsLoading] = useState(false);
+  const [genWeek, setGenWeek]             = useState('');
+  const [genSaving, setGenSaving]         = useState(false);
+  const [payrollAlert, setPayrollAlert]   = useState(null);
+  const [expandedPayroll, setExpandedPayroll] = useState(null);
+  const [payrollLogs, setPayrollLogs]     = useState({});
+  const [payrollLogsLoading, setPayrollLogsLoading] = useState({});
+  const [recallTarget, setRecallTarget]   = useState(null);
+  const [recallReason, setRecallReason]   = useState('');
+  const [markPaidTarget, setMarkPaidTarget] = useState(null);
+  const [payDate, setPayDate]             = useState('');
+  const [actionSaving, setActionSaving]   = useState(false);
+
+  const loadLogs = async () => {
+    setEntriesLoading(true);
+    try { setLogs(await truckLoadingService.getLogs()); }
+    catch (e) { setLogAlert({ type: 'error', msg: e.message }); }
+    finally { setEntriesLoading(false); }
+  };
+
+  const loadRates = async () => {
+    try { setRates(await truckLoadingService.getRates()); setRatesLoaded(true); }
+    catch (e) { setRateAlert({ type: 'error', msg: e.message }); }
+  };
+
+  const loadPayrolls = async () => {
+    setPayrollsLoading(true);
+    try { setPayrolls(await truckLoadingService.getPayrolls()); }
+    catch (e) { setPayrollAlert({ type: 'error', msg: e.message }); }
+    finally { setPayrollsLoading(false); }
+  };
+
+  useEffect(() => {
+    Promise.all([
+      vehiclesService.getAll(),
+      truckLoadingService.getAssignments(),
+      productsService.getActive(),
+    ]).then(([v, a, p]) => { setVehicles(v); setAssignments(a); setProducts(p); })
+      .catch(() => {});
+    if (canLog) loadLogs();
+    loadPayrolls();
+  }, []);
+
+  useEffect(() => {
+    if (tab === 'rates' && !ratesLoaded) loadRates();
+  }, [tab]);
+
+  const handleLogSubmit = async () => {
+    if (!logForm.vehicle_id || !logForm.product_id || !logForm.date || !logForm.quantity_loaded) {
+      setLogAlert({ type: 'error', msg: 'All log fields are required.' });
+      return;
+    }
+    setLogSaving(true); setLogAlert(null);
+    try {
+      const result = await truckLoadingService.createLog(
+        { vehicle_id: logForm.vehicle_id, product_id: logForm.product_id, date: logForm.date, quantity_loaded: Number(logForm.quantity_loaded) },
+        selectedLoaders,
+      );
+      setLogForm({ vehicle_id: '', product_id: '', date: '', quantity_loaded: '' });
+      setSelectedLoaders([]);
+      setShowLogForm(false);
+      setLogAlert({ type: 'success', msg: `Trip #${result.trip_number_for_day ?? '?'} logged — Rate: ${naira(result.rate_used)}, Total: ${naira(result.total_amount)}` });
+      await loadLogs();
+    } catch (e) { setLogAlert({ type: 'error', msg: e.message }); }
+    finally { setLogSaving(false); }
+  };
+
+  const handleRateSave = async () => {
+    setRateSaving(true); setRateAlert(null);
+    try {
+      await truckLoadingService.updateRate(editingRate, {
+        base_rate: Number(rateForm.base_rate),
+        trip_threshold: rateForm.trip_threshold !== '' ? Number(rateForm.trip_threshold) : null,
+        incentive_rate: rateForm.incentive_rate !== '' ? Number(rateForm.incentive_rate) : null,
+      });
+      setEditingRate(null);
+      setRateAlert({ type: 'success', msg: 'Rate updated.' });
+      await loadRates();
+    } catch (e) { setRateAlert({ type: 'error', msg: e.message }); }
+    finally { setRateSaving(false); }
+  };
+
+  const handleGenerate = async () => {
+    if (!genWeek) { setPayrollAlert({ type: 'error', msg: 'Select a week ending date.' }); return; }
+    setGenSaving(true); setPayrollAlert(null);
+    try {
+      await truckLoadingService.generatePayroll(genWeek);
+      setGenWeek('');
+      setPayrollAlert({ type: 'success', msg: 'Payroll generated.' });
+      await loadPayrolls();
+    } catch (e) { setPayrollAlert({ type: 'error', msg: e.message }); }
+    finally { setGenSaving(false); }
+  };
+
+  const handlePayrollAction = async (payrollId, action, reason = null) => {
+    setActionSaving(true); setPayrollAlert(null);
+    try {
+      await truckLoadingService.advancePayroll(payrollId, action, reason);
+      setRecallTarget(null); setRecallReason('');
+      setMarkPaidTarget(null); setPayDate('');
+      setPayrollAlert({ type: 'success', msg: 'Done.' });
+      await loadPayrolls();
+    } catch (e) { setPayrollAlert({ type: 'error', msg: e.message }); }
+    finally { setActionSaving(false); }
+  };
+
+  const expandPayroll = async (id) => {
+    if (expandedPayroll === id) { setExpandedPayroll(null); return; }
+    setExpandedPayroll(id);
+    if (!payrollLogs[id]) {
+      setPayrollLogsLoading(p => ({ ...p, [id]: true }));
+      try {
+        const data = await truckLoadingService.getPayrollLogs(id);
+        setPayrollLogs(p => ({ ...p, [id]: data }));
+      } catch {}
+      finally { setPayrollLogsLoading(p => ({ ...p, [id]: false })); }
+    }
+  };
+
+  const payrollStatusColor = (s) => {
+    if (s === 'paid') return theme.green;
+    if (s === 'md_approved' || s === 'approved') return theme.blue;
+    if (s === 'ico_approved') return theme.accent;
+    if (s === 'recalled' || s === 'rejected') return theme.red;
+    return theme.textMuted;
+  };
+
+  const tabBtn = (id, label) => (
+    <button
+      onClick={() => setTab(id)}
+      style={{ padding: '8px 16px', fontSize: '13px', fontWeight: tab === id ? '700' : '500', cursor: 'pointer', border: 'none', borderBottom: tab === id ? `2px solid ${theme.accent}` : '2px solid transparent', background: 'transparent', color: tab === id ? theme.accent : theme.textMuted, transition: 'all 0.15s' }}
+    >{label}</button>
+  );
+
+  return (
+    <div>
+      <div style={styles.header}>
+        <div>
+          <div style={styles.pageTitle}>Truck Loading</div>
+          <div style={styles.pageSubtitle}>Log entries, loading rates, and weekly payroll</div>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div style={{ display: 'flex', gap: '4px', borderBottom: `1px solid ${theme.border}`, marginBottom: '20px' }}>
+        {canLog && tabBtn('log', 'Log Entry')}
+        {canManageRates && tabBtn('rates', 'Rates')}
+        {tabBtn('payroll', 'Payroll')}
+      </div>
+
+      {/* ── Log Entry ── */}
+      {tab === 'log' && (
+        <div>
+          {logAlert && <Alert msg={logAlert.msg} type={logAlert.type} onClose={() => setLogAlert(null)} />}
+          <div style={{ marginBottom: '16px' }}>
+            <button style={styles.btn('primary')} onClick={() => { setShowLogForm(f => !f); setLogAlert(null); }}>
+              {showLogForm ? '✕ Cancel' : '+ New Log Entry'}
+            </button>
+          </div>
+
+          {showLogForm && (
+            <div style={{ ...styles.card, marginBottom: '20px' }}>
+              <div style={styles.sectionTitle}>New Log Entry</div>
+              <div style={styles.grid(2)}>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Product</label>
+                  <select style={styles.input} value={logForm.product_id} onChange={e => setLogForm(f => ({ ...f, product_id: e.target.value }))}>
+                    <option value="">Select product…</option>
+                    {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                </div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Vehicle</label>
+                  <select style={styles.input} value={logForm.vehicle_id} onChange={e => setLogForm(f => ({ ...f, vehicle_id: e.target.value }))}>
+                    <option value="">Select vehicle…</option>
+                    {vehicles.map(v => <option key={v.id} value={v.id}>{v.vehicle_number}{v.vehicle_name ? ` — ${v.vehicle_name}` : ''}</option>)}
+                  </select>
+                </div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Date</label>
+                  <input type="date" style={styles.input} value={logForm.date} onChange={e => setLogForm(f => ({ ...f, date: e.target.value }))} />
+                </div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Quantity Loaded</label>
+                  <input type="number" style={styles.input} placeholder="e.g. 120" min="1" value={logForm.quantity_loaded} onChange={e => setLogForm(f => ({ ...f, quantity_loaded: e.target.value }))} />
+                </div>
+              </div>
+              {assignments.length > 0 && (
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Loaders (optional)</label>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                    {assignments.map(a => {
+                      const sel = selectedLoaders.includes(a.labour_id);
+                      return (
+                        <button key={a.labour_id}
+                          style={{ ...styles.btn(sel ? 'primary' : 'secondary'), fontSize: '12px', padding: '4px 10px' }}
+                          onClick={() => setSelectedLoaders(l => sel ? l.filter(x => x !== a.labour_id) : [...l, a.labour_id])}>
+                          {a.worker?.full_name || '—'}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              <button style={styles.btn('primary')} onClick={handleLogSubmit} disabled={logSaving}>
+                {logSaving ? 'Saving…' : 'Save Log Entry'}
+              </button>
+            </div>
+          )}
+
+          <div style={styles.card}>
+            {entriesLoading ? <Spinner /> : logs.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '20px', color: theme.textMuted }}>No log entries yet.</div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={styles.table}>
+                  <thead>
+                    <tr>
+                      <th style={styles.th}>Date</th>
+                      <th style={styles.th}>Product</th>
+                      <th style={styles.th}>Vehicle</th>
+                      <th style={styles.th}>Trip #</th>
+                      <th style={styles.th}>Qty Loaded</th>
+                      <th style={styles.th}>Rate Used</th>
+                      <th style={styles.th}>Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {logs.map(log => (
+                      <tr key={log.id}>
+                        <td style={styles.td}>{log.date}</td>
+                        <td style={styles.td}>{log.product?.name || '—'}</td>
+                        <td style={styles.td}>{log.vehicle?.vehicle_number || '—'}</td>
+                        <td style={styles.td}>{log.trip_number_for_day ?? '—'}</td>
+                        <td style={styles.td}>{fmt(log.quantity_loaded)}</td>
+                        <td style={styles.td}>{log.rate_used != null ? naira(log.rate_used) : '—'}</td>
+                        <td style={styles.td}>{log.total_amount != null ? naira(log.total_amount) : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Rates ── */}
+      {tab === 'rates' && (
+        <div>
+          {rateAlert && <Alert msg={rateAlert.msg} type={rateAlert.type} onClose={() => setRateAlert(null)} />}
+          <div style={styles.card}>
+            {!ratesLoaded ? <Spinner /> : rates.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '20px', color: theme.textMuted }}>No rates configured.</div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={styles.table}>
+                  <thead>
+                    <tr>
+                      <th style={styles.th}>Product</th>
+                      <th style={styles.th}>Base Rate / Trip</th>
+                      <th style={styles.th}>Trip Threshold</th>
+                      <th style={styles.th}>Incentive Rate</th>
+                      {canManageRates && <th style={styles.th}></th>}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rates.map(r => (
+                      <tr key={r.id}>
+                        <td style={styles.td}>{r.product?.name || '—'}</td>
+                        {editingRate === r.id ? (
+                          <>
+                            <td style={styles.td}><input type="number" style={{ ...styles.input, width: '110px' }} value={rateForm.base_rate ?? ''} onChange={e => setRateForm(f => ({ ...f, base_rate: e.target.value }))} /></td>
+                            <td style={styles.td}><input type="number" style={{ ...styles.input, width: '80px' }} value={rateForm.trip_threshold ?? ''} onChange={e => setRateForm(f => ({ ...f, trip_threshold: e.target.value }))} /></td>
+                            <td style={styles.td}><input type="number" style={{ ...styles.input, width: '110px' }} value={rateForm.incentive_rate ?? ''} onChange={e => setRateForm(f => ({ ...f, incentive_rate: e.target.value }))} /></td>
+                            <td style={styles.td}>
+                              <div style={{ display: 'flex', gap: '6px' }}>
+                                <button style={{ ...styles.btn('primary'), fontSize: '11px', padding: '4px 10px' }} onClick={handleRateSave} disabled={rateSaving}>{rateSaving ? '…' : 'Save'}</button>
+                                <button style={{ ...styles.btn('secondary'), fontSize: '11px', padding: '4px 10px' }} onClick={() => setEditingRate(null)}>Cancel</button>
+                              </div>
+                            </td>
+                          </>
+                        ) : (
+                          <>
+                            <td style={styles.td}>{naira(r.base_rate)}</td>
+                            <td style={styles.td}>{r.trip_threshold ?? '—'}</td>
+                            <td style={styles.td}>{r.incentive_rate != null ? naira(r.incentive_rate) : '—'}</td>
+                            {canManageRates && (
+                              <td style={styles.td}>
+                                <button style={{ ...styles.btn('secondary'), fontSize: '11px', padding: '4px 10px' }}
+                                  onClick={() => { setEditingRate(r.id); setRateForm({ base_rate: r.base_rate ?? '', trip_threshold: r.trip_threshold ?? '', incentive_rate: r.incentive_rate ?? '' }); }}>
+                                  Edit
+                                </button>
+                              </td>
+                            )}
+                          </>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Payroll ── */}
+      {tab === 'payroll' && (
+        <div>
+          {payrollAlert && <Alert msg={payrollAlert.msg} type={payrollAlert.type} onClose={() => setPayrollAlert(null)} />}
+
+          {canGenerate && (
+            <div style={{ ...styles.card, marginBottom: '20px' }}>
+              <div style={styles.sectionTitle}>Generate Weekly Payroll</div>
+              <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                <div>
+                  <label style={styles.label}>Week Ending Date</label>
+                  <input type="date" style={{ ...styles.input, width: '200px' }} value={genWeek} onChange={e => setGenWeek(e.target.value)} />
+                </div>
+                <button style={styles.btn('primary')} onClick={handleGenerate} disabled={genSaving || !genWeek}>
+                  {genSaving ? 'Generating…' : 'Generate'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div style={styles.card}>
+            {payrollsLoading ? <Spinner /> : payrolls.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '20px', color: theme.textMuted }}>No payrolls yet.</div>
+            ) : payrolls.map(p => (
+              <div key={p.id} style={{ borderBottom: `1px solid ${theme.border}`, paddingBottom: '16px', marginBottom: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
+                  <div>
+                    <div style={{ fontWeight: '600', color: theme.text }}>Week ending {p.week_ending}</div>
+                    <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '2px' }}>
+                      {p.total_trips ?? 0} trips · {naira(p.total_amount)}
+                      {p.payment_date ? ` · Paid ${p.payment_date}` : ''}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <span style={styles.badge(payrollStatusColor(p.status))}>{p.status}</span>
+
+                    {canGenerate && p.status === 'draft' && recallTarget !== p.id && markPaidTarget !== p.id && (
+                      <button style={{ ...styles.btn('primary'), fontSize: '11px', padding: '4px 10px' }}
+                        disabled={actionSaving}
+                        onClick={() => handlePayrollAction(p.id, 'submit')}>Submit for Review</button>
+                    )}
+                    {canICOApprove && p.status === 'pending_ico' && (
+                      <button style={{ ...styles.btn('primary'), fontSize: '11px', padding: '4px 10px' }}
+                        disabled={actionSaving}
+                        onClick={() => handlePayrollAction(p.id, 'ico_approve')}>ICO Approve</button>
+                    )}
+                    {canMDApprove && p.status === 'ico_approved' && recallTarget !== p.id && (
+                      <button style={{ ...styles.btn('primary'), fontSize: '11px', padding: '4px 10px' }}
+                        disabled={actionSaving}
+                        onClick={() => handlePayrollAction(p.id, 'md_approve')}>MD Approve</button>
+                    )}
+                    {canMarkPaid && (p.status === 'md_approved' || p.status === 'approved') && markPaidTarget !== p.id && (
+                      <button style={{ ...styles.btn('primary'), fontSize: '11px', padding: '4px 10px' }}
+                        disabled={actionSaving}
+                        onClick={() => { setMarkPaidTarget(p.id); setPayDate(''); }}>Mark Paid</button>
+                    )}
+                    {canMDApprove && ['pending_ico', 'ico_approved'].includes(p.status) && recallTarget !== p.id && (
+                      <button style={{ ...styles.btn('danger'), fontSize: '11px', padding: '4px 10px' }}
+                        disabled={actionSaving}
+                        onClick={() => { setRecallTarget(p.id); setRecallReason(''); }}>Recall</button>
+                    )}
+
+                    <button style={{ ...styles.btn('secondary'), fontSize: '11px', padding: '4px 10px' }}
+                      onClick={() => expandPayroll(p.id)}>
+                      {expandedPayroll === p.id ? '▲ Hide' : '▼ Details'}
+                    </button>
+                  </div>
+                </div>
+
+                {markPaidTarget === p.id && (
+                  <div style={{ marginTop: '12px', padding: '12px', background: theme.surface, borderRadius: '8px', border: `1px solid ${theme.border}` }}>
+                    <label style={styles.label}>Payment Date</label>
+                    <input type="date" style={{ ...styles.input, maxWidth: '200px', marginBottom: '8px' }} value={payDate} onChange={e => setPayDate(e.target.value)} />
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button style={{ ...styles.btn('primary'), fontSize: '12px' }} disabled={!payDate || actionSaving}
+                        onClick={() => handlePayrollAction(p.id, 'mark_paid', payDate)}>
+                        {actionSaving ? '…' : 'Confirm Paid'}
+                      </button>
+                      <button style={{ ...styles.btn('secondary'), fontSize: '12px' }} onClick={() => setMarkPaidTarget(null)}>Cancel</button>
+                    </div>
+                  </div>
+                )}
+
+                {recallTarget === p.id && (
+                  <div style={{ marginTop: '12px', padding: '12px', background: theme.surface, borderRadius: '8px', border: `1px solid ${theme.border}` }}>
+                    <label style={styles.label}>Recall Reason</label>
+                    <textarea style={{ ...styles.input, height: '60px', resize: 'vertical', marginBottom: '8px' }}
+                      placeholder="Reason for recall…" value={recallReason} onChange={e => setRecallReason(e.target.value)} />
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button style={{ ...styles.btn('danger'), fontSize: '12px' }} disabled={!recallReason || actionSaving}
+                        onClick={() => handlePayrollAction(p.id, 'recall', recallReason)}>
+                        {actionSaving ? '…' : 'Confirm Recall'}
+                      </button>
+                      <button style={{ ...styles.btn('secondary'), fontSize: '12px' }} onClick={() => setRecallTarget(null)}>Cancel</button>
+                    </div>
+                  </div>
+                )}
+
+                {expandedPayroll === p.id && (
+                  <div style={{ marginTop: '12px' }}>
+                    {payrollLogsLoading[p.id] ? <Spinner /> : (payrollLogs[p.id] || []).length === 0 ? (
+                      <div style={{ fontSize: '12px', color: theme.textMuted }}>No log entries for this payroll period.</div>
+                    ) : (
+                      <div style={{ overflowX: 'auto' }}>
+                        <table style={{ ...styles.table, fontSize: '12px' }}>
+                          <thead>
+                            <tr>
+                              <th style={styles.th}>Date</th>
+                              <th style={styles.th}>Product</th>
+                              <th style={styles.th}>Vehicle</th>
+                              <th style={styles.th}>Trip #</th>
+                              <th style={styles.th}>Qty</th>
+                              <th style={styles.th}>Rate</th>
+                              <th style={styles.th}>Total</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(payrollLogs[p.id] || []).map(log => (
+                              <tr key={log.id}>
+                                <td style={styles.td}>{log.date}</td>
+                                <td style={styles.td}>{log.product?.name || '—'}</td>
+                                <td style={styles.td}>{log.vehicle?.vehicle_number || '—'}</td>
+                                <td style={styles.td}>{log.trip_number_for_day ?? '—'}</td>
+                                <td style={styles.td}>{fmt(log.quantity_loaded)}</td>
+                                <td style={styles.td}>{log.rate_used != null ? naira(log.rate_used) : '—'}</td>
+                                <td style={styles.td}>{log.total_amount != null ? naira(log.total_amount) : '—'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ── NAV ───────────────────────────────────────────────────────
 const navItems = [
   { section: "Overview", items: [{ id: "dashboard", label: "Dashboard", icon: "dashboard" }] },
@@ -8672,6 +9160,7 @@ const navItems = [
     { id: "vehicles", label: "Vehicles", icon: "truck" },
     { id: "staff", label: "Staff", icon: "staff" },
     { id: "labour", label: "Labour", icon: "staff" },
+    { id: "truck_loading", label: "Truck Loading", icon: "truck" },
     { id: "disciplinary", label: "Disciplinary", icon: "staff" },
     { id: "attendance_kiosk", label: "Attendance Kiosk", icon: "staff" },
     { id: "attendance_flags", label: "Attendance Flags", icon: "staff" },
@@ -9123,6 +9612,7 @@ export default function App() {
     data_import: <DataImport />,
     user_management: <UserManagement userProfile={userProfile} />,
     labour: <Labour userProfile={userProfile} />,
+    truck_loading: <TruckLoadingPage userProfile={userProfile} />,
     advances: <AdvancesPage userProfile={userProfile} />,
     payment_requests: <PaymentRequestsPage userProfile={userProfile} />,
     leave: <LeavePage userProfile={userProfile} />,
