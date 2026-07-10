@@ -119,6 +119,16 @@ export const paymentRequestsService = {
     if (error) throw error;
   },
 
+  async listDisbursed() {
+    const { data, error } = await supabase
+      .from('payment_requests')
+      .select('id, reference, amount, purpose, payee_name, payee_bank_name, payee_account_number, status, supplier:supplier_id(company_name)')
+      .in('status', ['disbursed', 'closed'])
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data || [];
+  },
+
   async createSupplierFromPaymentRequest({ company_name, bank_name, bank_account_number, bank_account_name, contact_person, phone }) {
     const { data, error } = await supabase.rpc('create_supplier_from_payment_request', {
       p_company_name: company_name,

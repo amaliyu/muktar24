@@ -370,7 +370,15 @@ const EXPENSE_KEYWORDS = {
   'Bank Charges':       ['stamp', 'stampduty', 'sms alert', 'commission', 'charge'],
 };
 
-export function autoMatchTransactions(transactions, payments, expenses, accountType, { invoices = [], customers = [] } = {}) {
+// Extract the integer payment-request number from a description or reference string.
+// Handles APC-PR-042, APCPR042, "apc pr 42", embedded anywhere, case/space/hyphen insensitive.
+// Returns the integer or null.
+export function extractPRReference(text) {
+  const m = String(text || '').replace(/[-\s]/g, '').toUpperCase().match(/APCPR(\d+)/);
+  return m ? parseInt(m[1], 10) : null;
+}
+
+export function autoMatchTransactions(transactions, payments, expenses, accountType, { invoices = [], customers = [], paymentRequests = [] } = {}) {
   const daysDiff = (a, b) => Math.abs(new Date(a) - new Date(b)) / 86400000;
 
   return transactions.map(tx => {
@@ -384,6 +392,26 @@ export function autoMatchTransactions(transactions, payments, expenses, accountT
     // Bank charge / stamp duty
     if (tx.auto_category === 'Bank Charges') {
       return { ...tx, autoMatch: { type: 'bank_charge', id: null, label: 'Bank Charge / Stamp Duty', confidence: 'high' } };
+    }
+
+    // Payment request reference match — highest priority for debits, before expense matching.
+    // Reference AND amount must both agree for auto-suggestion. Reference-only with a mismatched
+    // amount surfaces as a discrepancy that blocks auto-matching (Decision 12 amount-agreement gate).
+    if (tx.debit > 0 && paymentRequests.length) {
+      const prNum = extractPRReference(tx.description);
+      if (prNum !== null) {
+        const pr = paymentRequests.find(p =>
+          extractPRReference(p.reference) === prNum &&
+          ['disbursed', 'closed'].includes(p.status)
+        );
+        if (pr) {
+          if (Math.abs(Number(pr.amount) - tx.debit) < 0.01) {
+            return { ...tx, autoMatch: { type: 'payment_request', id: pr.id, label: `${pr.reference} · ${pr.payee_name || pr.purpose || ''}`, confidence: 'high' } };
+          }
+          // Reference found but amount differs — flag, do not auto-suggest
+          return { ...tx, autoMatch: null, prDiscrepancy: { prId: pr.id, prRef: pr.reference, prAmt: Number(pr.amount), txAmt: tx.debit } };
+        }
+      }
     }
 
     let best = null;
