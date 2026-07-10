@@ -77,9 +77,9 @@ export const bankTransactionsService = {
 
   async suggestMatch(id, matchedToType, matchedToId) {
     const { data, error } = await supabase.rpc('suggest_bank_match', {
-      bank_transaction_id: id,
-      matched_to_type: matchedToType,
-      matched_to_id: matchedToId,
+      p_bank_transaction_id: id,
+      p_matched_to_type: matchedToType,
+      p_matched_to_id: matchedToId,
     });
     if (error) throw error;
     return data;
@@ -87,9 +87,9 @@ export const bankTransactionsService = {
 
   async confirmMatch(id, action, reason) {
     const { data, error } = await supabase.rpc('confirm_bank_match', {
-      bank_transaction_id: id,
-      action,
-      reason: reason || null,
+      p_bank_transaction_id: id,
+      p_action: action,
+      p_reason: reason || null,
     });
     if (error) throw error;
     return data;
