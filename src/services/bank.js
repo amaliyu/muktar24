@@ -74,6 +74,37 @@ export const bankTransactionsService = {
       .eq('id', id);
     if (error) throw error;
   },
+
+  async suggestMatch(id, matchedToType, matchedToId) {
+    const { data, error } = await supabase.rpc('suggest_bank_match', {
+      bank_transaction_id: id,
+      matched_to_type: matchedToType,
+      matched_to_id: matchedToId,
+    });
+    if (error) throw error;
+    return data;
+  },
+
+  async confirmMatch(id, action, reason) {
+    const { data, error } = await supabase.rpc('confirm_bank_match', {
+      bank_transaction_id: id,
+      action,
+      reason: reason || null,
+    });
+    if (error) throw error;
+    return data;
+  },
+
+  async getSuggested(accountId) {
+    const { data, error } = await supabase
+      .from('bank_transactions')
+      .select('*')
+      .eq('bank_account_id', accountId)
+      .eq('match_status', 'suggested')
+      .order('transaction_date', { ascending: false });
+    if (error) throw error;
+    return data || [];
+  },
 };
 
 export const bankImportBatchesService = {

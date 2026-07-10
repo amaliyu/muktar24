@@ -32,7 +32,7 @@ import { generateManagementAccountsPDF } from './utils/generateManagementAccount
 import { bankAccountsService, bankTransactionsService, bankImportBatchesService, bankReconciliationsService, receiptsService } from './services/bank'
 import { generateReconciliationPDF } from './utils/generateReconciliationPDF'
 import { generatePaymentReceiptPDF } from './utils/generatePaymentReceiptPDF'
-import { parseFile, autoMapColumns, mapRowsToTransactions, autoMatchTransactions, detectCategory, extractCustomerFromDesc, extractStatementSummary } from './utils/parseBankStatement';
+import { parseFile, autoMapColumns, mapRowsToTransactions, autoMatchTransactions, detectCategory, extractCustomerFromDesc, extractStatementSummary, extractPRReference } from './utils/parseBankStatement';
 import VehicleRegistry from './components/VehicleRegistry'
 import KPIDashboard from './components/KPIDashboard'
 import DataImport from './components/DataImport'
@@ -5183,7 +5183,7 @@ const SEED_ACCOUNTS = [
   { bank_name: 'TAJ Bank PLC', account_name: 'Abuja Precast Concrete LTD (Operations)', account_number: '0001733191', account_type: 'expense', current_balance: 0 },
 ];
 
-const BankAccountsTab = () => {
+const BankAccountsTab = ({ userProfile }) => {
   const [accounts, setAccounts] = useState([]);
   const [selected, setSelected] = useState(null);
   const [transactions, setTransactions] = useState([]);
@@ -5221,12 +5221,32 @@ const BankAccountsTab = () => {
   const [ok, setOk] = useState('');
   const [reconUnverified, setReconUnverified] = useState(false);
   const [reconWarnAcked, setReconWarnAcked] = useState(false);
+  const [paymentRequests, setPaymentRequests] = useState([]);
+  const [suggestedTxs, setSuggestedTxs] = useState([]);
+  const [suggestModal, setSuggestModal] = useState(null);
+  const [prSearch, setPrSearch] = useState('');
+  const [rejectModal, setRejectModal] = useState(null);
+  const [rejectReason, setRejectReason] = useState('');
+  const [actioningId, setActioningId] = useState(null);
+
+  const canConfirm = userProfile?.role === 'md' || userProfile?.role === 'accountant';
+
+  // Helpers for payment request reference matching
+  const findPRCandidate = (tx) => {
+    if (!tx.debit || !paymentRequests.length) return null;
+    const txNum = extractPRReference(tx.description);
+    if (txNum === null) return null;
+    const pr = paymentRequests.find(p => extractPRReference(p.reference) === txNum);
+    if (!pr) return null;
+    return { pr, amtMatch: Math.abs(Number(pr.amount) - tx.debit) < 0.01 };
+  };
 
   useEffect(() => {
     // Supporting data — fail silently so they don't block the accounts tab
     expenseCategoriesService.getActive().then(setExpCategories).catch(() => {});
     accountingService.getOpenInvoices().then(setAllInvoices).catch(() => {});
     customersService.getAll().then(setAllCustomers).catch(() => {});
+    paymentRequestsService.listDisbursed().then(setPaymentRequests).catch(() => {});
     // Core accounts load
     bankAccountsService.getAll()
       .then(async (existing) => {
@@ -5258,6 +5278,11 @@ const BankAccountsTab = () => {
     bankTransactionsService.getByAccount(selected.id, txFrom || null, txTo || null)
       .then(setTransactions).catch(e => setErr(e?.message || 'An error occurred')).finally(() => setTxLoading(false));
   }, [selected?.id, txFrom, txTo]);
+
+  useEffect(() => {
+    if (!selected) { setSuggestedTxs([]); return; }
+    bankTransactionsService.getSuggested(selected.id).then(setSuggestedTxs).catch(() => {});
+  }, [selected?.id]);
 
   const openImport = (acct) => { setImportAcct(acct.id); setImportFile(null); setImportStep('upload'); setErr(''); setOk(''); setReconUnverified(false); setReconWarnAcked(false); };
   const closeImport = () => setImportStep(null);
@@ -5340,7 +5365,7 @@ const BankAccountsTab = () => {
       withDups.filter(t => !t.isDuplicate),
       payments, expenses2,
       acct?.account_type || 'both',
-      { invoices: invoices2, customers: customers2 }
+      { invoices: invoices2, customers: customers2, paymentRequests }
     );
     setPreview(matched);
     setImportStep('preview');
@@ -5516,6 +5541,47 @@ const BankAccountsTab = () => {
     } catch (e) { setErr(e?.message || 'An error occurred'); }
   };
 
+  const handleSuggestPR = async (tx, prId) => {
+    setActioningId(tx.id);
+    try {
+      await bankTransactionsService.suggestMatch(tx.id, 'payment_request', prId);
+      const pr = paymentRequests.find(p => p.id === prId);
+      const updated = { ...tx, match_status: 'suggested', matched_to_type: 'payment_request', matched_to_id: prId };
+      setTransactions(ts => ts.map(t => t.id === tx.id ? updated : t));
+      setSuggestedTxs(ss => [...ss.filter(s => s.id !== tx.id), updated]);
+      setSuggestModal(null);
+      setPrSearch('');
+      setOk(`Suggested match: ${pr?.reference || 'payment request'}`);
+    } catch (e) { setErr(e?.message || 'An error occurred'); }
+    finally { setActioningId(null); }
+  };
+
+  const handleConfirmMatch = async (tx) => {
+    setActioningId(tx.id);
+    try {
+      await bankTransactionsService.confirmMatch(tx.id, 'confirm', null);
+      setTransactions(ts => ts.map(t => t.id === tx.id ? { ...t, match_status: 'matched' } : t));
+      setSuggestedTxs(ss => ss.filter(s => s.id !== tx.id));
+      setOk(`Match confirmed`);
+    } catch (e) { setErr(e?.message || 'An error occurred'); }
+    finally { setActioningId(null); }
+  };
+
+  const handleRejectMatch = async () => {
+    if (!rejectModal) return;
+    if (!rejectReason.trim()) { setErr('Reason is required to reject a match'); return; }
+    setActioningId(rejectModal.id);
+    try {
+      await bankTransactionsService.confirmMatch(rejectModal.id, 'reject', rejectReason.trim());
+      setTransactions(ts => ts.map(t => t.id === rejectModal.id ? { ...t, match_status: 'unmatched', matched_to_type: null, matched_to_id: null } : t));
+      setSuggestedTxs(ss => ss.filter(s => s.id !== rejectModal.id));
+      setRejectModal(null);
+      setRejectReason('');
+      setOk(`Match rejected`);
+    } catch (e) { setErr(e?.message || 'An error occurred'); }
+    finally { setActioningId(null); }
+  };
+
   const filtered = transactions.filter(t => {
     if (!txSearch) return true;
     const s = txSearch.toLowerCase();
@@ -5664,6 +5730,74 @@ const BankAccountsTab = () => {
             <div style={{ display: 'flex', gap: '8px' }}>
               <button style={styles.btn('secondary')} onClick={() => setMatchModal(null)}>Cancel</button>
               <button style={styles.btn('primary')} onClick={saveMatch}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reject Match Modal */}
+      {rejectModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1002, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '10px', padding: '20px', width: '380px' }}>
+            <div style={{ fontWeight: '700', marginBottom: '10px' }}>Reject Suggested Match</div>
+            <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '14px' }}>{rejectModal.description} · {naira(rejectModal.debit)}</div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Reason (required)</label>
+              <input style={styles.input} value={rejectReason} onChange={e => setRejectReason(e.target.value)} placeholder="Why is this match incorrect?" autoFocus />
+            </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button style={styles.btn('secondary')} onClick={() => { setRejectModal(null); setRejectReason(''); }}>Cancel</button>
+              <button style={{ ...styles.btn('primary'), background: theme.red }} onClick={handleRejectMatch}
+                disabled={!rejectReason.trim() || actioningId === rejectModal?.id}>
+                {actioningId === rejectModal?.id ? 'Rejecting…' : 'Reject Match'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Link to Payment Request Modal */}
+      {suggestModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1002, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '10px', padding: '20px', width: '460px', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ fontWeight: '700', marginBottom: '4px' }}>Link to Payment Request</div>
+            <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '12px' }}>{suggestModal.description} · {naira(suggestModal.debit)} · {suggestModal.transaction_date}</div>
+            <input style={{ ...styles.input, marginBottom: '10px' }} placeholder="Search reference, payee, or purpose…"
+              value={prSearch} onChange={e => setPrSearch(e.target.value)} autoFocus />
+            <div style={{ overflowY: 'auto', flex: 1 }}>
+              {(() => {
+                const s = prSearch.toLowerCase();
+                const visible = paymentRequests.filter(pr =>
+                  !s || (pr.reference || '').toLowerCase().includes(s) ||
+                  (pr.payee_name || '').toLowerCase().includes(s) ||
+                  (pr.purpose || '').toLowerCase().includes(s) ||
+                  (pr.supplier?.company_name || '').toLowerCase().includes(s)
+                );
+                if (!visible.length) return <div style={{ textAlign: 'center', color: theme.textMuted, padding: '20px', fontSize: '12px' }}>No disbursed / closed payment requests found</div>;
+                return visible.map(pr => {
+                  const amtMatch = Math.abs(Number(pr.amount) - suggestModal.debit) < 0.01;
+                  return (
+                    <div key={pr.id}
+                      style={{ padding: '8px 10px', borderRadius: '6px', cursor: 'pointer', marginBottom: '4px',
+                        border: `1px solid ${amtMatch ? theme.green + '55' : theme.border}`,
+                        background: amtMatch ? theme.green + '11' : 'transparent' }}
+                      onClick={() => handleSuggestPR(suggestModal, pr.id)}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontWeight: '600', fontSize: '13px' }}>{pr.reference}</span>
+                        <span style={{ fontSize: '11px', color: amtMatch ? theme.green : '#d97706' }}>
+                          {naira(Number(pr.amount))}{amtMatch ? ' ✓' : ' (amt differs)'}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '2px' }}>
+                        {pr.payee_name || pr.supplier?.company_name || '—'}{pr.purpose ? ` · ${pr.purpose}` : ''}
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+            <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: `1px solid ${theme.border}` }}>
+              <button style={styles.btn('secondary')} onClick={() => { setSuggestModal(null); setPrSearch(''); }}>Cancel</button>
             </div>
           </div>
         </div>
@@ -5987,6 +6121,58 @@ const BankAccountsTab = () => {
               <input style={{ ...styles.input, width: '180px' }} placeholder="Search description / amount…" value={txSearch} onChange={e => setTxSearch(e.target.value)} />
             </div>
           </div>
+          {/* Suggested Matches Queue — independent of date filter, always visible */}
+          {suggestedTxs.length > 0 && (
+            <div style={{ ...styles.card, marginBottom: '16px', borderLeft: `3px solid ${theme.accent}` }}>
+              <div style={{ fontWeight: '600', fontSize: '13px', marginBottom: '10px' }}>
+                {suggestedTxs.length} Pending Suggested Match{suggestedTxs.length !== 1 ? 'es' : ''} — awaiting review
+              </div>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ ...styles.table, fontSize: '12px' }}>
+                  <thead>
+                    <tr>{['Date','Description','Debit','Suggested Match','Actions'].map(h => <th key={h} style={{ ...styles.th, fontSize: '11px' }}>{h}</th>)}</tr>
+                  </thead>
+                  <tbody>
+                    {suggestedTxs.map(stx => {
+                      const pr = paymentRequests.find(p => p.id === stx.matched_to_id);
+                      return (
+                        <tr key={stx.id}>
+                          <td style={{ ...styles.td, whiteSpace: 'nowrap' }}>{stx.transaction_date}</td>
+                          <td style={{ ...styles.td, maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={stx.description}>{stx.description}</td>
+                          <td style={{ ...styles.td, textAlign: 'right', color: theme.red, fontWeight: '600' }}>{stx.debit > 0 ? naira(stx.debit) : ''}</td>
+                          <td style={styles.td}>
+                            {pr ? (
+                              <div>
+                                <div style={{ fontWeight: '600' }}>{pr.reference}</div>
+                                <div style={{ fontSize: '10px', color: theme.textMuted }}>{pr.payee_name || pr.supplier?.company_name || pr.purpose || ''} · {naira(Number(pr.amount))}</div>
+                              </div>
+                            ) : stx.matched_to_type ? (
+                              <span style={{ color: theme.textMuted, fontSize: '11px' }}>{stx.matched_to_type}</span>
+                            ) : '—'}
+                          </td>
+                          <td style={{ ...styles.td, whiteSpace: 'nowrap' }}>
+                            {canConfirm ? (
+                              <div style={{ display: 'flex', gap: '4px' }}>
+                                <button style={{ ...styles.btn('primary'), padding: '2px 8px', fontSize: '11px', background: theme.green }}
+                                  onClick={() => handleConfirmMatch(stx)} disabled={actioningId === stx.id}>
+                                  {actioningId === stx.id ? '…' : '✓ Confirm'}
+                                </button>
+                                <button style={{ ...styles.btn('secondary'), padding: '2px 8px', fontSize: '11px' }}
+                                  onClick={() => { setRejectModal(stx); setRejectReason(''); }} disabled={actioningId === stx.id}>
+                                  ✕ Reject
+                                </button>
+                              </div>
+                            ) : <span style={{ fontSize: '11px', color: theme.textMuted }}>Awaiting accountant/MD review</span>}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
           {txLoading ? <Spinner /> : (
             <div style={styles.card}>
               <table style={styles.table}>
@@ -6000,6 +6186,7 @@ const BankAccountsTab = () => {
                     ? <tr><td colSpan="7" style={{ ...styles.td, textAlign: 'center', color: theme.textMuted, padding: '30px' }}>No transactions. Import a statement to get started.</td></tr>
                     : filtered.map(tx => {
                       const isUnmatched = tx.match_status === 'unmatched' || !tx.match_status;
+                      const isSuggested = tx.match_status === 'suggested';
                       const suggestedCat = (isUnmatched && tx.debit > 0) ? detectCategory(tx.description, tx.debit) : null;
                       const suggestedCustomer = (isUnmatched && tx.credit > 0) ? (() => {
                         const extracted = extractCustomerFromDesc(tx.description);
@@ -6014,6 +6201,7 @@ const BankAccountsTab = () => {
                           return false;
                         }) || null;
                       })() : null;
+                      const prCandidate = (isUnmatched && tx.debit > 0) ? findPRCandidate(tx) : null;
                       return (
                         <tr key={tx.id}>
                           <td style={{ ...styles.td, whiteSpace: 'nowrap' }}>{tx.transaction_date}</td>
@@ -6022,11 +6210,21 @@ const BankAccountsTab = () => {
                           <td style={{ ...styles.td, textAlign: 'right', color: theme.green, fontWeight: '600' }}>{tx.credit > 0 ? naira(tx.credit) : ''}</td>
                           <td style={{ ...styles.td, textAlign: 'right' }}>{tx.balance > 0 ? naira(tx.balance) : ''}</td>
                           <td style={styles.td}>
-                            <span style={styles.badge(tx.match_status === 'matched' ? theme.green : tx.match_status === 'manual' ? theme.blue : '#f5a623')}>
+                            <span style={styles.badge(tx.match_status === 'matched' ? theme.green : tx.match_status === 'manual' ? theme.blue : isSuggested ? theme.accent : '#f5a623')}>
                               {tx.match_status || 'unmatched'}
                             </span>
-                            {tx.matched_to_type && <div style={{ fontSize: '10px', color: theme.textMuted, marginTop: '2px' }}>{tx.matched_to_type}</div>}
-                            {isUnmatched && suggestedCat && (
+                            {isSuggested && tx.matched_to_type === 'payment_request' && tx.matched_to_id && (() => {
+                              const pr = paymentRequests.find(p => p.id === tx.matched_to_id);
+                              return pr ? <div style={{ fontSize: '10px', color: theme.accent, marginTop: '2px' }}>{pr.reference}</div> : null;
+                            })()}
+                            {!isSuggested && tx.matched_to_type && <div style={{ fontSize: '10px', color: theme.textMuted, marginTop: '2px' }}>{tx.matched_to_type}</div>}
+                            {isUnmatched && prCandidate?.amtMatch && (
+                              <div style={{ fontSize: '10px', color: theme.green, marginTop: '3px', fontStyle: 'italic' }}>PR: {prCandidate.pr.reference}</div>
+                            )}
+                            {isUnmatched && prCandidate && !prCandidate.amtMatch && (
+                              <div style={{ fontSize: '10px', color: '#d97706', marginTop: '3px' }}>⚠ PR ref found, amt mismatch ({naira(prCandidate.pr.amount)})</div>
+                            )}
+                            {isUnmatched && !prCandidate && suggestedCat && (
                               <div style={{ fontSize: '10px', color: theme.accent, marginTop: '3px', fontStyle: 'italic' }}>Suggested: {suggestedCat}</div>
                             )}
                             {isUnmatched && suggestedCustomer && (
@@ -6048,6 +6246,17 @@ const BankAccountsTab = () => {
                                     setCreatePaymentModal(tx);
                                   }}>+ Payment</button>
                               )}
+                              {isUnmatched && tx.debit > 0 && prCandidate?.amtMatch && (
+                                <button style={{ ...styles.btn('primary'), padding: '2px 7px', fontSize: '11px', background: theme.green }}
+                                  onClick={() => handleSuggestPR(tx, prCandidate.pr.id)}
+                                  disabled={actioningId === tx.id}>
+                                  {actioningId === tx.id ? '…' : `Suggest: ${prCandidate.pr.reference}`}
+                                </button>
+                              )}
+                              {isUnmatched && tx.debit > 0 && (
+                                <button style={{ ...styles.btn('secondary'), padding: '2px 7px', fontSize: '11px' }}
+                                  onClick={() => { setSuggestModal(tx); setPrSearch(''); }}>Link to PR</button>
+                              )}
                               {isUnmatched && tx.debit > 0 && (
                                 <button style={{ ...styles.btn('primary'), padding: '2px 7px', fontSize: '11px' }}
                                   onClick={() => {
@@ -6056,6 +6265,18 @@ const BankAccountsTab = () => {
                                     setCreateExpForm({ category_id: cat?.id || '', description: tx.description, notes: '' });
                                     setCreateExpModal(tx);
                                   }}>+ Expense</button>
+                              )}
+                              {isSuggested && canConfirm && (
+                                <>
+                                  <button style={{ ...styles.btn('primary'), padding: '2px 7px', fontSize: '11px', background: theme.green }}
+                                    onClick={() => handleConfirmMatch(tx)} disabled={actioningId === tx.id}>
+                                    {actioningId === tx.id ? '…' : '✓ Confirm'}
+                                  </button>
+                                  <button style={{ ...styles.btn('secondary'), padding: '2px 7px', fontSize: '11px' }}
+                                    onClick={() => { setRejectModal(tx); setRejectReason(''); }} disabled={actioningId === tx.id}>
+                                    ✕ Reject
+                                  </button>
+                                </>
                               )}
                             </div>
                           </td>
@@ -6517,7 +6738,7 @@ const Accounting = ({ userProfile }) => {
       {tab === 'cost' && <CostTabErrorBoundary><CostTab /></CostTabErrorBoundary>}
       {tab === 'receivables' && <ReceivablesTab />}
       {tab === 'management' && <ManagementTab />}
-      {tab === 'bank' && <BankAccountsTab />}
+      {tab === 'bank' && <BankAccountsTab userProfile={userProfile} />}
       {tab === 'reconciliation' && <ReconciliationTab />}
       {tab === 'receipts' && <ReceiptsTab />}
       {tab === 'opening_balances' && <OpeningBalances userProfile={userProfile} />}
