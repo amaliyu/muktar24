@@ -7380,8 +7380,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
     if (!disburseAccountId) return;
     setActionSaving(true); setAlert(null);
     try {
-      await paymentRequestsService.update(disburseTarget.id, { bank_account_id: disburseAccountId });
-      await paymentRequestsService.advance(disburseTarget.id, 'mark_disbursed', null);
+      await paymentRequestsService.advance(disburseTarget.id, 'mark_disbursed', null, disburseAccountId);
       setDisburseTarget(null); setDisburseAccountId('');
       await load();
     } catch (e) { setAlert({ type: 'error', msg: e.message }); }
