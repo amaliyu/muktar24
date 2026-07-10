@@ -130,9 +130,9 @@ const APP_ROLES = [
 const ROLE_PAGES = {
   md:                 'all',
   ico:                ['dashboard','production','inventory','batches','waybills','vehicles','labour','truck_loading','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','advances','leave','payment_requests'],
-  accountant:         ['dashboard','customers','orders','reports','kpi_dashboard','accounting','suppliers','products','my_profile','data_import','labour','waybills','advances','leave','payment_requests','truck_loading'],
-  board_member:       ['dashboard','production','inventory','batches','waybills','vehicles','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile'],
-  bdm:                ['dashboard','customers','orders','pending_register','daily_schedule','lpo_approvals','reports','kpi_dashboard','my_profile','payment_requests'],
+  accountant:         ['dashboard','customers','orders','reports','kpi_dashboard','accounting','suppliers','products','my_profile','data_import','labour','waybills','advances','leave','payment_requests','truck_loading','trading_margin'],
+  board_member:       ['dashboard','production','inventory','batches','waybills','vehicles','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','trading_margin'],
+  bdm:                ['dashboard','customers','orders','pending_register','daily_schedule','lpo_approvals','reports','kpi_dashboard','my_profile','payment_requests','trading_margin'],
   store_officer:      ['dashboard','inventory','batches','waybills','pending_register','daily_schedule','products','reports','my_profile'],
   logistics_manager:  ['dashboard','waybills','vehicles','labour','truck_loading','pending_register','daily_schedule','customers','my_profile','payment_requests'],
   marketer:           ['dashboard','customers','orders','products','my_profile'],
@@ -9516,6 +9516,151 @@ const TruckLoadingPage = ({ userProfile }) => {
   );
 };
 
+// ── TRADING MARGIN REPORT ─────────────────────────────────────
+const TradingMarginReport = () => {
+  const [rows, setRows]       = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError]     = useState(null);
+
+  useEffect(() => {
+    supabase.rpc('get_order_trading_margin')
+      .then(({ data, error: e }) => { if (e) throw e; setRows(data || []); })
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const totals = rows.reduce((acc, r) => ({
+    sale:          acc.sale          + (r.sale_amount   || 0),
+    purchase:      acc.purchase      + (r.purchase_cost || 0),
+    grossMargin:   acc.grossMargin   + (r.gross_margin  || 0),
+    fuel:          acc.fuel          + (r.fuel_cost     || 0),
+    loading:       acc.loading       + (r.loading_cost  || 0),
+    haulage:       acc.haulage       + (r.haulage_cost  || 0),
+    landed:        acc.landed        + (r.landed_cost   || 0),
+    trueMargin:    acc.trueMargin    + (r.true_margin   || 0),
+  }), { sale: 0, purchase: 0, grossMargin: 0, fuel: 0, loading: 0, haulage: 0, landed: 0, trueMargin: 0 });
+
+  const pct = (num, den) => den > 0 ? ((num / den) * 100).toFixed(1) + '%' : '—';
+  const mc  = v => v > 0 ? theme.green : v < 0 ? theme.red : theme.textMuted;
+
+  const SummaryCard = ({ label, value, sub, color }) => (
+    <div style={{ flex: 1, minWidth: '160px', background: theme.card, border: `1px solid ${theme.border}`, borderRadius: '10px', padding: '16px 18px' }}>
+      <div style={{ fontSize: '10px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '6px' }}>{label}</div>
+      <div style={{ fontSize: '19px', fontWeight: '700', color }}>{value}</div>
+      {sub && <div style={{ fontSize: '11px', color, opacity: 0.75, marginTop: '2px' }}>{sub} of sales</div>}
+    </div>
+  );
+
+  const thD = { ...styles.th, color: '#f59e0b' };
+  const tdD = (v) => ({ ...styles.td, color: v > 0 ? '#f59e0b' : theme.textMuted });
+
+  return (
+    <div>
+      <div style={styles.header}>
+        <div>
+          <div style={styles.pageTitle}>Trading Margin Report</div>
+          <div style={styles.pageSubtitle}>Per-order gross margin vs. true margin after delivery costs</div>
+        </div>
+      </div>
+
+      {!loading && !error && rows.length > 0 && (
+        <div style={{ display: 'flex', gap: '12px', marginBottom: '20px', flexWrap: 'wrap' }}>
+          <SummaryCard label="Total Sale Value"   value={naira(totals.sale)}        color={theme.text} />
+          <SummaryCard label="Gross Margin"        value={naira(totals.grossMargin)} sub={pct(totals.grossMargin, totals.sale)} color={mc(totals.grossMargin)} />
+          <SummaryCard label="Total Delivery Costs" value={naira(totals.fuel + totals.loading + totals.haulage)} sub={pct(totals.fuel + totals.loading + totals.haulage, totals.sale)} color="#f59e0b" />
+          <SummaryCard label="True Margin"         value={naira(totals.trueMargin)}  sub={pct(totals.trueMargin, totals.sale)}  color={mc(totals.trueMargin)} />
+        </div>
+      )}
+
+      <div style={styles.card}>
+        {loading ? <Spinner /> : error ? (
+          <div style={{ color: theme.red, padding: '20px', fontSize: '13px' }}>{error}</div>
+        ) : rows.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '30px', color: theme.textMuted }}>No orders with resale line items found.</div>
+        ) : (
+          <>
+            <div style={{ fontSize: '11px', color: theme.textMuted, marginBottom: '14px' }}>
+              <span style={{ color: theme.green }}>■</span> Gross margin (before delivery) &nbsp;
+              <span style={{ color: '#f59e0b' }}>■</span> Delivery cost drag (fuel · loading · haulage) &nbsp;
+              <span style={{ color: theme.green }}>■</span>/<span style={{ color: theme.red }}>■</span> True margin (after delivery)
+            </div>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={styles.table}>
+                <thead>
+                  <tr>
+                    <th style={styles.th}>Reference</th>
+                    <th style={styles.th}>Customer</th>
+                    <th style={styles.th}>Date</th>
+                    <th style={styles.th}>Sale Amount</th>
+                    <th style={styles.th}>Purchase Cost</th>
+                    <th style={{ ...styles.th, color: theme.green }}>Gross Margin</th>
+                    <th style={thD}>Fuel Cost</th>
+                    <th style={thD}>Loading Cost</th>
+                    <th style={thD}>Haulage Cost</th>
+                    <th style={styles.th}>Landed Cost</th>
+                    <th style={{ ...styles.th, color: theme.green }}>True Margin</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r, i) => {
+                    const drag = (r.gross_margin || 0) - (r.true_margin || 0);
+                    return (
+                      <tr key={r.order_id || i}>
+                        <td style={styles.td}><strong style={{ fontFamily: 'monospace', fontSize: '12px' }}>{r.order_reference || r.reference || (r.order_id ? r.order_id.slice(0, 8) : '—')}</strong></td>
+                        <td style={styles.td}>{r.customer_name || '—'}</td>
+                        <td style={styles.td}>{r.order_date ? new Date(r.order_date).toLocaleDateString('en-GB') : '—'}</td>
+                        <td style={styles.td}><strong>{naira(r.sale_amount)}</strong></td>
+                        <td style={styles.td}>{naira(r.purchase_cost)}</td>
+                        <td style={styles.td}>
+                          <div style={{ fontWeight: '700', color: mc(r.gross_margin) }}>{naira(r.gross_margin)}</div>
+                          <div style={{ fontSize: '11px', color: theme.textMuted }}>{pct(r.gross_margin, r.sale_amount)}</div>
+                        </td>
+                        <td style={tdD(r.fuel_cost)}>{naira(r.fuel_cost || 0)}</td>
+                        <td style={tdD(r.loading_cost)}>{naira(r.loading_cost || 0)}</td>
+                        <td style={tdD(r.haulage_cost)}>{naira(r.haulage_cost || 0)}</td>
+                        <td style={styles.td}>{naira(r.landed_cost)}</td>
+                        <td style={styles.td}>
+                          <div style={{ fontWeight: '700', color: mc(r.true_margin) }}>{naira(r.true_margin)}</div>
+                          <div style={{ fontSize: '11px', color: theme.textMuted }}>{pct(r.true_margin, r.sale_amount)}</div>
+                          {drag > 0 && (
+                            <div style={{ fontSize: '10px', color: '#f59e0b', marginTop: '2px' }}>▼ {naira(drag)} delivery drag</div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr style={{ background: theme.surface, fontWeight: '600' }}>
+                    <td colSpan={3} style={{ ...styles.td, fontWeight: '700', color: theme.textMuted }}>Totals ({rows.length} orders)</td>
+                    <td style={styles.td}><strong>{naira(totals.sale)}</strong></td>
+                    <td style={styles.td}>{naira(totals.purchase)}</td>
+                    <td style={styles.td}>
+                      <div style={{ fontWeight: '700', color: mc(totals.grossMargin) }}>{naira(totals.grossMargin)}</div>
+                      <div style={{ fontSize: '11px', color: theme.textMuted }}>{pct(totals.grossMargin, totals.sale)}</div>
+                    </td>
+                    <td style={{ ...styles.td, color: '#f59e0b', fontWeight: '700' }}>{naira(totals.fuel)}</td>
+                    <td style={{ ...styles.td, color: '#f59e0b', fontWeight: '700' }}>{naira(totals.loading)}</td>
+                    <td style={{ ...styles.td, color: '#f59e0b', fontWeight: '700' }}>{naira(totals.haulage)}</td>
+                    <td style={{ ...styles.td, fontWeight: '700' }}>{naira(totals.landed)}</td>
+                    <td style={styles.td}>
+                      <div style={{ fontWeight: '700', color: mc(totals.trueMargin) }}>{naira(totals.trueMargin)}</div>
+                      <div style={{ fontSize: '11px', color: theme.textMuted }}>{pct(totals.trueMargin, totals.sale)}</div>
+                      {totals.grossMargin > totals.trueMargin && (
+                        <div style={{ fontSize: '10px', color: '#f59e0b', marginTop: '2px' }}>▼ {naira(totals.grossMargin - totals.trueMargin)} total delivery drag</div>
+                      )}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
+
 // ── NAV ───────────────────────────────────────────────────────
 const navItems = [
   { section: "Overview", items: [{ id: "dashboard", label: "Dashboard", icon: "dashboard" }] },
@@ -9544,6 +9689,7 @@ const navItems = [
   { section: "Analytics", items: [
     { id: "reports", label: "Reports", icon: "reports" },
     { id: "kpi_dashboard", label: "KPI Dashboard", icon: "reports" },
+    { id: "trading_margin", label: "Trading Margin", icon: "orders" },
   ]},
   { section: "Finance", items: [{ id: "accounting", label: "Accounting", icon: "orders" }, { id: "advances", label: "Salary Advances", icon: "orders" }, { id: "payment_requests", label: "Payment Requests", icon: "orders" }, { id: "leave", label: "Leave Requests", icon: "staff" }] },
   { section: "Settings", items: [
@@ -9973,6 +10119,7 @@ export default function App() {
     schedule_approvals: <ScheduleApprovals />,
     reports: <Reports userProfile={userProfile} />,
     kpi_dashboard: <KPIDashboard />,
+    trading_margin: <TradingMarginReport />,
     products: <Products />,
     suppliers: <SupplierRegistry />,
     accounting: <Accounting userProfile={userProfile} />,
