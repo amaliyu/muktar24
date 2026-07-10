@@ -7270,7 +7270,10 @@ const PaymentRequestsPage = ({ userProfile }) => {
 
   useEffect(() => { load(); }, []);
   useEffect(() => { bankAccountsService.getAll().then(setBankAccounts).catch(() => {}); }, []);
-  useEffect(() => { authService.listUsers().then(setAllUsers).catch(() => {}); }, []);
+  useEffect(() => {
+    supabase.from('user_profiles_directory').select('id, full_name, role').order('full_name')
+      .then(({ data }) => setAllUsers(data || [])).catch(() => {});
+  }, []);
 
   const catMap = Object.fromEntries(categories.map(c => [c.id, c.name]));
   const tradingPurchasesId = categories.find(c => c.name === 'Trading Purchases')?.id;
