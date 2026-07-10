@@ -66,6 +66,26 @@ export const paymentRequestsService = {
     if (error) throw error;
   },
 
+  async backfill({ requested_by, amount, purpose, transaction_date, note, payee_name, payee_bank_name, payee_account_number, payee_account_name, supplier_id, disbursement_method, bank_account_id, expense_category_id }) {
+    const { data, error } = await supabase.rpc('backfill_payment_request', {
+      p_requested_by: requested_by,
+      p_amount: amount,
+      p_purpose: purpose,
+      p_transaction_date: transaction_date,
+      p_note: note,
+      p_payee_name: payee_name || null,
+      p_payee_bank_name: payee_bank_name || null,
+      p_payee_account_number: payee_account_number || null,
+      p_payee_account_name: payee_account_name || null,
+      p_supplier_id: supplier_id || null,
+      p_disbursement_method: disbursement_method || 'bank_transfer',
+      p_bank_account_id: bank_account_id || null,
+      p_expense_category_id: expense_category_id || null,
+    });
+    if (error) throw error;
+    return data;
+  },
+
   async advance(id, action, reason = null, bankAccountId = null) {
     const { data, error } = await supabase.rpc('advance_payment_request', {
       p_request_id: id,

@@ -7212,6 +7212,18 @@ const PaymentRequestsPage = ({ userProfile }) => {
   const [attachSaving, setAttachSaving] = useState(false);
   const [attachAlert, setAttachAlert] = useState(null);
 
+  const emptyBackfillForm = { requested_by: '', amount: '', purpose: '', transaction_date: '', note: '', expense_category_id: '', disbursement_method: 'bank_transfer', bank_account_id: '', payeeMode: 'existing', supplier_id: '', payee_name: '', payee_bank_name: '', payee_account_number: '', payee_account_name: '' };
+  const [showBackfill, setShowBackfill] = useState(false);
+  const [backfillForm, setBackfillForm] = useState(emptyBackfillForm);
+  const [backfillSaving, setBackfillSaving] = useState(false);
+  const [queryTarget, setQueryTarget] = useState(null);
+  const [queryReason, setQueryReason] = useState('');
+  const [allUsers, setAllUsers] = useState([]);
+  const [showQueried, setShowQueried] = useState(false);
+
+  const canBackfill = isInitiator || role === 'md';
+  const canQuery = ['ico', 'accountant'].includes(role);
+
   const [resaleItems, setResaleItems] = useState([]);
   const [resaleOrderMap, setResaleOrderMap] = useState({});
   const [resaleItemsLoading, setResaleItemsLoading] = useState(false);
@@ -7250,7 +7262,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
       ]);
       setRequests(reqs);
       setCategories(cats);
-      if (isInitiator) paymentRequestsService.getActiveSuppliers().then(setActiveSuppliers).catch(() => {});
+      if (isInitiator || role === 'md') paymentRequestsService.getActiveSuppliers().then(setActiveSuppliers).catch(() => {});
       if (canReviewVendors) paymentRequestsService.getPendingVendors().then(setPendingVendors).catch(() => {});
     } catch (e) { setAlert({ type: 'error', msg: e.message }); }
     finally { setLoading(false); }
@@ -7258,6 +7270,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
 
   useEffect(() => { load(); }, []);
   useEffect(() => { bankAccountsService.getAll().then(setBankAccounts).catch(() => {}); }, []);
+  useEffect(() => { authService.listUsers().then(setAllUsers).catch(() => {}); }, []);
 
   const catMap = Object.fromEntries(categories.map(c => [c.id, c.name]));
   const tradingPurchasesId = categories.find(c => c.name === 'Trading Purchases')?.id;
@@ -7371,9 +7384,45 @@ const PaymentRequestsPage = ({ userProfile }) => {
       await paymentRequestsService.advance(id, action, reason);
       setRecallTarget(null); setRecallReason('');
       setOverrideCloseTarget(null); setOverrideCloseReason('');
+      setQueryTarget(null); setQueryReason('');
       await load();
     } catch (e) { setAlert({ type: 'error', msg: e.message }); }
     finally { setActionSaving(false); }
+  };
+
+  const handleBackfill = async () => {
+    if (!backfillForm.requested_by) return setAlert({ type: 'error', msg: 'Select who this payment was for.' });
+    if (!backfillForm.amount || !backfillForm.purpose.trim()) return setAlert({ type: 'error', msg: 'Amount and purpose are required.' });
+    if (!backfillForm.transaction_date) return setAlert({ type: 'error', msg: 'Transaction date is required.' });
+    if (!backfillForm.note.trim()) return setAlert({ type: 'error', msg: 'Historical note is required.' });
+    if (backfillForm.payeeMode === 'existing' && !backfillForm.supplier_id)
+      return setAlert({ type: 'error', msg: 'Select an existing vendor, or switch to New Payee.' });
+    if (backfillForm.payeeMode === 'new' && !backfillForm.payee_name.trim())
+      return setAlert({ type: 'error', msg: 'Payee name is required.' });
+    setBackfillSaving(true); setAlert(null);
+    try {
+      const usePayeeFields = backfillForm.payeeMode === 'new';
+      await paymentRequestsService.backfill({
+        requested_by: backfillForm.requested_by,
+        amount: Number(backfillForm.amount),
+        purpose: backfillForm.purpose.trim(),
+        transaction_date: backfillForm.transaction_date,
+        note: backfillForm.note.trim(),
+        expense_category_id: backfillForm.expense_category_id || null,
+        disbursement_method: backfillForm.disbursement_method || 'bank_transfer',
+        bank_account_id: backfillForm.disbursement_method === 'bank_transfer' ? (backfillForm.bank_account_id || null) : null,
+        supplier_id: backfillForm.payeeMode === 'existing' ? (backfillForm.supplier_id || null) : null,
+        payee_name: usePayeeFields ? backfillForm.payee_name.trim() : null,
+        payee_bank_name: usePayeeFields ? (backfillForm.payee_bank_name.trim() || null) : null,
+        payee_account_number: usePayeeFields ? (backfillForm.payee_account_number.trim() || null) : null,
+        payee_account_name: usePayeeFields ? (backfillForm.payee_account_name.trim() || null) : null,
+      });
+      setShowBackfill(false);
+      setBackfillForm(emptyBackfillForm);
+      setAlert({ type: 'success', msg: 'Historical entry recorded.' });
+      await load();
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setBackfillSaving(false); }
   };
 
   const handleDisburse = async () => {
@@ -7408,6 +7457,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
     closed:       '#a78bfa',
     recalled:     theme.red,
     cancelled:    theme.red,
+    queried:      '#f59e0b',
   }[s] || theme.textMuted);
 
   const sm = { padding: '4px 10px', fontSize: '11px' };
@@ -7441,6 +7491,15 @@ const PaymentRequestsPage = ({ userProfile }) => {
       btns.push(<button key="close" style={{ ...styles.btn('primary'), ...sm, background: '#a78bfa', color: '#000' }} onClick={() => handleAction(id, 'close')} disabled={actionSaving}>✓ Close</button>);
       btns.push(<button key="override-close" style={{ ...styles.btn('secondary'), ...sm }} onClick={() => setOverrideCloseTarget({ id })}>Override Close</button>);
     }
+    if (canQuery && status === 'disbursed' && req.transaction_date) {
+      btns.push(<button key="query" style={{ ...styles.btn('secondary'), ...sm }} onClick={() => setQueryTarget({ id })}>⚑ Query</button>);
+    }
+    if (status === 'queried') {
+      if (req.requested_by === userId || role === 'md') {
+        btns.push(<button key="edit-queried" style={{ ...styles.btn('secondary'), ...sm }} onClick={() => openEdit(req)}>✏ Edit</button>);
+        btns.push(<button key="resolve" style={{ ...styles.btn('primary'), ...sm, background: theme.green, color: '#000' }} onClick={() => handleAction(id, 'resolve_query')} disabled={actionSaving}>✓ Resolve</button>);
+      }
+    }
     return btns;
   };
 
@@ -7453,7 +7512,9 @@ const PaymentRequestsPage = ({ userProfile }) => {
     : role === 'accountant'
     ? requests.filter(r => ['md_approved', 'funded', 'disbursed'].includes(r.status))
     : requests;
-  const queue = (!isInitiator && showHistory) ? requests : actionQueue;
+  const queriedRequests = requests.filter(r => r.status === 'queried' &&
+    (['ico', 'accountant', 'md'].includes(role) || r.requested_by === userId));
+  const queue = showQueried ? queriedRequests : ((!isInitiator && showHistory) ? requests : actionQueue);
 
   return (
     <div>
@@ -7469,24 +7530,38 @@ const PaymentRequestsPage = ({ userProfile }) => {
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
           {!isInitiator && (
             <div style={{ display: 'flex', gap: '4px' }}>
-              {[['Action Queue', false], ['All Requests', true]].map(([label, val]) => (
-                <button key={label}
-                  style={{ ...styles.btn(showHistory === val ? 'primary' : 'secondary'), padding: '7px 14px', fontSize: '12px' }}
-                  onClick={() => setShowHistory(val)}>
-                  {label}
-                </button>
-              ))}
+              {[['Action Queue', 'queue'], ['All Requests', 'all'], ...((canQuery || role === 'md') ? [['Queried', 'queried']] : [])].map(([label, val]) => {
+                const active = val === 'queried' ? showQueried : (!showQueried && showHistory === (val === 'all'));
+                return (
+                  <button key={label}
+                    style={{ ...styles.btn(active ? 'primary' : 'secondary'), padding: '7px 14px', fontSize: '12px' }}
+                    onClick={() => {
+                      if (val === 'queried') { setShowQueried(true); setShowHistory(false); }
+                      else { setShowQueried(false); setShowHistory(val === 'all'); }
+                    }}>
+                    {label}
+                    {val === 'queried' && queriedRequests.length > 0 && (
+                      <span style={{ marginLeft: '5px', background: '#f59e0b', color: '#000', borderRadius: '10px', padding: '1px 5px', fontSize: '10px', fontWeight: '700' }}>{queriedRequests.length}</span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           )}
+          {canBackfill && (
+            <button style={styles.btn(showBackfill ? 'secondary' : 'secondary')} onClick={() => { setShowBackfill(v => !v); setBackfillForm(emptyBackfillForm); setShowForm(false); setEditTarget(null); }}>
+              {showBackfill ? '✕ Cancel Backfill' : '+ Backfill Entry'}
+            </button>
+          )}
           {isInitiator && (
-            <button style={styles.btn(showForm ? 'secondary' : 'primary')} onClick={() => { setShowForm(v => !v); setEditTarget(null); setForm(emptyForm); }}>
+            <button style={styles.btn(showForm ? 'secondary' : 'primary')} onClick={() => { setShowForm(v => !v); setEditTarget(null); setForm(emptyForm); setShowBackfill(false); }}>
               {showForm ? '✕ Cancel' : '+ New Request'}
             </button>
           )}
         </div>
       </div>
 
-      {isInitiator && showForm && (
+      {showForm && (isInitiator || editTarget) && (
         <div style={{ ...styles.card, marginBottom: '20px' }}>
           <div style={styles.sectionTitle}>
             {editTarget ? `Edit Request — ${editTarget.reference}` : 'New Payment Request'}
@@ -7636,6 +7711,130 @@ const PaymentRequestsPage = ({ userProfile }) => {
         </div>
       )}
 
+      {showBackfill && canBackfill && (
+        <div style={{ ...styles.card, marginBottom: '20px', border: `1px solid #f59e0b` }}>
+          <div style={styles.sectionTitle}>Backfill Historical Entry <span style={{ fontSize: '12px', fontWeight: 400, color: '#f59e0b' }}>— lands directly in Disbursed</span></div>
+          <div style={styles.grid(2)}>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>On behalf of (who was paid) *</label>
+              <select style={styles.input} value={backfillForm.requested_by}
+                onChange={e => setBackfillForm(f => ({ ...f, requested_by: e.target.value }))}>
+                <option value="">— Select staff member —</option>
+                {allUsers.map(u => <option key={u.id} value={u.id}>{u.full_name}{u.role ? ` (${u.role})` : ''}</option>)}
+              </select>
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Transaction Date *</label>
+              <input style={styles.input} type="date" max={new Date().toISOString().split('T')[0]}
+                value={backfillForm.transaction_date}
+                onChange={e => setBackfillForm(f => ({ ...f, transaction_date: e.target.value }))} />
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Amount (₦) *</label>
+              <input style={styles.input} type="number" min="1" placeholder="0"
+                value={backfillForm.amount}
+                onChange={e => setBackfillForm(f => ({ ...f, amount: e.target.value }))} />
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Purpose *</label>
+              <input style={styles.input} placeholder="Brief description of the payment purpose…"
+                value={backfillForm.purpose}
+                onChange={e => setBackfillForm(f => ({ ...f, purpose: e.target.value }))} />
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Expense Category (optional)</label>
+              <select style={styles.input} value={backfillForm.expense_category_id}
+                onChange={e => setBackfillForm(f => ({ ...f, expense_category_id: e.target.value }))}>
+                <option value="">— None —</option>
+                {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Disbursement Method</label>
+              <select style={styles.input} value={backfillForm.disbursement_method}
+                onChange={e => setBackfillForm(f => ({ ...f, disbursement_method: e.target.value }))}>
+                <option value="bank_transfer">Bank Transfer</option>
+                <option value="cash">Cash</option>
+              </select>
+            </div>
+            {backfillForm.disbursement_method === 'bank_transfer' && (
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Source Bank Account</label>
+                <select style={styles.input} value={backfillForm.bank_account_id}
+                  onChange={e => setBackfillForm(f => ({ ...f, bank_account_id: e.target.value }))}>
+                  <option value="">— Select account —</option>
+                  {bankAccounts.map(a => <option key={a.id} value={a.id}>{a.bank_name} — {a.account_number}</option>)}
+                </select>
+              </div>
+            )}
+          </div>
+          <div style={{ marginTop: '12px' }}>
+            <label style={styles.label}>Historical Note * <span style={{ fontWeight: 400, color: theme.textMuted }}>— e.g. "WhatsApp approval, 2026-07-04"</span></label>
+            <textarea style={{ ...styles.input, height: '64px', resize: 'vertical' }}
+              placeholder="Describe how this disbursement was originally authorised…"
+              value={backfillForm.note}
+              onChange={e => setBackfillForm(f => ({ ...f, note: e.target.value }))} />
+          </div>
+          <div style={{ marginTop: '14px', padding: '14px', background: theme.surface, borderRadius: '8px', border: `1px solid ${theme.border}` }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <div style={{ fontSize: '12px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Payee *</div>
+              <div style={{ display: 'flex', gap: '4px' }}>
+                {['existing', 'new'].map(m => (
+                  <button key={m} type="button"
+                    style={{ ...styles.btn(backfillForm.payeeMode === m ? 'primary' : 'secondary'), padding: '5px 12px', fontSize: '12px' }}
+                    onClick={() => setBackfillForm(f => ({ ...f, payeeMode: m, supplier_id: '', payee_name: '', payee_bank_name: '', payee_account_number: '', payee_account_name: '' }))}>
+                    {m === 'existing' ? 'Existing Vendor' : 'New Payee'}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {backfillForm.payeeMode === 'existing' ? (
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Vendor</label>
+                <select style={styles.input} value={backfillForm.supplier_id}
+                  onChange={e => setBackfillForm(f => ({ ...f, supplier_id: e.target.value }))}>
+                  <option value="">— Select vendor —</option>
+                  {activeSuppliers.map(s => <option key={s.id} value={s.id}>{s.company_name}</option>)}
+                </select>
+                {activeSuppliers.length === 0 && (
+                  <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '4px' }}>No active vendors — switch to New Payee.</div>
+                )}
+              </div>
+            ) : (
+              <div style={styles.grid(2)}>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Payee name *</label>
+                  <input style={styles.input} placeholder="Person or business name"
+                    value={backfillForm.payee_name}
+                    onChange={e => setBackfillForm(f => ({ ...f, payee_name: e.target.value }))} />
+                </div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Bank name</label>
+                  <input style={styles.input} placeholder="e.g. First Bank"
+                    value={backfillForm.payee_bank_name}
+                    onChange={e => setBackfillForm(f => ({ ...f, payee_bank_name: e.target.value }))} />
+                </div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Account number</label>
+                  <input style={styles.input} placeholder="10-digit account number"
+                    value={backfillForm.payee_account_number}
+                    onChange={e => setBackfillForm(f => ({ ...f, payee_account_number: e.target.value }))} />
+                </div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Account name</label>
+                  <input style={styles.input} placeholder="Name on account"
+                    value={backfillForm.payee_account_name}
+                    onChange={e => setBackfillForm(f => ({ ...f, payee_account_name: e.target.value }))} />
+                </div>
+              </div>
+            )}
+          </div>
+          <button style={{ ...styles.btn('primary'), marginTop: '14px', background: '#f59e0b', color: '#000' }} onClick={handleBackfill} disabled={backfillSaving}>
+            {backfillSaving ? 'Recording…' : 'Record Historical Entry'}
+          </button>
+        </div>
+      )}
+
       {recallTarget && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
           <div style={{ ...styles.card, width: '420px' }}>
@@ -7696,6 +7895,27 @@ const PaymentRequestsPage = ({ userProfile }) => {
         </div>
       )}
 
+      {queryTarget && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ ...styles.card, width: '420px' }}>
+            <div style={{ ...styles.sectionTitle, marginBottom: '12px' }}>Query Entry — Reason Required</div>
+            <textarea
+              style={{ ...styles.input, height: '80px', resize: 'vertical' }}
+              placeholder="Describe what needs to be corrected…"
+              value={queryReason}
+              onChange={e => setQueryReason(e.target.value)}
+            />
+            <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+              <button style={{ ...styles.btn('danger') }} disabled={!queryReason.trim() || actionSaving}
+                onClick={() => handleAction(queryTarget.id, 'query', queryReason.trim())}>
+                {actionSaving ? 'Saving…' : 'Submit Query'}
+              </button>
+              <button style={styles.btn('secondary')} onClick={() => { setQueryTarget(null); setQueryReason(''); }}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {detailReq && (() => {
         const req = detailReq;
         const bankName = req.supplier_id ? req.supplier?.bank_name : req.payee_bank_name;
@@ -7735,6 +7955,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
                 <DL label="Category" value={req.expense_category_id ? catMap[req.expense_category_id] : null} />
                 {req.category_other_note && <DL label="Category note" value={req.category_other_note} />}
                 <DL label="Disbursement method" value={req.disbursement_method === 'bank_transfer' ? 'Bank Transfer' : req.disbursement_method === 'cash' ? 'Cash' : req.disbursement_method} />
+                {req.transaction_date && <DL label="Transaction Date (Historical)" value={new Date(req.transaction_date).toLocaleDateString('en-GB')} />}
               </div>
               <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: '16px', marginTop: '4px' }}>
                 <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '12px' }}>Payee / Bank Details</div>
@@ -7831,8 +8052,11 @@ const PaymentRequestsPage = ({ userProfile }) => {
                       <td style={styles.td}>{req.disbursement_method === 'bank_transfer' ? 'Bank Transfer' : 'Cash'}</td>
                       <td style={styles.td}>{req.supplier?.company_name || req.payee_name || <span style={{ color: theme.textMuted }}>—</span>}</td>
                       {!isInitiator && <td style={styles.td}>{req.requester?.full_name || '—'}</td>}
-                      <td style={styles.td}><span style={styles.badge(statusColor(req.status))}>{req.status}</span></td>
-                      <td style={styles.td}>{req.created_at ? new Date(req.created_at).toLocaleDateString('en-GB') : '—'}</td>
+                      <td style={styles.td}>
+                        <span style={styles.badge(statusColor(req.status))}>{req.status}</span>
+                        {req.transaction_date && <span style={{ ...styles.badge('#f59e0b'), marginLeft: '4px', fontSize: '10px', color: '#000' }}>Historical</span>}
+                      </td>
+                      <td style={styles.td}>{req.transaction_date ? new Date(req.transaction_date).toLocaleDateString('en-GB') : req.created_at ? new Date(req.created_at).toLocaleDateString('en-GB') : '—'}</td>
                       <td style={styles.td}>
                         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                           <button style={{ ...styles.btn('secondary'), ...sm }} onClick={() => setDetailReq(req)}>View</button>
