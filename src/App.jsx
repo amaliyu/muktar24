@@ -5219,6 +5219,8 @@ const BankAccountsTab = () => {
   const [creatingPayment, setCreatingPayment] = useState(false);
   const [err, setErr] = useState('');
   const [ok, setOk] = useState('');
+  const [reconUnverified, setReconUnverified] = useState(false);
+  const [reconWarnAcked, setReconWarnAcked] = useState(false);
 
   useEffect(() => {
     // Supporting data — fail silently so they don't block the accounts tab
@@ -5257,7 +5259,7 @@ const BankAccountsTab = () => {
       .then(setTransactions).catch(e => setErr(e?.message || 'An error occurred')).finally(() => setTxLoading(false));
   }, [selected?.id, txFrom, txTo]);
 
-  const openImport = (acct) => { setImportAcct(acct.id); setImportFile(null); setImportStep('upload'); setErr(''); setOk(''); };
+  const openImport = (acct) => { setImportAcct(acct.id); setImportFile(null); setImportStep('upload'); setErr(''); setOk(''); setReconUnverified(false); setReconWarnAcked(false); };
   const closeImport = () => setImportStep(null);
 
   const handleFileSelect = async (file) => {
@@ -5275,6 +5277,8 @@ const BankAccountsTab = () => {
   };
 
   const buildPreview = async () => {
+    setReconUnverified(false);
+    setReconWarnAcked(false);
     const txs = mapRowsToTransactions(importRows, colMap);
     if (txs.length === 0) { setErr('No valid transactions found. Check column mapping.'); return; }
 
@@ -5316,6 +5320,8 @@ const BankAccountsTab = () => {
         );
         return;
       }
+    } else {
+      setReconUnverified(true);
     }
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -5589,6 +5595,16 @@ const BankAccountsTab = () => {
 
             {importStep === 'preview' && (
               <div>
+                {reconUnverified && (
+                  <div style={{ background: '#d9770622', border: '1px solid #d9770644', borderRadius: '8px', padding: '12px 14px', marginBottom: '14px', fontSize: '13px', color: '#d97706' }}>
+                    <div style={{ fontWeight: '600', marginBottom: '4px' }}>Could not verify this statement reconciles</div>
+                    <div style={{ marginBottom: '10px' }}>Opening balance or transaction totals were not found in the expected format — review this statement manually before importing.</div>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                      <input type="checkbox" checked={reconWarnAcked} onChange={e => setReconWarnAcked(e.target.checked)} />
+                      I have reviewed this statement manually and confirm I want to proceed
+                    </label>
+                  </div>
+                )}
                 <div style={{ ...styles.grid(3), marginBottom: '16px' }}>
                   <div style={styles.statCard(theme.blue)}><div style={styles.statLabel}>Total</div><div style={{ ...styles.statValue, fontSize: '18px' }}>{preview.length}</div></div>
                   <div style={styles.statCard(theme.green)}><div style={styles.statLabel}>Auto-Matched</div><div style={{ ...styles.statValue, fontSize: '18px', color: theme.green }}>{preview.filter(t => t.autoMatch).length}</div></div>
@@ -5618,7 +5634,7 @@ const BankAccountsTab = () => {
                 </div>
                 <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
                   <button style={styles.btn('secondary')} onClick={() => setImportStep('mapping')}>← Back</button>
-                  <button style={{ ...styles.btn('primary'), marginLeft: 'auto' }} onClick={confirmImport} disabled={importing}>{importing ? 'Importing…' : `✓ Import ${preview.length} Transactions`}</button>
+                  <button style={{ ...styles.btn('primary'), marginLeft: 'auto' }} onClick={confirmImport} disabled={importing || (reconUnverified && !reconWarnAcked)}>{importing ? 'Importing…' : `✓ Import ${preview.length} Transactions`}</button>
                 </div>
               </div>
             )}
