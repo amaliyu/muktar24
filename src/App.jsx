@@ -7201,6 +7201,9 @@ const PaymentRequestsPage = ({ userProfile }) => {
   const [recallReason, setRecallReason] = useState('');
   const [overrideCloseTarget, setOverrideCloseTarget] = useState(null);
   const [overrideCloseReason, setOverrideCloseReason] = useState('');
+  const [disburseTarget, setDisburseTarget] = useState(null);
+  const [disburseAccountId, setDisburseAccountId] = useState('');
+  const [bankAccounts, setBankAccounts] = useState([]);
   const [detailReq, setDetailReq] = useState(null);
   const [copiedField, setCopiedField] = useState(null);
   const [showHistory, setShowHistory] = useState(false);
@@ -7254,6 +7257,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
   };
 
   useEffect(() => { load(); }, []);
+  useEffect(() => { bankAccountsService.getAll().then(setBankAccounts).catch(() => {}); }, []);
 
   const catMap = Object.fromEntries(categories.map(c => [c.id, c.name]));
   const tradingPurchasesId = categories.find(c => c.name === 'Trading Purchases')?.id;
@@ -7372,6 +7376,17 @@ const PaymentRequestsPage = ({ userProfile }) => {
     finally { setActionSaving(false); }
   };
 
+  const handleDisburse = async () => {
+    if (!disburseAccountId) return;
+    setActionSaving(true); setAlert(null);
+    try {
+      await paymentRequestsService.advance(disburseTarget.id, 'mark_disbursed', null, disburseAccountId);
+      setDisburseTarget(null); setDisburseAccountId('');
+      await load();
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setActionSaving(false); }
+  };
+
   const handleUploadAttachment = async (req) => {
     if (!attachFile) return setAttachAlert({ type: 'error', msg: 'Select a file first.' });
     setAttachSaving(true); setAttachAlert(null);
@@ -7397,7 +7412,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
 
   const sm = { padding: '4px 10px', fontSize: '11px' };
   const rowActions = (req) => {
-    const { id, status } = req;
+    const { id, status, disbursement_method } = req;
     const btns = [];
     if (role === 'ico' && status === 'draft') {
       btns.push(<button key="approve" style={{ ...styles.btn('primary'), ...sm }} onClick={() => handleAction(id, 'ico_approve')} disabled={actionSaving}>✓ Approve</button>);
@@ -7415,7 +7430,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
         btns.push(<button key="fund" style={{ ...styles.btn('primary'), ...sm, background: theme.green, color: '#000' }} onClick={() => handleAction(id, 'mark_funded')} disabled={actionSaving}>↑ Mark Funded</button>);
       }
       if (status === 'funded') {
-        btns.push(<button key="disburse" style={{ ...styles.btn('primary'), ...sm }} onClick={() => handleAction(id, 'mark_disbursed')} disabled={actionSaving}>✓ Mark Disbursed</button>);
+        btns.push(<button key="disburse" style={{ ...styles.btn('primary'), ...sm }} onClick={() => disbursement_method === 'cash' ? handleAction(id, 'mark_disbursed') : setDisburseTarget({ id })} disabled={actionSaving}>✓ Mark Disbursed</button>);
       }
       if (status === 'disbursed') {
         btns.push(<button key="close" style={{ ...styles.btn('primary'), ...sm, background: '#a78bfa', color: '#000' }} onClick={() => handleAction(id, 'close')} disabled={actionSaving}>✓ Close</button>);
@@ -7658,6 +7673,24 @@ const PaymentRequestsPage = ({ userProfile }) => {
                 {actionSaving ? 'Saving…' : 'Confirm Override Close'}
               </button>
               <button style={styles.btn('secondary')} onClick={() => { setOverrideCloseTarget(null); setOverrideCloseReason(''); }}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {disburseTarget && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ ...styles.card, width: '420px' }}>
+            <div style={{ ...styles.sectionTitle, marginBottom: '12px' }}>Mark Disbursed — Select Source Account</div>
+            <select style={styles.input} value={disburseAccountId} onChange={e => setDisburseAccountId(e.target.value)}>
+              <option value="">— Select source bank account —</option>
+              {bankAccounts.map(a => <option key={a.id} value={a.id}>{a.bank_name} — {a.account_number}</option>)}
+            </select>
+            <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+              <button style={styles.btn('primary')} disabled={!disburseAccountId || actionSaving} onClick={handleDisburse}>
+                {actionSaving ? 'Saving…' : 'Confirm Disbursement'}
+              </button>
+              <button style={styles.btn('secondary')} onClick={() => { setDisburseTarget(null); setDisburseAccountId(''); }}>Cancel</button>
             </div>
           </div>
         </div>

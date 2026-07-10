@@ -66,11 +66,12 @@ export const paymentRequestsService = {
     if (error) throw error;
   },
 
-  async advance(id, action, reason = null) {
+  async advance(id, action, reason = null, bankAccountId = null) {
     const { data, error } = await supabase.rpc('advance_payment_request', {
       p_request_id: id,
       p_action: action,
       p_reason: reason,
+      p_bank_account_id: bankAccountId,
     });
     if (error) throw error;
     return data;
