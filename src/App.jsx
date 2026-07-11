@@ -9206,13 +9206,9 @@ const TruckLoadingPage = ({ userProfile }) => {
   const role = userProfile?.role;
   const canLog         = ['production_manager', 'assistant_production_manager', 'logistics_manager', 'md'].includes(role);
   const canManageRates = ['logistics_manager', 'md'].includes(role);
-  const canGenerate    = ['logistics_manager', 'md'].includes(role);
-  const canICOApprove  = role === 'ico';
-  const canMDApprove   = role === 'md';
-  const canMarkPaid    = ['accountant', 'md'].includes(role);
-  const canRecall      = ['ico', 'md', 'logistics_manager'].includes(role);
+  const canDelete      = ['md', 'production_manager', 'assistant_production_manager', 'logistics_manager'].includes(role);
 
-  const defaultTab = canLog ? 'log' : 'payroll';
+  const defaultTab = canLog ? 'log' : 'rates';
   const [tab, setTab] = useState(defaultTab);
 
   // Shared data
@@ -9237,18 +9233,9 @@ const TruckLoadingPage = ({ userProfile }) => {
   const [rateSaving, setRateSaving]   = useState(false);
   const [rateAlert, setRateAlert]     = useState(null);
 
-  // Payroll tab
-  const [payrolls, setPayrolls]           = useState([]);
-  const [payrollsLoading, setPayrollsLoading] = useState(false);
-  const [genWeek, setGenWeek]             = useState('');
-  const [genSaving, setGenSaving]         = useState(false);
-  const [payrollAlert, setPayrollAlert]   = useState(null);
-  const [expandedPayroll, setExpandedPayroll] = useState(null);
-  const [payrollLogs, setPayrollLogs]     = useState({});
-  const [payrollLogsLoading, setPayrollLogsLoading] = useState({});
-  const [recallTarget, setRecallTarget]   = useState(null);
-  const [recallReason, setRecallReason]   = useState('');
-  const [actionSaving, setActionSaving]   = useState(false);
+  // Log tab — delete
+  const [deleteTarget, setDeleteTarget]   = useState(null);
+  const [deleteSaving, setDeleteSaving]   = useState(false);
 
   const loadLogs = async () => {
     setEntriesLoading(true);
@@ -9262,13 +9249,6 @@ const TruckLoadingPage = ({ userProfile }) => {
     catch (e) { setRateAlert({ type: 'error', msg: e.message }); }
   };
 
-  const loadPayrolls = async () => {
-    setPayrollsLoading(true);
-    try { setPayrolls(await truckLoadingService.getPayrolls()); }
-    catch (e) { setPayrollAlert({ type: 'error', msg: e.message }); }
-    finally { setPayrollsLoading(false); }
-  };
-
   useEffect(() => {
     Promise.all([
       vehiclesService.getAll(),
@@ -9277,7 +9257,6 @@ const TruckLoadingPage = ({ userProfile }) => {
     ]).then(([v, a, p]) => { setVehicles(v); setAssignments(a); setProducts(p); })
       .catch(() => {});
     if (canLog) loadLogs();
-    loadPayrolls();
   }, []);
 
   useEffect(() => {
@@ -9319,48 +9298,15 @@ const TruckLoadingPage = ({ userProfile }) => {
     finally { setRateSaving(false); }
   };
 
-  const handleGenerate = async () => {
-    if (!genWeek) { setPayrollAlert({ type: 'error', msg: 'Select a week ending date.' }); return; }
-    setGenSaving(true); setPayrollAlert(null);
+  const handleDeleteLog = async (id) => {
+    setDeleteSaving(true);
     try {
-      await truckLoadingService.generatePayroll(genWeek);
-      setGenWeek('');
-      setPayrollAlert({ type: 'success', msg: 'Payroll generated.' });
-      await loadPayrolls();
-    } catch (e) { setPayrollAlert({ type: 'error', msg: e.message }); }
-    finally { setGenSaving(false); }
-  };
-
-  const handlePayrollAction = async (payrollId, action, reason = null) => {
-    setActionSaving(true); setPayrollAlert(null);
-    try {
-      await truckLoadingService.advancePayroll(payrollId, action, reason);
-      setRecallTarget(null); setRecallReason('');
-      setPayrollAlert({ type: 'success', msg: 'Done.' });
-      await loadPayrolls();
-    } catch (e) { setPayrollAlert({ type: 'error', msg: e.message }); }
-    finally { setActionSaving(false); }
-  };
-
-  const expandPayroll = async (id) => {
-    if (expandedPayroll === id) { setExpandedPayroll(null); return; }
-    setExpandedPayroll(id);
-    if (!payrollLogs[id]) {
-      setPayrollLogsLoading(p => ({ ...p, [id]: true }));
-      try {
-        const data = await truckLoadingService.getPayrollLogs(id);
-        setPayrollLogs(p => ({ ...p, [id]: data }));
-      } catch {}
-      finally { setPayrollLogsLoading(p => ({ ...p, [id]: false })); }
-    }
-  };
-
-  const payrollStatusColor = (s) => {
-    if (s === 'paid') return theme.green;
-    if (s === 'md_approved') return theme.blue;
-    if (s === 'ico_approved') return theme.accent;
-    if (s === 'recalled' || s === 'rejected') return theme.red;
-    return theme.textMuted;
+      await truckLoadingService.deleteLog(id);
+      setDeleteTarget(null);
+      setLogAlert({ type: 'success', msg: 'Entry deleted.' });
+      await loadLogs();
+    } catch (e) { setLogAlert({ type: 'error', msg: e.message }); setDeleteTarget(null); }
+    finally { setDeleteSaving(false); }
   };
 
   const tabBtn = (id, label) => (
@@ -9375,7 +9321,7 @@ const TruckLoadingPage = ({ userProfile }) => {
       <div style={styles.header}>
         <div>
           <div style={styles.pageTitle}>Truck Loading</div>
-          <div style={styles.pageSubtitle}>Log entries, loading rates, and weekly payroll</div>
+          <div style={styles.pageSubtitle}>Log entries and loading rates</div>
         </div>
       </div>
 
@@ -9383,7 +9329,6 @@ const TruckLoadingPage = ({ userProfile }) => {
       <div style={{ display: 'flex', gap: '4px', borderBottom: `1px solid ${theme.border}`, marginBottom: '20px' }}>
         {canLog && tabBtn('log', 'Log Entry')}
         {canManageRates && tabBtn('rates', 'Rates')}
-        {tabBtn('payroll', 'Payroll')}
       </div>
 
       {/* ── Log Entry ── */}
@@ -9446,6 +9391,18 @@ const TruckLoadingPage = ({ userProfile }) => {
             </div>
           )}
 
+          {deleteTarget && (
+            <div style={{ ...styles.card, marginBottom: '12px', border: `1px solid ${theme.red}` }}>
+              <div style={{ fontSize: '13px', marginBottom: '10px' }}>Delete this log entry? This cannot be undone.</div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button style={{ ...styles.btn('danger'), fontSize: '12px' }} onClick={() => handleDeleteLog(deleteTarget)} disabled={deleteSaving}>
+                  {deleteSaving ? 'Deleting…' : 'Confirm Delete'}
+                </button>
+                <button style={{ ...styles.btn('secondary'), fontSize: '12px' }} onClick={() => setDeleteTarget(null)}>Cancel</button>
+              </div>
+            </div>
+          )}
+
           <div style={styles.card}>
             {entriesLoading ? <Spinner /> : logs.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '20px', color: theme.textMuted }}>No log entries yet.</div>
@@ -9461,20 +9418,32 @@ const TruckLoadingPage = ({ userProfile }) => {
                       <th style={styles.th}>Qty Loaded</th>
                       <th style={styles.th}>Rate Used</th>
                       <th style={styles.th}>Total</th>
+                      {canDelete && <th style={styles.th}></th>}
                     </tr>
                   </thead>
                   <tbody>
-                    {logs.map(log => (
-                      <tr key={log.id}>
-                        <td style={styles.td}>{log.date}</td>
-                        <td style={styles.td}>{log.product?.name || '—'}</td>
-                        <td style={styles.td}>{log.vehicle?.vehicle_number || '—'}</td>
-                        <td style={styles.td}>{log.trip_number_for_day ?? '—'}</td>
-                        <td style={styles.td}>{fmt(log.quantity_loaded)}</td>
-                        <td style={styles.td}>{log.computed_rate_used != null ? naira(log.computed_rate_used) : '—'}</td>
-                        <td style={styles.td}>{log.total_amount != null ? naira(log.total_amount) : '—'}</td>
-                      </tr>
-                    ))}
+                    {logs.map(log => {
+                      const isHistorical = log.date && log.created_at && log.date < log.created_at.split('T')[0];
+                      return (
+                        <tr key={log.id}>
+                          <td style={styles.td}>
+                            {log.date}
+                            {isHistorical && <span style={{ marginLeft: '6px', fontSize: '10px', padding: '1px 6px', borderRadius: '4px', background: '#f59e0b22', color: '#f59e0b', border: '1px solid #f59e0b44', fontWeight: '700' }}>Historical</span>}
+                          </td>
+                          <td style={styles.td}>{log.product?.name || '—'}</td>
+                          <td style={styles.td}>{log.vehicle?.vehicle_number || '—'}</td>
+                          <td style={styles.td}>{log.trip_number_for_day ?? '—'}</td>
+                          <td style={styles.td}>{fmt(log.quantity_loaded)}</td>
+                          <td style={styles.td}>{log.computed_rate_used != null ? naira(log.computed_rate_used) : '—'}</td>
+                          <td style={styles.td}>{log.total_amount != null ? naira(log.total_amount) : '—'}</td>
+                          {canDelete && (
+                            <td style={styles.td}>
+                              <button style={{ ...styles.btn('danger'), fontSize: '11px', padding: '3px 10px' }} onClick={() => setDeleteTarget(log.id)}>Delete</button>
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -9543,126 +9512,6 @@ const TruckLoadingPage = ({ userProfile }) => {
         </div>
       )}
 
-      {/* ── Payroll ── */}
-      {tab === 'payroll' && (
-        <div>
-          {payrollAlert && <Alert msg={payrollAlert.msg} type={payrollAlert.type} onClose={() => setPayrollAlert(null)} />}
-
-          {canGenerate && (
-            <div style={{ ...styles.card, marginBottom: '20px' }}>
-              <div style={styles.sectionTitle}>Generate Weekly Payroll</div>
-              <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-                <div>
-                  <label style={styles.label}>Week Ending Date</label>
-                  <input type="date" style={{ ...styles.input, width: '200px' }} value={genWeek} onChange={e => setGenWeek(e.target.value)} />
-                </div>
-                <button style={styles.btn('primary')} onClick={handleGenerate} disabled={genSaving || !genWeek}>
-                  {genSaving ? 'Generating…' : 'Generate'}
-                </button>
-              </div>
-            </div>
-          )}
-
-          <div style={styles.card}>
-            {payrollsLoading ? <Spinner /> : payrolls.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '20px', color: theme.textMuted }}>No payrolls yet.</div>
-            ) : payrolls.map(p => (
-              <div key={p.id} style={{ borderBottom: `1px solid ${theme.border}`, paddingBottom: '16px', marginBottom: '16px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
-                  <div>
-                    <div style={{ fontWeight: '600', color: theme.text }}>Week ending {p.week_ending}</div>
-                    <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '2px' }}>
-                      {p.entry_count ?? 0} trips · {naira(p.total_amount)}
-                      {p.payment_date ? ` · Paid ${p.payment_date}` : ''}
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
-                    <span style={styles.badge(payrollStatusColor(p.status))}>{p.status}</span>
-
-                    {canICOApprove && p.status === 'draft' && (
-                      <button style={{ ...styles.btn('primary'), fontSize: '11px', padding: '4px 10px' }}
-                        disabled={actionSaving}
-                        onClick={() => handlePayrollAction(p.id, 'ico_approve')}>ICO Approve</button>
-                    )}
-                    {canMDApprove && p.status === 'ico_approved' && recallTarget !== p.id && (
-                      <button style={{ ...styles.btn('primary'), fontSize: '11px', padding: '4px 10px' }}
-                        disabled={actionSaving}
-                        onClick={() => handlePayrollAction(p.id, 'md_approve')}>MD Approve</button>
-                    )}
-                    {canMarkPaid && p.status === 'md_approved' && (
-                      <button style={{ ...styles.btn('primary'), fontSize: '11px', padding: '4px 10px' }}
-                        disabled={actionSaving}
-                        onClick={() => handlePayrollAction(p.id, 'mark_paid')}>Mark Paid</button>
-                    )}
-                    {canRecall && ['ico_approved', 'md_approved'].includes(p.status) && recallTarget !== p.id && (
-                      <button style={{ ...styles.btn('danger'), fontSize: '11px', padding: '4px 10px' }}
-                        disabled={actionSaving}
-                        onClick={() => { setRecallTarget(p.id); setRecallReason(''); }}>Recall</button>
-                    )}
-
-                    <button style={{ ...styles.btn('secondary'), fontSize: '11px', padding: '4px 10px' }}
-                      onClick={() => expandPayroll(p.id)}>
-                      {expandedPayroll === p.id ? '▲ Hide' : '▼ Details'}
-                    </button>
-                  </div>
-                </div>
-
-                {recallTarget === p.id && (
-                  <div style={{ marginTop: '12px', padding: '12px', background: theme.surface, borderRadius: '8px', border: `1px solid ${theme.border}` }}>
-                    <label style={styles.label}>Recall Reason</label>
-                    <textarea style={{ ...styles.input, height: '60px', resize: 'vertical', marginBottom: '8px' }}
-                      placeholder="Reason for recall…" value={recallReason} onChange={e => setRecallReason(e.target.value)} />
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <button style={{ ...styles.btn('danger'), fontSize: '12px' }} disabled={!recallReason || actionSaving}
-                        onClick={() => handlePayrollAction(p.id, 'recall', recallReason)}>
-                        {actionSaving ? '…' : 'Confirm Recall'}
-                      </button>
-                      <button style={{ ...styles.btn('secondary'), fontSize: '12px' }} onClick={() => setRecallTarget(null)}>Cancel</button>
-                    </div>
-                  </div>
-                )}
-
-                {expandedPayroll === p.id && (
-                  <div style={{ marginTop: '12px' }}>
-                    {payrollLogsLoading[p.id] ? <Spinner /> : (payrollLogs[p.id] || []).length === 0 ? (
-                      <div style={{ fontSize: '12px', color: theme.textMuted }}>No log entries for this payroll period.</div>
-                    ) : (
-                      <div style={{ overflowX: 'auto' }}>
-                        <table style={{ ...styles.table, fontSize: '12px' }}>
-                          <thead>
-                            <tr>
-                              <th style={styles.th}>Date</th>
-                              <th style={styles.th}>Product</th>
-                              <th style={styles.th}>Vehicle</th>
-                              <th style={styles.th}>Trip #</th>
-                              <th style={styles.th}>Qty</th>
-                              <th style={styles.th}>Rate</th>
-                              <th style={styles.th}>Total</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {(payrollLogs[p.id] || []).map(log => (
-                              <tr key={log.id}>
-                                <td style={styles.td}>{log.date}</td>
-                                <td style={styles.td}>{log.product?.name || '—'}</td>
-                                <td style={styles.td}>{log.vehicle?.vehicle_number || '—'}</td>
-                                <td style={styles.td}>{log.trip_number_for_day ?? '—'}</td>
-                                <td style={styles.td}>{fmt(log.quantity_loaded)}</td>
-                                <td style={styles.td}>{log.computed_rate_used != null ? naira(log.computed_rate_used) : '—'}</td>
-                                <td style={styles.td}>{log.total_amount != null ? naira(log.total_amount) : '—'}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 };

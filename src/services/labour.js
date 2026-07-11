@@ -242,40 +242,9 @@ export const truckLoadingService = {
     if (error) throw error
   },
 
-  async getPayrolls() {
-    const { data, error } = await supabase
-      .from('truck_loading_payroll')
-      .select('*')
-      .order('week_ending', { ascending: false })
-    if (error) throw error
-    return data || []
-  },
-
-  async generatePayroll(weekEnding) {
-    const { data, error } = await supabase.rpc('generate_truck_loading_payroll', { p_week_ending: weekEnding })
-    if (error) throw error
-    return data
-  },
-
-  async advancePayroll(payrollId, action, reason = null) {
-    const { data, error } = await supabase.rpc('advance_truck_loading_payroll', {
-      p_payroll_id: payrollId,
-      p_action: action,
-      p_reason: reason,
-    })
-    if (error) throw error
-    return data
-  },
-
-  async getPayrollLogs(payrollId) {
-    const { data, error } = await supabase
-      .from('truck_loading_log')
-      .select('*, product:product_id(name), vehicle:vehicle_id(vehicle_number, vehicle_name)')
-      .eq('payroll_id', payrollId)
-      .order('date')
-      .order('trip_number_for_day')
-    if (error) throw error
-    return data || []
+  async deleteLog(id) {
+    const { error } = await supabase.from('truck_loading_log').delete().eq('id', id);
+    if (error) throw error;
   },
 }
 

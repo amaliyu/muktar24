@@ -1040,6 +1040,16 @@ function TruckLoadingTab({ pool, userProfile }) {
     else { setAlert({ msg: 'Assignment removed.', type: 'success' }); loadData() }
   }
 
+  const canDelete = ['md', 'production_manager', 'assistant_production_manager', 'logistics_manager'].includes(userProfile?.role)
+  const [deleteTarget, setDeleteTarget] = useState(null)
+
+  const handleDeleteLog = async (id) => {
+    const { error } = await supabase.from('truck_loading_log').delete().eq('id', id)
+    setDeleteTarget(null)
+    if (error) setAlert({ msg: error.message, type: 'error' })
+    else { setAlert({ msg: 'Entry deleted.', type: 'success' }); loadData() }
+  }
+
   return (
     <div>
       <div style={{ ...styles.row, gap: '4px', marginBottom: '16px' }}>
@@ -1097,18 +1107,35 @@ function TruckLoadingTab({ pool, userProfile }) {
               {showLogForm && (
                 <LoadingLogForm waybills={waybills} pool={pool} userProfile={userProfile} onSave={() => { setShowLogForm(false); loadData() }} onCancel={() => setShowLogForm(false)} />
               )}
+              {deleteTarget && (
+                <div style={{ ...styles.card, marginBottom: '12px', borderColor: theme.red }}>
+                  <div style={{ fontSize: '13px', marginBottom: '10px', color: theme.text }}>Delete this log entry? This cannot be undone.</div>
+                  <div style={styles.row}>
+                    <button style={styles.btn('danger')} onClick={() => handleDeleteLog(deleteTarget)}>Confirm Delete</button>
+                    <button style={styles.btn('ghost')} onClick={() => setDeleteTarget(null)}>Cancel</button>
+                  </div>
+                </div>
+              )}
               <div style={{ ...styles.card, padding: 0, overflow: 'hidden' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead style={{ background: theme.surface }}>
-                    <tr>{['Waybill No', 'Blocks Loaded', 'Rate/Block', 'Total', 'Loaders', 'Split Each', 'Week Ending', 'Status'].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
+                    <tr>
+                      {['Waybill No', 'Blocks Loaded', 'Rate/Block', 'Total', 'Loaders', 'Split Each', 'Week Ending', 'Status'].map(h => <th key={h} style={styles.th}>{h}</th>)}
+                      {canDelete && <th style={styles.th}></th>}
+                    </tr>
                   </thead>
                   <tbody>
-                    {logs.length === 0 && <tr><td colSpan={8} style={{ ...styles.td, textAlign: 'center', color: theme.textMuted }}>No loading logs.</td></tr>}
+                    {logs.length === 0 && <tr><td colSpan={canDelete ? 9 : 8} style={{ ...styles.td, textAlign: 'center', color: theme.textMuted }}>No loading logs.</td></tr>}
                     {logs.map(l => {
+                      const wb = waybills.find(w => String(w.id) === String(l.waybill_id))
                       const loaderNames = (l.loaders || []).map(x => x.labour?.full_name).filter(Boolean).join(', ')
+                      const isHistorical = wb?.waybill_date && l.created_at && wb.waybill_date < l.created_at.split('T')[0]
                       return (
                         <tr key={l.id}>
-                          <td style={styles.td}>{l.waybill_id || '—'}</td>
+                          <td style={styles.td}>
+                            <span>{wb?.waybill_number || l.waybill_id || '—'}</span>
+                            {isHistorical && <span style={{ marginLeft: '6px', fontSize: '10px', padding: '1px 6px', borderRadius: '4px', background: '#f59e0b22', color: '#f59e0b', border: '1px solid #f59e0b44', fontWeight: '700' }}>Historical</span>}
+                          </td>
                           <td style={styles.td}>{l.blocks_loaded}</td>
                           <td style={styles.td}>{naira(l.rate_per_block)}</td>
                           <td style={{ ...styles.td, color: theme.accent, fontWeight: '600' }}>{naira(l.total_amount)}</td>
@@ -1116,6 +1143,11 @@ function TruckLoadingTab({ pool, userProfile }) {
                           <td style={styles.td}>{naira(l.split_per_loader)}</td>
                           <td style={styles.td}>{l.payment_week_ending || '—'}</td>
                           <td style={styles.td}><span style={styles.badge(statusColor(l.payment_status))}>{l.payment_status || 'unpaid'}</span></td>
+                          {canDelete && (
+                            <td style={styles.td}>
+                              <button style={{ ...styles.btn('danger'), padding: '3px 10px', fontSize: '11px' }} onClick={() => setDeleteTarget(l.id)}>Delete</button>
+                            </td>
+                          )}
                         </tr>
                       )
                     })}
@@ -2250,7 +2282,7 @@ function ProposeRateForm({ roles, userProfile, onSave, onCancel }) {
 
 // ── MAIN COMPONENT ────────────────────────────────────────────────────────────
 export default function Labour({ userProfile }) {
-  const [activeTab, setActiveTab] = useState(userProfile?.role === 'logistics_manager' ? 'truck' : 'pool')
+  const [activeTab, setActiveTab] = useState(userProfile?.role === 'logistics_manager' ? 'payroll' : 'pool')
   const [roles, setRoles] = useState([])
   const [pool, setPool] = useState([])
   const [loading, setLoading] = useState(true)
@@ -2271,11 +2303,10 @@ export default function Labour({ userProfile }) {
 
   const isLogistics = userProfile?.role === 'logistics_manager'
   const TABS = isLogistics
-    ? [{ key: 'truck', label: 'Truck Loading' }]
+    ? [{ key: 'payroll', label: 'Payroll' }]
     : [
       { key: 'pool', label: 'Labour Pool' },
       { key: 'roster', label: 'Daily Roster' },
-      { key: 'truck', label: 'Truck Loading' },
       { key: 'payroll', label: 'Payroll' },
       { key: 'monthly', label: 'Monthly Fixed' },
       { key: 'rates', label: 'Labour Rates' },
