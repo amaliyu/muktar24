@@ -9606,7 +9606,7 @@ const TradingMarginReport = () => {
                     const drag = (r.gross_margin || 0) - (r.true_margin || 0);
                     return (
                       <tr key={r.order_id || i}>
-                        <td style={styles.td}><strong style={{ fontFamily: 'monospace', fontSize: '12px' }}>{r.order_reference || r.reference || (r.order_id ? r.order_id.slice(0, 8) : '—')}</strong></td>
+                        <td style={styles.td}><strong style={{ fontFamily: 'monospace', fontSize: '12px' }}>{r.invoice_number || (r.order_id ? r.order_id.slice(0, 8) + ' (not invoiced)' : '—')}</strong></td>
                         <td style={styles.td}>{r.customer_name || '—'}</td>
                         <td style={styles.td}>{r.order_date ? new Date(r.order_date).toLocaleDateString('en-GB') : '—'}</td>
                         <td style={styles.td}><strong>{naira(r.sale_amount)}</strong></td>
