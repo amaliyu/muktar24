@@ -1,88 +1,161 @@
 # Abuja Precast Manager — Handoff Document
 
-> **Date:** 2026-06-09
+> **Last updated:** 2026-07-11
 > **Repo:** `amaliyu/muktar24`
-> **Live branch (Vercel):** `main`
-> **Dev branch:** `claude/analyze-test-coverage-irQFZ`
+> **Production branch:** `main` (Vercel auto-deploys from here)
 > **Reference doc:** `APP_FULL_DOC.md` (full technical reference)
+
+---
+
+## OPERATING RULES — Non-Negotiable
+
+These rules govern every Claude Code session on this project. They must be restated at the start of any new session and followed without exception.
+
+1. **MD merges only.** Claude Code never merges its own PRs. All branches go through a GitHub PR that Muktar (MD) reviews and merges.
+2. **No DB changes.** Claude Code does not touch the Supabase database directly — no SQL execution, no migration tools, no schema edits. SQL that needs to run is written here in the handoff for Muktar to paste into the Supabase SQL Editor manually.
+3. **One feature, one branch, one PR.** Each distinct piece of work gets its own branch (`claude/<short-name>`) and its own PR. Never stack unrelated work on the same branch.
+4. **Slow and Verified.** The sequence is: fix on branch → Vercel preview deployed → test as the affected role in the preview → confirm with own eyes → MD merges → re-verify on production. Never mark work done until it passes role-based preview testing.
+
+---
+
+## Current State of `main`
+
+`main` tip: **`91641eeb`** — "Merge PR#68: Truck loading consolidation"
+
+Both PRs from the current work session are merged:
+- **PR#67** (`claude/trading-margin-report`) — TradingMarginReport fixes — ✅ merged
+- **PR#68** (`claude/truck-loading-consolidation`) — Truck loading consolidation — ✅ merged
+
+There are no open feature branches. `main` is clean.
 
 ---
 
 ## What This Project Is
 
-A full operations management ERP for Abuja Precast Concrete. It handles orders, invoicing, waybills, deliveries, production logging, inventory, labour payroll, staff management, vehicle fleet, expenses, and financial statements — all in a single React SPA backed by Supabase.
+A full-stack operations ERP for Abuja Precast Concrete. It handles orders, invoicing, waybills, deliveries, production logging, inventory, labour payroll, staff management, vehicle fleet, expenses, and financial statements — all in a single React SPA backed by Supabase. No router; page state is a single `useState` string.
 
 ---
 
-## Current Branch State
+## All Work Done Across Sessions (Cumulative)
 
-The dev branch (`claude/analyze-test-coverage-irQFZ`) is **2 commits ahead of `main`**:
+### Session 1 — Core ERP Setup
+Initial build: orders, invoicing, payroll, production, inventory, waybills, roles, ICO read-only mode.
 
-| Commit | What it does |
-|--------|-------------|
-| `a49950f` | Guards payroll submit button edge cases; restricts Monthly Fixed "Create Payroll" to authorised roles |
-| `10ee28f` | Updated `APP_FULL_DOC.md` to current state |
+### Session 2 — Bug Fixes & Role Hardening (2026-06-09)
+- **Invoice FK error fix:** Delete order restricted to MD only. `handleSaveInvoice` catches FK errors and auto-refreshes.
+- **Labour payroll submit button fix:** `LoadingWeeklySummary` now checks `weekly_labour_payroll` table instead of `truck_loading_log.payment_status` (DB CHECK constraint only allows `unpaid`/`paid` — no intermediate state).
+- **Recall to Draft workflow:** Added to all three payroll types. Resets `status → 'draft'`, clears approver fields. Roles: PM, APM, HR, Logistics, ICO, MD.
+- **`assistant_production_manager` role added end-to-end:** `APP_ROLES`, `ROLE_PAGES`, Labour.jsx, Reports.jsx. Same pages as PM except no Propose Rate Change.
+- **Submit button edge cases fixed:** `LoadingWeeklySummary` no longer silently swallows Supabase errors; Monthly Fixed "Create Payroll" restricted to authorised roles.
 
-**These commits have not been merged to `main` yet.** Merge them before deploying or building on top.
+### Session 3 — Download Buttons & Statement PDF (2026-06-11)
+- **Payroll download buttons (root cause):** `WeeklyPayrollTab` defaulted to *upcoming* Saturday. If today is Wednesday, it picked next Saturday, found no payroll → buttons never rendered. Fixed by adding `getLastSaturday()` so tab opens on the most recent past Saturday.
+- **Customer statement PDF:** `buildRows()` rewrote to use `invoice.total_amount` (VAT-inclusive) instead of waybill qty × unit price.
+- **Bulk Transfer XLSX + Payment Schedule XLSX:** Added to WeeklyPayrollTab and MonthlyFixedTab, visible to `['accountant', 'ico', 'md']` when status is `md_approved` or `paid`.
+- **Dashboard zero stats:** Guard added for `if (!userProfile) return`; re-fetches on `userProfile` change.
+- **Accountant page access:** `labour` and `waybills` added to `ROLE_PAGES.accountant`.
 
----
+### Session 3.5 — Bank Reconciliation + Payment Requests (PRs #62–#66, between sessions)
 
-## What Was Done in This Session (in order)
+These PRs were merged between sessions. Documented here for completeness.
 
-### 1. Invoice FK error fix (`9119c45`)
+#### PR#62: TruckLoadingPage (standalone page)
+Extracted truck loading out of Labour.jsx into a dedicated page in App.jsx. This was the prerequisite that made PR#68's consolidation possible.
 
-**Problem:** When the BDM tried to create an invoice, they sometimes got a raw Postgres error: `invoices_order_id_fkey`. Root cause: the Delete order button had no role restriction, so anyone could delete an order while another user had it selected.
+#### PR#63: Bank Statement Reconciliation
+Added whole-file reconciliation gate to bank statement import. Before importing a new statement batch, the system checks if the prior batch was reconciled; if not, the user must confirm before proceeding. Reconciliation check cannot run without a previous reconciliation record — the UI shows an explicit confirmation dialog rather than silently passing. Service: `bankReconciliationsService` in `services/bank.js`.
 
-**Fixes applied:**
-- Delete order button now shows for **MD only** (`src/App.jsx:1322`)
-- `handleSaveInvoice` catches the FK error and shows a helpful message + auto-refreshes the order list
-- Guard added so invoice can't be saved if `selected` order is null
+#### PR#64: Payment Request Bank Reference Matching
+Added reference-based matching between bank transactions and payment requests. Two RPCs: `suggest_bank_match(p_bank_transaction_id, p_matched_to_type, p_matched_to_id)` and `confirm_bank_match(p_bank_transaction_id, p_action, p_reason)`. Adds a suggested-match review UI where the accountant can confirm or reject each match. Match statuses: `unmatched`, `suggested`, `matched`. Service: `bankTransactionsService.suggestMatch()` and `.confirmMatch()`.
 
----
+#### PR#65: Disbursement Source Account
+Payment request disbursement flow now requires selecting which bank account the payment will go out from. The `advance_payment_request` RPC now takes `p_bank_account_id`. UI shows a bank account picker on the disbursement modal.
 
-### 2. Labour payroll submit button fix + recall workflow (`ce003f4`)
-
-**Problem:** The logistics manager's "Submit for Approval" button stayed visible after clicking. Root cause: the only way to detect a submission was to check `truck_loading_log.payment_status`, but the DB `CHECK` constraint only allows `'unpaid'` or `'paid'` — there is no intermediate "submitted" state. So the button condition never changed.
-
-**Fix:** `LoadingWeeklySummary` now loads `weekly_labour_payroll` records directly and checks `existingPayrolls[week]`. Once a payroll row exists for a week, the button is replaced with a status badge.
-
-**Recall workflow added:** A "Recall to Draft" button was added to all three payroll types (weekly loading, weekly production, monthly fixed). It resets `status → 'draft'` and clears `ico_approved_by` / `md_approved_by`. Available to: PM, APM, Logistics Manager, HR Officer, ICO, MD — for any payroll that hasn't been marked `paid`.
-
----
-
-### 3. `assistant_production_manager` role (`f6cb287`)
-
-**New role added end-to-end:**
-- Added to `APP_ROLES` and `ROLE_PAGES` in `src/App.jsx`
-- Added to `src/components/Labour.jsx` — can submit payrolls, use recall, access all labour tabs
-- Added to `src/components/Reports.jsx` — sees production and inventory reports
-- Added `ROLE_LABELS` entry in Reports
-- Same page access as `production_manager`, **except** the Propose Rate Change button (intentionally excluded — PM-only)
-
-**Outstanding SQL needed** — see section below.
+#### PR#66: Backfill Payment Requests
+Added a backfill entry form for entering historical payment requests after the fact. Uses the `backfill_payment_request` RPC which sets `status` to `disbursed` and links to a bank transaction directly. The on-behalf-of user picker uses `user_profiles_directory` (the RLS-safe view). Service: `paymentRequestsService.backfill()`.
 
 ---
 
-### 4. Submit button edge case hardening (`a49950f`)
+### Session 4 (Current) — Trading Margin Report + Truck Loading Consolidation (2026-07-11)
 
-Two bugs found in `LoadingWeeklySummary` that could cause the Submit button to reappear after being clicked:
+#### PR#67: TradingMarginReport fixes
 
-1. `useEffect` fetching existing payrolls used `.then(({ data }) => ...)` — silently ignored Supabase errors, leaving `existingPayrolls` empty on network failure.
-2. Supabase `.single()` can return `null` for `inserted`, making `existingPayrolls[week]` falsy — button reappears.
+**What was broken:**
+- Reference column showed `order_reference` or `reference` fields that don't exist on the RPC response.
+- RPC (`get_order_trading_margin`) returns raw cost columns — it does NOT return computed margin columns (`gross_margin`, `landed_cost`, `true_margin`). These were being read directly, producing all-zero values.
 
-Both fixed. Monthly Fixed "Create Payroll" button also restricted to authorised roles only (was open to any authenticated user).
+**What was fixed:**
+1. Reference column changed to: `r.invoice_number || (r.order_id ? r.order_id.slice(0, 8) + ' (not invoiced)' : '—')`
+2. RPC response normalised at `setRows` — all derived fields computed once at source, stable names used everywhere downstream:
+
+```js
+const normalized = (data || []).map(r => {
+  const sale     = Number(r.resale_sale_amount)      || 0
+  const purchase = Number(r.purchase_cost)           || 0
+  const fuel     = Number(r.attributed_fuel_cost)    || 0
+  const loading  = Number(r.attributed_loading_cost) || 0
+  const haulage  = Number(r.attributed_haulage_cost) || 0
+  const landed   = purchase + fuel + loading + haulage
+  return {
+    ...r,
+    sale_amount: sale, purchase_cost: purchase,
+    gross_margin: sale - purchase,
+    fuel_cost: fuel, loading_cost: loading, haulage_cost: haulage,
+    landed_cost: landed,
+    true_margin: sale - landed,
+  }
+})
+setRows(normalized)
+```
+
+**RPC actual return columns:**
+`order_id`, `invoice_number`, `customer_name`, `order_date`, `resale_sale_amount`, `purchase_cost`, `attributed_fuel_cost`, `attributed_loading_cost`, `attributed_haulage_cost`
+
+#### PR#68: Truck Loading Consolidation
+
+**Background:** The `truck_loading_payroll` table, its audit table, and both payroll RPCs (`generate_truck_loading_payroll`, `advance_truck_loading_payroll`) were dropped from the DB by Muktar before this session. This left the TruckLoadingPage Payroll tab calling dead DB objects — a live runtime error on production.
+
+**What was changed:**
+
+`src/components/Labour.jsx`:
+- Removed `{ key: 'truck', label: 'Truck Loading' }` from all TABS arrays (PM, APM, HR, Logistics, MD)
+- Logistics manager default tab changed from `'truck'` to `'payroll'`
+- The `TruckLoadingTab` component and its `truck` conditional render remain in the file as unreachable dead code (harmless)
+
+`src/App.jsx` — TruckLoadingPage component:
+- Removed entire **Payroll** tab: all state variables (11), all handler functions (`loadPayrolls`, `handleGenerate`, `handlePayrollAction`, etc.), all payroll UI (~120 lines)
+- Remaining tabs: **Log Entry** (`canLog` roles) and **Rates** (`canManageRates` roles)
+- Role flags:
+  ```js
+  const canLog         = ['production_manager','assistant_production_manager','logistics_manager','md'].includes(role)
+  const canManageRates = ['logistics_manager','md'].includes(role)
+  const canDelete      = ['md','production_manager','assistant_production_manager','logistics_manager'].includes(role)
+  ```
+- **Delete action added:** each log row shows a Delete button (for `canDelete` roles); clicking sets `deleteTarget`; a confirmation card appears before calling `truckLoadingService.deleteLog(id)`
+- **Historical badge added:** if `log.date < log.created_at.split('T')[0]`, the date cell shows an amber badge labelled "Historical"
+
+`src/services/labour.js` — `truckLoadingService`:
+- Removed: `getPayrolls()`, `generatePayroll()`, `advancePayroll()`, `getPayrollLogs()`
+- Added:
+  ```js
+  async deleteLog(id) {
+    const { error } = await supabase.from('truck_loading_log').delete().eq('id', id)
+    if (error) throw error
+  },
+  ```
+
+#### PR#67 Conflict Resolution
+PR#67 was created targeting the wrong base branch (`claude/analyze-test-coverage-irQFZ`). Fixed by retargeting via GitHub API to `main`, then rebasing `claude/trading-margin-report` onto current `main` and force-pushing. PR merged cleanly.
 
 ---
 
 ## SQL That Must Be Run in the Supabase SQL Editor
 
-**These have NOT been run. The app will not work fully without them.**
+**These have NOT been run by Claude Code. Paste each block manually.**
 
 ---
 
-### 1. Fix production target permissions for APM (blocking)
-
-APM users cannot set daily production targets because the RLS policy is missing their role:
+### 1. Fix `prod_targets_write` — APM cannot set production targets (BLOCKING for APM role)
 
 ```sql
 DROP POLICY IF EXISTS "prod_targets_write" ON production_targets;
@@ -94,9 +167,9 @@ CREATE POLICY "prod_targets_write" ON production_targets
 
 ---
 
-### 2. Seed the assistant_production_manager role (deployment safety)
+### 2. Seed `assistant_production_manager` role (deployment safety)
 
-The role exists in the app code but is not in the database seed files. If the DB is ever rebuilt from scratch, any user with this role will fail the FK constraint on `user_profiles.role`. Run once:
+The role exists in app code but is missing from DB seed files. Run once; also add to `supabase/add_all_roles.sql` and `supabase/MASTER_DEPLOYMENT.sql` for future full rebuilds:
 
 ```sql
 INSERT INTO app_roles (id, display_name, description, is_system_role)
@@ -111,78 +184,59 @@ ON CONFLICT (id) DO UPDATE
       description  = EXCLUDED.description;
 ```
 
-After running, also paste this row into `supabase/add_all_roles.sql` and `supabase/MASTER_DEPLOYMENT.sql` so it survives future full redeployments.
+---
+
+## Known Limitations
+
+| # | Issue | Severity |
+|---|-------|----------|
+| 1 | `ordersService.create` not transactional — zombie `orders` rows possible if `order_items` insert fails | Low |
+| 2 | `invoice_number` computed client-side — duplicate possible under concurrent sessions | Low |
+| 3 | `prod_targets_write` RLS missing APM — APM cannot set daily production targets | **Blocking for APM** |
+| 4 | `assistant_production_manager` not in SQL seed files | Low — matters only on full DB rebuild |
+| 5 | `TruckLoadingTab` in Labour.jsx is unreachable dead code | Cleanup only — no user impact |
 
 ---
 
-## Known Limitations to Be Aware Of
+## Architecture Quick Reference
 
-| Issue | Impact | Notes |
-|-------|--------|-------|
-| `ordersService.create` is not transactional | If `order_items` insert fails, a zombie `orders` row is left | Rare; fix requires a Supabase DB function with a transaction |
-| `invoice_number` computed client-side | Two simultaneous sessions could generate the same number | Low risk — it's a display label, no DB uniqueness constraint |
-| No audit log | Changes to orders, payrolls etc. are not tracked beyond the current state | Opening balances has a history table; nothing else does |
-
----
-
-## Architecture in One Page
-
-- **No router.** Page state is a single `useState` string (`active`). Sidebar calls `setActive(pageId)`.
-- **Role access** is enforced by `canSee(pageId)` which checks `ROLE_PAGES[role]`. Pages outside the role's list are filtered from the sidebar and redirect to dashboard.
-- **ICO read-only** is enforced via a CSS attribute: when `isICO` and the page is not `labour` or `schedule_approvals`, `<main>` gets `data-ico-view="true"`, which hides all buttons that don't have `data-ico-allow`. Buttons ICO must click (approve, recall) carry `data-ico-allow`.
-- **Board member read-only** same pattern via `data-board-view`.
-- **All Supabase calls** are in `src/services/*.js`. `Labour.jsx` calls Supabase directly in a few places (payroll queries inside components).
-- **RLS is disabled** on most tables; access control is purely in the frontend. The exceptions where RLS is active: `production_targets` (has a write policy), Storage buckets.
+- **No router.** `useState` string drives navigation. `safePage` falls back to `'dashboard'` if current page is outside the role's allowed list.
+- **Role access:** `canSee(pageId)` checks `ROLE_PAGES[role]`. `'all'` means MD full access.
+- **ICO read-only:** `data-ico-view="true"` on `<main>` hides all buttons except `[data-ico-allow]`. Excluded pages: `labour`, `schedule_approvals`.
+- **Board member read-only:** same pattern via `data-board-view`.
+- **Service layer:** all Supabase calls in `src/services/*.js`. Exception: Labour.jsx makes some direct Supabase calls inside components.
+- **Inline styles only.** No CSS framework.
 
 ---
 
-## Files to Know
+## Key Files
 
 | File | Why it matters |
-|------|---------------|
-| `src/App.jsx` | ~7 030 lines — almost all page components live here |
-| `src/components/Labour.jsx` | ~2 100 lines — entire labour module |
+|------|----------------|
+| `src/App.jsx` | ~9 500+ lines — almost all page components including TruckLoadingPage, TradingMarginReport |
+| `src/components/Labour.jsx` | ~2 300 lines — entire labour module (pool, roster, payroll, rates tabs) |
 | `src/components/Reports.jsx` | Role-gated reporting engine |
 | `src/components/StaffHR.jsx` | Staff and HR management |
-| `supabase/fix_all_priority_issues.sql` | Most recent migration — contains current RLS policies |
-| `supabase/labour_schema.sql` | Labour tables and constraints |
-| `supabase/auth_roles_financial_tables.sql` | app_roles, user_profiles, financial tables |
+| `src/services/labour.js` | Labour service layer (pool, roles, rate change, roster, truck loading, payroll) |
 | `APP_FULL_DOC.md` | Full technical reference — roles, tables, workflows |
 
 ---
 
 ## How to Continue Development
 
-1. **Merge dev branch to main** before building new features:
+1. **Always start fresh:** `git fetch origin main && git checkout main && git pull`
+2. **Create a feature branch:** `git checkout -b claude/<short-name>`
+3. **Run the pending SQL blocks above** if testing with an APM user or after a DB rebuild.
+4. **Environment variables** (Vercel + `.env.local`):
    ```
-   git checkout main
-   git merge claude/analyze-test-coverage-irQFZ
-   git push origin main
+   VITE_SUPABASE_URL=<project URL>
+   VITE_SUPABASE_ANON_KEY=<anon key>
    ```
-
-2. **Run the two SQL blocks** above in Supabase before testing with an APM user.
-
-3. **Environment variables needed** (set in Vercel and in `.env.local` for local dev):
-   ```
-   VITE_SUPABASE_URL=<your project URL>
-   VITE_SUPABASE_ANON_KEY=<your anon key>
-   ```
-
-4. **Local dev:**
-   ```
-   npm install
-   npm run dev
-   ```
-
-5. **To add a new role:**
-   - Add to `APP_ROLES` array (`src/App.jsx:102`)
-   - Add to `ROLE_PAGES` constant (`src/App.jsx:118`)
+5. **Local dev:** `npm install && npm run dev`
+6. **To add a new role:**
+   - Add to `APP_ROLES` (App.jsx ~line 102) and `ROLE_PAGES` (~line 118)
    - Add to `supabase/add_all_roles.sql` and `supabase/MASTER_DEPLOYMENT.sql`
    - Insert into `app_roles` table in Supabase
-   - Wire up any component-level role checks (ICO approve buttons, recall buttons, etc.)
-
-6. **To add a new page:**
-   - Add a component
-   - Add the page ID to `ROLE_PAGES` for each role that should see it
-   - Add a `pages` entry in the root component (`src/App.jsx:6912`)
-   - Add a sidebar nav item in the `NAV_SECTIONS` array
+   - Wire component-level role checks (approve buttons, recall, etc.)
+7. **To add a new page:**
+   - Add component, add page ID to `ROLE_PAGES`, add `pages` entry (~App.jsx line 6912), add sidebar nav item in `NAV_SECTIONS`

@@ -1,10 +1,10 @@
 # Abuja Precast Concrete Manager — Project Knowledge Document
 
-> **Last updated:** 2026-06-09 (commit `a49950f`)
+> **Last updated:** 2026-07-11 (main tip `91641eeb`)
 > **Stack:** React 18.3.1 · Vite 5.2.0 · Supabase (PostgreSQL + Auth + RLS + Storage)
-> **Repo:** `amaliyu/muktar24` · **Dev branch:** `claude/analyze-test-coverage-irQFZ`
+> **Repo:** `amaliyu/muktar24`
 > **Deployment:** Vercel auto-deploys from `main`
-> **Primary files:** `src/App.jsx` (~7 030 lines) · `src/components/Labour.jsx` (~2 100 lines)
+> **Primary files:** `src/App.jsx` (~9 500+ lines) · `src/components/Labour.jsx` (~2 300 lines)
 
 ---
 
@@ -45,7 +45,7 @@
 
 | File | Contents |
 |---|---|
-| `src/components/Labour.jsx` | Entire Labour module (~2 100 lines) |
+| `src/components/Labour.jsx` | Entire Labour module (~2 300 lines) |
 | `src/components/Reports.jsx` | Reports engine |
 | `src/components/StaffHR.jsx` | Staff/HR management |
 | `src/components/LoginScreen.jsx` | Auth screen |
@@ -211,15 +211,19 @@ Marketers only see customers and orders where `orders.marketer_id = userProfile.
 
 **File:** `src/components/Labour.jsx`
 
-### Tabs
+### Tabs (current — `truck` tab removed)
 
 | Tab key | Component | Who can access |
 |---|---|---|
+| `pool` | Worker pool management | PM, APM, HR, MD |
 | `roster` | `DailyRosterTab` | PM, APM, HR, MD |
-| `truck` | `TruckLoadingTab` | PM, APM, Logistics, MD |
 | `payroll` | `WeeklyPayrollTab` | PM, APM, HR, Logistics, ICO, MD |
 | `monthly` | `MonthlyFixedTab` | PM, APM, HR, ICO, MD |
 | `rates` | `LabourRatesTab` | All labour users |
+
+**Note:** The `truck` tab key and `TruckLoadingTab` component still exist in Labour.jsx as unreachable dead code — they are not included in any TABS array and are never rendered. Truck loading is now handled by **TruckLoadingPage** in `App.jsx` (separate page accessible via the sidebar).
+
+Logistics manager default tab: `payroll` (was `truck`; changed when the truck tab was removed).
 
 ### Worker Categories
 
@@ -227,16 +231,35 @@ Marketers only see customers and orders where `orders.marketer_id = userProfile.
 daily | monthly_fixed | piece_rate
 ```
 
-### Loading Payroll Submit Flow (`LoadingWeeklySummary`)
+### TruckLoadingPage (App.jsx — the live truck loading UI)
 
-1. `TruckLoadingTab` records individual log entries in `truck_loading_log` with `payment_status = 'unpaid'`.
-2. `LoadingWeeklySummary` groups logs by `payment_week_ending` (Saturday date).
-3. On component mount / log change, it queries `weekly_labour_payroll` for any existing payroll record for those weeks.
+Accessible via the sidebar as its own page (not a labour sub-tab).
+
+**Role flags:**
+```js
+const canLog         = ['production_manager','assistant_production_manager','logistics_manager','md'].includes(role)
+const canManageRates = ['logistics_manager','md'].includes(role)
+const canDelete      = ['md','production_manager','assistant_production_manager','logistics_manager'].includes(role)
+```
+
+**Tabs:** Log Entry (canLog), Rates (canManageRates). Payroll tab was removed — it called dropped DB objects.
+
+**Delete log entry:** canDelete roles see a Delete button per row. Clicking sets `deleteTarget`; a confirmation card appears. Confirmed deletion calls `truckLoadingService.deleteLog(id)` which does `DELETE FROM truck_loading_log WHERE id = $1`.
+
+**Historical badge:** If `log.date < log.created_at.split('T')[0]` (log's entry date predates when it was created — it was backfilled), an amber "Historical" badge appears on the date cell.
+
+### Loading Payroll Submit Flow (`LoadingWeeklySummary` inside WeeklyPayrollTab)
+
+1. Truck loading log entries are recorded via TruckLoadingPage, stored in `truck_loading_log` with `payment_status = 'unpaid'`.
+2. `LoadingWeeklySummary` (inside `WeeklyPayrollTab` in Labour.jsx) groups logs by `payment_week_ending` (Saturday date).
+3. On mount / log change, it queries `weekly_labour_payroll` for any existing payroll record for those weeks.
 4. If a payroll record exists for a week → shows a status badge.
 5. If no payroll exists and there are unpaid logs → shows **Submit for Approval** button.
 6. Submit creates a `weekly_labour_payroll` row with `status = 'draft'` and hides the button.
 
-**Important:** `truck_loading_log.payment_status` DB CHECK constraint only allows `'unpaid'` or `'paid'`. There is no intermediate submitted state in that table.
+**Important:** `truck_loading_log.payment_status` DB CHECK only allows `'unpaid'` or `'paid'`. No intermediate submitted state in that table.
+
+**WeeklyPayrollTab default date:** Opens on the most recent past Saturday (`getLastSaturday()` function), not the upcoming one. This ensures existing payroll records are found on load.
 
 ---
 
@@ -305,16 +328,21 @@ Service: `src/services/lpo.js`
 
 ## 9. Other Modules
 
-| Module | File | Key Tables |
+| Module | File | Key Tables / RPC |
 |---|---|---|
 | Production | `App.jsx` (Production component) | `production_log`, `damage_log`, `production_targets`, `batches` |
 | Inventory | `App.jsx` | `finished_goods`, `inventory` |
 | Waybills | `App.jsx` (Waybills component) | `waybills`, `deliveries` |
+| Truck Loading | `App.jsx` (TruckLoadingPage) | `truck_loading_log`, `truck_loading_rates`, `truck_loader_assignments` |
 | Customers | `App.jsx` (Customers component) | `customers` |
 | Suppliers | `SupplierRegistry.jsx` | `suppliers` |
 | Vehicles | `VehicleRegistry.jsx` | `vehicles`, `vehicle_rentals`, `vehicle_maintenance` |
 | Staff/HR | `StaffHR.jsx` | `staff`, `attendance`, `staff_documents` |
 | Reports | `Reports.jsx` | Reads from most tables |
+| **Trading Margin Report** | `App.jsx` (TradingMarginReport) | `get_order_trading_margin()` RPC |
+| **Payment Requests** | `App.jsx` | `payment_requests`, `payment_request_attachments` |
+| **Bank Accounts & Reconciliation** | `App.jsx` | `bank_accounts`, `bank_transactions`, `bank_import_batches`, `bank_reconciliations` |
+| **Receipts** | `App.jsx` | `receipts` (Storage bucket: `receipts`) |
 | Accounting | `App.jsx` (Accounting component) | `expenses`, `expense_categories`, `opening_balances`, `financial_adjustments` |
 | Financial Statements | `FinancialStatements.jsx` | Aggregates from expenses, payments, opening_balances |
 | KPI Dashboard | `KPIDashboard.jsx` | Aggregates across all tables |
@@ -323,6 +351,26 @@ Service: `src/services/lpo.js`
 | Pending Register | `App.jsx` | `pending_register` |
 | Data Import | `DataImport.jsx` | Bulk inserts into production_log, attendance, expenses |
 | User Management | `App.jsx` | `user_profiles`, `app_roles` |
+
+### TradingMarginReport — Important Notes
+
+Calls the `get_order_trading_margin(p_order_id uuid DEFAULT NULL)` Supabase RPC.
+
+**Actual RPC return columns:** `order_id`, `invoice_number`, `customer_name`, `order_date`, `resale_sale_amount`, `purchase_cost`, `attributed_fuel_cost`, `attributed_loading_cost`, `attributed_haulage_cost`
+
+The RPC does **not** return computed margin columns. All derived fields are calculated at `setRows` and stored with stable names:
+
+| Derived field | Formula |
+|---|---|
+| `sale_amount` | `resale_sale_amount` |
+| `gross_margin` | `sale_amount − purchase_cost` |
+| `fuel_cost` | `attributed_fuel_cost` |
+| `loading_cost` | `attributed_loading_cost` |
+| `haulage_cost` | `attributed_haulage_cost` |
+| `landed_cost` | `purchase_cost + fuel_cost + loading_cost + haulage_cost` |
+| `true_margin` | `sale_amount − landed_cost` |
+
+Reference column: `r.invoice_number || (r.order_id ? r.order_id.slice(0,8) + ' (not invoiced)' : '—')`
 
 ---
 
@@ -371,14 +419,20 @@ Auto-trigger: `on_auth_user_created` fires on `auth.users INSERT`, creates a `us
 
 | Table | Key Columns |
 |---|---|
-| `labour_pool` | id, name, category, role_id, bank, account_number, status |
-| `labour_roles` | id, role_name, base_rate, target_bonus, bonus_type, effective_date |
+| `labour_pool` | id, full_name, labour_number, usual_role_id, bank, account_number, status |
+| `labour_roles` | id, role_name, base_rate, target_bonus, payment_type, bonus_type, effective_date, approved_by |
 | `daily_labour_log` | id, worker_id, date, hours_worked, block_count, amount_earned |
-| `truck_loading_log` | id, worker_id, date, truck_count, total_amount, payment_week_ending, payment_status CHECK('unpaid','paid') |
+| `daily_roster` | id, roster_date, prepared_by, notes |
+| `daily_roster_entries` | id, roster_id, labour_id, role_id, hours_worked |
+| `truck_loading_log` | id, vehicle_id, product_id, date, quantity_loaded, trip_number_for_day, computed_rate_used, total_amount, created_at |
+| `truck_loading_rates` | id, product_id, rate_per_unit, effective_date |
+| `truck_loader_assignments` | id, vehicle_id, labour_id, assigned_date, is_active, removed_date |
 | `weekly_labour_payroll` | id, week_ending, payroll_type, total_amount, worker_count, status CHECK('draft','ico_approved','md_approved','paid'), prepared_by, ico_approved_by, md_approved_by |
 | `monthly_fixed_payroll_items` | id, payroll_id, worker_id, base_amount, bonus_amount |
-| `labour_rate_change_requests` | id, role_id, proposed_rate, overall_status, ico_status, md_status |
+| `labour_rate_change_requests` | id, role_id, proposed_rate, proposed_bonus, effective_date, overall_status, ico_status, md_status |
 | `labour_attendance` | id, worker_id, date, status |
+
+**Dropped tables (no longer exist):** `truck_loading_payroll`, `truck_loading_payroll_audit`. Both RPCs `generate_truck_loading_payroll` and `advance_truck_loading_payroll` are also dropped. Any code referencing these will throw a runtime error — all such code was removed in PR#68.
 
 ---
 
@@ -401,6 +455,33 @@ Auto-trigger: `on_auth_user_created` fires on `auth.users INSERT`, creates a `us
 | `opening_balances` | id, category, sub_category, account_name, amount, depreciation_amount, vehicle_id, as_at_date |
 | `opening_balance_history` | id, opening_balance_id, old_amount, new_amount, changed_by, changed_at |
 | `financial_adjustments` | id, statement_type, account_name, amount, period_from, period_to, adjustment_date |
+| `receipts` | id, receipt_number, expense_id, receipt_date, vendor_name, amount, file_url, receipt_type, uploaded_by, tax_category |
+
+---
+
+### Bank & Payment
+
+| Table | Key Columns |
+|---|---|
+| `bank_accounts` | id, account_name, bank_name, account_number, created_at |
+| `bank_transactions` | id, bank_account_id, transaction_date, value_date, description, debit, credit, balance, reference, match_status CHECK('unmatched','suggested','matched'), matched_to_type, matched_to_id, import_batch_id |
+| `bank_import_batches` | id, bank_account_id, imported_at, row_count |
+| `bank_reconciliations` | id, bank_account_id, reconciliation_date, status, reconciled_date |
+| `payment_requests` | id, reference, requested_by, amount, purpose, expense_category_id, disbursement_method, supplier_id, payee_name, payee_bank_name, payee_account_number, payee_account_name, bank_account_id, status, order_item_id |
+| `payment_request_attachments` | id, payment_request_id, file_path, uploaded_by, note |
+
+**Payment request status flow:** `draft → ico_reviewed → md_approved → disbursed → closed`
+
+**Bank transaction match_status:** `unmatched` (just imported) → `suggested` (match proposed by user/system, awaiting confirmation) → `matched` (confirmed)
+
+**Supabase RPCs (bank & payments):**
+- `suggest_bank_match(p_bank_transaction_id, p_matched_to_type, p_matched_to_id)` — proposes a match, sets `match_status = 'suggested'`
+- `confirm_bank_match(p_bank_transaction_id, p_action, p_reason)` — accepts or rejects a suggested match
+- `get_next_payment_request_reference()` — returns next sequential reference like `APC-PR-0042`
+- `advance_payment_request(p_request_id, p_action, p_reason, p_bank_account_id)` — moves request through its approval/disbursement workflow
+- `backfill_payment_request(p_requested_by, p_amount, p_purpose, p_transaction_date, ...)` — enters historical payment directly to `disbursed` status
+- `approve_vendor(p_supplier_id)` — moves supplier from `pending_verification` to `active`
+- `create_supplier_from_payment_request(p_company_name, ...)` — creates a new supplier from payment request payee details
 
 ---
 
@@ -432,7 +513,7 @@ Each service file exports a single object with async methods. All raw Supabase c
 | `services/production.js` | `productionService` | production_log, damage_log, production_targets |
 | `services/inventory.js` | `inventoryService` | finished_goods, inventory |
 | `services/batches.js` | `batchesService` | batches |
-| `services/labour.js` | `labourService` | labour_pool, labour_roles, logs |
+| `services/labour.js` | `labourRolesService`, `labourPoolService`, `rateChangeService`, `rosterService`, `truckLoadingService`, `payrollService` | labour_pool, labour_roles, daily_roster, truck_loading_log, weekly_labour_payroll |
 | `services/attendance.js` | `attendanceService` | attendance |
 | `services/staff.js` | `staffService` | staff |
 | `services/vehicles.js` | `vehiclesService` | vehicles |
@@ -440,7 +521,8 @@ Each service file exports a single object with async methods. All raw Supabase c
 | `services/products.js` | `productsService` | products |
 | `services/expenses.js` (accounting.js) | `accountingService` | expenses, expense_categories |
 | `services/financialService.js` | `financialService` | aggregates |
-| `services/bank.js` | `bankService` | bank transactions |
+| `services/bank.js` | `bankAccountsService`, `bankTransactionsService`, `bankImportBatchesService`, `bankReconciliationsService`, `receiptsService` | bank_accounts, bank_transactions, bank_import_batches, bank_reconciliations, receipts |
+| `services/paymentRequests.js` | `paymentRequestsService` | payment_requests, payment_request_attachments |
 | `services/authService.js` | `authService` | user_profiles, app_roles |
 | `services/hrService.js` | `hrService` | staff documents |
 
@@ -498,10 +580,11 @@ ON CONFLICT (id) DO UPDATE
 
 | # | Description | Severity |
 |---|-------------|----------|
-| 1 | `ordersService.create` is not transactional — zombie order rows possible if `order_items` insert fails | Low |
-| 2 | `invoice_number` computed client-side from current order list — race condition possible under concurrent sessions | Low |
-| 3 | `prod_targets_write` RLS policy missing `assistant_production_manager` — APM cannot set daily targets | **Blocking for APM** — fix with SQL A above |
-| 4 | `assistant_production_manager` missing from SQL seed files | Low — only matters on full DB rebuild |
+| 1 | `ordersService.create` not transactional — zombie `orders` rows possible if `order_items` insert fails | Low |
+| 2 | `invoice_number` computed client-side — duplicate possible under concurrent sessions | Low |
+| 3 | `prod_targets_write` RLS missing `assistant_production_manager` — APM cannot set daily production targets | **Blocking for APM** |
+| 4 | `assistant_production_manager` not in SQL seed files | Low — matters only on full DB rebuild |
+| 5 | `TruckLoadingTab` and its `truck` tab key remain in Labour.jsx as unreachable dead code | Cleanup only — no user impact |
 
 ---
 
@@ -513,16 +596,22 @@ ON CONFLICT (id) DO UPDATE
 - LPO workflow (submit → MD approve/reject)
 - Deliveries and waybill management (driver scoping works)
 - Customer management (marketer scoping works)
+- Customer statement PDF (VAT-inclusive, invoice-based debits)
 - Production logging, target setting, damage log
 - Inventory and finished goods tracking
 - Batch management
 - Labour pool management
 - Daily labour roster
-- Truck loading log + weekly summary
+- **TruckLoadingPage** — log entries, loading rates, delete log entry, Historical badge for backfilled entries
 - Weekly payroll (loading and production) full approval chain: draft → ICO → MD → paid
 - Monthly fixed payroll full approval chain: draft → ICO → MD → paid
 - **Recall to Draft** for all payroll types (any non-paid state)
+- Payroll XLSX downloads (Payment Schedule + Bulk Transfer) for accountant / ICO / MD when status is `md_approved` or `paid`
 - Labour rate change request workflow (propose → ICO → MD → auto-apply to labour_roles)
+- **Trading Margin Report** — per-order margin analysis with fuel, loading, haulage cost attribution
+- **Payment Requests** — submit → ICO review → MD approve → disburse (with source bank account selection); backfill historical; attachment upload; vendor management with verification flow
+- **Bank Accounts & Transactions** — import bank statement CSV/PDF, duplicate detection, whole-file reconciliation gate, reference matching (suggested → confirmed), bank-to-payment-request reconciliation
+- **Receipts** — upload photo/PDF receipts, link to expense entries, signed URL viewing (private storage bucket)
 - Staff management and attendance
 - Vehicle registry, maintenance, rentals
 - Supplier registry
@@ -542,7 +631,7 @@ ON CONFLICT (id) DO UPDATE
 
 ### Requires SQL Action Before Working Fully
 
-- Production target setting for `assistant_production_manager` role — run SQL A in section 12
+- Production target setting for `assistant_production_manager` role — run SQL block 1 in section 12
 
 ### Not Yet Built / Out of Scope
 
