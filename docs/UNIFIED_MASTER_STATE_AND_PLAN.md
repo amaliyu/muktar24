@@ -3,7 +3,7 @@
 
 Repo: `amaliyu/muktar24` (PRIVATE) · Prod branch: `main` · Stack: React 18 + Vite 5 + Supabase (PostgreSQL, RLS) + Vercel
 App: APC Manager — internal ERP for Abuja Precast Concrete Limited
-**Updated: 2026-07-09 (Session 16 — Phase 5a frontend, trading/resale).** All DB state verified by live query, not memory.
+**Updated: 2026-07-11 (Session 17 — Phase 5b/5c complete, truck loading rebuild, historical backfill, full landed-cost margin).** All DB state verified by live query, not memory.
 **Status: BETA. A physical/manual backup system runs in parallel — NO downtime pressure.**
 **Operating mode: SLOW AND VERIFIED — fix on a branch → test on the branch's Vercel preview AS THE AFFECTED ROLE → confirm with own eyes → MD merges → re-verify production.**
 
@@ -18,6 +18,50 @@ App: APC Manager — internal ERP for Abuja Precast Concrete Limited
 ---
 
 ## 1. SESSION HISTORY (most recent first)
+
+### ✅ SESSION 17 (2026-07-10/11) — PHASE 5b/5c COMPLETE + TRUCK LOADING REBUILD + HISTORICAL BACKFILL
+**PRs: #59 (payment-requests-history), #60 (payment-request-edit), #61 (payment-request-closure), #62 (truck-loading-page — initial standalone build), #63 (bank-statement-reconciliation), #64 (pr-bank-matching), #65 (disbursement-source-account), #66 (backfill-payment-requests), #67 (trading-margin-report), #68 (truck-loading-consolidation — final rebuild). All merged. DB changes applied via planning-chat migrations as usual.**
+
+**A. Phase 5b closure logic (PRs #59–61)**
+- `advance_payment_request` now handles `close` and `override_close` actions.
+- Closure is evidence-gated per category's `closure_mechanism`: stock-movement link required for `stock` category; vehicle-log link for `vehicle`; truck-loading-log link for `loading`; external-haulage-log link for `haulage`; receipt attachment for `receipt`. Service/cash categories expect a receipt — policy-based, not a hard block.
+- Override close is a dual-actor mechanism (accountant OR MD); each override is logged with actor so accountant-overrides-own-disbursement is visually distinguished (self-review mitigation, per Decision 13).
+- A self-review override reporting view (`payment_request_override_report` or equivalent) surfaces all logged overrides to MD/ICO.
+- **History view (PR #59):** the payment-request detail modal gains a full audit trail (status transitions, actors, timestamps) — same pattern as payroll/advance/disciplinary audit tables.
+- **Edit-while-draft (PR #60):** initiators can edit a payment request while it is in `draft` status; edit is locked once it moves to ICO review.
+
+**B. Truck loading rates + payroll — built, then partially rebuilt (PRs #62, #68)**
+- **Initial build (PR #62, Stage B):** Per-product trip-tiered rate table (`truck_loading_rates`) added, fixing a flat hard-coded ₦8/bag rate that had left the feature unused since beta. A new dedicated payroll-approval table (`truck_loading_payroll`) and its RPCs (`generate_truck_loading_payroll`, `advance_truck_loading_payroll`) were built and the Payroll tab wired up in the standalone TruckLoadingPage.
+- **Redundancy identified same session:** The new payroll table duplicated a proven, already-in-use mechanism — `weekly_labour_payroll` with `payroll_type='loading'`, with 4 completed real cycles pre-existing and correctly used by the existing `WeeklyPayrollTab` in `Labour.jsx`. Critically, the existing P&L and cost-per-unit reports already read from `weekly_labour_payroll` specifically; the new table would have been invisible to cost reporting if left in place.
+- **Consolidation (PR #68):** New redundant payroll table, its RPCs, and the old broken `TruckLoadingTab` entry-logging UI in `Labour.jsx` all removed. Rate/pricing logic and the standalone `TruckLoadingPage` kept. All payroll flow consolidated onto the one proven `weekly_labour_payroll` path via `WeeklyPayrollTab`. Delete capability added for initiators (entry deletion is blocked once a payroll run covering it has moved past draft). Historical-entry badge added: if `log.date < log.created_at.split('T')[0]` the row is flagged amber "Historical" — confirms a back-entered trip rather than a same-day punch.
+
+**C. Phase 5c — bank reconciliation (PRs #63, #64)**
+- **Account hygiene (DB — planning-chat migration):** duplicate bank account records removed; real Moniepoint account number recorded in `bank_accounts`. Live account count now correct.
+- **Match-state machine (RPC-guarded — planning-chat migration):** `suggested` → `confirmed` / `rejected` with full audit trail. The existing client-side unguarded writes to `bank_transactions` are replaced by `suggest_bank_match(p_bank_transaction_id, p_matched_to_type, p_matched_to_id)` and `confirm_bank_match(p_bank_transaction_id, p_action, p_reason)` RPCs. A confirmed match cannot be re-matched without a reject first.
+- **Whole-file reconciliation gate on statement import (PR #63):** opening + credits − debits = closing, verified before the import batch is written. Prefers the bank's own stated totals over row-summation when present (Moniepoint header totals; Taj TRANS SUMMARY). If the check cannot run at all (data missing), the user receives an explicit acknowledgment prompt — never silently skips. Any arithmetic mismatch rejects the entire file; partial ingestion is forbidden.
+- **Reference-based auto-matching (PR #64):** `APC-PR-#####` embedded in bank narrations is matched against `payment_requests`. **Amount-agreement gate is strict:** a reference match with a mismatched amount is flagged as a discrepancy, never auto-confirmed. Matching creates a `suggested` match; accountant confirms. UI surfaces all suggested matches in a review queue.
+- **`payment_requests.bank_account_id` required on non-cash disbursement (PR #65):** the disbursement modal now requires selecting the source bank account before the `disbursed` action can be submitted. `advance_payment_request` receives `p_bank_account_id` and records it on the request row.
+
+**D. Historical backfill (PR #66)**
+- `payment_requests.transaction_date` column added — the actual date money moved, separate from `created_at` (when the digital record was entered).
+- `backfill_payment_request()` RPC: lands directly in `disbursed` status (skips the live approval chain, since real approval already happened informally before the system existed). Open to initiator roles + md. A mandatory historical note field is required on every backfill submission.
+- `query` and `resolve_query` actions on `advance_payment_request`: ICO or accountant can flag a backfilled entry for correction without triggering a live dispute; the initiator can submit a corrected note/amount; the querying role resolves. Keeps back-data corrections auditable without a full re-submission cycle.
+- On-behalf-of user picker uses `user_profiles_directory` (the RLS-safe view accessible to all authenticated roles), not the raw `user_profiles` table which is restricted to HR/MD.
+
+**E. Trading/resale corrections (DB — planning-chat migrations)**
+- "9 Inch" product (leftover test-data debris, not a real product) renamed to "9 Inch (Nigeria Standard)" and repurposed as the actual local/Nigeria-standard resale catalog entry — resolves the S16 naming-collision deferral.
+- A real live order (APC-INV-2026-2381) found mis-tagged as `source_type='manufactured'` when it was actually a resale order — corrected.
+- `order_items.cost_basis` auto-sync trigger: whenever a linked Trading Purchases payment request reaches `disbursed`, its `amount` is added to (not overwrites) `cost_basis` on the linked `order_item`. Accumulates across partial/installment payments — supporting the 50%-now-50%-on-delivery pattern.
+
+**F. Full landed-cost margin — resolves S16 deferral (PR #67)**
+- `order_trading_margin` view + `get_order_trading_margin(p_order_id uuid DEFAULT NULL)` RPC (role-gated: `bdm`, `md`, `accountant`, `board_member`). Attributes fuel and loading costs to a specific order via the existing `waybills → vehicle_fuel_log / truck_loading_log` link (no new columns on waybills). External-haulage cases use `external_haulage_log.order_id` (new column).
+- **TradingMarginReport UI in `App.jsx`:** gross margin (sale − purchase_cost) vs. true margin (sale − landed_cost) side by side. RPC returns raw cost columns only; all derived fields (`gross_margin`, `landed_cost`, `true_margin`) computed client-side at `setRows` using stable aliased names — prevents repeated field-name divergence across components.
+
+**G. Miscellaneous real fixes (DB — planning-chat migrations)**
+- **`suppliers_select` RLS widened:** initiator roles (production_manager, logistics_manager, bdm, hr_officer) were unable to see any active vendors at all when creating a payment request — oversight-role-only was an oversight in the original policy. Fixed to grant `status='active'` vendor SELECT to all authenticated roles (the payee's company name and bank details are not sensitive).
+- **Staff self-service ID card download:** `staff_photos_read` only ever covered oversight roles (HR/MD) reading others' photos; staff accessing their own photo for their own ID card download were blocked. Self-access rule added (`auth.uid() = owner`-style) so any linked employee can download their own ID card without HR having to do it.
+- **NULL-role-bypass security sweep:** A pattern where `get_user_role() NOT IN ('list', 'of', 'roles')` silently evaluates to TRUE when the role resolves to NULL (unauthenticated/broken profile), found first in `get_kiosk_pin_sync` during an earlier fix that itself introduced the same bug. Swept across the entire schema — 9 pre-existing functions had the same latent vulnerability; all patched to `get_user_role() IS NOT NULL AND get_user_role() NOT IN (...)` or equivalent safe guard. Verified clean.
+- **`reconcile_attendance_punches` access tightened:** the RPC was callable by any `authenticated` user, not just the pg_cron service role. `REVOKE EXECUTE FROM authenticated` applied; `service_role` retains access for the nightly job.
 
 ### 🔵 SESSION 16 (2026-07-09) — PHASE 5a BUILD: EXPENSE CATEGORIES + PAYMENT REQUESTS + TRADING/RESALE
 **PRs: #51 (docs — Decision 10 Moniepoint empirics), #52 (docs — Decision 11 initiator roles), #53 (Phase 5a payment-request lifecycle frontend), #54 (trading/resale order items). Code PRs carry no DB changes. All DB changes applied via planning-chat migrations.**
@@ -345,8 +389,15 @@ Bounded audit, five categories:
 - ✅ **Leave year-end controls — COMPLETE (S11, PR #33).** `run_annual_leave_rollover` and `expire_annual_carryover` RPCs wired to MD-only buttons in StaffHR LeaveBalancesTab.
 - ✅ **Attendance kiosk — Phase 4d (S11, merged: PR #34 revert + PR #35 kiosk).** `src/services/kioskService.js` + `src/components/AttendanceKiosk.jsx` + App.jsx plumbing (flags page, My HR attendance+PIN sections, ICO exemption fix). DB fully live. pg_cron resolved: `reconcile-attendance-punches-nightly` runs at 20:00 UTC. `pin_hash` confirmed SHA-256 hex. No outstanding items.
 - **Manager email migration (future).** Current manager logins use personal emails. Planned: replace 7 role accounts with official `@abujaprecast.com` addresses (MD/ICO/BDM/logistics/production/store/HR).
-- **Products naming collision (PENDING, S16 — not fixed).** The `products` table currently has a "9 Inch 3 Hole Block" entry representing APCL's own manufactured block. A local/Nigeria-standard resale variant of the same nominal size needs to be a distinct product record — the two have different geometry, spec, and/or sourcing and must be distinguishable at order-item entry time. The resale-variant product row has not been added yet. Until it is, `source_type = 'resale'` items with block_type "9 Inch 3 Hole Block" are ambiguous. Planned resolution options (not decided): add a qualified-name product (e.g. "9 Inch Local"), or a `source_type` discriminator at the product level. **No DB change applied; defer to a dedicated products session.**
-- **Full landed-cost margin on resale trades (DEFERRED, S16).** `order_items.cost_basis` captures what APCL pays the partner (purchase cost). What is NOT tracked: the share of delivery/logistics cost attributable to a specific resale sale (freight, haulage, loading). Current gross margin from `cost_basis` is therefore sale-price-minus-purchase-cost only — not full landed cost. Full landed cost requires attributing a delivery cost to the order item, which in turn requires linking a waybill or logistics run to the line item. This was deliberately not built in S16. `cost_basis` is the foundation; the freight-attribution link is the remaining piece. Defer to a future trading/margin session.
+- ✅ **Products naming collision — RESOLVED (S17, item E).** "9 Inch" ambiguous product renamed "9 Inch (Nigeria Standard)" and repurposed as the real local-block catalog entry. The live mis-tagged order (APC-INV-2026-2381) corrected.
+- ✅ **Full landed-cost margin on resale trades — RESOLVED (S17, item F).** `order_trading_margin` view + `get_order_trading_margin()` RPC live. TradingMarginReport UI in App.jsx shows gross and true (landed-cost) margins side by side. See item F above.
+- **Stock movement linkage (NEW — S17).** Loading blocks for delivery genuinely never registers as inventory leaving the yard through any path, old or new system — confirmed via direct code trace. A "dispatch" stock-movement entry is not created when a waybill is issued or a delivery completed. Not yet built; would require a new outbound-stock event triggered by waybill dispatch or delivery confirmation.
+- **Dashboard widget for labour/loading activity (NEW — S17).** No existing connection to preserve; would be a new addition to the KPI/dashboard aggregations pulling from `daily_roster_entries` and `truck_loading_log`.
+- **Invoice deletion (NEW — S17).** RLS already permits md, but no direct UI action exists. The only way to remove an invoice today is deleting its whole parent order, which cascades and removes every other invoice, payment, and waybill attached to it. A targeted single-invoice delete UI (MD-only, confirm-gated) is missing.
+- **Payroll week navigation UX (NEW — S17).** `WeeklyPayrollTab` has only a raw date picker — no prev/next buttons, no status badge on the selector showing whether the week has a payroll and what state it is in. Flagged as the concrete answer to a real "labour tabs are hard to use" complaint. Not yet built.
+- **Payment request list filtering (NEW — S17).** Status grouping (pending vs actioned vs disbursed) and an outstanding-disbursement summary are not yet built in the PaymentRequestsPage list view.
+- **Trading Margin Report access for ICO (NEW — S17, open decision).** Currently gated to `bdm`, `md`, `accountant`, `board_member`. Whether ICO should also have read access is an open MD decision — not resolved.
+- **HANDOFF.md accuracy (NEW — S17).** During S17, at least two items claimed outstanding in `HANDOFF.md` were already live in the DB — the SQL blocks listed as pending had already been applied. `HANDOFF.md` needs a pass to re-sync with actual current DB state rather than just the plan document's outstanding list. (Note: `APP_FULL_DOC.md` was updated in the S17 docs round-up session — the accuracy gap is specifically in `HANDOFF.md`.)
 - **Orphaned staff photo files** in `staff-photos` bucket from deleted test staff — harmless; clear via Supabase dashboard (SQL delete blocked).
 - **Ransom (APC-EMP-018)** in onboarding — HR to complete checklist + activate when ready.
 - Original payroll trigger/RPC/audit objects not in tracked migration history (pre-discipline). Live & verified. Optional: capture as no-op migration.
@@ -403,10 +454,26 @@ Bounded audit, five categories:
 | Silent supabase fallback | ✅ fixed (PR #18) | — |
 | Staff-payroll state machine | ✅ live (S7, PR #20) | — |
 | expense_categories restructure (S16) | ✅ DONE — cost-centre grouping, Labour/Salaries deactivated, Trading Purchases + seeds seeded per §8 | — |
-| Payee/vendor system (S16, PR #56) | 🔵 PR #56 open — `supplier_id`/payee fields/Others note on creation form, save-as-vendor RPC, pending-vendors section | MD merges; **unblocks all new payment-request creation** (DB constraint was live with no frontend) |
-| Phase 5a payment-request lifecycle (S16, PR #53) | 🔵 PR #53 open — role-differentiated frontend (initiator form, ICO/MD/accountant queues), 23505 collision retry | MD merges; smoke-test 4 initiator roles + ICO + MD + accountant |
-| Trading/resale order items (S16, PR #54) | 🔵 PR #54 open — source_type toggle + cost_basis in order forms; Resale badge in detail; BDM order-item link in payment requests | MD merges; test Mfg/Resale toggle + BDM Trading Purchases flow |
-| Payment-request + ingestion (#5) | **5a IN PROGRESS (S16, §8)** — PRs #53/#54 open; pre-schema verification fully closed (S15); 5b–5e queued per design | PR #53/#54 MD merge → 5b (attachments + goods-receipt link) |
+| Payee/vendor system (S16, PR #56) | ✅ MERGED — `supplier_id`/payee fields/Others note, save-as-vendor RPC, pending-vendors section | — |
+| Phase 5a payment-request lifecycle (S16, PR #53) | ✅ MERGED — role-differentiated frontend (initiator form, ICO/MD/accountant queues), 23505 collision retry | — |
+| Trading/resale order items (S16, PR #54) | ✅ MERGED — source_type toggle + cost_basis in order forms; Resale badge in detail; BDM order-item link in payment requests | — |
+| Payment-request History view (S17, PR #59) | ✅ MERGED — full audit trail on detail modal | — |
+| Payment-request Edit-while-draft (S17, PR #60) | ✅ MERGED — initiator can edit before ICO review; locked after | — |
+| Phase 5b closure logic (S17, PR #61) | ✅ MERGED — `close`/`override_close` actions, evidence-gated per closure_mechanism, dual-actor override log, self-review reporting view | — |
+| Truck loading per-product rates (S17, PR #62 + #68) | ✅ MERGED — trip-tiered `truck_loading_rates` table, live editable per product, fixes the broken ₦8 flat rate; delete capability (blocked once payroll moves past draft); Historical badge on backfilled entries | — |
+| Truck loading payroll consolidation (S17, PR #68) | ✅ MERGED — redundant `truck_loading_payroll` table, its RPCs, and old broken Labour.jsx truck tab all removed; consolidated onto proven `weekly_labour_payroll` path | — |
+| Phase 5c reconciliation gate (S17, PR #63) | ✅ MERGED — whole-file opening+credits−debits=closing gate; explicit acknowledgment when check cannot run; no silent partial ingestion | — |
+| Phase 5c reference matching (S17, PR #64) | ✅ MERGED — APC-PR-##### auto-match against payment_requests; amount-agreement gate (mismatch = discrepancy, never auto-confirm); suggested-match review queue | — |
+| Phase 5c disbursement source account (S17, PR #65) | ✅ MERGED — `bank_account_id` required on non-cash disburse; recorded on request row; RPC receives `p_bank_account_id` | — |
+| Phase 5c match-state machine (S17, DB) | ✅ LIVE — `suggest_bank_match` / `confirm_bank_match` RPCs; `suggested`→`confirmed`/`rejected` with audit trail; replaces unguarded client-side writes | — |
+| Historical backfill (S17, PR #66) | ✅ MERGED — `transaction_date` column, `backfill_payment_request` RPC (lands in `disbursed`, mandatory note), `query`/`resolve_query` actions, on-behalf-of picker via `user_profiles_directory` | — |
+| Trading/resale corrections (S17, DB) | ✅ LIVE — "9 Inch (Nigeria Standard)" product fixed; APC-INV-2026-2381 source_type corrected; cost_basis accumulating auto-sync trigger on disbursed Trading Purchases requests | — |
+| Full landed-cost margin (S17, PR #67) | ✅ MERGED — `order_trading_margin` view + `get_order_trading_margin()` RPC; TradingMarginReport UI (gross vs true margin); client-side field normalization at setRows | — |
+| suppliers_select RLS fix (S17, DB) | ✅ LIVE — initiator roles can now see active vendors; was oversight-roles-only | — |
+| Staff self-service ID card (S17, DB) | ✅ LIVE — `staff_photos_read` self-access rule added; any linked employee can download own ID card | — |
+| NULL-role-bypass security sweep (S17, DB) | ✅ LIVE — 9 functions patched; `NOT IN (...)` now null-safe across schema | — |
+| `reconcile_attendance_punches` access (S17, DB) | ✅ LIVE — REVOKE from authenticated; service_role only | — |
+| Payment-request + ingestion (#5) | **5a ✅, 5b ✅, 5c ✅ (S17)** — 5d (revenue matching) and 5e (treasury funding) queued per §8 design | 5c live-proven → 5d revenue matching |
 | Document storage buckets (receipts/lpo/supplier/vehicle) | ✅ **CLOSED** — signed URLs (PR #44 receipts, PR #45 lpo/supplier/vehicle), buckets flipped private, storage RLS role-scoped (S14, migration `storage_policy_cleanup_role_scoped_buckets`) | — |
 | Storage policy cleanup (public_* removal, S14) | ✅ COMPLETE — 4 generic + 3 receipts-legacy permissive policies replaced with 9 per-bucket role-scoped policies across 5 buckets; verified via full 8-role × 7-bucket RLS simulation (SELECT+INSERT, positive+negative) | — |
 | Go-live re-entry / dust gap | parked | MD triggers |
