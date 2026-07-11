@@ -9524,7 +9524,19 @@ const TradingMarginReport = () => {
 
   useEffect(() => {
     supabase.rpc('get_order_trading_margin')
-      .then(({ data, error: e }) => { if (e) throw e; setRows(data || []); })
+      .then(({ data, error: e }) => {
+        if (e) throw e;
+        const normalized = (data || []).map(r => {
+          const sale     = Number(r.resale_sale_amount)     || 0;
+          const purchase = Number(r.purchase_cost)          || 0;
+          const fuel     = Number(r.attributed_fuel_cost)   || 0;
+          const loading  = Number(r.attributed_loading_cost)|| 0;
+          const haulage  = Number(r.attributed_haulage_cost)|| 0;
+          const landed   = purchase + fuel + loading + haulage;
+          return { ...r, sale_amount: sale, purchase_cost: purchase, gross_margin: sale - purchase, fuel_cost: fuel, loading_cost: loading, haulage_cost: haulage, landed_cost: landed, true_margin: sale - landed };
+        });
+        setRows(normalized);
+      })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
   }, []);
