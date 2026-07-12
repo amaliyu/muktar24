@@ -971,6 +971,9 @@ const Orders = ({ onNavigate, userProfile }) => {
   const [orderEditMode, setOrderEditMode] = useState(false);
   const [orderEditItems, setOrderEditItems] = useState([]);
   const [orderEditMarketer, setOrderEditMarketer] = useState("");
+  const [confirmDeleteInvoice, setConfirmDeleteInvoice] = useState(null);
+  const [invDeleting, setInvDeleting] = useState(false);
+  const [invDeleteMsg, setInvDeleteMsg] = useState(null);
 
   const isMarketerRole = userProfile?.role === 'marketer';
 
@@ -1241,6 +1244,40 @@ const Orders = ({ onNavigate, userProfile }) => {
     }
   };
 
+  const handleDeleteInvoice = async (invoice) => {
+    setInvDeleteMsg(null);
+    try {
+      const payments = await paymentsService.getByInvoice(invoice.id);
+      if (payments.length > 0) {
+        setInvDeleteMsg(`${payments.length} payment${payments.length > 1 ? 's are' : ' is'} recorded against this invoice and must be handled first.`);
+        return;
+      }
+      setConfirmDeleteInvoice(invoice);
+    } catch (e) {
+      setAlert({ type: 'error', msg: 'Could not check invoice payments: ' + (e?.message || String(e)) });
+    }
+  };
+
+  const doDeleteInvoice = async (invoice) => {
+    setInvDeleting(true);
+    try {
+      await invoicesService.delete(invoice.id);
+      setConfirmDeleteInvoice(null);
+      const newOrders = await load();
+      if (newOrders) setSelected(newOrders.find(o => o.id === selected?.id) || null);
+      setAlert({ type: 'success', msg: `Invoice ${invoice.invoice_number} deleted.` });
+    } catch (e) {
+      setConfirmDeleteInvoice(null);
+      if (e?.code === '23503' || e?.message?.includes('foreign key')) {
+        setInvDeleteMsg('This invoice has payments recorded against it and cannot be deleted.');
+      } else {
+        setAlert({ type: 'error', msg: e?.message || 'Delete failed.' });
+      }
+    } finally {
+      setInvDeleting(false);
+    }
+  };
+
   const startOrderEdit = (order) => {
     setOrderEditItems((order.order_items || []).map(i => ({ blockType: i.block_type, quantity: String(i.quantity), unitPrice: String(i.unit_price), sourceType: i.source_type || 'manufactured', costBasis: i.cost_basis != null ? String(i.cost_basis) : '' })));
     setOrderEditMarketer(order.marketer_id || "");
@@ -1271,6 +1308,7 @@ const Orders = ({ onNavigate, userProfile }) => {
   return (
     <div>
       {confirmDelete && <ConfirmModal msg={confirmDelete.type === "payment" ? `Remove payment of ${naira(confirmDelete.amount_paid)} recorded on ${confirmDelete.payment_date}? This cannot be undone.` : `Delete order for ${confirmDelete.customer?.name}? This will also delete all invoices and payments.`} onConfirm={() => confirmDelete.type === "payment" ? handleDeletePayment(confirmDelete.id) : handleDeleteOrder(confirmDelete.id)} onCancel={() => setConfirmDelete(null)} />}
+      {confirmDeleteInvoice && <ConfirmModal msg={`Delete invoice ${confirmDeleteInvoice.invoice_number}? This cannot be undone.`} onConfirm={() => doDeleteInvoice(confirmDeleteInvoice)} onCancel={() => setConfirmDeleteInvoice(null)} />}
       <InvoiceEditorModal editor={invoiceEditor} setEditor={setInvoiceEditor} onSave={handleSaveInvoice} saving={invoicing} />
       <div style={styles.header}>
         <div>
@@ -1596,10 +1634,17 @@ const Orders = ({ onNavigate, userProfile }) => {
                           </div>
                           <button style={styles.btn("primary")} onClick={handleGenerateInvoice} disabled={invoicing}>{invoicing ? "Downloading…" : "Download Invoice PDF"}</button>
                           {['md','accountant'].includes(userProfile?.role) && <button style={styles.btn("secondary")} onClick={() => setShowPayForm(!showPayForm)}>+ Record Payment</button>}
+                          {userProfile?.role === 'md' && <button style={{ ...styles.btn("danger"), opacity: invDeleting ? 0.6 : 1 }} disabled={invDeleting} onClick={() => handleDeleteInvoice(selected.invoices[0])}>Delete Invoice</button>}
                         </>
                       )}
                       <button style={styles.btn("secondary")} onClick={() => onNavigate("waybills")}>View Waybills</button>
                     </div>
+                    {invDeleteMsg && (
+                      <div style={{ marginTop: "10px", padding: "10px 14px", background: theme.red + '18', border: `1px solid ${theme.red}44`, borderRadius: "6px", fontSize: "13px", color: theme.red, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span>{invDeleteMsg}</span>
+                        <button style={{ background: "none", border: "none", color: theme.red, cursor: "pointer", fontWeight: "700", fontSize: "14px", padding: "0 4px" }} onClick={() => setInvDeleteMsg(null)}>×</button>
+                      </div>
+                    )}
                     {showPayForm && (
                       <div style={{ marginTop: "12px", padding: "14px", background: theme.surface, borderRadius: "8px", border: `1px solid ${theme.border}` }}>
                         <div style={{ fontSize: "11px", fontWeight: "700", color: theme.textMuted, marginBottom: "10px", textTransform: "uppercase", letterSpacing: "0.06em" }}>{editPayment ? "Edit Payment" : "Record Payment"}</div>

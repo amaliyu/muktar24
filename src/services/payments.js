@@ -83,4 +83,9 @@ export const invoicesService = {
     if (error) throw error
     return data || []
   },
+
+  async delete(id) {
+    const { error } = await supabase.from('invoices').delete().eq('id', id)
+    if (error) throw error
+  },
 }
