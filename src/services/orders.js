@@ -113,7 +113,13 @@ export const ordersService = {
   async delete(id) {
     const { data: invoices } = await supabase.from('invoices').select('id').eq('order_id', id)
     if (invoices?.length) {
-      await supabase.from('payments').delete().in('invoice_id', invoices.map(i => i.id))
+      const invoiceIds = invoices.map(i => i.id)
+      const { data: pmts } = await supabase.from('payments').select('id').in('invoice_id', invoiceIds)
+      if (pmts?.length) {
+        const err = new Error(`${pmts.length} payment(s) exist against this order's invoices and must be removed first.`)
+        err.code = 'PAYMENTS_EXIST'
+        throw err
+      }
       await supabase.from('invoices').delete().eq('order_id', id)
     }
     const { error } = await supabase.from('orders').delete().eq('id', id)
