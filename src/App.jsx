@@ -10,7 +10,7 @@ import { staffService } from './services/staff';
 import Staff from './components/StaffHR';
 import { ordersService, customersService, customerSitesService } from './services/orders';
 import { waybillsService } from './services/deliveries';
-import { invoicesService, paymentsService } from './services/payments';
+import { invoicesService, paymentsService, orderPaymentsService } from './services/payments';
 import { inventoryService } from './services/inventory';
 import { lpoService } from './services/lpo';
 import { pendingDeliveryService } from './services/pendingDelivery';
@@ -974,6 +974,7 @@ const Orders = ({ onNavigate, userProfile }) => {
   const [confirmDeleteInvoice, setConfirmDeleteInvoice] = useState(null);
   const [invDeleting, setInvDeleting] = useState(false);
   const [invDeleteMsg, setInvDeleteMsg] = useState(null);
+  const [orderDeleteMsg, setOrderDeleteMsg] = useState(null);
 
   const isMarketerRole = userProfile?.role === 'marketer';
 
@@ -1244,6 +1245,21 @@ const Orders = ({ onNavigate, userProfile }) => {
     }
   };
 
+  const handleDeleteOrderClick = async (order) => {
+    setOrderDeleteMsg(null);
+    try {
+      const invoiceIds = (order.invoices || []).map(i => i.id);
+      const payments = await orderPaymentsService.getByOrderInvoices(invoiceIds);
+      if (payments.length > 0) {
+        setOrderDeleteMsg(`${payments.length} payment${payments.length > 1 ? 's are' : ' is'} recorded against this order's invoice(s) and must be removed first.`);
+        return;
+      }
+      setConfirmDelete(order);
+    } catch (e) {
+      setAlert({ type: 'error', msg: 'Could not check order payments: ' + (e?.message || String(e)) });
+    }
+  };
+
   const handleDeleteInvoice = async (invoice) => {
     setInvDeleteMsg(null);
     try {
@@ -1307,7 +1323,7 @@ const Orders = ({ onNavigate, userProfile }) => {
 
   return (
     <div>
-      {confirmDelete && <ConfirmModal msg={confirmDelete.type === "payment" ? `Remove payment of ${naira(confirmDelete.amount_paid)} recorded on ${confirmDelete.payment_date}? This cannot be undone.` : `Delete order for ${confirmDelete.customer?.name}? This will also delete all invoices and payments.`} onConfirm={() => confirmDelete.type === "payment" ? handleDeletePayment(confirmDelete.id) : handleDeleteOrder(confirmDelete.id)} onCancel={() => setConfirmDelete(null)} />}
+      {confirmDelete && <ConfirmModal msg={confirmDelete.type === "payment" ? `Remove payment of ${naira(confirmDelete.amount_paid)} recorded on ${confirmDelete.payment_date}? This cannot be undone.` : `Delete order for ${confirmDelete.customer?.name}? This will also delete all invoices. This cannot be undone.`} onConfirm={() => confirmDelete.type === "payment" ? handleDeletePayment(confirmDelete.id) : handleDeleteOrder(confirmDelete.id)} onCancel={() => setConfirmDelete(null)} />}
       {confirmDeleteInvoice && <ConfirmModal msg={`Delete invoice ${confirmDeleteInvoice.invoice_number}? This cannot be undone.`} onConfirm={() => doDeleteInvoice(confirmDeleteInvoice)} onCancel={() => setConfirmDeleteInvoice(null)} />}
       <InvoiceEditorModal editor={invoiceEditor} setEditor={setInvoiceEditor} onSave={handleSaveInvoice} saving={invoicing} />
       <div style={styles.header}>
@@ -1319,6 +1335,12 @@ const Orders = ({ onNavigate, userProfile }) => {
       </div>
 
       {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
+      {orderDeleteMsg && (
+        <div style={{ margin: "0 0 12px", padding: "10px 14px", background: theme.red + '18', border: `1px solid ${theme.red}44`, borderRadius: "6px", fontSize: "13px", color: theme.red, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span>{orderDeleteMsg}</span>
+          <button style={{ background: "none", border: "none", color: theme.red, cursor: "pointer", fontWeight: "700", fontSize: "14px", padding: "0 4px" }} onClick={() => setOrderDeleteMsg(null)}>×</button>
+        </div>
+      )}
 
       {showForm && (
         <div style={{ ...styles.card, marginBottom: "24px", borderColor: theme.accent + "44" }}>
@@ -1503,7 +1525,7 @@ const Orders = ({ onNavigate, userProfile }) => {
                     <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
                       {o.is_lpo && <span style={styles.badge(theme.blue)}>LPO</span>}
                       <span style={styles.badge(statusColor(o.status))}>{o.status}</span>
-                      {userProfile?.role === 'md' && <button style={{ ...styles.btn("danger"), padding: "3px 9px", fontSize: "11px" }} onClick={e => { e.stopPropagation(); setConfirmDelete(o); }}>Delete</button>}
+                      {userProfile?.role === 'md' && <button style={{ ...styles.btn("danger"), padding: "3px 9px", fontSize: "11px" }} onClick={e => { e.stopPropagation(); handleDeleteOrderClick(o); }}>Delete</button>}
                     </div>
                   </div>
                   <div style={{ marginTop: "8px", display: "flex", gap: "20px", fontSize: "12px", color: theme.textMuted }}>

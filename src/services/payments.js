@@ -89,3 +89,15 @@ export const invoicesService = {
     if (error) throw error
   },
 }
+
+export const orderPaymentsService = {
+  async getByOrderInvoices(invoiceIds) {
+    if (!invoiceIds?.length) return []
+    const { data, error } = await supabase
+      .from('payments')
+      .select('id, invoice_id')
+      .in('invoice_id', invoiceIds)
+    if (error) throw error
+    return data || []
+  },
+}
