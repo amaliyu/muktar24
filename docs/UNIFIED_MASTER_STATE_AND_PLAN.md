@@ -3,7 +3,7 @@
 
 Repo: `amaliyu/muktar24` (PRIVATE) · Prod branch: `main` · Stack: React 18 + Vite 5 + Supabase (PostgreSQL, RLS) + Vercel
 App: APC Manager — internal ERP for Abuja Precast Concrete Limited
-**Updated: 2026-07-11 (Session 17 — Phase 5b/5c complete, truck loading rebuild, historical backfill, full landed-cost margin).** All DB state verified by live query, not memory.
+**Updated: 2026-07-12 (Session 18 — waybill→truck loading sync trigger, transit-damage driver linkage, DB-only).** All DB state verified by live query, not memory.
 **Status: BETA. A physical/manual backup system runs in parallel — NO downtime pressure.**
 **Operating mode: SLOW AND VERIFIED — fix on a branch → test on the branch's Vercel preview AS THE AFFECTED ROLE → confirm with own eyes → MD merges → re-verify production.**
 
@@ -18,6 +18,30 @@ App: APC Manager — internal ERP for Abuja Precast Concrete Limited
 ---
 
 ## 1. SESSION HISTORY (most recent first)
+
+### ✅ SESSION 18 (2026-07-12) — WAYBILL→TRUCK LOADING SYNC + TRANSIT-DAMAGE DRIVER LINKAGE (DB ONLY)
+**No code PRs — all changes applied directly by the planning chat via `apply_migration`. No app code changed.**
+
+**A. Waybill → Truck Loading sync trigger**
+- New trigger function `fn_sync_waybill_to_truck_loading()` on the `waybills` table (fires on INSERT, UPDATE, DELETE).
+- On INSERT/UPDATE: auto-generates or refreshes a `truck_loading_log` row for the waybill, sourcing the crew list from `truck_loader_assignments` (active assignments for the vehicle at the time of the waybill). Also writes the corresponding `truck_loading_loaders` rows.
+- On DELETE: removes the linked `truck_loading_log` row (and its loader rows via cascade) unless the log entry has already been included in a paid payroll run — paid entries are locked from overwrite/deletion to protect payroll integrity.
+- Helper function `apc_map_block_type_to_product_id()` maps block type strings to `products.id` for the log insert.
+- **Effect:** every waybill save now automatically keeps truck loading records in sync without manual double-entry.
+
+**B. FK fix — `truck_loading_log.waybill_id` ON DELETE action**
+- The foreign key `truck_loading_log_waybill_id_fkey` was missing an `ON DELETE` clause (defaulted to RESTRICT), which would have blocked deletion of any waybill that had a linked loading log row.
+- Fixed to `ON DELETE SET NULL` — waybill deletion now nulls the `waybill_id` on the loading log rather than being blocked.
+
+**C. Transit-damage driver linkage**
+- Added `damage_log.waybill_id` column — a proper FK to `waybills` (nullable; not all damage is transit damage).
+- Backfilled 5 existing delivery-stage damage records against their respective waybills.
+- New trigger `fn_autolink_delivery_damage()` on `damage_log` (INSERT): inspects the `notes` text for a waybill reference and auto-populates `waybill_id` on future transit-damage entries.
+- **Effect:** driver-level damage reporting is now possible via the join chain `damage_log → waybills → driver_id → staff`. Previously there was no programmatic link between a transit-damage record and the driver who made the delivery.
+
+**D. Known issues logged (not yet fixed)**
+- **Duplicate active row in `truck_loader_assignments`** for one loader on vehicle BWR-100XB — this loader would receive double credit on any loading payroll run that covers that vehicle. Other trucks have not been audited for the same pattern. Needs an audit query and dedup before the next payroll cycle that touches BWR-100XB.
+- **`damage_log.delivery_id` / `deliveries` table confirmed dead** — `deliveries` has 0 rows; the `delivery_id` FK on `damage_log` is a legacy column from an earlier design that was never used. Candidate for cleanup in a future housekeeping pass.
 
 ### ✅ SESSION 17 (2026-07-10/11) — PHASE 5b/5c COMPLETE + TRUCK LOADING REBUILD + HISTORICAL BACKFILL
 **PRs: #59 (payment-requests-history), #60 (payment-request-edit), #61 (payment-request-closure), #62 (truck-loading-page — initial standalone build), #63 (bank-statement-reconciliation), #64 (pr-bank-matching), #65 (disbursement-source-account), #66 (backfill-payment-requests), #67 (trading-margin-report), #68 (truck-loading-consolidation — final rebuild). All merged. DB changes applied via planning-chat migrations as usual.**
@@ -391,7 +415,9 @@ Bounded audit, five categories:
 - **Manager email migration (future).** Current manager logins use personal emails. Planned: replace 7 role accounts with official `@abujaprecast.com` addresses (MD/ICO/BDM/logistics/production/store/HR).
 - ✅ **Products naming collision — RESOLVED (S17, item E).** "9 Inch" ambiguous product renamed "9 Inch (Nigeria Standard)" and repurposed as the real local-block catalog entry. The live mis-tagged order (APC-INV-2026-2381) corrected.
 - ✅ **Full landed-cost margin on resale trades — RESOLVED (S17, item F).** `order_trading_margin` view + `get_order_trading_margin()` RPC live. TradingMarginReport UI in App.jsx shows gross and true (landed-cost) margins side by side. See item F above.
-- **Stock movement linkage (NEW — S17).** Loading blocks for delivery genuinely never registers as inventory leaving the yard through any path, old or new system — confirmed via direct code trace. A "dispatch" stock-movement entry is not created when a waybill is issued or a delivery completed. Not yet built; would require a new outbound-stock event triggered by waybill dispatch or delivery confirmation.
+- ✅ **Stock movement linkage — RESOLVED (S18, item A).** Investigation confirmed Waybills already correctly decrements stock via `quantity_loaded`. The actual gap was Truck Loading non-adoption (broken ₦8 flat rate, fixed S17). The S18 waybill→truck_loading sync trigger closes the loop: every waybill save auto-generates the corresponding loading log entry. No manual double-entry required; no stock event missing.
+- **Duplicate active loader assignment — BWR-100XB (NEW — S18, URGENT before next payroll).** One loader on BWR-100XB has a duplicate active row in `truck_loader_assignments` — would cause double payroll credit on any run covering that vehicle. Other vehicles unaudited. Requires a dedup query before the next loading payroll cycle. Planning chat to run audit and fix.
+- **`damage_log.delivery_id` / `deliveries` table dead (NEW — S18).** `deliveries` has 0 rows; `damage_log.delivery_id` is an unused legacy FK. Candidate for cleanup in a future housekeeping migration.
 - **Dashboard widget for labour/loading activity (NEW — S17).** No existing connection to preserve; would be a new addition to the KPI/dashboard aggregations pulling from `daily_roster_entries` and `truck_loading_log`.
 - **Invoice deletion (NEW — S17).** RLS already permits md, but no direct UI action exists. The only way to remove an invoice today is deleting its whole parent order, which cascades and removes every other invoice, payment, and waybill attached to it. A targeted single-invoice delete UI (MD-only, confirm-gated) is missing.
 - **Payroll week navigation UX (NEW — S17).** `WeeklyPayrollTab` has only a raw date picker — no prev/next buttons, no status badge on the selector showing whether the week has a payroll and what state it is in. Flagged as the concrete answer to a real "labour tabs are hard to use" complaint. Not yet built.
@@ -473,6 +499,11 @@ Bounded audit, five categories:
 | Staff self-service ID card (S17, DB) | ✅ LIVE — `staff_photos_read` self-access rule added; any linked employee can download own ID card | — |
 | NULL-role-bypass security sweep (S17, DB) | ✅ LIVE — 9 functions patched; `NOT IN (...)` now null-safe across schema | — |
 | `reconcile_attendance_punches` access (S17, DB) | ✅ LIVE — REVOKE from authenticated; service_role only | — |
+| Waybill→truck loading sync (S18, DB) | ✅ LIVE — `fn_sync_waybill_to_truck_loading()` trigger; `apc_map_block_type_to_product_id()` helper; paid entries locked from overwrite | — |
+| `truck_loading_log` waybill FK ON DELETE (S18, DB) | ✅ FIXED — was RESTRICT (would block waybill deletion); now SET NULL | — |
+| Transit-damage driver linkage (S18, DB) | ✅ LIVE — `damage_log.waybill_id` FK added; 5 records backfilled; `fn_autolink_delivery_damage()` trigger on INSERT | — |
+| Duplicate loader assignment — BWR-100XB (S18) | ⚠️ KNOWN, NOT FIXED — one loader has duplicate active row; pay-doubling risk on next payroll; needs dedup before next loading payroll cycle | Planning chat: audit + dedup |
+| `deliveries` table / `damage_log.delivery_id` (S18) | ⚠️ KNOWN, NOT FIXED — `deliveries` has 0 rows; `delivery_id` FK is legacy dead column | Future housekeeping migration |
 | Payment-request + ingestion (#5) | **5a ✅, 5b ✅, 5c ✅ (S17)** — 5d (revenue matching) and 5e (treasury funding) queued per §8 design | 5c live-proven → 5d revenue matching |
 | Document storage buckets (receipts/lpo/supplier/vehicle) | ✅ **CLOSED** — signed URLs (PR #44 receipts, PR #45 lpo/supplier/vehicle), buckets flipped private, storage RLS role-scoped (S14, migration `storage_policy_cleanup_role_scoped_buckets`) | — |
 | Storage policy cleanup (public_* removal, S14) | ✅ COMPLETE — 4 generic + 3 receipts-legacy permissive policies replaced with 9 per-bucket role-scoped policies across 5 buckets; verified via full 8-role × 7-bucket RLS simulation (SELECT+INSERT, positive+negative) | — |
