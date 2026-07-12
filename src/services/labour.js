@@ -229,7 +229,7 @@ export const truckLoadingService = {
     const { data, error } = await supabase
       .from('truck_loading_rates')
       .select('*, product:product_id(name)')
-      .order('created_at')
+      .order('updated_at')
     if (error) throw error
     return data || []
   },
