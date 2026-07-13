@@ -2023,7 +2023,7 @@ const Waybills = ({ userProfile }) => {
               <label style={styles.label}>Driver</label>
               <select style={styles.input} value={form.driverId} onChange={e => setForm({ ...form, driverId: e.target.value })}>
                 <option value="">— Select driver —</option>
-                {staff.map(s => <option key={s.id} value={s.id}>{s.full_name} ({s.role})</option>)}
+                {staff.filter(s => s.role?.trim().toLowerCase() === 'driver').map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
               </select>
             </div>
             <div style={styles.formGroup}>
