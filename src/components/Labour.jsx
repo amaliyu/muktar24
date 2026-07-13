@@ -1148,7 +1148,9 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
   const loadRangeData = useCallback(async () => {
     if (!rangeFrom || !rangeTo) return
     setLoading(true)
-    const [rRes, lRes, pRes] = await Promise.all([
+
+    // Step 1: fetch source rows for the range
+    const [rRes, lRes] = await Promise.all([
       supabase.from('daily_roster')
         .select('*, entries:daily_roster_entries(*)')
         .gte('roster_date', rangeFrom)
@@ -1157,21 +1159,42 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
         .select('*, loaders:truck_loading_loaders(labour_id)')
         .gte('date', rangeFrom)
         .lte('date', rangeTo),
-      supabase.from('weekly_labour_payroll')
-        .select('*')
-        .eq('week_ending', rangeTo),
     ])
     const rosterData = rRes.data || []
     const logData = lRes.data || []
-    const payrollData = pRes.data || []
+
+    // Step 2: detect payrolls via payroll_id linkage on the fetched rows —
+    // NOT by week_ending equality, so a widened or shifted range still finds
+    // a draft that was generated for a narrower window inside it.
+    const linkedIds = [...new Set([
+      ...rosterData.filter(r => r.payroll_id != null).map(r => r.payroll_id),
+      ...logData.filter(l => l.payroll_id != null).map(l => l.payroll_id),
+    ])]
+
+    let payrollData = []
+    if (linkedIds.length > 0) {
+      const { data } = await supabase.from('weekly_labour_payroll').select('*').in('id', linkedIds)
+      payrollData = data || []
+    }
+
+    // Warn if multiple drafts for the same type exist in this range (shouldn't normally happen)
+    for (const type of ['production', 'loading']) {
+      const drafts = payrollData.filter(p => p.payroll_type === type && p.status === 'draft')
+      if (drafts.length > 1) {
+        setAlert({ msg: `Multiple draft ${type} payrolls found in this range — contact an admin to resolve (IDs: ${drafts.map(d => d.id).join(', ')}).`, type: 'warning' })
+      }
+    }
+
     setRosters(rosterData)
     setLoadingLogs(logData)
     setPayrollRecords(payrollData)
 
-    // Auto-select rows: if a draft exists, pre-select rows already linked to it;
-    // otherwise pre-select unassigned rows (payroll_id IS NULL)
-    const prodRec = payrollData.find(p => p.payroll_type === 'production')
-    const loadRec = payrollData.find(p => p.payroll_type === 'loading')
+    // Auto-select: draft rows → those already linked to the draft; else → unassigned rows
+    // Prefer draft payroll over other statuses when multiple payrolls touch this range
+    const prodRec = payrollData.find(p => p.payroll_type === 'production' && p.status === 'draft')
+      ?? payrollData.find(p => p.payroll_type === 'production')
+    const loadRec = payrollData.find(p => p.payroll_type === 'loading' && p.status === 'draft')
+      ?? payrollData.find(p => p.payroll_type === 'loading')
     setCheckedRosterIds(new Set(
       rosterData
         .filter(r => prodRec?.status === 'draft' ? r.payroll_id === prodRec.id : r.payroll_id == null)
@@ -1213,8 +1236,11 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
     setRangeTo(shiftWeek(rangeTo, weeks))
   }
 
-  const prodPayroll = payrollRecords.find(p => p.payroll_type === 'production')
-  const loadPayroll = payrollRecords.find(p => p.payroll_type === 'loading')
+  // Prefer draft payroll over other statuses when multiple payrolls touch this range
+  const prodPayroll = payrollRecords.find(p => p.payroll_type === 'production' && p.status === 'draft')
+    ?? payrollRecords.find(p => p.payroll_type === 'production')
+  const loadPayroll = payrollRecords.find(p => p.payroll_type === 'loading' && p.status === 'draft')
+    ?? payrollRecords.find(p => p.payroll_type === 'loading')
   const currentPayroll = subTab === 'production' ? prodPayroll : loadPayroll
   const isDraftMode = currentPayroll?.status === 'draft'
 
