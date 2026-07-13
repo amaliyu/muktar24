@@ -204,17 +204,17 @@ export const truckLoadingService = {
   async getLogs() {
     const { data, error } = await supabase
       .from('truck_loading_log')
-      .select('*, product:product_id(name), vehicle:vehicle_id(vehicle_number, vehicle_name)')
+      .select('*, product:product_id(name), vehicle:vehicle_id(vehicle_number, vehicle_name), loaders:truck_loading_loaders(labour_id)')
       .order('date', { ascending: false })
       .order('trip_number_for_day', { ascending: false })
     if (error) throw error
     return data || []
   },
 
-  async createLog({ vehicle_id, product_id, date, quantity_loaded }, loaderIds = []) {
+  async createLog({ vehicle_id, product_id, date, quantity_loaded, waybill_id }, loaderIds = []) {
     const { data, error } = await supabase
       .from('truck_loading_log')
-      .insert({ vehicle_id, product_id, date, quantity_loaded })
+      .insert({ vehicle_id, product_id, date, quantity_loaded, ...(waybill_id ? { waybill_id } : {}) })
       .select('*, product:product_id(name), vehicle:vehicle_id(vehicle_number, vehicle_name)')
       .single()
     if (error) throw error
@@ -245,6 +245,32 @@ export const truckLoadingService = {
   async deleteLog(id) {
     const { error } = await supabase.from('truck_loading_log').delete().eq('id', id);
     if (error) throw error;
+  },
+
+  async updateLog(id, { vehicle_id, product_id, date, quantity_loaded }) {
+    const { error } = await supabase
+      .from('truck_loading_log')
+      .update({ vehicle_id, product_id, date, quantity_loaded: Number(quantity_loaded) })
+      .eq('id', id)
+    if (error) throw error
+  },
+
+  async syncLoaders(loadingLogId, loaderIds) {
+    await supabase.from('truck_loading_loaders').delete().eq('loading_log_id', loadingLogId)
+    if (loaderIds.length > 0) {
+      const { error } = await supabase.from('truck_loading_loaders')
+        .insert(loaderIds.map(lid => ({ loading_log_id: loadingLogId, labour_id: lid })))
+      if (error) throw error
+    }
+  },
+
+  async getLogByWaybill(waybillId) {
+    const { data } = await supabase
+      .from('truck_loading_log')
+      .select('id')
+      .eq('waybill_id', waybillId)
+      .maybeSingle()
+    return data
   },
 }
 
