@@ -40,6 +40,8 @@ import { vehiclesService, fuelLogService } from './services/vehicles'
 import SupplierRegistry from './components/SupplierRegistry'
 import { suppliersService, supplierTransactionsService } from './services/suppliers'
 import Labour from './components/Labour'
+import Messages from './components/Messages'
+import { messagesService } from './services/messages'
 import { advancesService } from './services/advances'
 import { paymentRequestsService } from './services/paymentRequests'
 import { truckLoadingService, labourPoolService } from './services/labour'
@@ -10161,6 +10163,7 @@ const navItems = [
     { id: "user_management", label: "User Management", icon: "staff" },
   ]},
   { section: "Account", items: [
+    { id: "messages", label: "Messages", icon: "staff" },
     { id: "my_hr", label: "My HR", icon: "staff" },
     { id: "my_profile", label: "My Profile", icon: "staff" },
   ]},
@@ -10460,6 +10463,7 @@ export default function App() {
   const [lowStockCount, setLowStockCount] = useState(0);
   const [lpoCount, setLpoCount] = useState(0);
   const [scheduleCount, setScheduleCount] = useState(0);
+  const [unreadMsgCount, setUnreadMsgCount] = useState(0);
   const [showChangePwd, setShowChangePwd] = useState(false);
   const [sessionWarning, setSessionWarning] = useState(false); // 15-min expiry warning
   const [sessionMinutes, setSessionMinutes] = useState(15);
@@ -10542,6 +10546,16 @@ export default function App() {
     schedulesService.getSubmitted().then(s => setScheduleCount(s.length)).catch(() => {});
   }, [active]);
 
+  // Poll unread message count for the nav badge (30s interval; skip while on Messages page)
+  useEffect(() => {
+    if (!userProfile || active === 'messages') return;
+    messagesService.getTotalUnread(userProfile.id).then(setUnreadMsgCount).catch(() => {});
+    const interval = setInterval(() => {
+      messagesService.getTotalUnread(userProfile.id).then(setUnreadMsgCount).catch(() => {});
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [active, userProfile]);
+
   if (session === undefined) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#0f1117' }}>
       <div style={{ color: '#e8eaf0', fontSize: '14px' }}>Loading…</div>
@@ -10595,6 +10609,7 @@ export default function App() {
     disciplinary: <DisciplinaryPage userProfile={userProfile} />,
     attendance_kiosk: <AttendanceKiosk userProfile={userProfile} />,
     attendance_flags: <AttendanceFlagsPage userProfile={userProfile} />,
+    messages: <Messages userProfile={userProfile} onUnreadChange={setUnreadMsgCount} />,
     my_hr: <MyHRPage userProfile={userProfile} />,
     my_profile: <MyProfile userProfile={userProfile} />,
   };
@@ -10603,6 +10618,7 @@ export default function App() {
     if (id === "inventory" && lowStockCount > 0) return lowStockCount;
     if (id === "lpo_approvals" && lpoCount > 0) return lpoCount;
     if (id === "schedule_approvals" && scheduleCount > 0) return scheduleCount;
+    if (id === "messages" && unreadMsgCount > 0) return unreadMsgCount;
     return 0;
   };
 
