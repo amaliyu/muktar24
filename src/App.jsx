@@ -9986,22 +9986,26 @@ const TradingMarginReport = () => {
 // ── NAV ───────────────────────────────────────────────────────
 const navItems = [
   { section: "Overview", items: [{ id: "dashboard", label: "Dashboard", icon: "dashboard" }] },
-  { section: "Operations", items: [
+  { section: "Production", items: [
     { id: "production", label: "Production", icon: "production" },
     { id: "inventory", label: "Inventory", icon: "inventory" },
     { id: "batches", label: "Batches", icon: "batches" },
+  ]},
+  { section: "Logistics", items: [
     { id: "waybills", label: "Waybills", icon: "waybill" },
     { id: "vehicles", label: "Vehicles", icon: "truck" },
+    { id: "truck_loading", label: "Truck Loading", icon: "truck" },
+    { id: "pending_register", label: "Pending Deliveries", icon: "pending" },
+    { id: "daily_schedule", label: "Daily Schedule", icon: "schedule" },
+  ]},
+  { section: "HR & Workforce", items: [
     { id: "staff", label: "Staff", icon: "staff" },
     { id: "labour", label: "Labour", icon: "staff" },
-    { id: "truck_loading", label: "Truck Loading", icon: "truck" },
     { id: "disciplinary", label: "Disciplinary", icon: "staff" },
     { id: "attendance_kiosk", label: "Attendance Kiosk", icon: "staff" },
     { id: "attendance_flags", label: "Attendance Flags", icon: "staff" },
-  ]},
-  { section: "Deliveries", items: [
-    { id: "pending_register", label: "Pending Deliveries", icon: "pending" },
-    { id: "daily_schedule", label: "Daily Schedule", icon: "schedule" },
+    { id: "leave", label: "Leave Requests", icon: "staff" },
+    { id: "advances", label: "Salary Advances", icon: "orders" },
   ]},
   { section: "Sales", items: [{ id: "customers", label: "Customers", icon: "staff" }, { id: "orders", label: "Orders & Invoicing", icon: "orders" }] },
   { section: "Approvals", items: [
@@ -10013,7 +10017,10 @@ const navItems = [
     { id: "kpi_dashboard", label: "KPI Dashboard", icon: "reports" },
     { id: "trading_margin", label: "Trading Margin", icon: "orders" },
   ]},
-  { section: "Finance", items: [{ id: "accounting", label: "Accounting", icon: "orders" }, { id: "advances", label: "Salary Advances", icon: "orders" }, { id: "payment_requests", label: "Payment Requests", icon: "orders" }, { id: "leave", label: "Leave Requests", icon: "staff" }] },
+  { section: "Finance", items: [
+    { id: "accounting", label: "Accounting", icon: "orders" },
+    { id: "payment_requests", label: "Payment Requests", icon: "orders" },
+  ]},
   { section: "Settings", items: [
     { id: "products", label: "Products", icon: "products" },
     { id: "suppliers", label: "Suppliers", icon: "supplier" },
