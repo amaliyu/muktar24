@@ -427,6 +427,10 @@ Bounded audit, five categories:
 - **Orphaned staff photo files** in `staff-photos` bucket from deleted test staff — harmless; clear via Supabase dashboard (SQL delete blocked).
 - **Ransom (APC-EMP-018)** in onboarding — HR to complete checklist + activate when ready.
 - Original payroll trigger/RPC/audit objects not in tracked migration history (pre-discipline). Live & verified. Optional: capture as no-op migration.
+- **KPI tracking — breakage/damage accountability by role (NEW — S19, goal not yet scoped).** Goal: tie block breakage to whoever had custody at the time, not just total damage figures. Chain of custody per MD: Production Manager/Assistant PM (batching through yard stacking count) → Store Officer (from batch-number handover, through curing, through supervising loading, until they sign the waybill) → Driver (from their waybill signature through delivery, until customer sign-off). Third-party security signs at factory exit as a gate checkpoint, not a custody holder.
+  - **Current gap:** `damage_log.stage = 'stacking'` conflates two different owners (pre-handover PM/APM vs. post-handover Store Officer) into one label. Needs either a split stage value or a handover timestamp to separate them before any KPI can attribute stacking-stage damage correctly. `delivery` stage is already clean — links to `waybill_id → driver_id`.
+  - Not yet scoped: exact KPI definitions/thresholds ("high breakage"), whether this becomes a dashboard, a scorecard, or feeds into existing HR/disciplinary flows. Recorded as a goal, not a build item.
+- **Waybill schema additions (S19, DB — planning-chat migration, no PR).** `waybills.signed_by_name` (on-site signer at delivery, distinct from `receiver_name` which is the customer's registered name) and `waybills.store_officer_id` (FK → `staff.id`, replacing free-text `store_officer`) — both live.
 
 ---
 
@@ -507,6 +511,7 @@ Bounded audit, five categories:
 | Payment-request + ingestion (#5) | **5a ✅, 5b ✅, 5c ✅ (S17)** — 5d (revenue matching) and 5e (treasury funding) queued per §8 design | 5c live-proven → 5d revenue matching |
 | Document storage buckets (receipts/lpo/supplier/vehicle) | ✅ **CLOSED** — signed URLs (PR #44 receipts, PR #45 lpo/supplier/vehicle), buckets flipped private, storage RLS role-scoped (S14, migration `storage_policy_cleanup_role_scoped_buckets`) | — |
 | Storage policy cleanup (public_* removal, S14) | ✅ COMPLETE — 4 generic + 3 receipts-legacy permissive policies replaced with 9 per-bucket role-scoped policies across 5 buckets; verified via full 8-role × 7-bucket RLS simulation (SELECT+INSERT, positive+negative) | — |
+| `waybills.signed_by_name` + `store_officer_id` (S19, DB) | ✅ LIVE — planning-chat migration; on-site signer column (distinct from `receiver_name`) + `store_officer_id` FK → `staff.id` replacing free-text field | — |
 | Go-live re-entry / dust gap | parked | MD triggers |
 
 ---
