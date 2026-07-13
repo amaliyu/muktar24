@@ -3,7 +3,7 @@
 
 Repo: `amaliyu/muktar24` (PRIVATE) · Prod branch: `main` · Stack: React 18 + Vite 5 + Supabase (PostgreSQL, RLS) + Vercel
 App: APC Manager — internal ERP for Abuja Precast Concrete Limited
-**Updated: 2026-07-12 (Session 18 — waybill→truck loading sync trigger, transit-damage driver linkage, DB-only).** All DB state verified by live query, not memory.
+**Updated: 2026-07-13 (Session 19 — deletion audit trail, truck loading cleanup, loading/waybill redesign).** All DB state verified by live query, not memory.
 **Status: BETA. A physical/manual backup system runs in parallel — NO downtime pressure.**
 **Operating mode: SLOW AND VERIFIED — fix on a branch → test on the branch's Vercel preview AS THE AFFECTED ROLE → confirm with own eyes → MD merges → re-verify production.**
 
@@ -18,6 +18,54 @@ App: APC Manager — internal ERP for Abuja Precast Concrete Limited
 ---
 
 ## 1. SESSION HISTORY (most recent first)
+
+### ✅ SESSION 19 (2026-07-13) — DELETION AUDIT TRAIL + TRUCK LOADING CLEANUP + LOADING/WAYBILL REDESIGN
+**PRs: #71 (invoice-and-order-delete), #72 (truck-loading-cleanup), #74 (truck-loading-features), #75 (store-officer-dropdown-fix), #76 (waybill-driver-filter). DB-only changes applied via planning-chat migration: deletion_log table + triggers; duplicate truck_loading_log row cleanup + UNIQUE INDEX on waybill_id; '9 Inch 3 Hole Block' product split + loading rate. PR #73 was docs-only (partial S19 notes, superseded by this entry).**
+
+**A. Deletion audit trail (DB — planning-chat migration; code via PR #71)**
+- `deletion_log` table: captures deleted-row snapshots for invoices, payments, orders, waybills, and truck_loading_log. Columns: table_name, record_id, snapshot (jsonb), deleted_by, deleted_at.
+- Trigger fires on DELETE from each covered table and writes a row to `deletion_log` before the row is removed — durable audit record without relying on application logic.
+- All triggers (covering all five tables) were applied via planning-chat migrations — entirely DB-only work, separate from PR #71's app-code changes.
+
+**B. Invoice deletion + order deletion (PR #71)**
+- Single-invoice delete added (MD-only, confirm-gated). Guard: if the invoice has any linked payments, deletion is blocked with a clear message — must clear or void payments first.
+- Order deletion added with the same payment-guard on both the client side (UI blocks before submit) and DB side (enforced even on direct API calls).
+- Before this PR, the only removal path was deleting the whole parent order — cascading all other invoices, payments, and waybills on the order. A targeted single-invoice delete resolves that.
+
+**C. Truck loading duplicate cleanup + unique index (DB — planning-chat migration)**
+- 9 waybills had duplicate `truck_loading_log` rows: the S18 waybill→loading sync trigger ran against pre-existing waybills that already had a manual log entry, creating one extra row per affected waybill.
+- Duplicate rows posed ~₦28,800 in phantom payroll exposure — loaders would have been paid twice for those trips on the next loading payroll run.
+- Duplicates cleared; `UNIQUE INDEX` added on `truck_loading_log(waybill_id)` to prevent recurrence. Any future INSERT that would create a second log row for the same waybill surfaces as Postgres error 23505 — caught in the TruckLoadingPage UI with a clear message (PR #74).
+- Live verification: zero duplicate rows post-cleanup; unique constraint proven by attempted duplicate INSERT.
+- **Also confirmed via this audit:** zero duplicate active rows exist in `truck_loader_assignments` — the S18 URGENT flag for BWR-100XB is fully closed (see §4).
+
+**D. Dead code removal + rates-tab crash fix (PR #72)**
+- `TruckLoadingTab`, `AssignLoaderForm`, `LoadingLogForm`, `LoadingWeeklySummary` and their render branch removed from `src/components/Labour.jsx` (~443 lines). These components had been unreachable since the S17 payroll consolidation (PR #68) and contained a hardcoded ₦8/block rate predating the per-product rate table.
+- Rates tab crash fixed: `truckLoadingService.getRates()` called `.order('created_at')` — `truck_loading_rates` has no `created_at` column (only `updated_at`). Fixed to `.order('updated_at')`.
+
+**E. '9 Inch 3 Hole Block' product split (DB — planning-chat migration)**
+- New product record created for '9 Inch 3 Hole Block', separated from '9 Inch (Nigeria Standard)' (the local-resale catalog entry from the S17 naming-collision fix). Own truck loading rate configured.
+- No app-code change required — the product appears in all product dropdowns via the existing products table query.
+
+**F. Loading/waybill redesign (PR #74)**
+- **Loader picker on Waybills form:** searchable multi-select. On vehicle selection, auto-populates loaders from `truck_loader_assignments` (standing crew for that vehicle). Per-trip override: any user change triggers `truckLoadingService.syncLoaders()` after save. Semantics: `waybillLoaders = null` = don't override the S18 trigger's auto-population; any array (even empty) = explicit selection, sync after save.
+- **`signed_by_name` field:** free-text "Receiver's Signature (Name)" — the person who physically signed at the delivery site; distinct from `receiver_name` (the customer's registered name). Writes to `waybills.signed_by_name`.
+- **Store officer FK:** replaced the old free-text `store_officer` field with a `store_officer_id` FK dropdown bound to `staff.id`.
+- **Edit action on loading log entries:** edit form on TruckLoadingPage. Blocked when `payment_status = 'paid'` — paid entries locked to protect payroll integrity, consistent with the S18 trigger's paid-entry lock.
+- **Waybill picker + backfill mode:** log form on TruckLoadingPage gains a waybill selector, filtered to waybills not yet linked to any existing log entry (client-side Set lookup on `waybill_id`). Backfill toggle allows logging a historical trip not auto-created by the S18 trigger. Postgres 23505 on duplicate waybill_id surfaces as a clear UI message.
+
+**G. Store officer and driver dropdown fixes (PRs #75, #76)**
+- Both dropdowns were listing all staff unfiltered. Root cause: `staff.role` stores `'Store Officer'` and `'Driver'` (capitalized, space-separated) but the filter code compared against lowercase enum-style values — returning no matches.
+- Fix: `staff.filter(s => s.role?.trim().toLowerCase() === 'store officer')` and `=== 'driver'` respectively. Case-insensitive match against the actual stored string, same pattern used throughout the codebase for role filters.
+- PR #75 also relabeled the waybill field from "Signed By (On-Site)" → "Receiver's Signature (Name)" and updated the placeholder. PR #76 dropped the `({s.role})` suffix from driver option labels (redundant once the list is role-filtered).
+- Both PRs merged.
+
+**H. KPI tracking goal — chain of custody (recorded, not yet built)**
+- Goal: tie block breakage to whoever had custody at the time. Chain per MD: Production Manager/Assistant PM (batching through yard stacking count) → Store Officer (from batch-number handover through supervising loading, until they sign the waybill) → Driver (from waybill signature through delivery, until customer sign-off).
+- Stacking-stage attribution gap: `damage_log.stage = 'stacking'` conflates two different custody holders (pre-handover PM/APM vs. post-handover Store Officer) into one label. Needs either a split stage value or a handover timestamp before any KPI can attribute stacking-stage damage correctly. See §4 for detail.
+- Not yet scoped as a build item.
+
+---
 
 ### ✅ SESSION 18 (2026-07-12) — WAYBILL→TRUCK LOADING SYNC + TRANSIT-DAMAGE DRIVER LINKAGE (DB ONLY)
 **No code PRs — all changes applied directly by the planning chat via `apply_migration`. No app code changed.**
@@ -416,10 +464,10 @@ Bounded audit, five categories:
 - ✅ **Products naming collision — RESOLVED (S17, item E).** "9 Inch" ambiguous product renamed "9 Inch (Nigeria Standard)" and repurposed as the real local-block catalog entry. The live mis-tagged order (APC-INV-2026-2381) corrected.
 - ✅ **Full landed-cost margin on resale trades — RESOLVED (S17, item F).** `order_trading_margin` view + `get_order_trading_margin()` RPC live. TradingMarginReport UI in App.jsx shows gross and true (landed-cost) margins side by side. See item F above.
 - ✅ **Stock movement linkage — RESOLVED (S18, item A).** Investigation confirmed Waybills already correctly decrements stock via `quantity_loaded`. The actual gap was Truck Loading non-adoption (broken ₦8 flat rate, fixed S17). The S18 waybill→truck_loading sync trigger closes the loop: every waybill save auto-generates the corresponding loading log entry. No manual double-entry required; no stock event missing.
-- **Duplicate active loader assignment — BWR-100XB (NEW — S18, URGENT before next payroll).** One loader on BWR-100XB has a duplicate active row in `truck_loader_assignments` — would cause double payroll credit on any run covering that vehicle. Other vehicles unaudited. Requires a dedup query before the next loading payroll cycle. Planning chat to run audit and fix.
+- ✅ **Duplicate active loader assignment — BWR-100XB (RESOLVED — S19).** Verified this session: zero duplicate active rows exist in `truck_loader_assignments`. The S19 audit also added a `UNIQUE INDEX` on `truck_loading_log(waybill_id)` to prevent the related double-log issue. No action required before next payroll.
 - **`damage_log.delivery_id` / `deliveries` table dead (NEW — S18).** `deliveries` has 0 rows; `damage_log.delivery_id` is an unused legacy FK. Candidate for cleanup in a future housekeeping migration.
 - **Dashboard widget for labour/loading activity (NEW — S17).** No existing connection to preserve; would be a new addition to the KPI/dashboard aggregations pulling from `daily_roster_entries` and `truck_loading_log`.
-- **Invoice deletion (NEW — S17).** RLS already permits md, but no direct UI action exists. The only way to remove an invoice today is deleting its whole parent order, which cascades and removes every other invoice, payment, and waybill attached to it. A targeted single-invoice delete UI (MD-only, confirm-gated) is missing.
+- ✅ **Invoice deletion — RESOLVED (S19, PR #71).** Single-invoice delete added (MD-only, confirm-gated, payment-guarded). Order deletion added with the same guard (client + DB-side). `deletion_log` audit trail captures all deleted invoice/order/payment rows.
 - **Payroll week navigation UX (NEW — S17).** `WeeklyPayrollTab` has only a raw date picker — no prev/next buttons, no status badge on the selector showing whether the week has a payroll and what state it is in. Flagged as the concrete answer to a real "labour tabs are hard to use" complaint. Not yet built.
 - **Payment request list filtering (NEW — S17).** Status grouping (pending vs actioned vs disbursed) and an outstanding-disbursement summary are not yet built in the PaymentRequestsPage list view.
 - **Trading Margin Report access for ICO (NEW — S17, open decision).** Currently gated to `bdm`, `md`, `accountant`, `board_member`. Whether ICO should also have read access is an open MD decision — not resolved.
@@ -506,12 +554,20 @@ Bounded audit, five categories:
 | Waybill→truck loading sync (S18, DB) | ✅ LIVE — `fn_sync_waybill_to_truck_loading()` trigger; `apc_map_block_type_to_product_id()` helper; paid entries locked from overwrite | — |
 | `truck_loading_log` waybill FK ON DELETE (S18, DB) | ✅ FIXED — was RESTRICT (would block waybill deletion); now SET NULL | — |
 | Transit-damage driver linkage (S18, DB) | ✅ LIVE — `damage_log.waybill_id` FK added; 5 records backfilled; `fn_autolink_delivery_damage()` trigger on INSERT | — |
-| Duplicate loader assignment — BWR-100XB (S18) | ⚠️ KNOWN, NOT FIXED — one loader has duplicate active row; pay-doubling risk on next payroll; needs dedup before next loading payroll cycle | Planning chat: audit + dedup |
+| Duplicate loader assignment — BWR-100XB (S18) | ✅ RESOLVED (S19) — zero duplicate active rows confirmed in `truck_loader_assignments`; `UNIQUE INDEX` on `truck_loading_log(waybill_id)` also added | — |
 | `deliveries` table / `damage_log.delivery_id` (S18) | ⚠️ KNOWN, NOT FIXED — `deliveries` has 0 rows; `delivery_id` FK is legacy dead column | Future housekeeping migration |
 | Payment-request + ingestion (#5) | **5a ✅, 5b ✅, 5c ✅ (S17)** — 5d (revenue matching) and 5e (treasury funding) queued per §8 design | 5c live-proven → 5d revenue matching |
 | Document storage buckets (receipts/lpo/supplier/vehicle) | ✅ **CLOSED** — signed URLs (PR #44 receipts, PR #45 lpo/supplier/vehicle), buckets flipped private, storage RLS role-scoped (S14, migration `storage_policy_cleanup_role_scoped_buckets`) | — |
 | Storage policy cleanup (public_* removal, S14) | ✅ COMPLETE — 4 generic + 3 receipts-legacy permissive policies replaced with 9 per-bucket role-scoped policies across 5 buckets; verified via full 8-role × 7-bucket RLS simulation (SELECT+INSERT, positive+negative) | — |
 | `waybills.signed_by_name` + `store_officer_id` (S19, DB) | ✅ LIVE — planning-chat migration; on-site signer column (distinct from `receiver_name`) + `store_officer_id` FK → `staff.id` replacing free-text field | — |
+| Deletion audit trail — `deletion_log` (S19, DB + PR #71) | ✅ LIVE — table + triggers on invoices, payments, orders, waybills, truck_loading_log; captures deleted-row snapshots (jsonb) with actor + timestamp | — |
+| Invoice deletion + order deletion guard (S19, PR #71) | ✅ MERGED — MD-only, confirm-gated, payment-guarded for both; `deletion_log` captures all deletes | — |
+| Truck loading duplicate cleanup + unique index (S19, DB) | ✅ LIVE — 9 duplicate `truck_loading_log` rows cleared (~₦28,800 phantom payroll exposure); `UNIQUE INDEX` on `truck_loading_log(waybill_id)` added; zero duplicates confirmed | — |
+| Dead code removal + rates-tab crash fix (S19, PR #72) | ✅ MERGED — ~443 lines of dead `TruckLoadingTab`/`LoadingLogForm`/`AssignLoaderForm`/`LoadingWeeklySummary` removed from Labour.jsx; `.order('created_at')` → `.order('updated_at')` crash fix | — |
+| '9 Inch 3 Hole Block' product split (S19, DB) | ✅ LIVE — separate product record + loading rate; no longer bundled under '9 Inch (Nigeria Standard)' | — |
+| Loading/waybill redesign (S19, PR #74) | ✅ MERGED — loader picker (auto-fill from standing crew, per-trip override, syncLoaders); edit action on log entries (blocked when paid); waybill picker + backfill mode; `signed_by_name`; `store_officer_id` FK dropdown | — |
+| Store officer dropdown fix (S19, PR #75) | ✅ MERGED — filtered to `role = 'Store Officer'`; field relabeled "Receiver's Signature (Name)"; placeholder updated | — |
+| Driver dropdown fix (S19, PR #76) | ✅ MERGED — filtered to `role = 'Driver'`; `({s.role})` suffix dropped from labels | — |
 | Go-live re-entry / dust gap | parked | MD triggers |
 
 ---
