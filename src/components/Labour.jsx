@@ -1112,6 +1112,12 @@ function getLastSaturday(dateStr) {
   return d.toISOString().split('T')[0]
 }
 
+function shiftWeek(dateStr, weeks) {
+  const d = new Date(dateStr)
+  d.setDate(d.getDate() + weeks * 7)
+  return d.toISOString().split('T')[0]
+}
+
 function WeeklyPayrollTab({ pool, roles, userProfile }) {
   const [subTab, setSubTab] = useState('production')
   const [weekEnding, setWeekEnding] = useState(getLastSaturday(todayStr()))
@@ -1293,12 +1299,22 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
         ))}
       </div>
 
-      <div style={{ ...styles.row, marginBottom: '16px', gap: '12px' }}>
+      <div style={{ ...styles.row, marginBottom: '16px', gap: '12px', alignItems: 'flex-end' }}>
         <div>
           <label style={styles.label}>Week Ending (Saturday)</label>
-          <input type="date" style={styles.input} value={weekEnding} onChange={e => setWeekEnding(getSaturday(e.target.value))} />
+          <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+            <button style={{ ...styles.btn('ghost'), padding: '6px 10px' }} onClick={() => setWeekEnding(shiftWeek(weekEnding, -1))}>‹</button>
+            <input type="date" style={styles.input} value={weekEnding} onChange={e => setWeekEnding(getSaturday(e.target.value))} />
+            <button style={{ ...styles.btn('ghost'), padding: '6px 10px' }} onClick={() => setWeekEnding(shiftWeek(weekEnding, 1))}>›</button>
+          </div>
         </div>
-        <button style={{ ...styles.btn('ghost'), marginTop: '18px' }} onClick={loadWeekData}>Load Week</button>
+        <button style={styles.btn('ghost')} onClick={loadWeekData}>Load Week</button>
+        {(() => {
+          const rec = payrollRecords.find(p => p.payroll_type === subTab)
+          const color = !rec ? theme.textMuted : rec.status === 'paid' ? theme.green : rec.status === 'draft' ? '#f59e0b' : theme.textMuted
+          const label = !rec ? 'No payroll' : rec.status === 'paid' ? 'Paid' : rec.status === 'draft' ? 'Draft' : rec.status
+          return <span style={styles.badge(color)}>{label}</span>
+        })()}
       </div>
 
       {alert && <AlertBar msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
