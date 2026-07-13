@@ -2075,12 +2075,12 @@ const Waybills = ({ userProfile }) => {
               <label style={styles.label}>Store Officer</label>
               <select style={styles.input} value={form.storeOfficerId} onChange={e => setForm({ ...form, storeOfficerId: e.target.value })}>
                 <option value="">— Select store officer —</option>
-                {staff.map(s => <option key={s.id} value={s.id}>{s.full_name} ({s.role})</option>)}
+                {staff.filter(s => s.role?.trim().toLowerCase() === 'store officer').map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
               </select>
             </div>
             <div style={styles.formGroup}>
-              <label style={styles.label}>Signed By (On-Site)</label>
-              <input style={styles.input} placeholder="Name of person who signed for delivery" value={form.signedByName} onChange={e => setForm({ ...form, signedByName: e.target.value })} />
+              <label style={styles.label}>Receiver's Signature (Name)</label>
+              <input style={styles.input} placeholder="Name of person who received and signed for the delivery" value={form.signedByName} onChange={e => setForm({ ...form, signedByName: e.target.value })} />
             </div>
             {form.vehicleId && (
               <div style={styles.formGroup}>
