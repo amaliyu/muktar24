@@ -7391,6 +7391,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
   const [queryReason, setQueryReason] = useState('');
   const [allUsers, setAllUsers] = useState([]);
   const [showQueried, setShowQueried] = useState(false);
+  const [statusFilter, setStatusFilter] = useState('all');
 
   const canBackfill = isInitiator || role === 'md';
   const canQuery = ['ico', 'accountant'].includes(role);
@@ -7688,7 +7689,13 @@ const PaymentRequestsPage = ({ userProfile }) => {
     : requests;
   const queriedRequests = requests.filter(r => r.status === 'queried' &&
     (['ico', 'accountant', 'md'].includes(role) || r.requested_by === userId));
-  const queue = showQueried ? queriedRequests : ((!isInitiator && showHistory) ? requests : actionQueue);
+  const baseQueue = showQueried ? queriedRequests : ((!isInitiator && showHistory) ? requests : actionQueue);
+  // Status filter takes precedence over the Action Queue / All / Queried toggle when active
+  const queue = statusFilter !== 'all' ? requests.filter(r => r.status === statusFilter) : baseQueue;
+
+  const ALL_STATUSES = ['draft', 'ico_approved', 'md_approved', 'funded', 'disbursed', 'closed', 'queried'];
+  const fundedRequests = requests.filter(r => r.status === 'funded');
+  const outstandingTotal = fundedRequests.reduce((s, r) => s + Number(r.amount || 0), 0);
 
   return (
     <div>
@@ -7734,6 +7741,22 @@ const PaymentRequestsPage = ({ userProfile }) => {
           )}
         </div>
       </div>
+
+      {fundedRequests.length > 0 && (
+        <div style={{ ...styles.statCard(theme.green), marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '32px', flexWrap: 'wrap' }}>
+          <div>
+            <div style={styles.statLabel}>Outstanding Disbursement</div>
+            <div style={{ ...styles.statValue, color: theme.green }}>{naira(outstandingTotal)}</div>
+            <div style={styles.statSub}>
+              {fundedRequests.length} request{fundedRequests.length !== 1 ? 's' : ''} funded but not yet disbursed
+              {isInitiator && ' (your requests)'}
+            </div>
+          </div>
+          <div style={{ fontSize: '12px', color: theme.textMuted, maxWidth: '320px' }}>
+            Funding has been set aside for {isInitiator ? 'these requests' : 'these requests across all initiators'} — pending final disbursement by the accountant.
+          </div>
+        </div>
+      )}
 
       {showForm && (isInitiator || editTarget) && (
         <div style={{ ...styles.card, marginBottom: '20px' }}>
@@ -8197,10 +8220,26 @@ const PaymentRequestsPage = ({ userProfile }) => {
         );
       })()}
 
+      <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap' }}>
+        <span style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginRight: '4px' }}>Filter:</span>
+        {['all', ...ALL_STATUSES].map(s => (
+          <button key={s}
+            style={{ ...styles.btn(statusFilter === s ? 'primary' : 'secondary'), padding: '5px 11px', fontSize: '11px', fontWeight: '600' }}
+            onClick={() => setStatusFilter(s)}>
+            {s === 'all' ? 'All' : s.replace(/_/g, ' ')}
+            {s !== 'all' && requests.filter(r => r.status === s).length > 0 && (
+              <span style={{ marginLeft: '5px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px', padding: '0 5px', fontSize: '10px' }}>
+                {requests.filter(r => r.status === s).length}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
       <div style={styles.card}>
         {loading ? <Spinner /> : queue.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '30px', color: theme.textMuted }}>
-            {isInitiator ? 'No payment requests yet.' : showHistory ? 'No payment requests found.' : 'No requests pending in this queue.'}
+            {statusFilter !== 'all' ? `No ${statusFilter.replace(/_/g, ' ')} requests.` : isInitiator ? 'No payment requests yet.' : showHistory ? 'No payment requests found.' : 'No requests pending in this queue.'}
           </div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
