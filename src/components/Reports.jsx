@@ -170,7 +170,7 @@ async function fetchProductionRange(from, to) {
   const { data } = await q; return data || []
 }
 async function fetchDamageRange(from, to) {
-  let q = supabase.from('damage_log').select('*, recorder:recorded_by(full_name), delivery:delivery_id(waybill_number)').order('date')
+  let q = supabase.from('damage_log').select('*, recorder:recorded_by(full_name), delivery:waybill_id(waybill_number)').order('date')
   if (from) q = q.gte('date', from)
   if (to)   q = q.lte('date', to)
   const { data } = await q; return data || []
