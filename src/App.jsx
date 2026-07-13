@@ -339,9 +339,10 @@ const Dashboard = ({ onNavigate, userProfile }) => {
 
   const firstOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
   const todayIso = new Date().toISOString().split('T')[0];
+  const weekStart = (() => { const d = new Date(); d.setDate(d.getDate() - d.getDay()); return d.toISOString().split('T')[0]; })();
   const [dateRange, setDateRange] = useState({ from: firstOfMonth, to: todayIso });
 
-  const [stats, setStats] = useState({ staff: 0, produced: 0, orders: 0, revenue: 0, pending: 0, waybills: 0, damages: 0, lpoQueue: 0, scheduleQueue: 0, pendingRegister: 0 });
+  const [stats, setStats] = useState({ staff: 0, produced: 0, orders: 0, revenue: 0, pending: 0, waybills: 0, damages: 0, lpoQueue: 0, scheduleQueue: 0, pendingRegister: 0, blocksLoadedWeek: 0, activeLoadersToday: 0, pendingPayroll: 0, rosterHeadcountToday: 0 });
   const [finishedGoods, setFinishedGoods] = useState([]);
   const [recent, setRecent] = useState([]);
   const [vehicleAlerts, setVehicleAlerts] = useState([]);
@@ -411,6 +412,18 @@ const Dashboard = ({ onNavigate, userProfile }) => {
         setFinishedGoods(grouped.map(f => ({ ...f, unit: productUnitMap[f.block_type] || 'pieces' })));
         setVehicleAlerts(expiring);
         setRentalVehicles(rentals);
+
+        const needsLabour = can('production_manager', 'assistant_production_manager', 'logistics_manager', 'hr_officer', 'ico', 'md', 'board_member');
+        if (needsLabour) {
+          const [labourLoadLogs, labourPayroll, labourRoster] = await Promise.all([
+            supabase.from('truck_loading_log').select('quantity_loaded, date, loaders:truck_loading_loaders(labour_id)').gte('date', weekStart).lte('date', todayIso).then(r => r.data || []).catch(() => []),
+            supabase.from('weekly_labour_payroll').select('id', { count: 'exact', head: true }).in('status', ['draft', 'ico_approved', 'md_approved']).then(r => r.count || 0).catch(() => 0),
+            supabase.from('daily_roster').select('entries:daily_roster_entries(id)').eq('roster_date', todayIso).maybeSingle().then(r => r.data?.entries?.length || 0).catch(() => 0),
+          ]);
+          const blocksLoadedWeek = labourLoadLogs.reduce((s, r) => s + (r.quantity_loaded || 0), 0);
+          const activeLoaderSet = new Set(labourLoadLogs.filter(r => r.date === todayIso).flatMap(r => (r.loaders || []).map(l => l.labour_id)));
+          setStats(s => ({ ...s, blocksLoadedWeek, activeLoadersToday: activeLoaderSet.size, pendingPayroll: labourPayroll, rosterHeadcountToday: labourRoster }));
+        }
       } catch { /* workflow tables may not exist yet */ } finally {
         setLoading(false);
       }
@@ -466,6 +479,15 @@ const Dashboard = ({ onNavigate, userProfile }) => {
       <StatCard key="damages" label="Transit Damages" value={fmt(stats.damages)} sub="Blocks damaged in delivery" accent={theme.red} />,
   ].filter(Boolean);
 
+  const row3 = can('production_manager', 'assistant_production_manager', 'logistics_manager', 'hr_officer', 'ico', 'md', 'board_member') ? [
+    <StatCard key="blocksLoaded" label="Blocks Loaded This Week" value={fmt(stats.blocksLoadedWeek)} sub="Qty dispatched this week" accent={theme.blue} />,
+    <StatCard key="activeLoaders" label="Active Loaders Today" value={stats.activeLoadersToday} sub="Workers on today's loads" accent={theme.accent} />,
+    <div key="pendingPayroll" style={{ cursor: 'pointer' }} onClick={() => onNavigate('labour')}>
+      <StatCard label="Pending Payroll" value={stats.pendingPayroll} sub="Payrolls awaiting approval" accent={theme.accent} />
+    </div>,
+    <StatCard key="rosterHeadcount" label="Roster Headcount Today" value={stats.rosterHeadcountToday} sub="Workers on today's roster" accent={theme.green} />,
+  ] : [];
+
   const showLpo      = can('md', 'ico', 'bdm') && stats.lpoQueue > 0;
   const showSchedule = can('md', 'ico') && stats.scheduleQueue > 0;
   const showPending  = can('md', 'board_member', 'ico', 'bdm', 'store_officer', 'logistics_manager') && stats.pendingRegister > 0;
@@ -501,6 +523,12 @@ const Dashboard = ({ onNavigate, userProfile }) => {
         <>
           {row1.length > 0 && <div style={styles.grid(row1.length)}>{row1}</div>}
           {row2.length > 0 && <div style={styles.grid(row2.length)}>{row2}</div>}
+          {row3.length > 0 && (
+            <>
+              <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em', marginTop: '8px', marginBottom: '8px' }}>Labour &amp; Loading</div>
+              <div style={styles.grid(row3.length)}>{row3}</div>
+            </>
+          )}
           {(showLpo || showSchedule || showPending) && (
             <div style={{ display: "flex", gap: "12px", marginBottom: "16px", flexWrap: "wrap" }}>
               {showLpo && (
