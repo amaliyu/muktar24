@@ -3,7 +3,7 @@
 
 Repo: `amaliyu/muktar24` (PRIVATE) · Prod branch: `main` · Stack: React 18 + Vite 5 + Supabase (PostgreSQL, RLS) + Vercel
 App: APC Manager — internal ERP for Abuja Precast Concrete Limited
-**Updated: 2026-07-13 (Session 19 — deletion audit trail, truck loading cleanup, loading/waybill redesign).** All DB state verified by live query, not memory.
+**Updated: 2026-07-13 (Session 20 — sidebar regroup, payroll date-range/draft rebuild, payment-request filter, curing damage tracking).** All DB state verified by live query, not memory.
 **Status: BETA. A physical/manual backup system runs in parallel — NO downtime pressure.**
 **Operating mode: SLOW AND VERIFIED — fix on a branch → test on the branch's Vercel preview AS THE AFFECTED ROLE → confirm with own eyes → MD merges → re-verify production.**
 
@@ -18,6 +18,74 @@ App: APC Manager — internal ERP for Abuja Precast Concrete Limited
 ---
 
 ## 1. SESSION HISTORY (most recent first)
+
+### ✅ SESSION 20 (2026-07-13) — SIDEBAR REGROUP + PAYROLL RANGE/DRAFT REBUILD + PAYMENT-REQUEST FILTER + CURING DAMAGE TRACKING
+**PRs: #78 (sidebar-regroup, docs-only nav change), #79 (payroll-week-nav), #80 (payroll-range-picker), #81 (payment-requests-status-filter), #82 (curing-damage-kpi-and-batches). All merged. DB changes applied via planning-chat migrations: weekly_labour_payroll period columns + payroll_id FKs (PR #80 schema); damage_log curing stage + batch_id FK (PR #82 schema); advance_weekly_payroll() cascade + backfill (PR #80 follow-up).**
+
+**A. Sidebar navigation regroup (PR #78)**
+- The old Operations section had grown to 11 unrelated items. Restructured `navItems` into five domain sections: Overview / Production / Logistics / HR & Workforce / Finance (Sales/Approvals/Analytics unchanged).
+- Every `id`, `label`, and `icon` value is byte-identical to before — pure regroup with zero logic change. `ROLE_PAGES` is keyed on `id` so all role-visibility rules were unaffected.
+- Staff, Labour, Disciplinary, Attendance Kiosk, Attendance Flags, Leave Requests, Salary Advances all moved under **HR & Workforce**. Advances and Leave moved from Finance. Finance retains Accounting and Payment Requests.
+
+**B. Payroll week navigation UX (PR #79)**
+- Added `shiftWeek(dateStr, weeks)` helper function in `src/components/Labour.jsx` near the other date helpers: shifts a Saturday date string by `weeks × 7` days, returns `YYYY-MM-DD`.
+- `WeeklyPayrollTab` date-selector row gained **prev (‹) / next (›) buttons** flanking the date input. Each calls `setWeekEnding(shiftWeek(weekEnding, ±1))`; the existing `useEffect` on `loadWeekData` fires automatically.
+- **Status badge** shown inline after "Load Week", derived from `payrollRecords` filtered to the current `subTab` payroll_type. States: No payroll (gray) / Draft (amber) / Paid (green) / verbatim fallthrough for other real states (ico_approved, md_approved, etc.).
+
+**C. Flexible date-range payroll selection, production + loading (PR #80; DB via planning-chat migration)**
+This was the major build item of the session.
+
+*Schema changes (applied via planning-chat before PR merge):*
+- `weekly_labour_payroll` gained `period_start date` and `period_end date` columns (additive; `week_ending` is still populated as `period_end` for backward compatibility with PDF/XLSX/status-board code that reads it).
+- `UNIQUE(week_ending, payroll_type)` constraint on `weekly_labour_payroll` was dropped — custom date ranges can share a Saturday week_ending.
+- `daily_roster.payroll_id uuid FK → weekly_labour_payroll.id` and `truck_loading_log.payroll_id uuid FK → weekly_labour_payroll.id` added as the real "already linked to a payroll" guard, replacing week-bucket matching.
+
+*UI rebuild (PR #80):*
+- `WeeklyPayrollTab` rebuilt with a **date-range picker** (From / To date inputs replacing the single week-ending input), prev/next buttons shifting both ends by 7 days, and a "Load Range" button.
+- **Row-level checkbox selection:** all `daily_roster` / `truck_loading_log` rows in the fetched range are shown in a source-rows table above the worker summary. Unassigned rows (`payroll_id IS NULL`) pre-selected; rows linked to the current draft pre-selected + badged "This Draft"; rows in other payrolls dimmed + checkbox disabled + badged "Other". Select-all checkbox in header; worker aggregation recomputes live from checked rows only.
+- **Draft-edit mode:** if a `weekly_labour_payroll` draft record is detected, the "Generate Payroll" button becomes **"Update Draft"** — saves recalculated totals to the existing record without creating a new INSERT. A "— editing draft" indicator shown next to the status badge. This allows adding or removing rows from an existing draft rather than starting over.
+- **Generate Payroll:** staleness guard re-fetches `payroll_id` on selected rows before inserting; aborts if any were claimed since page load. On success: INSERTs `weekly_labour_payroll` with `period_start`, `period_end`, `week_ending = rangeTo`; UPDATEs each selected `daily_roster` / `truck_loading_log` row to set `payroll_id = newId`.
+- **Recent Payrolls list:** "Period" column now shows `period_start – period_end` range for new records; falls back to `week_ending` for old ones. `openPayroll()` from the list restores `rangeFrom` / `rangeTo` from the clicked record.
+- **Historical badge on `RosterCreateForm`** date input: amber "Historical" badge when the selected roster date is before today.
+
+*Bug caught and fixed before merge:*
+- Initial implementation detected an existing draft using `.eq('week_ending', rangeTo)` — still week-bucket matching, defeating the feature for the most common real case (widening a draft's range after creation). Fixed to two-step detection: (1) fetch `daily_roster` / `truck_loading_log` rows for the range; (2) collect distinct `payroll_id` values from those rows; (3) fetch `weekly_labour_payroll` by `.in('id', linkedIds)`. A visible warning is surfaced if a range spans multiple distinct draft payrolls for the same type (edge case; admin resolution required).
+
+*Follow-up DB fix (planning-chat, after PR merge):*
+- `advance_weekly_payroll()` RPC previously never cascaded a payroll reaching `paid` status to the linked `daily_roster` / `truck_loading_log` rows' own `payment_status` column — those rows stayed `'unpaid'` regardless of their payroll's status.
+- Fixed inside the RPC: when a payroll is marked paid, it now updates `payment_status = 'paid'` on all rows whose `payroll_id` matches.
+- Backfilled: 17 rows (5 `daily_roster`, 12 `truck_loading_log`) whose payrolls were already paid but hadn't inherited the status.
+
+**D. Payment request status filter + Outstanding Disbursement card (PR #81)**
+- **Full 7-status filter bar** (`draft` / `ico_approved` / `md_approved` / `funded` / `disbursed` / `queried` / `closed`) added for every role, including initiators — who previously had no filtering at all. Filter takes precedence over the existing Action Queue / All / Queried 3-way toggle when active; selecting "All" restores the toggle's normal behavior. The existing toggle is not modified.
+- Each status button shows a count badge for non-zero statuses. Empty-state message is status-aware ("No ico_approved requests." instead of the generic queue message) when a filter is active.
+- **Outstanding Disbursement stat card** showing total ₦ sum + request count whenever `status = 'funded'` requests exist. Positioned between the page header and the create/backfill forms. Scoped automatically: initiators see `listMine()` results (their own funded-but-undisbursed total with "(your requests)" label); reviewer roles see company-wide. Interpretation: `funded` = accountant has run `mark_funded`, money is committed, `mark_disbursed` has not yet been called — flagged in PR description for MD confirmation.
+- `recalled` and `cancelled` statuses visible in `statusColor` map but not confirmed as live state machine values — left out of the filter buttons, accessible under "All".
+
+**E. Trading Margin Report ICO access — decision only, no code change**
+- Confirmed: ICO stays excluded from `get_order_trading_margin()`. Current RLS/RPC already reflects this (gated to `bdm`, `md`, `accountant`, `board_member` only). Open S17 decision item closed with no migration or code change required.
+
+**F. KPI stacking-stage split + curing damage entry (PR #82; DB via planning-chat migration)**
+
+*Schema changes (applied via planning-chat before PR):*
+- `damage_log.stage` CHECK constraint gained a `'curing'` value: Store Officer custody window (from batch handover through curing/picking/loading until they sign the waybill). `'stacking'` now means specifically pre-handover, PM/Assistant PM custody only.
+- `damage_log.batch_id uuid FK → batches.id` added for curing-stage entries. `production_log_id` left unchanged for production/stacking-stage entries.
+- 7 existing `damage_log` rows reclassified from `'stacking'` to `'curing'` (those logged after their batch's `created_at` = the handover moment). Done; no further data action required.
+- `damage_log.recorded_by` FK retargeted from `staff(id)` to `user_profiles(id)` — the app only has `userProfile.id` (auth UUID from `user_profiles`) on hand at runtime; `staff.id` is a separate UUID in this schema and would have been a dangling reference. Confirmed zero existing rows had `recorded_by` populated, so no migration of existing data was needed.
+
+*KPIDashboard.jsx fix (PR #82):*
+- Damage aggregation previously only recognized `['production','stacking']` and `'delivery'` stages — curing-stage rows were silently invisible in all KPI totals, including the 7 newly reclassified rows.
+- Added `dmgCuring = dmgLog.filter(d => d.stage === 'curing').reduce(...)`. `dmgProduction` definition left exactly as-is (PM/APM combined total, still correct).
+- New **"Curing/Yard Damage (Store Officer)"** KPICard in the Production tab's Damage Analysis section (purple accent, % of produced sub-text). Grid widened from 3 to 4 columns.
+- Added to PDF export table under PRODUCTION alongside the existing Production Damage row.
+
+*New Batches page feature (PR #82):*
+- `Batches` component now receives `userProfile` prop; render call updated accordingly.
+- **"Log Damage" button** added per active batch row — visible only when `['store_officer', 'md'].includes(userProfile?.role)`. Role casing confirmed `'store_officer'` (lowercase underscore) from `ROLE_PAGES` at line 136, consistent with all other role checks in the file. Button hidden on exhausted batches (no remaining stock to deduct from).
+- Opens a **modal** with: quantity damaged (required), date (defaults to today, amber "Historical" badge if backdated — same pattern as `RosterCreateForm`), optional notes.
+- On submit: `productionService.logDamage({ stage: 'curing', batch_id, block_type, quantity_damaged, date, notes, recorded_by: userProfile.id })` — no `production_log_id` set on this path; calls `batchesService.reduceStock(batch.id, qty)` (existing service method that decrements `qty_remaining`, clamps at 0, flips status to `exhausted` when zero — same code path used by waybill/delivery picking); calls `finishedGoodsService.decrease(block_type, qty)` (fire-and-forget pattern already used by batch edit and delete in the same component).
+
+---
 
 ### ✅ SESSION 19 (2026-07-13) — DELETION AUDIT TRAIL + TRUCK LOADING CLEANUP + LOADING/WAYBILL REDESIGN
 **PRs: #71 (invoice-and-order-delete), #72 (truck-loading-cleanup), #74 (truck-loading-features), #75 (store-officer-dropdown-fix), #76 (waybill-driver-filter). DB-only changes applied via planning-chat migration: deletion_log table + triggers; duplicate truck_loading_log row cleanup + UNIQUE INDEX on waybill_id; '9 Inch 3 Hole Block' product split + loading rate. PR #73 was docs-only (partial S19 notes, superseded by this entry).**
@@ -470,14 +538,13 @@ Bounded audit, five categories:
 - ✅ **Invoice deletion — RESOLVED (S19, PR #71).** Single-invoice delete added (MD-only, confirm-gated, payment-guarded). Order deletion added with the same guard (client + DB-side). `deletion_log` audit trail captures all deleted invoice/order/payment rows.
 - **Payroll week navigation UX (NEW — S17).** `WeeklyPayrollTab` has only a raw date picker — no prev/next buttons, no status badge on the selector showing whether the week has a payroll and what state it is in. Flagged as the concrete answer to a real "labour tabs are hard to use" complaint. Not yet built.
 - **Payment request list filtering (NEW — S17).** Status grouping (pending vs actioned vs disbursed) and an outstanding-disbursement summary are not yet built in the PaymentRequestsPage list view.
-- **Trading Margin Report access for ICO (NEW — S17, open decision).** Currently gated to `bdm`, `md`, `accountant`, `board_member`. Whether ICO should also have read access is an open MD decision — not resolved.
+- ✅ **Trading Margin Report access for ICO (NEW — S17, CLOSED — S20).** ICO stays excluded from `get_order_trading_margin()`. MD confirmed: current gating (`bdm`, `md`, `accountant`, `board_member` only) is correct. Existing RLS/RPC already reflects this; no migration or code change was needed. Decision item closed.
 - **HANDOFF.md accuracy (NEW — S17).** During S17, at least two items claimed outstanding in `HANDOFF.md` were already live in the DB — the SQL blocks listed as pending had already been applied. `HANDOFF.md` needs a pass to re-sync with actual current DB state rather than just the plan document's outstanding list. (Note: `APP_FULL_DOC.md` was updated in the S17 docs round-up session — the accuracy gap is specifically in `HANDOFF.md`.)
 - **Orphaned staff photo files** in `staff-photos` bucket from deleted test staff — harmless; clear via Supabase dashboard (SQL delete blocked).
 - **Ransom (APC-EMP-018)** in onboarding — HR to complete checklist + activate when ready.
 - Original payroll trigger/RPC/audit objects not in tracked migration history (pre-discipline). Live & verified. Optional: capture as no-op migration.
-- **KPI tracking — breakage/damage accountability by role (NEW — S19, goal not yet scoped).** Goal: tie block breakage to whoever had custody at the time, not just total damage figures. Chain of custody per MD: Production Manager/Assistant PM (batching through yard stacking count) → Store Officer (from batch-number handover, through curing, through supervising loading, until they sign the waybill) → Driver (from their waybill signature through delivery, until customer sign-off). Third-party security signs at factory exit as a gate checkpoint, not a custody holder.
-  - **Current gap:** `damage_log.stage = 'stacking'` conflates two different owners (pre-handover PM/APM vs. post-handover Store Officer) into one label. Needs either a split stage value or a handover timestamp to separate them before any KPI can attribute stacking-stage damage correctly. `delivery` stage is already clean — links to `waybill_id → driver_id`.
-  - Not yet scoped: exact KPI definitions/thresholds ("high breakage"), whether this becomes a dashboard, a scorecard, or feeds into existing HR/disciplinary flows. Recorded as a goal, not a build item.
+- ✅ **KPI tracking — stacking-stage split (S19 goal, RESOLVED — S20 DB + PR #82).** The `damage_log.stage = 'stacking'` conflation (pre-handover PM/APM vs. post-handover Store Officer in one label) has been resolved by adding a `'curing'` stage value and retargeting 7 existing rows. `damage_log.batch_id` added for curing entries. KPIDashboard.jsx now tracks `dmgCuring` as its own KPI metric with a dedicated card and PDF export row. The broader goal — attributing damage to specific custody holders via dashboards, scorecards, or HR/disciplinary flows — is not yet scoped; the schema split is the foundation.
+  - **⚠️ New entry point worth real-world validation (S20):** The "Log Damage" button in Batches is the first time a store_officer has an interface for this. It has not been used in production yet — worth a check next session that (a) the role gate works as tested, (b) `qty_remaining` deduction is visible and correct, and (c) the KPI card reflects new curing-stage entries promptly. Flag this rather than assuming it's fully bedded in until a real entry has been made and verified end-to-end.
 - **Waybill schema additions (S19, DB — planning-chat migration, no PR).** `waybills.signed_by_name` (on-site signer at delivery, distinct from `receiver_name` which is the customer's registered name) and `waybills.store_officer_id` (FK → `staff.id`, replacing free-text `store_officer`) — both live.
 
 ---
@@ -568,6 +635,12 @@ Bounded audit, five categories:
 | Loading/waybill redesign (S19, PR #74) | ✅ MERGED — loader picker (auto-fill from standing crew, per-trip override, syncLoaders); edit action on log entries (blocked when paid); waybill picker + backfill mode; `signed_by_name`; `store_officer_id` FK dropdown | — |
 | Store officer dropdown fix (S19, PR #75) | ✅ MERGED — filtered to `role = 'Store Officer'`; field relabeled "Receiver's Signature (Name)"; placeholder updated | — |
 | Driver dropdown fix (S19, PR #76) | ✅ MERGED — filtered to `role = 'Driver'`; `({s.role})` suffix dropped from labels | — |
+| Sidebar nav regroup (S20, PR #78) | ✅ MERGED — Operations split into Production/Logistics/HR & Workforce sections; all ids/labels/icons byte-identical, zero logic change | — |
+| Payroll week nav UX (S20, PR #79) | ✅ MERGED — shiftWeek() helper; ‹/› prev/next buttons; status badge (No payroll / Draft / Paid / verbatim fallthrough) per week+subtab | — |
+| Payroll date-range + draft mode (S20, PR #80; DB) | ✅ MERGED — period_start/period_end on weekly_labour_payroll; payroll_id FKs on daily_roster + truck_loading_log; UNIQUE(week_ending,payroll_type) dropped; range picker + row-level checkboxes + draft-edit mode; draft detected via payroll_id linkage not week_ending. Follow-up DB: advance_weekly_payroll() now cascades paid status to linked rows; 17 rows backfilled | — |
+| Payment-request filter + outstanding card (S20, PR #81) | ✅ MERGED — 7-status filter bar (all roles incl. initiators); Outstanding Disbursement stat card for funded requests; status-aware empty-state message | — |
+| Trading Margin Report ICO access (S17 open decision) | ✅ CLOSED S20 — ICO stays excluded; no code or DB change needed | — |
+| Curing-stage damage KPI + Batches entry (S20, PR #82; DB) | ✅ MERGED — damage_log.stage 'curing' value + batch_id FK + recorded_by retargeted to user_profiles; 7 rows reclassified; KPIDashboard dmgCuring metric + KPICard + PDF row; Batches 'Log Damage' action (store_officer + md only, active batches only) | ⚠️ Real-world usage check next session — first production use by a store_officer not yet confirmed |
 | Go-live re-entry / dust gap | parked | MD triggers |
 
 ---
