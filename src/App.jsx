@@ -42,7 +42,7 @@ import { suppliersService, supplierTransactionsService } from './services/suppli
 import Labour from './components/Labour'
 import { advancesService } from './services/advances'
 import { paymentRequestsService } from './services/paymentRequests'
-import { truckLoadingService } from './services/labour'
+import { truckLoadingService, labourPoolService } from './services/labour'
 import { leaveService } from './services/leave'
 import { leaveBalanceService } from './services/leaveBalance'
 import { meService } from './services/me'
@@ -1715,8 +1715,12 @@ const Waybills = ({ userProfile }) => {
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [editTarget, setEditTarget] = useState(null);
   const [selectedOrderId, setSelectedOrderId] = useState("");
-  const emptyForm = { waybillDate: "", vehicleId: "", driverId: "", truckNumber: "", physicalWaybillNumber: "", blockType: "9 Inch 3 Hole Block", quantityLoaded: "", quantityReceived: "", quantityDamaged: "0", batchId: "", scheduleItemId: "", dieselLitres: "", storeOfficer: "", notes: "" };
+  const emptyForm = { waybillDate: "", vehicleId: "", driverId: "", truckNumber: "", physicalWaybillNumber: "", blockType: "9 Inch 3 Hole Block", quantityLoaded: "", quantityReceived: "", quantityDamaged: "0", batchId: "", scheduleItemId: "", dieselLitres: "", storeOfficerId: "", signedByName: "", notes: "" };
   const [form, setForm] = useState(emptyForm);
+  const [loaderAssignments, setLoaderAssignments] = useState([]);
+  const [wbPool, setWbPool] = useState([]);
+  const [waybillLoaders, setWaybillLoaders] = useState(null);
+  const [loaderSearch, setLoaderSearch] = useState('');
 
   const isDriverRole = userProfile?.role === 'driver';
   const driverStaffId = userProfile?.staff_id;
@@ -1729,10 +1733,16 @@ const Waybills = ({ userProfile }) => {
         : isDriverRole && !driverStaffId
           ? Promise.resolve([])
           : waybillsService.getAll();
-      const [w, s, v] = await Promise.all([fetchWaybills, staffService.getPublicActive(), vehiclesService.getActive().catch(() => [])]);
+      const [w, s, v, a, pool] = await Promise.all([
+        fetchWaybills, staffService.getPublicActive(), vehiclesService.getActive().catch(() => []),
+        truckLoadingService.getAssignments().catch(() => []),
+        labourPoolService.getAll().catch(() => []),
+      ]);
       setWaybills(w);
       setStaff(s);
       setVehicles(v);
+      setLoaderAssignments(a);
+      setWbPool(pool);
     } catch {
       setAlert({ type: "error", msg: "Could not load waybills." });
     }
@@ -1772,9 +1782,12 @@ const Waybills = ({ userProfile }) => {
       batchId: w.batch_id || "",
       scheduleItemId: w.schedule_item_id || "",
       dieselLitres: String(w.diesel_given_litres || ""),
-      storeOfficer: w.store_officer || "",
+      storeOfficerId: w.store_officer_id || "",
+      signedByName: w.signed_by_name || "",
       notes: w.notes || "",
     });
+    setWaybillLoaders(null);
+    setLoaderSearch('');
     setSelectedOrderId("");
     setShowForm(true);
   };
@@ -1788,6 +1801,7 @@ const Waybills = ({ userProfile }) => {
     try {
       const damaged = parseInt(form.quantityDamaged) || 0;
       const dieselLitres = parseFloat(form.dieselLitres) || 0;
+      const soName = staff.find(s => s.id === form.storeOfficerId)?.full_name || '';
       const waybillData = {
         vehicle_id: form.vehicleId || null,
         driver_id: form.driverId || null,
@@ -1800,7 +1814,8 @@ const Waybills = ({ userProfile }) => {
         waybill_date: form.waybillDate,
         schedule_item_id: form.scheduleItemId || null,
         diesel_given_litres: dieselLitres || null,
-        store_officer: form.storeOfficer || null,
+        store_officer_id: form.storeOfficerId || null,
+        signed_by_name: form.signedByName || null,
         notes: form.notes || null,
       };
 
@@ -1818,9 +1833,16 @@ const Waybills = ({ userProfile }) => {
         // Sync fuel log for this waybill
         try {
           if (form.vehicleId || editTarget.vehicle_id) {
-            await fuelLogService.upsertForWaybill(form.vehicleId || editTarget.vehicle_id, editTarget.id, form.waybillDate, dieselLitres, form.storeOfficer);
+            await fuelLogService.upsertForWaybill(form.vehicleId || editTarget.vehicle_id, editTarget.id, form.waybillDate, dieselLitres, soName);
           }
         } catch { /* non-blocking */ }
+        // Sync loaders if user explicitly set them
+        if (waybillLoaders !== null) {
+          try {
+            const logRow = await truckLoadingService.getLogByWaybill(editTarget.id);
+            if (logRow) await truckLoadingService.syncLoaders(logRow.id, waybillLoaders);
+          } catch { /* non-blocking */ }
+        }
         // Apply new effects
         try {
           await finishedGoodsService.decrease(form.blockType, newLoaded);
@@ -1858,9 +1880,16 @@ const Waybills = ({ userProfile }) => {
         // Auto-create fuel log entry if diesel was given
         try {
           if (form.vehicleId && dieselLitres > 0) {
-            await fuelLogService.upsertForWaybill(form.vehicleId, created.id, form.waybillDate, dieselLitres, form.storeOfficer);
+            await fuelLogService.upsertForWaybill(form.vehicleId, created.id, form.waybillDate, dieselLitres, soName);
           }
         } catch { /* non-blocking */ }
+        // Sync loaders if user explicitly set them (trigger may have already populated from standing crew)
+        if (waybillLoaders !== null) {
+          try {
+            const logRow = await truckLoadingService.getLogByWaybill(created.id);
+            if (logRow) await truckLoadingService.syncLoaders(logRow.id, waybillLoaders);
+          } catch { /* non-blocking */ }
+        }
         // Side effects (non-blocking)
         try {
           if (qtyLoaded > 0) await finishedGoodsService.decrease(form.blockType, qtyLoaded);
@@ -1881,6 +1910,8 @@ const Waybills = ({ userProfile }) => {
       setSelectedOrderId("");
       setShowForm(false);
       setEditTarget(null);
+      setWaybillLoaders(null);
+      setLoaderSearch('');
     } catch (e) {
       setAlert({ type: "error", msg: "Failed to save waybill. " + e.message });
     } finally {
@@ -1979,6 +2010,9 @@ const Waybills = ({ userProfile }) => {
               <label style={styles.label}>Vehicle</label>
               <select style={styles.input} value={form.vehicleId} onChange={e => {
                 const v = vehicles.find(v => v.id === e.target.value);
+                const crew = loaderAssignments.filter(a => a.vehicle_id === e.target.value).map(a => a.labour_id);
+                setWaybillLoaders(crew);
+                setLoaderSearch('');
                 setForm({ ...form, vehicleId: e.target.value, truckNumber: v?.vehicle_number || form.truckNumber, driverId: v?.assigned_driver_id || form.driverId });
               }}>
                 <option value="">— Select vehicle (optional) —</option>
@@ -2037,16 +2071,21 @@ const Waybills = ({ userProfile }) => {
               <label style={styles.label}>Quantity Damaged in Transit</label>
               <input style={styles.input} type="number" placeholder="0" value={form.quantityDamaged} onChange={e => setForm({ ...form, quantityDamaged: e.target.value })} />
             </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Store Officer</label>
+              <select style={styles.input} value={form.storeOfficerId} onChange={e => setForm({ ...form, storeOfficerId: e.target.value })}>
+                <option value="">— Select store officer —</option>
+                {staff.map(s => <option key={s.id} value={s.id}>{s.full_name} ({s.role})</option>)}
+              </select>
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Signed By (On-Site)</label>
+              <input style={styles.input} placeholder="Name of person who signed for delivery" value={form.signedByName} onChange={e => setForm({ ...form, signedByName: e.target.value })} />
+            </div>
             {form.vehicleId && (
               <div style={styles.formGroup}>
                 <label style={styles.label}>Diesel Given to Driver (litres)</label>
                 <input style={styles.input} type="number" placeholder="e.g. 80" value={form.dieselLitres} onChange={e => setForm({ ...form, dieselLitres: e.target.value })} />
-              </div>
-            )}
-            {form.vehicleId && parseFloat(form.dieselLitres) > 0 && (
-              <div style={styles.formGroup}>
-                <label style={styles.label}>Dispensed By (Store Officer)</label>
-                <input style={styles.input} placeholder="Name of store officer" value={form.storeOfficer} onChange={e => setForm({ ...form, storeOfficer: e.target.value })} />
               </div>
             )}
             {editTarget ? (
@@ -2073,6 +2112,71 @@ const Waybills = ({ userProfile }) => {
               <input style={styles.input} placeholder="Optional notes" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
             </div>
           </div>
+          {form.vehicleId && wbPool.length > 0 && (
+            <div style={{ marginBottom: '14px' }}>
+              <label style={styles.label}>Loaders (optional)</label>
+              {waybillLoaders !== null ? (
+                <div>
+                  {waybillLoaders.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '6px' }}>
+                      {waybillLoaders.map(lid => {
+                        const worker = wbPool.find(p => p.id === lid);
+                        return (
+                          <span key={lid} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: theme.accent + '22', border: `1px solid ${theme.accent}44`, borderRadius: '4px', padding: '3px 8px', fontSize: '12px', color: theme.text }}>
+                            {worker?.full_name || lid}
+                            <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: theme.red, padding: 0, fontSize: '13px', lineHeight: 1 }}
+                              onClick={() => setWaybillLoaders(l => l.filter(x => x !== lid))}>×</button>
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <div style={{ position: 'relative' }}>
+                    <input
+                      style={{ ...styles.input, marginBottom: '2px' }}
+                      placeholder="Search to add a loader…"
+                      value={loaderSearch}
+                      onChange={e => setLoaderSearch(e.target.value)}
+                    />
+                    {loaderSearch.trim() && (
+                      <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: theme.card, border: `1px solid ${theme.border}`, borderRadius: '6px', zIndex: 10, maxHeight: '180px', overflowY: 'auto' }}>
+                        {wbPool
+                          .filter(p => !waybillLoaders.includes(p.id) && p.full_name.toLowerCase().includes(loaderSearch.toLowerCase()))
+                          .slice(0, 8)
+                          .map(p => (
+                            <div key={p.id}
+                              style={{ padding: '8px 12px', cursor: 'pointer', fontSize: '13px', color: theme.text }}
+                              onClick={() => { setWaybillLoaders(l => [...l, p.id]); setLoaderSearch(''); }}
+                              onMouseEnter={e => e.currentTarget.style.background = theme.surface}
+                              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                            >
+                              {p.full_name}
+                            </div>
+                          ))
+                        }
+                        {wbPool.filter(p => !waybillLoaders.includes(p.id) && p.full_name.toLowerCase().includes(loaderSearch.toLowerCase())).length === 0 && (
+                          <div style={{ padding: '8px 12px', fontSize: '12px', color: theme.textMuted }}>No matches</div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <span style={{ fontSize: '12px', color: theme.textMuted }}>
+                    {editTarget ? 'Loaders set by trigger.' : 'Standing crew will be auto-assigned.'}
+                  </span>
+                  <button style={{ ...styles.btn('secondary'), fontSize: '12px' }}
+                    onClick={() => {
+                      const crew = loaderAssignments.filter(a => a.vehicle_id === form.vehicleId).map(a => a.labour_id);
+                      setWaybillLoaders(crew);
+                    }}>
+                    Override
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
           {parseInt(form.quantityDamaged) > 0 && (
             <div style={{ ...styles.alert("error"), marginBottom: "14px" }}>
               <span>⚠️ {form.quantityDamaged} damaged blocks will be automatically logged to the damage register as transit damage.</span>
@@ -2080,7 +2184,7 @@ const Waybills = ({ userProfile }) => {
           )}
           <div style={styles.row}>
             <button style={styles.btn("primary")} onClick={handleSave} disabled={saving}>{saving ? "Saving…" : editTarget ? "Update Waybill" : "Record Waybill"}</button>
-            <button style={styles.btn("secondary")} onClick={() => { setShowForm(false); setForm(emptyForm); setSelectedOrderId(""); setEditTarget(null); }}>Cancel</button>
+            <button style={styles.btn("secondary")} onClick={() => { setShowForm(false); setForm(emptyForm); setSelectedOrderId(""); setEditTarget(null); setWaybillLoaders(null); setLoaderSearch(''); }}>Cancel</button>
           </div>
         </div>
       )}
@@ -9287,10 +9391,18 @@ const TruckLoadingPage = ({ userProfile }) => {
   const [logs, setLogs]               = useState([]);
   const [entriesLoading, setEntriesLoading] = useState(false);
   const [showLogForm, setShowLogForm] = useState(false);
-  const [logForm, setLogForm]         = useState({ vehicle_id: '', product_id: '', date: '', quantity_loaded: '' });
+  const [logForm, setLogForm]         = useState({ vehicle_id: '', product_id: '', date: '', quantity_loaded: '', waybill_id: '' });
   const [selectedLoaders, setSelectedLoaders] = useState([]);
   const [logSaving, setLogSaving]     = useState(false);
   const [logAlert, setLogAlert]       = useState(null);
+  const [isBackfill, setIsBackfill]   = useState(false);
+  const [waybillsForLog, setWaybillsForLog] = useState([]);
+
+  // Log tab — edit
+  const [editingLogId, setEditingLogId]   = useState(null);
+  const [editLogForm, setEditLogForm]     = useState({ vehicle_id: '', product_id: '', date: '', quantity_loaded: '' });
+  const [editLogLoaders, setEditLogLoaders] = useState([]);
+  const [editLogSaving, setEditLogSaving] = useState(false);
 
   // Rates tab
   const [rates, setRates]             = useState([]);
@@ -9306,7 +9418,11 @@ const TruckLoadingPage = ({ userProfile }) => {
 
   const loadLogs = async () => {
     setEntriesLoading(true);
-    try { setLogs(await truckLoadingService.getLogs()); }
+    try {
+      const data = await truckLoadingService.getLogs();
+      setLogs(data);
+      loadWaybillsForLog(data);
+    }
     catch (e) { setLogAlert({ type: 'error', msg: e.message }); }
     finally { setEntriesLoading(false); }
   };
@@ -9330,6 +9446,14 @@ const TruckLoadingPage = ({ userProfile }) => {
     if (tab === 'rates' && !ratesLoaded) loadRates();
   }, [tab]);
 
+  const loadWaybillsForLog = async (currentLogs) => {
+    try {
+      const wbs = await waybillsService.getAll();
+      const usedIds = new Set((currentLogs || logs).map(l => l.waybill_id).filter(Boolean));
+      setWaybillsForLog(wbs.filter(w => !usedIds.has(w.id)));
+    } catch { /* non-blocking */ }
+  };
+
   const handleLogSubmit = async () => {
     if (!logForm.vehicle_id || !logForm.product_id || !logForm.date || !logForm.quantity_loaded) {
       setLogAlert({ type: 'error', msg: 'All log fields are required.' });
@@ -9338,16 +9462,32 @@ const TruckLoadingPage = ({ userProfile }) => {
     setLogSaving(true); setLogAlert(null);
     try {
       const result = await truckLoadingService.createLog(
-        { vehicle_id: logForm.vehicle_id, product_id: logForm.product_id, date: logForm.date, quantity_loaded: Number(logForm.quantity_loaded) },
+        { vehicle_id: logForm.vehicle_id, product_id: logForm.product_id, date: logForm.date, quantity_loaded: Number(logForm.quantity_loaded), waybill_id: logForm.waybill_id || null },
         selectedLoaders,
       );
-      setLogForm({ vehicle_id: '', product_id: '', date: '', quantity_loaded: '' });
+      setLogForm({ vehicle_id: '', product_id: '', date: '', quantity_loaded: '', waybill_id: '' });
       setSelectedLoaders([]);
       setShowLogForm(false);
+      setIsBackfill(false);
       setLogAlert({ type: 'success', msg: `Trip #${result.trip_number_for_day ?? '?'} logged — Rate: ${naira(result.computed_rate_used)}, Total: ${naira(result.total_amount)}` });
       await loadLogs();
-    } catch (e) { setLogAlert({ type: 'error', msg: e.message }); }
+    } catch (e) {
+      if (e.code === '23505') setLogAlert({ type: 'error', msg: 'A log entry for this waybill already exists.' });
+      else setLogAlert({ type: 'error', msg: e.message });
+    }
     finally { setLogSaving(false); }
+  };
+
+  const handleEditLogSave = async () => {
+    setEditLogSaving(true); setLogAlert(null);
+    try {
+      await truckLoadingService.updateLog(editingLogId, editLogForm);
+      await truckLoadingService.syncLoaders(editingLogId, editLogLoaders);
+      setEditingLogId(null);
+      setLogAlert({ type: 'success', msg: 'Entry updated.' });
+      await loadLogs();
+    } catch (e) { setLogAlert({ type: 'error', msg: e.message }); }
+    finally { setEditLogSaving(false); }
   };
 
   const handleRateSave = async () => {
@@ -9402,15 +9542,25 @@ const TruckLoadingPage = ({ userProfile }) => {
       {tab === 'log' && (
         <div>
           {logAlert && <Alert msg={logAlert.msg} type={logAlert.type} onClose={() => setLogAlert(null)} />}
-          <div style={{ marginBottom: '16px' }}>
-            <button style={styles.btn('primary')} onClick={() => { setShowLogForm(f => !f); setLogAlert(null); }}>
+          <div style={{ marginBottom: '16px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            <button style={styles.btn('primary')} onClick={() => { setShowLogForm(f => !f); setLogAlert(null); setIsBackfill(false); setLogForm({ vehicle_id: '', product_id: '', date: '', quantity_loaded: '', waybill_id: '' }); setSelectedLoaders([]); }}>
               {showLogForm ? '✕ Cancel' : '+ New Log Entry'}
             </button>
+            {!showLogForm && (
+              <button style={styles.btn('secondary')} onClick={() => { setShowLogForm(true); setIsBackfill(true); loadWaybillsForLog(logs); }}>
+                Backfill Historical Entry
+              </button>
+            )}
           </div>
 
           {showLogForm && (
             <div style={{ ...styles.card, marginBottom: '20px' }}>
-              <div style={styles.sectionTitle}>New Log Entry</div>
+              {isBackfill && (
+                <div style={{ background: '#f59e0b22', border: '1px solid #f59e0b44', borderRadius: '6px', padding: '8px 12px', marginBottom: '14px', fontSize: '12px', color: '#f59e0b' }}>
+                  Backfill mode — pick a past date and link to an existing waybill. The Historical badge will appear automatically.
+                </div>
+              )}
+              <div style={styles.sectionTitle}>{isBackfill ? 'Backfill Log Entry' : 'New Log Entry'}</div>
               <div style={styles.grid(2)}>
                 <div style={styles.formGroup}>
                   <label style={styles.label}>Product</label>
@@ -9421,7 +9571,11 @@ const TruckLoadingPage = ({ userProfile }) => {
                 </div>
                 <div style={styles.formGroup}>
                   <label style={styles.label}>Vehicle</label>
-                  <select style={styles.input} value={logForm.vehicle_id} onChange={e => setLogForm(f => ({ ...f, vehicle_id: e.target.value }))}>
+                  <select style={styles.input} value={logForm.vehicle_id} onChange={e => {
+                    const crew = assignments.filter(a => a.vehicle_id === e.target.value).map(a => a.labour_id);
+                    setSelectedLoaders(crew);
+                    setLogForm(f => ({ ...f, vehicle_id: e.target.value }));
+                  }}>
                     <option value="">Select vehicle…</option>
                     {vehicles.map(v => <option key={v.id} value={v.id}>{v.vehicle_number}{v.vehicle_name ? ` — ${v.vehicle_name}` : ''}</option>)}
                   </select>
@@ -9433,6 +9587,21 @@ const TruckLoadingPage = ({ userProfile }) => {
                 <div style={styles.formGroup}>
                   <label style={styles.label}>Quantity Loaded</label>
                   <input type="number" style={styles.input} placeholder="e.g. 120" min="1" value={logForm.quantity_loaded} onChange={e => setLogForm(f => ({ ...f, quantity_loaded: e.target.value }))} />
+                </div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Link to Waybill {isBackfill ? '' : '(optional)'}</label>
+                  <select style={styles.input} value={logForm.waybill_id} onChange={e => {
+                    const wb = waybillsForLog.find(w => w.id === e.target.value);
+                    setLogForm(f => ({
+                      ...f,
+                      waybill_id: e.target.value,
+                      ...(wb ? { date: wb.waybill_date, quantity_loaded: String(wb.quantity_loaded || f.quantity_loaded), vehicle_id: wb.vehicle_id || f.vehicle_id } : {}),
+                    }));
+                  }}>
+                    <option value="">— {isBackfill ? 'Select waybill' : 'None (standalone load)'} —</option>
+                    {waybillsForLog.map(w => <option key={w.id} value={w.id}>{w.waybill_number} · {w.waybill_date} · {w.block_type}</option>)}
+                  </select>
+                  {!isBackfill && waybillsForLog.length === 0 && <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '4px' }}>No unlinked waybills found. <button style={{ background: 'none', border: 'none', color: theme.blue, cursor: 'pointer', fontSize: '11px', padding: 0 }} onClick={() => loadWaybillsForLog(logs)}>Refresh</button></div>}
                 </div>
               </div>
               {assignments.length > 0 && (
@@ -9455,6 +9624,56 @@ const TruckLoadingPage = ({ userProfile }) => {
               <button style={styles.btn('primary')} onClick={handleLogSubmit} disabled={logSaving}>
                 {logSaving ? 'Saving…' : 'Save Log Entry'}
               </button>
+            </div>
+          )}
+
+          {editingLogId && (
+            <div style={{ ...styles.card, marginBottom: '16px', border: `1px solid ${theme.accent}44` }}>
+              <div style={styles.sectionTitle}>Edit Log Entry</div>
+              <div style={styles.grid(2)}>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Product</label>
+                  <select style={styles.input} value={editLogForm.product_id} onChange={e => setEditLogForm(f => ({ ...f, product_id: e.target.value }))}>
+                    {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                </div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Vehicle</label>
+                  <select style={styles.input} value={editLogForm.vehicle_id} onChange={e => setEditLogForm(f => ({ ...f, vehicle_id: e.target.value }))}>
+                    <option value="">— Select vehicle —</option>
+                    {vehicles.map(v => <option key={v.id} value={v.id}>{v.vehicle_number}{v.vehicle_name ? ` — ${v.vehicle_name}` : ''}</option>)}
+                  </select>
+                </div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Date</label>
+                  <input type="date" style={styles.input} value={editLogForm.date} onChange={e => setEditLogForm(f => ({ ...f, date: e.target.value }))} />
+                </div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Quantity Loaded</label>
+                  <input type="number" style={styles.input} value={editLogForm.quantity_loaded} onChange={e => setEditLogForm(f => ({ ...f, quantity_loaded: e.target.value }))} />
+                </div>
+              </div>
+              {assignments.length > 0 && (
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Loaders</label>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                    {assignments.map(a => {
+                      const sel = editLogLoaders.includes(a.labour_id);
+                      return (
+                        <button key={a.labour_id}
+                          style={{ ...styles.btn(sel ? 'primary' : 'secondary'), fontSize: '12px', padding: '4px 10px' }}
+                          onClick={() => setEditLogLoaders(l => sel ? l.filter(x => x !== a.labour_id) : [...l, a.labour_id])}>
+                          {a.worker?.full_name || '—'}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              <div style={styles.row}>
+                <button style={styles.btn('primary')} onClick={handleEditLogSave} disabled={editLogSaving}>{editLogSaving ? 'Saving…' : 'Save'}</button>
+                <button style={styles.btn('secondary')} onClick={() => setEditingLogId(null)}>Cancel</button>
+              </div>
             </div>
           )}
 
@@ -9485,12 +9704,19 @@ const TruckLoadingPage = ({ userProfile }) => {
                       <th style={styles.th}>Qty Loaded</th>
                       <th style={styles.th}>Rate Used</th>
                       <th style={styles.th}>Total</th>
+                      <th style={styles.th}>Loaders</th>
                       {canDelete && <th style={styles.th}></th>}
                     </tr>
                   </thead>
                   <tbody>
                     {logs.map(log => {
                       const isHistorical = log.date && log.created_at && log.date < log.created_at.split('T')[0];
+                      const isPaid = log.payment_status === 'paid';
+                      const logLoaderIds = (log.loaders || []).map(l => l.labour_id);
+                      const logLoaderNames = logLoaderIds.map(lid => {
+                        const a = assignments.find(a => a.labour_id === lid);
+                        return a?.worker?.full_name || lid;
+                      });
                       return (
                         <tr key={log.id}>
                           <td style={styles.td}>
@@ -9503,9 +9729,26 @@ const TruckLoadingPage = ({ userProfile }) => {
                           <td style={styles.td}>{fmt(log.quantity_loaded)}</td>
                           <td style={styles.td}>{log.computed_rate_used != null ? naira(log.computed_rate_used) : '—'}</td>
                           <td style={styles.td}>{log.total_amount != null ? naira(log.total_amount) : '—'}</td>
+                          <td style={styles.td}>
+                            {logLoaderNames.length > 0
+                              ? <span style={{ fontSize: '11px', color: theme.textMuted }}>{logLoaderNames.join(', ')}</span>
+                              : <span style={{ fontSize: '11px', color: theme.textDim }}>—</span>}
+                          </td>
                           {canDelete && (
                             <td style={styles.td}>
-                              <button style={{ ...styles.btn('danger'), fontSize: '11px', padding: '3px 10px' }} onClick={() => setDeleteTarget(log.id)}>Delete</button>
+                              <div style={{ display: 'flex', gap: '6px' }}>
+                                {!isPaid ? (
+                                  <button style={{ ...styles.btn('secondary'), fontSize: '11px', padding: '3px 10px' }} onClick={() => {
+                                    setEditingLogId(log.id);
+                                    setEditLogForm({ vehicle_id: log.vehicle_id || '', product_id: log.product_id || '', date: log.date || '', quantity_loaded: String(log.quantity_loaded || '') });
+                                    setEditLogLoaders(logLoaderIds);
+                                    setShowLogForm(false);
+                                  }}>Edit</button>
+                                ) : (
+                                  <span style={{ fontSize: '11px', color: theme.textMuted, padding: '3px 6px' }}>Paid</span>
+                                )}
+                                <button style={{ ...styles.btn('danger'), fontSize: '11px', padding: '3px 10px' }} onClick={() => setDeleteTarget(log.id)} disabled={isPaid}>Delete</button>
+                              </div>
                             </td>
                           )}
                         </tr>
