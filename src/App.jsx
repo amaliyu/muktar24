@@ -4154,7 +4154,7 @@ const ScheduleApprovals = () => {
 };
 
 // ── BATCHES ────────────────────────────────────────────────────
-const Batches = () => {
+const Batches = ({ userProfile }) => {
   const [batches, setBatches] = useState([]);
   const [productions, setProductions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -4165,6 +4165,9 @@ const Batches = () => {
   const [editTarget, setEditTarget] = useState(null);
   const [editForm, setEditForm] = useState({});
   const [deleting, setDeleting] = useState(null);
+  const [dmgTarget, setDmgTarget] = useState(null);
+  const [dmgForm, setDmgForm] = useState({ qty: '', date: '', notes: '' });
+  const [dmgSaving, setDmgSaving] = useState(false);
   const today = new Date().toISOString().split("T")[0];
   const emptyForm = { blockType: "9 Inch 3 Hole Block", dateCured: today, qtyAccepted: "", createdBy: "", notes: "", linkedProds: [] };
   const [form, setForm] = useState(emptyForm);
@@ -4264,6 +4267,35 @@ const Batches = () => {
     finally { setDeleting(null); }
   };
 
+  const openDmgModal = (b) => {
+    setDmgTarget(b);
+    setDmgForm({ qty: '', date: today, notes: '' });
+  };
+
+  const handleLogDamage = async () => {
+    const qty = parseInt(dmgForm.qty);
+    if (!qty || qty <= 0) return setAlert({ type: "error", msg: "Quantity damaged must be a positive number." });
+    if (!dmgForm.date) return setAlert({ type: "error", msg: "Date is required." });
+    setDmgSaving(true);
+    try {
+      await productionService.logDamage({
+        date: dmgForm.date,
+        block_type: dmgTarget.block_type,
+        stage: "curing",
+        quantity_damaged: qty,
+        batch_id: dmgTarget.id,
+        notes: dmgForm.notes || null,
+        recorded_by: userProfile?.id || null,
+      });
+      await batchesService.reduceStock(dmgTarget.id, qty);
+      try { await finishedGoodsService.decrease(dmgTarget.block_type, qty); } catch {}
+      await load();
+      setDmgTarget(null);
+      setAlert({ type: "success", msg: `${qty} damaged block(s) logged against ${dmgTarget.batch_number}.` });
+    } catch (e) { setAlert({ type: "error", msg: "Failed to log damage: " + e.message }); }
+    finally { setDmgSaving(false); }
+  };
+
   const filteredProds = productions.filter(p => p.block_type === form.blockType);
   const totalInYard = batches.filter(b => b.status === "active").reduce((s, b) => s + Number(b.qty_remaining || 0), 0);
 
@@ -4295,6 +4327,37 @@ const Batches = () => {
             <div style={styles.row}>
               <button style={styles.btn("primary")} onClick={handleSaveEdit} disabled={saving}>{saving ? "Saving…" : "Save Changes"}</button>
               <button style={styles.btn("secondary")} onClick={() => setEditTarget(null)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Damage modal */}
+      {dmgTarget && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+          <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: "12px", padding: "24px", width: "100%", maxWidth: "460px" }}>
+            <div style={{ fontWeight: "700", fontSize: "15px", marginBottom: "4px" }}>Log Curing/Yard Damage</div>
+            <div style={{ fontSize: "12px", color: theme.textMuted, marginBottom: "18px" }}>Batch {dmgTarget.batch_number} · {dmgTarget.block_type} · {Number(dmgTarget.qty_remaining).toLocaleString()} remaining</div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Quantity Damaged *</label>
+              <input style={styles.input} type="number" min="1" placeholder="e.g. 30" value={dmgForm.qty} onChange={e => setDmgForm(f => ({ ...f, qty: e.target.value }))} />
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Date *</label>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <input style={styles.input} type="date" value={dmgForm.date} onChange={e => setDmgForm(f => ({ ...f, date: e.target.value }))} />
+                {dmgForm.date && dmgForm.date < today && (
+                  <span style={{ fontSize: "10px", padding: "1px 6px", borderRadius: "4px", background: "#f59e0b22", color: "#f59e0b", border: "1px solid #f59e0b44", fontWeight: "700", whiteSpace: "nowrap" }}>Historical</span>
+                )}
+              </div>
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Notes (optional)</label>
+              <input style={styles.input} placeholder="e.g. cracks found during picking" value={dmgForm.notes} onChange={e => setDmgForm(f => ({ ...f, notes: e.target.value }))} />
+            </div>
+            <div style={styles.row}>
+              <button style={styles.btn("danger")} onClick={handleLogDamage} disabled={dmgSaving}>{dmgSaving ? "Logging…" : "Log Damage"}</button>
+              <button style={styles.btn("secondary")} onClick={() => setDmgTarget(null)}>Cancel</button>
             </div>
           </div>
         </div>
@@ -4361,6 +4424,9 @@ const Batches = () => {
                     <div style={{ fontSize: "13px" }}>Remaining: <strong style={{ color: b.status === "active" ? theme.green : theme.textMuted }}>{Number(b.qty_remaining).toLocaleString()}</strong></div>
                   </div>
                   <div style={{ display: "flex", gap: "6px" }} onClick={e => e.stopPropagation()}>
+                    {['store_officer', 'md'].includes(userProfile?.role) && b.status === "active" && (
+                      <button style={{ ...styles.btn("danger"), padding: "5px 12px", fontSize: "12px" }} onClick={() => openDmgModal(b)}>Log Damage</button>
+                    )}
                     <button style={{ ...styles.btn("secondary"), padding: "5px 12px", fontSize: "12px" }} onClick={() => startEdit(b)}>Edit</button>
                     <button style={{ ...styles.btn("danger"), padding: "5px 12px", fontSize: "12px" }} onClick={() => handleDelete(b)} disabled={deleting === b.id}>{deleting === b.id ? "…" : "Delete"}</button>
                   </div>
@@ -10475,7 +10541,7 @@ export default function App() {
     dashboard: isBoard ? <BoardDashboard userProfile={userProfile} /> : <Dashboard onNavigate={setActive} userProfile={userProfile} />,
     production: <Production />,
     inventory: <Inventory onLowStockChange={setLowStockCount} />,
-    batches: <Batches />,
+    batches: <Batches userProfile={userProfile} />,
     waybills: <Waybills userProfile={userProfile} />,
     vehicles: <VehicleRegistry />,
     staff: <Staff userProfile={userProfile} />,

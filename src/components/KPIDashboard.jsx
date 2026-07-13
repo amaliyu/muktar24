@@ -282,6 +282,7 @@ export default function KPIDashboard() {
     const dailyAvgProd       = prodDays > 0 ? Math.round(totalProduced / prodDays) : 0
     const prodByType         = {}; prodCurr.forEach(p => { prodByType[p.block_type] = (prodByType[p.block_type] || 0) + p.quantity_produced })
     const dmgProduction      = dmgLog.filter(d => ['production','stacking'].includes(d.stage)).reduce((s, d) => s + d.quantity_damaged, 0)
+    const dmgCuring          = dmgLog.filter(d => d.stage === 'curing').reduce((s, d) => s + d.quantity_damaged, 0)
     const dmgTransit         = dmgLog.filter(d => d.stage === 'delivery').reduce((s, d) => s + d.quantity_damaged, 0)
     const dmgByType          = {}; dmgLog.forEach(d => { dmgByType[d.block_type] = (dmgByType[d.block_type] || 0) + d.quantity_damaged })
 
@@ -360,7 +361,7 @@ export default function KPIDashboard() {
     return {
       totalProduced, prevProduced, cementUsed, dieselUsed, graniteUsed,
       prodDays, dailyAvgProd, workingDays, prodByType,
-      dmgProduction, dmgTransit, dmgByType,
+      dmgProduction, dmgCuring, dmgTransit, dmgByType,
       revenue, prevRevenue, totalInvoiced, collectionRate,
       top5Customers, orderCount, orderValue, avgOrderVal,
       newCustCount, repeatCustCount,
@@ -412,6 +413,7 @@ export default function KPIDashboard() {
       ['Diesel Used (litres)', fmt(M.dieselUsed)],
       ['Granite Used (kg)', fmt(M.graniteUsed)],
       ['Production Damage', fmt(M.dmgProduction) + ` (${M.totalProduced > 0 ? (M.dmgProduction / M.totalProduced * 100).toFixed(1) : 0}%)`],
+      ['Curing/Yard Damage (Store Officer)', fmt(M.dmgCuring) + ` (${M.totalProduced > 0 ? (M.dmgCuring / M.totalProduced * 100).toFixed(1) : 0}%)`],
     ])
     section('SALES & REVENUE'); kv([
       ['Revenue Collected', naira(M.revenue)],
@@ -567,9 +569,11 @@ export default function KPIDashboard() {
                   sub={M.totalProduced > 0 ? `${(M.graniteUsed / M.totalProduced * 1000).toFixed(1)} kg per 1,000 blocks` : ''} />
               </div>
               <div style={s.section}>Damage Analysis</div>
-              <div style={s.grid(3)}>
+              <div style={s.grid(4)}>
                 <KPICard label="Production + Stacking Damage" value={fmt(M.dmgProduction)} accent={theme.red}
                   sub={M.totalProduced > 0 ? `${(M.dmgProduction / M.totalProduced * 100).toFixed(2)}% of produced` : ''} />
+                <KPICard label="Curing/Yard Damage (Store Officer)" value={fmt(M.dmgCuring)} accent={theme.purple}
+                  sub={M.totalProduced > 0 ? `${(M.dmgCuring / M.totalProduced * 100).toFixed(2)}% of produced` : ''} />
                 <KPICard label="Transit Damage" value={fmt(M.dmgTransit)} accent={theme.accent}
                   sub={M.totalLoaded > 0 ? `${(M.dmgTransit / M.totalLoaded * 100).toFixed(2)}% of loaded` : ''} />
                 <div style={s.card}>
