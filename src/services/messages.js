@@ -1,17 +1,32 @@
 import { supabase } from '../lib/supabase'
 
+// Resolve names for a list of user ids from the unrestricted directory view.
+async function resolveNames(ids) {
+  if (!ids || ids.length === 0) return {}
+  const { data } = await supabase
+    .from('user_profiles_directory')
+    .select('id, full_name')
+    .in('id', ids)
+  const map = {}
+  for (const p of data || []) map[p.id] = p.full_name
+  return map
+}
+
 export const messagesService = {
+  // FIX 1: was user_profiles (RLS-restricted). user_profiles_directory has no RLS.
   async getAllUsers(currentUserId) {
     const { data, error } = await supabase
-      .from('user_profiles')
+      .from('user_profiles_directory')
       .select('id, full_name, role')
-      .eq('is_active', true)
       .neq('id', currentUserId)
       .order('full_name')
     if (error) throw error
     return data || []
   },
 
+  // FIX 2: removed profile:user_id(id, full_name) embed (goes through user_profiles FK,
+  // which is RLS-restricted for non-md roles). Now fetches only user_id values from the
+  // participant rows, then resolves names in a separate query against user_profiles_directory.
   async getInbox(userId) {
     const { data, error } = await supabase
       .from('conversation_participants')
@@ -19,15 +34,21 @@ export const messagesService = {
         last_read_at,
         conversation:conversation_id(
           id, is_group, name, created_at,
-          participants:conversation_participants(
-            user_id,
-            profile:user_id(id, full_name)
-          ),
+          participants:conversation_participants(user_id),
           messages(id, body, created_at, sender_id)
         )
       `)
       .eq('user_id', userId)
     if (error) throw error
+
+    // Collect all other-participant ids so we can resolve their names in one batch.
+    const otherIds = new Set()
+    for (const p of data || []) {
+      for (const part of p.conversation?.participants || []) {
+        if (part.user_id !== userId) otherIds.add(part.user_id)
+      }
+    }
+    const nameMap = await resolveNames([...otherIds])
 
     return (data || [])
       .filter(p => p.conversation)
@@ -42,8 +63,8 @@ export const messagesService = {
         if (conv.is_group) {
           displayName = conv.name || 'Group Chat'
         } else {
-          const other = (conv.participants || []).find(p => p.user_id !== userId)
-          displayName = other?.profile?.full_name || 'Unknown'
+          const otherId = (conv.participants || []).find(p => p.user_id !== userId)?.user_id
+          displayName = (otherId && nameMap[otherId]) || 'Unknown'
         }
 
         const unread = (conv.messages || []).filter(m => {
@@ -57,7 +78,10 @@ export const messagesService = {
           name: displayName,
           lastMessage: lastMsg,
           unread,
-          participants: conv.participants || [],
+          participants: (conv.participants || []).map(p => ({
+            user_id: p.user_id,
+            profile: { id: p.user_id, full_name: nameMap[p.user_id] || null },
+          })),
           created_at: conv.created_at,
         }
       })
@@ -73,24 +97,35 @@ export const messagesService = {
     return inbox.reduce((s, c) => s + (c.unread || 0), 0)
   },
 
+  // FIX 3: removed sender:sender_id(id, full_name) embed (user_profiles FK, RLS-restricted).
+  // Fetches messages without sender join, then resolves distinct sender_ids via directory.
   async getMessages(conversationId) {
     const { data, error } = await supabase
       .from('messages')
-      .select('id, body, created_at, sender_id, sender:sender_id(id, full_name)')
+      .select('id, body, created_at, sender_id')
       .eq('conversation_id', conversationId)
       .order('created_at', { ascending: true })
     if (error) throw error
-    return data || []
+
+    const senderIds = [...new Set((data || []).map(m => m.sender_id).filter(Boolean))]
+    const nameMap = await resolveNames(senderIds)
+
+    return (data || []).map(m => ({
+      ...m,
+      sender: { id: m.sender_id, full_name: nameMap[m.sender_id] || null },
+    }))
   },
 
+  // sendMessage: own message, so sender name is never needed in the UI (isOwn = true
+  // suppresses the sender label). Skip the embed entirely; attach sender: null.
   async sendMessage(conversationId, senderId, body) {
     const { data, error } = await supabase
       .from('messages')
       .insert({ conversation_id: conversationId, sender_id: senderId, body })
-      .select('id, body, created_at, sender_id, sender:sender_id(id, full_name)')
+      .select('id, body, created_at, sender_id')
       .single()
     if (error) throw error
-    return data
+    return { ...data, sender: null }
   },
 
   async markAsRead(conversationId, userId) {
