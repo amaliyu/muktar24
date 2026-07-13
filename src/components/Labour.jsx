@@ -692,7 +692,12 @@ function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCanc
       <div style={{ ...styles.row, gap: '20px', marginBottom: '18px', alignItems: 'center' }}>
         <div style={styles.formGroup}>
           <label style={styles.label}>Roster Date</label>
-          <input type="date" style={styles.input} value={date} onChange={e => setDate(e.target.value)} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <input type="date" style={styles.input} value={date} onChange={e => setDate(e.target.value)} />
+            {date < todayStr() && (
+              <span style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '4px', background: '#f59e0b22', color: '#f59e0b', border: '1px solid #f59e0b44', fontWeight: '700', whiteSpace: 'nowrap' }}>Historical</span>
+            )}
+          </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '14px' }}>
           <input type="checkbox" id="targetMet" checked={targetMet} onChange={e => setTargetMet(e.target.checked)} style={{ width: '16px', height: '16px' }} />
@@ -1118,9 +1123,16 @@ function shiftWeek(dateStr, weeks) {
   return d.toISOString().split('T')[0]
 }
 
+function shiftDays(dateStr, days) {
+  const d = new Date(dateStr)
+  d.setDate(d.getDate() + days)
+  return d.toISOString().split('T')[0]
+}
+
 function WeeklyPayrollTab({ pool, roles, userProfile }) {
   const [subTab, setSubTab] = useState('production')
-  const [weekEnding, setWeekEnding] = useState(getLastSaturday(todayStr()))
+  const [rangeFrom, setRangeFrom] = useState(() => shiftDays(getLastSaturday(todayStr()), -6))
+  const [rangeTo, setRangeTo] = useState(() => getLastSaturday(todayStr()))
   const [rosters, setRosters] = useState([])
   const [loadingLogs, setLoadingLogs] = useState([])
   const [payrollRecords, setPayrollRecords] = useState([])
@@ -1130,22 +1142,50 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
   const [recentPayrolls, setRecentPayrolls] = useState([])
   const [recentLoading, setRecentLoading] = useState(false)
   const [recallReason, setRecallReason] = useState('')
+  const [checkedRosterIds, setCheckedRosterIds] = useState(new Set())
+  const [checkedLogIds, setCheckedLogIds] = useState(new Set())
 
-  const loadWeekData = useCallback(async () => {
-    if (!weekEnding) return
+  const loadRangeData = useCallback(async () => {
+    if (!rangeFrom || !rangeTo) return
     setLoading(true)
     const [rRes, lRes, pRes] = await Promise.all([
-      supabase.from('daily_roster').select('*, entries:daily_roster_entries(*)').eq('payment_week_ending', weekEnding),
-      supabase.from('truck_loading_log').select('*, loaders:truck_loading_loaders(labour_id)').eq('payment_week_ending', weekEnding),
-      supabase.from('weekly_labour_payroll').select('*').eq('week_ending', weekEnding),
+      supabase.from('daily_roster')
+        .select('*, entries:daily_roster_entries(*)')
+        .gte('roster_date', rangeFrom)
+        .lte('roster_date', rangeTo),
+      supabase.from('truck_loading_log')
+        .select('*, loaders:truck_loading_loaders(labour_id)')
+        .gte('date', rangeFrom)
+        .lte('date', rangeTo),
+      supabase.from('weekly_labour_payroll')
+        .select('*')
+        .eq('week_ending', rangeTo),
     ])
-    setRosters(rRes.data || [])
-    setLoadingLogs(lRes.data || [])
-    setPayrollRecords(pRes.data || [])
-    setLoading(false)
-  }, [weekEnding])
+    const rosterData = rRes.data || []
+    const logData = lRes.data || []
+    const payrollData = pRes.data || []
+    setRosters(rosterData)
+    setLoadingLogs(logData)
+    setPayrollRecords(payrollData)
 
-  useEffect(() => { loadWeekData() }, [loadWeekData])
+    // Auto-select rows: if a draft exists, pre-select rows already linked to it;
+    // otherwise pre-select unassigned rows (payroll_id IS NULL)
+    const prodRec = payrollData.find(p => p.payroll_type === 'production')
+    const loadRec = payrollData.find(p => p.payroll_type === 'loading')
+    setCheckedRosterIds(new Set(
+      rosterData
+        .filter(r => prodRec?.status === 'draft' ? r.payroll_id === prodRec.id : r.payroll_id == null)
+        .map(r => r.id)
+    ))
+    setCheckedLogIds(new Set(
+      logData
+        .filter(l => loadRec?.status === 'draft' ? l.payroll_id === loadRec.id : l.payroll_id == null)
+        .map(l => l.id)
+    ))
+    setLoading(false)
+  }, [rangeFrom, rangeTo])
+
+  useEffect(() => { loadRangeData() }, [loadRangeData])
 
   const loadRecentPayrolls = useCallback(async () => {
     setRecentLoading(true)
@@ -1158,18 +1198,49 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
     setRecentLoading(false)
   }, [])
 
-  // Refresh the list whenever the week data reloads (covers generate/approve/recall/pay)
   useEffect(() => { loadRecentPayrolls() }, [loadRecentPayrolls, payrollRecords])
 
   const openPayroll = (p) => {
     if (p.payroll_type) setSubTab(p.payroll_type)
-    setWeekEnding(p.week_ending)
+    const end = p.period_end || p.week_ending
+    const start = p.period_start || shiftDays(end, -6)
+    setRangeFrom(start)
+    setRangeTo(end)
   }
 
-  // Aggregate production workers from rosters
+  const shiftRange = (weeks) => {
+    setRangeFrom(shiftWeek(rangeFrom, weeks))
+    setRangeTo(shiftWeek(rangeTo, weeks))
+  }
+
+  const prodPayroll = payrollRecords.find(p => p.payroll_type === 'production')
+  const loadPayroll = payrollRecords.find(p => p.payroll_type === 'loading')
+  const currentPayroll = subTab === 'production' ? prodPayroll : loadPayroll
+  const isDraftMode = currentPayroll?.status === 'draft'
+
+  // Per-tab row selection state
+  const currentCheckedIds = subTab === 'production' ? checkedRosterIds : checkedLogIds
+  const setCurrentCheckedIds = subTab === 'production' ? setCheckedRosterIds : setCheckedLogIds
+  const sourceRows = subTab === 'production' ? rosters : loadingLogs
+
+  const toggleRow = (id) => {
+    setCurrentCheckedIds(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  const allChecked = sourceRows.length > 0 && sourceRows.every(r => currentCheckedIds.has(r.id))
+  const toggleAll = () => {
+    if (allChecked) setCurrentCheckedIds(new Set())
+    else setCurrentCheckedIds(new Set(sourceRows.map(r => r.id)))
+  }
+
+  // Aggregate from checked rows only
   const productionWorkers = (() => {
     const map = {}
-    rosters.forEach(r => {
+    rosters.filter(r => checkedRosterIds.has(r.id)).forEach(r => {
       ;(r.entries || []).forEach(e => {
         const worker = pool.find(w => w.id === e.labour_id)
         const role = roles.find(x => x.id === e.role_id)
@@ -1182,10 +1253,9 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
     return Object.values(map)
   })()
 
-  // Aggregate loading workers
   const loadingWorkers = (() => {
     const map = {}
-    loadingLogs.forEach(l => {
+    loadingLogs.filter(l => checkedLogIds.has(l.id)).forEach(l => {
       const loaderCount = l.loaders?.length || 1
       const split = Number(l.total_amount || 0) / loaderCount
       ;(l.loaders || []).forEach(x => {
@@ -1198,23 +1268,68 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
     return Object.values(map)
   })()
 
-  const prodPayroll = payrollRecords.find(p => p.payroll_type === 'production')
-  const loadPayroll = payrollRecords.find(p => p.payroll_type === 'loading')
   const workers = subTab === 'production' ? productionWorkers : loadingWorkers
-  const currentPayroll = subTab === 'production' ? prodPayroll : loadPayroll
   const totalAmount = workers.reduce((s, w) => s + Number(w.total_pay || 0), 0)
 
   const handleGeneratePayroll = async () => {
-    if (workers.length === 0) return setAlert({ msg: 'No workers found for this week.', type: 'error' })
+    if (workers.length === 0) return setAlert({ msg: 'No workers in selection.', type: 'error' })
+    const isProduction = subTab === 'production'
+    const selectedIds = isProduction ? [...checkedRosterIds] : [...checkedLogIds]
+    if (selectedIds.length === 0) return setAlert({ msg: 'No rows selected.', type: 'error' })
     setActioning(true)
-    const { error: upErr } = await supabase.from('weekly_labour_payroll').upsert(
-      { week_ending: weekEnding, payroll_type: subTab, total_amount: totalAmount, worker_count: workers.length, status: 'draft', prepared_by: userProfile?.full_name },
-      { onConflict: 'week_ending,payroll_type', ignoreDuplicates: true }
-    )
+
+    // Staleness guard: verify no selected row was claimed by another payroll since page load
+    const { data: staleRows } = isProduction
+      ? await supabase.from('daily_roster').select('id, payroll_id').in('id', selectedIds)
+      : await supabase.from('truck_loading_log').select('id, payroll_id').in('id', selectedIds)
+    if ((staleRows || []).some(r => r.payroll_id != null)) {
+      setActioning(false)
+      setAlert({ msg: 'Some rows were claimed by another payroll — reload and try again.', type: 'error' })
+      return
+    }
+
+    // INSERT new payroll record
+    const { data: newPayroll, error: insErr } = await supabase
+      .from('weekly_labour_payroll')
+      .insert({
+        payroll_type: subTab,
+        period_start: rangeFrom,
+        period_end: rangeTo,
+        week_ending: rangeTo,
+        total_amount: totalAmount,
+        worker_count: workers.length,
+        status: 'draft',
+        prepared_by: userProfile?.full_name,
+      })
+      .select()
+      .single()
+    if (insErr) { setActioning(false); setAlert({ msg: insErr.message, type: 'error' }); return }
+
+    // Link selected rows to the new payroll
+    const { error: linkErr } = await supabase
+      .from(isProduction ? 'daily_roster' : 'truck_loading_log')
+      .update({ payroll_id: newPayroll.id })
+      .in('id', selectedIds)
     setActioning(false)
-    if (upErr) { setAlert({ msg: upErr.message, type: 'error' }); return }
-    setAlert({ msg: 'Payroll generated.', type: 'success' })
-    loadWeekData()
+    if (linkErr) {
+      setAlert({ msg: `Payroll created but row linking failed: ${linkErr.message}`, type: 'error' })
+    } else {
+      setAlert({ msg: 'Payroll generated.', type: 'success' })
+    }
+    loadRangeData()
+  }
+
+  const handleUpdateDraft = async () => {
+    if (!currentPayroll || currentPayroll.status !== 'draft') return
+    if (workers.length === 0) return setAlert({ msg: 'No workers in selection.', type: 'error' })
+    setActioning(true)
+    const { error } = await supabase
+      .from('weekly_labour_payroll')
+      .update({ total_amount: totalAmount, worker_count: workers.length })
+      .eq('id', currentPayroll.id)
+    setActioning(false)
+    if (error) { setAlert({ msg: error.message, type: 'error' }) }
+    else { setAlert({ msg: 'Draft updated.', type: 'success' }); loadRangeData() }
   }
 
   const handlePayrollAction = async (action) => {
@@ -1229,23 +1344,19 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
       p_action: action,
       p_reason: action === 'recall' ? recallReason.trim() : null,
     })
-    if (error) {
-      setActioning(false)
-      setAlert({ msg: error.message, type: 'error' })
-      return
-    }
+    if (error) { setActioning(false); setAlert({ msg: error.message, type: 'error' }); return }
     if (action === 'mark_paid') {
       const catId = await getOrCreateCategory('Labour Wages')
       if (catId) {
         const { error: expErr } = await supabase.from('expenses').insert({
           category_id: catId,
-          description: `${subTab === 'production' ? 'Production' : 'Loading'} Labour Payroll — Week ending ${weekEnding}`,
+          description: `${subTab === 'production' ? 'Production' : 'Loading'} Labour Payroll — ${fmtDate(rangeFrom)} to ${fmtDate(rangeTo)}`,
           amount: totalAmount, expense_date: todayStr(), status: 'approved', vendor: 'Labour Pool',
         })
         if (expErr) {
           setActioning(false)
           setAlert({ msg: 'Payroll marked paid — expense entry failed, please create it manually.', type: 'error' })
-          loadWeekData()
+          loadRangeData()
           return
         }
       }
@@ -1253,29 +1364,38 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
     if (action === 'recall') setRecallReason('')
     setActioning(false)
     setAlert({ msg: action === 'recall' ? 'Payroll recalled to draft — corrections can now be made.' : 'Updated.', type: 'success' })
-    loadWeekData()
+    loadRangeData()
   }
+
+  const canGenerate = !currentPayroll && workers.length > 0 &&
+    ['production_manager','assistant_production_manager','hr_officer','md'].includes(userProfile?.role)
+  const canUpdateDraft = isDraftMode &&
+    ['production_manager','assistant_production_manager','hr_officer','md'].includes(userProfile?.role)
 
   return (
     <div>
+      {/* Recent Payrolls */}
       <div style={{ ...styles.card, padding: 0, overflow: 'hidden', marginBottom: '16px' }}>
         <div style={{ ...styles.row, justifyContent: 'space-between', padding: '12px 16px', borderBottom: `1px solid ${theme.border}` }}>
           <div style={{ fontWeight: '700', fontSize: '14px' }}>Recent Payrolls</div>
           <button style={{ ...styles.btn('ghost'), padding: '4px 12px', fontSize: '12px' }} onClick={loadRecentPayrolls} disabled={recentLoading}>{recentLoading ? 'Loading…' : 'Refresh'}</button>
         </div>
         {recentLoading ? <div style={{ padding: '16px' }}><Spinner /></div> : recentPayrolls.length === 0 ? (
-          <div style={{ padding: '16px', color: theme.textMuted, fontSize: '13px' }}>No payrolls generated yet. Pick a week below and generate one.</div>
+          <div style={{ padding: '16px', color: theme.textMuted, fontSize: '13px' }}>No payrolls generated yet.</div>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead style={{ background: theme.surface }}>
-              <tr>{['Week Ending', 'Type', 'Workers', 'Total', 'Status', ''].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
+              <tr>{['Period', 'Type', 'Workers', 'Total', 'Status', ''].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
             </thead>
             <tbody>
               {recentPayrolls.map(p => {
-                const isOpen = p.week_ending === weekEnding && p.payroll_type === subTab
+                const isOpen = p.id === currentPayroll?.id
+                const periodLabel = p.period_start && p.period_end
+                  ? `${fmtDate(p.period_start)} – ${fmtDate(p.period_end)}`
+                  : fmtDate(p.week_ending)
                 return (
                   <tr key={p.id} style={isOpen ? { background: theme.surface } : undefined}>
-                    <td style={styles.td}>{p.week_ending}</td>
+                    <td style={styles.td}>{periodLabel}</td>
                     <td style={styles.td}>{p.payroll_type === 'production' ? 'Production' : 'Loading'}</td>
                     <td style={styles.td}>{p.worker_count ?? '—'}</td>
                     <td style={{ ...styles.td, color: theme.accent, fontWeight: '600' }}>{naira(p.total_amount)}</td>
@@ -1291,6 +1411,7 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
         )}
       </div>
 
+      {/* Sub-tab switcher */}
       <div style={{ ...styles.row, gap: '4px', marginBottom: '16px' }}>
         {['production', 'loading'].map(t => (
           <button key={t} style={styles.tab(subTab === t)} onClick={() => setSubTab(t)}>
@@ -1299,28 +1420,37 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
         ))}
       </div>
 
-      <div style={{ ...styles.row, marginBottom: '16px', gap: '12px', alignItems: 'flex-end' }}>
+      {/* Date range picker */}
+      <div style={{ ...styles.row, marginBottom: '16px', gap: '12px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
         <div>
-          <label style={styles.label}>Week Ending (Saturday)</label>
-          <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-            <button style={{ ...styles.btn('ghost'), padding: '6px 10px' }} onClick={() => setWeekEnding(shiftWeek(weekEnding, -1))}>‹</button>
-            <input type="date" style={styles.input} value={weekEnding} onChange={e => setWeekEnding(getSaturday(e.target.value))} />
-            <button style={{ ...styles.btn('ghost'), padding: '6px 10px' }} onClick={() => setWeekEnding(shiftWeek(weekEnding, 1))}>›</button>
-          </div>
+          <label style={styles.label}>From</label>
+          <input type="date" style={{ ...styles.input, width: '148px' }} value={rangeFrom} onChange={e => setRangeFrom(e.target.value)} />
         </div>
-        <button style={styles.btn('ghost')} onClick={loadWeekData}>Load Week</button>
+        <div>
+          <label style={styles.label}>To</label>
+          <input type="date" style={{ ...styles.input, width: '148px' }} value={rangeTo} onChange={e => setRangeTo(e.target.value)} />
+        </div>
+        <div style={{ display: 'flex', gap: '4px', paddingBottom: '1px' }}>
+          <button style={{ ...styles.btn('ghost'), padding: '6px 10px' }} onClick={() => shiftRange(-1)}>‹</button>
+          <button style={{ ...styles.btn('ghost'), padding: '6px 10px' }} onClick={() => shiftRange(1)}>›</button>
+        </div>
+        <button style={styles.btn('ghost')} onClick={loadRangeData}>Load Range</button>
         {(() => {
-          const rec = payrollRecords.find(p => p.payroll_type === subTab)
-          const color = !rec ? theme.textMuted : rec.status === 'paid' ? theme.green : rec.status === 'draft' ? '#f59e0b' : theme.textMuted
-          const label = !rec ? 'No payroll' : rec.status === 'paid' ? 'Paid' : rec.status === 'draft' ? 'Draft' : rec.status
+          const color = !currentPayroll ? theme.textMuted
+            : currentPayroll.status === 'paid' ? theme.green
+            : currentPayroll.status === 'draft' ? '#f59e0b'
+            : statusColor(currentPayroll.status)
+          const label = !currentPayroll ? 'No payroll' : (currentPayroll.status || 'draft').replace('_', ' ')
           return <span style={styles.badge(color)}>{label}</span>
         })()}
+        {isDraftMode && <span style={{ fontSize: '12px', color: '#f59e0b', fontWeight: '600' }}>— editing draft</span>}
       </div>
 
       {alert && <AlertBar msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
 
       {loading ? <Spinner /> : (
         <>
+          {/* Summary cards */}
           <div style={{ ...styles.row, gap: '12px', marginBottom: '16px', flexWrap: 'wrap' }}>
             <div style={{ ...styles.card, minWidth: '160px', marginBottom: 0 }}>
               <div style={{ fontSize: '11px', color: theme.textMuted, fontWeight: '700', textTransform: 'uppercase' }}>Workers</div>
@@ -1338,13 +1468,102 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
             )}
           </div>
 
+          {/* Source rows with checkboxes */}
+          <div style={{ ...styles.card, padding: 0, overflow: 'hidden', marginBottom: '12px' }}>
+            <div style={{ padding: '10px 14px', borderBottom: `1px solid ${theme.border}`, fontSize: '11px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase' }}>
+              {subTab === 'production' ? 'Daily Roster Rows' : 'Truck Loading Logs'} — select rows to include
+            </div>
+            <div style={{ overflowX: 'auto' }}>
+              {subTab === 'production' ? (
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead style={{ background: theme.surface }}>
+                    <tr>
+                      <th style={{ ...styles.th, width: '36px', paddingRight: '4px' }}>
+                        <input type="checkbox" checked={allChecked} onChange={toggleAll} />
+                      </th>
+                      {['Date', 'Workers', 'Total Cost', 'ICO', 'MD', 'Payment', 'Payroll'].map(h => <th key={h} style={styles.th}>{h}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rosters.length === 0 && <tr><td colSpan={8} style={{ ...styles.td, textAlign: 'center', color: theme.textMuted }}>No rosters in this range.</td></tr>}
+                    {rosters.map(r => {
+                      const isThisDraft = isDraftMode && r.payroll_id === currentPayroll?.id
+                      const isOtherPayroll = r.payroll_id != null && !isThisDraft
+                      return (
+                        <tr key={r.id} style={{ opacity: isOtherPayroll ? 0.45 : 1 }}>
+                          <td style={{ ...styles.td, paddingRight: '4px' }}>
+                            <input type="checkbox" checked={checkedRosterIds.has(r.id)} disabled={isOtherPayroll} onChange={() => !isOtherPayroll && toggleRow(r.id)} />
+                          </td>
+                          <td style={styles.td}>{r.roster_date}</td>
+                          <td style={styles.td}>{r.worker_count ?? '—'}</td>
+                          <td style={styles.td}>{naira(r.total_daily_cost)}</td>
+                          <td style={styles.td}><span style={styles.badge(statusColor(r.ico_status || 'draft'))}>{(r.ico_status || 'draft').replace('_', ' ')}</span></td>
+                          <td style={styles.td}><span style={styles.badge(statusColor(r.md_status || 'pending'))}>{r.md_status || 'pending'}</span></td>
+                          <td style={styles.td}><span style={styles.badge(statusColor(r.payment_status || 'unpaid'))}>{r.payment_status || 'unpaid'}</span></td>
+                          <td style={styles.td}>
+                            {isThisDraft
+                              ? <span style={{ ...styles.badge('#f59e0b'), fontSize: '9px' }}>This Draft</span>
+                              : r.payroll_id != null
+                                ? <span style={{ ...styles.badge(theme.textMuted), fontSize: '9px' }}>Other</span>
+                                : <span style={{ color: theme.textMuted, fontSize: '11px' }}>—</span>}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              ) : (
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead style={{ background: theme.surface }}>
+                    <tr>
+                      <th style={{ ...styles.th, width: '36px', paddingRight: '4px' }}>
+                        <input type="checkbox" checked={allChecked} onChange={toggleAll} />
+                      </th>
+                      {['Date', 'Waybill', 'Loaders', 'Amount', 'Payment', 'Payroll'].map(h => <th key={h} style={styles.th}>{h}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {loadingLogs.length === 0 && <tr><td colSpan={7} style={{ ...styles.td, textAlign: 'center', color: theme.textMuted }}>No loading logs in this range.</td></tr>}
+                    {loadingLogs.map(l => {
+                      const isThisDraft = isDraftMode && l.payroll_id === currentPayroll?.id
+                      const isOtherPayroll = l.payroll_id != null && !isThisDraft
+                      return (
+                        <tr key={l.id} style={{ opacity: isOtherPayroll ? 0.45 : 1 }}>
+                          <td style={{ ...styles.td, paddingRight: '4px' }}>
+                            <input type="checkbox" checked={checkedLogIds.has(l.id)} disabled={isOtherPayroll} onChange={() => !isOtherPayroll && toggleRow(l.id)} />
+                          </td>
+                          <td style={styles.td}>{l.date}</td>
+                          <td style={styles.td}>{l.waybill_number || '—'}</td>
+                          <td style={styles.td}>{l.loaders?.length ?? 0}</td>
+                          <td style={{ ...styles.td, color: theme.accent }}>{naira(l.total_amount)}</td>
+                          <td style={styles.td}><span style={styles.badge(statusColor(l.payment_status || 'unpaid'))}>{l.payment_status || 'unpaid'}</span></td>
+                          <td style={styles.td}>
+                            {isThisDraft
+                              ? <span style={{ ...styles.badge('#f59e0b'), fontSize: '9px' }}>This Draft</span>
+                              : l.payroll_id != null
+                                ? <span style={{ ...styles.badge(theme.textMuted), fontSize: '9px' }}>Other</span>
+                                : <span style={{ color: theme.textMuted, fontSize: '11px' }}>—</span>}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+
+          {/* Worker aggregate table */}
           <div style={{ ...styles.card, padding: 0, overflow: 'hidden', marginBottom: '16px' }}>
+            <div style={{ padding: '10px 14px', borderBottom: `1px solid ${theme.border}`, fontSize: '11px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase' }}>
+              Worker Summary (from checked rows)
+            </div>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead style={{ background: theme.surface }}>
                 <tr>{['Name', 'Role', subTab === 'production' ? 'Days' : 'Blocks', 'Base Rate', 'Bonus', 'Total Pay', 'Bank', 'Account'].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
               </thead>
               <tbody>
-                {workers.length === 0 && <tr><td colSpan={8} style={{ ...styles.td, textAlign: 'center', color: theme.textMuted }}>No workers for this week.</td></tr>}
+                {workers.length === 0 && <tr><td colSpan={8} style={{ ...styles.td, textAlign: 'center', color: theme.textMuted }}>No workers — check rows above to include them.</td></tr>}
                 {workers.map((w, i) => (
                   <tr key={i}>
                     <td style={styles.td}>{w.name}</td>
@@ -1368,9 +1587,13 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
             </table>
           </div>
 
+          {/* Action buttons */}
           <div style={{ ...styles.row, gap: '8px', flexWrap: 'wrap' }}>
-            {!currentPayroll && workers.length > 0 && ['production_manager','assistant_production_manager','hr_officer','md'].includes(userProfile?.role) && (
+            {canGenerate && (
               <button style={styles.btn('primary')} onClick={handleGeneratePayroll} disabled={actioning}>Generate Payroll</button>
+            )}
+            {canUpdateDraft && (
+              <button style={styles.btn('primary')} onClick={handleUpdateDraft} disabled={actioning}>Update Draft</button>
             )}
             {currentPayroll?.status === 'draft' && userProfile?.role === 'ico' && (
               <button data-ico-allow style={styles.btn('success')} onClick={() => handlePayrollAction('ico_approve')} disabled={actioning}>ICO Approve</button>
@@ -1390,17 +1613,17 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
             {currentPayroll?.status === 'paid' && (
               <button style={styles.btn('blue')} onClick={() => {
                 const pdfWorkers = workers.map(w => ({ ...w, days_or_blocks: subTab === 'production' ? w.days : Math.round(w.days_or_blocks || 0) }))
-                generatePayrollPDF(subTab, weekEnding, pdfWorkers, totalAmount, currentPayroll)
+                generatePayrollPDF(subTab, rangeTo, pdfWorkers, totalAmount, currentPayroll)
               }}>Download PDF</button>
             )}
             {['md_approved', 'paid'].includes(currentPayroll?.status) && ['accountant', 'ico', 'md'].includes(userProfile?.role) && (
               <button data-ico-allow style={styles.btn('blue')} onClick={() =>
-                generatePaymentScheduleXLSX(subTab, weekEnding, workers, pool)
+                generatePaymentScheduleXLSX(subTab, rangeTo, workers, pool)
               }>Download Payment Schedule</button>
             )}
             {['md_approved', 'paid'].includes(currentPayroll?.status) && ['accountant', 'ico', 'md'].includes(userProfile?.role) && (
               <button data-ico-allow style={styles.btn('blue')} onClick={() =>
-                generateBulkTransferXLSX(weekEnding, workers, pool)
+                generateBulkTransferXLSX(rangeTo, workers, pool)
               }>Download Bulk Transfer</button>
             )}
           </div>
