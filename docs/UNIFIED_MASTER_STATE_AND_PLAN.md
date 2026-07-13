@@ -20,12 +20,12 @@ App: APC Manager — internal ERP for Abuja Precast Concrete Limited
 ## 1. SESSION HISTORY (most recent first)
 
 ### ✅ SESSION 19 (2026-07-13) — DELETION AUDIT TRAIL + TRUCK LOADING CLEANUP + LOADING/WAYBILL REDESIGN
-**PRs: #71 (invoice-and-order-delete), #72 (truck-loading-cleanup), #74 (truck-loading-features), #75 (store-officer-dropdown-fix), #76 (waybill-driver-filter — open, pending MD merge). DB-only changes applied via planning-chat migration: deletion_log table + triggers; duplicate truck_loading_log row cleanup + UNIQUE INDEX on waybill_id; '9 Inch 3 Hole Block' product split + loading rate. PR #73 was docs-only (partial S19 notes, superseded by this entry).**
+**PRs: #71 (invoice-and-order-delete), #72 (truck-loading-cleanup), #74 (truck-loading-features), #75 (store-officer-dropdown-fix), #76 (waybill-driver-filter). DB-only changes applied via planning-chat migration: deletion_log table + triggers; duplicate truck_loading_log row cleanup + UNIQUE INDEX on waybill_id; '9 Inch 3 Hole Block' product split + loading rate. PR #73 was docs-only (partial S19 notes, superseded by this entry).**
 
 **A. Deletion audit trail (DB — planning-chat migration; code via PR #71)**
-- `deletion_log` table: captures deleted-row snapshots for invoices, payments, orders, waybills, and truck_loading_log. Columns: table_name, record_id, deleted_data (jsonb), deleted_by, deleted_at.
+- `deletion_log` table: captures deleted-row snapshots for invoices, payments, orders, waybills, and truck_loading_log. Columns: table_name, record_id, snapshot (jsonb), deleted_by, deleted_at.
 - Trigger fires on DELETE from each covered table and writes a row to `deletion_log` before the row is removed — durable audit record without relying on application logic.
-- The truck_loading_log trigger was applied as a standalone planning-chat migration; the remaining covered tables were applied as part of the PR #71 DB migration.
+- All triggers (covering all five tables) were applied via planning-chat migrations — entirely DB-only work, separate from PR #71's app-code changes.
 
 **B. Invoice deletion + order deletion (PR #71)**
 - Single-invoice delete added (MD-only, confirm-gated). Guard: if the invoice has any linked payments, deletion is blocked with a clear message — must clear or void payments first.
@@ -58,7 +58,7 @@ App: APC Manager — internal ERP for Abuja Precast Concrete Limited
 - Both dropdowns were listing all staff unfiltered. Root cause: `staff.role` stores `'Store Officer'` and `'Driver'` (capitalized, space-separated) but the filter code compared against lowercase enum-style values — returning no matches.
 - Fix: `staff.filter(s => s.role?.trim().toLowerCase() === 'store officer')` and `=== 'driver'` respectively. Case-insensitive match against the actual stored string, same pattern used throughout the codebase for role filters.
 - PR #75 also relabeled the waybill field from "Signed By (On-Site)" → "Receiver's Signature (Name)" and updated the placeholder. PR #76 dropped the `({s.role})` suffix from driver option labels (redundant once the list is role-filtered).
-- PR #76 is open as of end of session, awaiting MD merge.
+- Both PRs merged.
 
 **H. KPI tracking goal — chain of custody (recorded, not yet built)**
 - Goal: tie block breakage to whoever had custody at the time. Chain per MD: Production Manager/Assistant PM (batching through yard stacking count) → Store Officer (from batch-number handover through supervising loading, until they sign the waybill) → Driver (from waybill signature through delivery, until customer sign-off).
@@ -567,7 +567,7 @@ Bounded audit, five categories:
 | '9 Inch 3 Hole Block' product split (S19, DB) | ✅ LIVE — separate product record + loading rate; no longer bundled under '9 Inch (Nigeria Standard)' | — |
 | Loading/waybill redesign (S19, PR #74) | ✅ MERGED — loader picker (auto-fill from standing crew, per-trip override, syncLoaders); edit action on log entries (blocked when paid); waybill picker + backfill mode; `signed_by_name`; `store_officer_id` FK dropdown | — |
 | Store officer dropdown fix (S19, PR #75) | ✅ MERGED — filtered to `role = 'Store Officer'`; field relabeled "Receiver's Signature (Name)"; placeholder updated | — |
-| Driver dropdown fix (S19, PR #76) | open — filtered to `role = 'Driver'`; `({s.role})` suffix dropped from labels | MD to merge |
+| Driver dropdown fix (S19, PR #76) | ✅ MERGED — filtered to `role = 'Driver'`; `({s.role})` suffix dropped from labels | — |
 | Go-live re-entry / dust gap | parked | MD triggers |
 
 ---
