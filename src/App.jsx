@@ -42,6 +42,7 @@ import { suppliersService, supplierTransactionsService } from './services/suppli
 import Labour from './components/Labour'
 import Messages from './components/Messages'
 import { messagesService } from './services/messages'
+import NotificationBell from './components/NotificationBell'
 import { advancesService } from './services/advances'
 import { paymentRequestsService } from './services/paymentRequests'
 import { truckLoadingService, labourPoolService } from './services/labour'
@@ -10675,6 +10676,11 @@ export default function App() {
         </div>
       </div>
       {showChangePwd && <ChangePasswordModal onClose={() => setShowChangePwd(false)} />}
+      <NotificationBell
+        userProfile={userProfile}
+        onNavigate={(page) => { setActive(page); if (isMobile) setSidebarOpen(false); }}
+        isMobile={isMobile}
+      />
       <main style={{ ...styles.main, ...(isMobile ? { marginLeft: 0, padding: '16px 14px', paddingTop: '58px' } : {}) }} {...(isBoard && !BOARD_EXEMPT_PAGES.includes(safePage) ? { 'data-board-view': 'true' } : {})} {...(isICO && !ICO_EXEMPT_PAGES.includes(safePage) ? { 'data-ico-view': 'true' } : {})}>
         {/* Mobile hamburger */}
         {isMobile && (
