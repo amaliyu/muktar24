@@ -28,7 +28,7 @@ export const productionService = {
   async getDamages({ from, to } = {}) {
     let query = supabase
       .from('damage_log')
-      .select('*, recorded_by_staff:staff(full_name)')
+      .select('*')
       .order('date', { ascending: false })
 
     if (from) query = query.gte('date', from)

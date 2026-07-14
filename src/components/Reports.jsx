@@ -170,10 +170,19 @@ async function fetchProductionRange(from, to) {
   const { data } = await q; return data || []
 }
 async function fetchDamageRange(from, to) {
-  let q = supabase.from('damage_log').select('*, recorder:recorded_by(full_name), delivery:waybill_id(waybill_number)').order('date')
+  let q = supabase.from('damage_log').select('*, delivery:waybill_id(waybill_number)').order('date')
   if (from) q = q.gte('date', from)
   if (to)   q = q.lte('date', to)
-  const { data } = await q; return data || []
+  const { data } = await q
+  const rows = data || []
+  const ids = [...new Set(rows.map(r => r.recorded_by).filter(Boolean))]
+  if (ids.length) {
+    const { data: profiles } = await supabase.from('user_profiles_directory').select('id, full_name').in('id', ids)
+    const nameMap = {}
+    for (const p of profiles || []) nameMap[p.id] = p.full_name
+    return rows.map(r => ({ ...r, recorder: r.recorded_by ? { id: r.recorded_by, full_name: nameMap[r.recorded_by] || null } : null }))
+  }
+  return rows
 }
 async function fetchWaybillRange(from, to) {
   let q = supabase.from('waybills').select('*, driver:driver_id(full_name), vehicle:vehicle_id(vehicle_number)').order('waybill_date')
