@@ -43,6 +43,7 @@ import Labour from './components/Labour'
 import Messages from './components/Messages'
 import { messagesService } from './services/messages'
 import NotificationBell from './components/NotificationBell'
+import MessagesBell from './components/MessagesBell'
 import { advancesService } from './services/advances'
 import { paymentRequestsService } from './services/paymentRequests'
 import { truckLoadingService, labourPoolService } from './services/labour'
@@ -10676,6 +10677,11 @@ export default function App() {
         </div>
       </div>
       {showChangePwd && <ChangePasswordModal onClose={() => setShowChangePwd(false)} />}
+      <MessagesBell
+        unreadMsgCount={unreadMsgCount}
+        onNavigate={(page) => { setActive(page); if (isMobile) setSidebarOpen(false); }}
+        isMobile={isMobile}
+      />
       <NotificationBell
         userProfile={userProfile}
         onNavigate={(page) => { setActive(page); if (isMobile) setSidebarOpen(false); }}
