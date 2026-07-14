@@ -18,6 +18,7 @@ export const messagesService = {
     const { data, error } = await supabase
       .from('user_profiles_directory')
       .select('id, full_name, role')
+      .eq('is_active', true)
       .neq('id', currentUserId)
       .order('full_name')
     if (error) throw error
