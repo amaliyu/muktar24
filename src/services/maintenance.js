@@ -46,7 +46,7 @@ export const maintenanceService = {
   async getStaffForPicker() {
     const { data, error } = await supabase
       .from('staff_public')
-      .select('id, full_name, is_active')
+      .select('id, full_name, is_active, role, reports_to_staff_id')
       .order('full_name');
     if (error) throw error;
     return data || [];
