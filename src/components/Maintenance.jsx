@@ -112,6 +112,29 @@ const PhotoLink = ({ path }) => {
 
 const assetLabel = (a) => a ? `${(a.name || '').trim()} (${(a.code || '').trim()})` : '—'
 
+// The manager role responsible for each asset type. Matched against
+// staff_public.role (trimmed, case-insensitive — some role values carry
+// trailing whitespace).
+const MANAGER_ROLE_FOR_ASSET = { machine: 'production manager', vehicle: 'logistics manager' }
+
+// Scope the staff picker to the team relevant to the asset being logged:
+// the responsible manager (resolved dynamically by role text, never a
+// hardcoded id/name) plus everyone who reports to that manager. Returns the
+// filtered team, or null to signal the caller should fall back to the full
+// active list — when the asset_type is unknown, or no active person holds the
+// manager role (logged as a warning so it's visible in dev tools rather than
+// silently breaking data entry).
+function teamForAssetType(assetType, activeStaff) {
+  const targetRole = MANAGER_ROLE_FOR_ASSET[assetType]
+  if (!targetRole) return null
+  const manager = activeStaff.find(s => String(s.role || '').trim().toLowerCase() === targetRole)
+  if (!manager) {
+    console.warn(`Maintenance staff picker: no active "${targetRole}" found in staff_public — falling back to full active staff list.`)
+    return null
+  }
+  return activeStaff.filter(s => s.id === manager.id || s.reports_to_staff_id === manager.id)
+}
+
 // ── CHECKLIST TAB ────────────────────────────────────────────────
 function ChecklistTab({ assets, templates, staffById, activeStaff, userProfile, canWrite }) {
   const [templateId, setTemplateId] = useState('')
@@ -146,13 +169,22 @@ function ChecklistTab({ assets, templates, staffById, activeStaff, userProfile, 
     return assets.filter(a => a.asset_type === selectedTemplate.asset_type)
   }, [assets, selectedTemplate])
 
+  // Staff dropdown scoped to the team for the template's asset_type; falls back
+  // to the full active list when the team can't be resolved.
+  const pickerStaff = useMemo(() => {
+    if (!selectedTemplate) return []
+    return teamForAssetType(selectedTemplate.asset_type, activeStaff) ?? activeStaff
+  }, [selectedTemplate, activeStaff])
+
   const resetForm = () => {
     setTemplateId(''); setItems([]); setAssetId(''); setStaffId('')
     setChecked({}); setFlagToggle(false); setNotes(''); setPhotoFile(null)
   }
 
   const onTemplateChange = async (id) => {
-    setTemplateId(id); setAssetId(''); setChecked({}); setItems([]); setFlagToggle(false)
+    // asset_type (and therefore the relevant team) changes with the template,
+    // so clear the asset and staff selections that were scoped to the old one.
+    setTemplateId(id); setAssetId(''); setStaffId(''); setChecked({}); setItems([]); setFlagToggle(false)
     if (!id) return
     setItemsLoading(true)
     try {
@@ -264,9 +296,9 @@ function ChecklistTab({ assets, templates, staffById, activeStaff, userProfile, 
 
               <div style={styles.formGroup}>
                 <label style={styles.label}>For staff member (required)</label>
-                <select style={styles.input} value={staffId} onChange={e => setStaffId(e.target.value)}>
-                  <option value="">Select staff…</option>
-                  {activeStaff.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
+                <select style={styles.input} value={staffId} onChange={e => setStaffId(e.target.value)} disabled={!selectedTemplate}>
+                  <option value="">{selectedTemplate ? 'Select staff…' : 'Pick a checklist first'}</option>
+                  {pickerStaff.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
                 </select>
                 <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '4px' }}>
                   Who the checklist is for/about — not necessarily you. Recorded by {userProfile?.full_name || 'you'} automatically.
@@ -476,6 +508,15 @@ function DowntimeTab({ assets, activeStaff, staffById, userProfile, canWrite }) 
   const assetById = useMemo(() => Object.fromEntries(assets.map(a => [a.id, a])), [assets])
   const staffName = (id) => staffById[id]?.full_name || (id ? 'Unknown staff' : '—')
 
+  // "Reported by" scoped to the team for the selected asset's asset_type; falls
+  // back to the full active list before an asset is picked or when the team
+  // can't be resolved.
+  const selectedAsset = assetById[assetId] || null
+  const pickerStaff = useMemo(() => {
+    if (!selectedAsset) return activeStaff
+    return teamForAssetType(selectedAsset.asset_type, activeStaff) ?? activeStaff
+  }, [selectedAsset, activeStaff])
+
   return (
     <div>
       {alert && <AlertBar msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
@@ -486,7 +527,7 @@ function DowntimeTab({ assets, activeStaff, staffById, userProfile, canWrite }) 
           <div style={styles.grid2}>
             <div style={styles.formGroup}>
               <label style={styles.label}>Asset</label>
-              <select style={styles.input} value={assetId} onChange={e => setAssetId(e.target.value)}>
+              <select style={styles.input} value={assetId} onChange={e => { setAssetId(e.target.value); setStaffId('') }}>
                 <option value="">Select an asset…</option>
                 {assets.map(a => (
                   <option key={a.id} value={a.id}>{assetLabel(a)} — {a.status}</option>
@@ -510,7 +551,7 @@ function DowntimeTab({ assets, activeStaff, staffById, userProfile, canWrite }) 
               <label style={styles.label}>Reported by (optional)</label>
               <select style={styles.input} value={staffId} onChange={e => setStaffId(e.target.value)}>
                 <option value="">Not specified</option>
-                {activeStaff.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
+                {pickerStaff.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
               </select>
             </div>
           </div>
