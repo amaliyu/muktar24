@@ -40,6 +40,7 @@ import { vehiclesService, fuelLogService } from './services/vehicles'
 import SupplierRegistry from './components/SupplierRegistry'
 import { suppliersService, supplierTransactionsService } from './services/suppliers'
 import Labour from './components/Labour'
+import Maintenance from './components/Maintenance'
 import Messages from './components/Messages'
 import { messagesService } from './services/messages'
 import NotificationBell from './components/NotificationBell'
@@ -133,18 +134,18 @@ const APP_ROLES = [
 // Pages each role is allowed to access. 'all' = unrestricted.
 const ROLE_PAGES = {
   md:                 'all',
-  ico:                ['dashboard','production','inventory','batches','waybills','vehicles','labour','truck_loading','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','advances','leave','payment_requests'],
+  ico:                ['dashboard','production','inventory','batches','maintenance','waybills','vehicles','labour','truck_loading','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','advances','leave','payment_requests'],
   accountant:         ['dashboard','customers','orders','reports','kpi_dashboard','accounting','suppliers','products','my_profile','data_import','labour','waybills','advances','leave','payment_requests','truck_loading','trading_margin'],
-  board_member:       ['dashboard','production','inventory','batches','waybills','vehicles','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','trading_margin'],
+  board_member:       ['dashboard','production','inventory','batches','maintenance','waybills','vehicles','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','trading_margin'],
   bdm:                ['dashboard','customers','orders','pending_register','daily_schedule','lpo_approvals','reports','kpi_dashboard','my_profile','payment_requests','trading_margin'],
-  store_officer:      ['dashboard','inventory','batches','waybills','pending_register','daily_schedule','products','reports','my_profile'],
-  logistics_manager:  ['dashboard','waybills','vehicles','labour','truck_loading','pending_register','daily_schedule','customers','my_profile','payment_requests'],
+  store_officer:      ['dashboard','inventory','batches','maintenance','waybills','pending_register','daily_schedule','products','reports','my_profile'],
+  logistics_manager:  ['dashboard','waybills','vehicles','labour','truck_loading','maintenance','pending_register','daily_schedule','customers','my_profile','payment_requests'],
   marketer:           ['dashboard','customers','orders','products','my_profile'],
   driver:             ['dashboard','waybills','my_profile'],
   hr_officer:         ['dashboard','staff','reports','labour','my_profile','advances','leave','disciplinary','attendance_kiosk','attendance_flags','payment_requests'],
   kiosk_device:       ['attendance_kiosk'],
-  production_manager:           ['dashboard','production','inventory','batches','reports','products','labour','truck_loading','my_profile','attendance_flags','payment_requests'],
-  assistant_production_manager: ['dashboard','production','inventory','batches','reports','products','labour','truck_loading','my_profile','attendance_flags'],
+  production_manager:           ['dashboard','production','inventory','batches','maintenance','reports','products','labour','truck_loading','my_profile','attendance_flags','payment_requests'],
+  assistant_production_manager: ['dashboard','production','inventory','batches','maintenance','reports','products','labour','truck_loading','my_profile','attendance_flags'],
   // legacy roles — kept for any existing users
   operations:         ['dashboard','production','inventory','batches','waybills','vehicles','pending_register','daily_schedule','lpo_approvals','my_profile'],
   sales:              ['dashboard','customers','orders','my_profile'],
@@ -160,8 +161,8 @@ const ROLE_PAGES = {
 // (accounting, reports, kpi_dashboard, daily_schedule) are NOT listed here —
 // those buttons carry per-element data-ico-allow / data-board-allow instead,
 // so write actions stay hidden.
-const ICO_EXEMPT_PAGES   = ['dashboard', 'labour', 'truck_loading', 'schedule_approvals', 'advances', 'leave', 'my_hr', 'payment_requests'];
-const BOARD_EXEMPT_PAGES = ['dashboard', 'my_profile', 'my_hr'];
+const ICO_EXEMPT_PAGES   = ['dashboard', 'labour', 'truck_loading', 'schedule_approvals', 'advances', 'leave', 'my_hr', 'payment_requests', 'maintenance'];
+const BOARD_EXEMPT_PAGES = ['dashboard', 'my_profile', 'my_hr', 'maintenance'];
 
 // ── UI HELPERS ───────────────────────────────────────────────
 const Spinner = () => (
@@ -293,7 +294,7 @@ const ConfirmModal = ({ msg, onConfirm, onCancel }) => (
 );
 
 const Icon = ({ name, size = 16 }) => {
-  const icons = { dashboard: "⊞", production: "🏭", orders: "📋", staff: "👥", waybill: "📄", reports: "📊", inventory: "📦", batches: "🗂", pending: "⏳", schedule: "📅", lpo: "📝", approve: "✓", settings: "⚙", products: "🧱", truck: "🚛", supplier: "🏢", logout: "→" };
+  const icons = { dashboard: "⊞", production: "🏭", orders: "📋", staff: "👥", waybill: "📄", reports: "📊", inventory: "📦", batches: "🗂", pending: "⏳", schedule: "📅", lpo: "📝", approve: "✓", settings: "⚙", products: "🧱", truck: "🚛", supplier: "🏢", maintenance: "🔧", logout: "→" };
   return <span style={{ fontSize: size }}>{icons[name] || "•"}</span>;
 };
 
@@ -10127,6 +10128,7 @@ const navItems = [
     { id: "production", label: "Production", icon: "production" },
     { id: "inventory", label: "Inventory", icon: "inventory" },
     { id: "batches", label: "Batches", icon: "batches" },
+    { id: "maintenance", label: "Maintenance", icon: "maintenance" },
   ]},
   { section: "Logistics", items: [
     { id: "waybills", label: "Waybills", icon: "waybill" },
@@ -10604,6 +10606,7 @@ export default function App() {
     data_import: <DataImport />,
     user_management: <UserManagement userProfile={userProfile} />,
     labour: <Labour userProfile={userProfile} />,
+    maintenance: <Maintenance userProfile={userProfile} />,
     truck_loading: <TruckLoadingPage userProfile={userProfile} />,
     advances: <AdvancesPage userProfile={userProfile} />,
     payment_requests: <PaymentRequestsPage userProfile={userProfile} />,
