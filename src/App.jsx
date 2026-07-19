@@ -658,8 +658,24 @@ const Dashboard = ({ onNavigate, userProfile }) => {
 };
 
 // ── PRODUCTION ────────────────────────────────────────────────
-const Production = () => {
+// Compact relative-time formatter for the "edited" indicator.
+const fmtRelativeTime = (iso) => {
+  if (!iso) return "";
+  const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 30) return `${days}d ago`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months}mo ago`;
+  return `${Math.floor(months / 12)}y ago`;
+};
+
+const Production = ({ userProfile }) => {
   const [showForm, setShowForm] = useState(false);
+  const [dupWarning, setDupWarning] = useState(null);
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -736,8 +752,16 @@ const Production = () => {
     setShowForm(true);
   };
 
-  const handleSave = async () => {
+  const handleSave = async (skipDupCheck = false) => {
     if (!form.date || !form.produced) return setAlert({ type: "error", msg: "Date and quantity produced are required." });
+    // Create path only: warn (non-blocking) if a same-date + block-type entry
+    // already exists. Fail open — a check error must never block a valid save.
+    if (!editTarget && !skipDupCheck) {
+      try {
+        const dup = records.find(r => r.date === form.date && r.block_type === form.blockType);
+        if (dup) { setDupWarning(dup); return; }
+      } catch (e) { console.error("Duplicate-entry check failed, proceeding:", e); }
+    }
     setSaving(true);
     setAlert(null);
     try {
@@ -751,7 +775,7 @@ const Production = () => {
         diesel_litres: parseFloat(form.diesel) || 0,
       };
       if (editTarget) {
-        await productionService.update(editTarget.id, entryData);
+        await productionService.update(editTarget.id, entryData, userProfile?.id);
         await productionService.clearDamages(editTarget.id);
         if (dmgProd > 0) await productionService.logDamage({ date: form.date, block_type: form.blockType, stage: "production", quantity_damaged: dmgProd, production_log_id: editTarget.id });
         if (dmgStack > 0) await productionService.logDamage({ date: form.date, block_type: form.blockType, stage: "stacking", quantity_damaged: dmgStack, production_log_id: editTarget.id });
@@ -834,6 +858,20 @@ const Production = () => {
         onConfirm={() => handleDelete(confirmDelete)}
         onCancel={() => setConfirmDelete(null)}
       />}
+      {dupWarning && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: "12px", padding: "28px 32px", maxWidth: "440px", width: "90%" }}>
+            <div style={{ fontWeight: "700", fontSize: "15px", marginBottom: "10px", color: theme.text }}>Possible duplicate entry</div>
+            <div style={{ fontSize: "13px", color: theme.textMuted, marginBottom: "24px", lineHeight: "1.5" }}>
+              An entry for <strong style={{ color: theme.text }}>{dupWarning.date}</strong> — <strong style={{ color: theme.text }}>{dupWarning.block_type}</strong> already exists ({fmt(dupWarning.quantity_produced)} produced). Do you want to edit that entry instead, or continue creating a new one?
+            </div>
+            <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
+              <button style={styles.btn("secondary")} onClick={() => { const m = dupWarning; setDupWarning(null); startEdit(m); }}>Edit existing</button>
+              <button style={styles.btn("primary")} onClick={() => { setDupWarning(null); handleSave(true); }}>Create anyway</button>
+            </div>
+          </div>
+        </div>
+      )}
       <div style={styles.header}>
         <div>
           <div style={styles.pageTitle}>Production Log</div>
@@ -918,7 +956,7 @@ const Production = () => {
             ))}
           </div>
           <div style={styles.row}>
-            <button style={styles.btn("primary")} onClick={handleSave} disabled={saving}>{saving ? "Saving…" : editTarget ? "Update Entry" : "Save Entry"}</button>
+            <button style={styles.btn("primary")} onClick={() => handleSave()} disabled={saving}>{saving ? "Saving…" : editTarget ? "Update Entry" : "Save Entry"}</button>
             <button style={styles.btn("secondary")} onClick={() => { setShowForm(false); setForm(emptyForm); setEditTarget(null); }}>Cancel</button>
           </div>
         </div>
@@ -945,7 +983,14 @@ const Production = () => {
                 const net = (p.quantity_produced || 0) - (p.damaged?.production || 0) - (p.damaged?.stacking || 0);
                 return (
                   <tr key={p.id}>
-                    <td style={styles.td}>{p.date}</td>
+                    <td style={styles.td}>
+                      {p.date}
+                      {p.updated_at && (
+                        <div style={{ fontSize: "10px", color: theme.textMuted, marginTop: "2px", fontStyle: "italic" }} title={`Edited ${new Date(p.updated_at).toLocaleString()}`}>
+                          (edited {fmtRelativeTime(p.updated_at)})
+                        </div>
+                      )}
+                    </td>
                     <td style={styles.td}><span style={styles.badge(theme.blue)}>{p.block_type}</span></td>
                     <td style={styles.td}>{fmt(p.quantity_produced)}</td>
                     <td style={styles.td}>{p.cement_bags}</td>
@@ -10669,7 +10714,7 @@ export default function App() {
 
   const pages = {
     dashboard: isBoard ? <BoardDashboard userProfile={userProfile} /> : <Dashboard onNavigate={setActive} userProfile={userProfile} />,
-    production: <Production />,
+    production: <Production userProfile={userProfile} />,
     inventory: <Inventory onLowStockChange={setLowStockCount} />,
     batches: <Batches userProfile={userProfile} />,
     waybills: <Waybills userProfile={userProfile} />,
