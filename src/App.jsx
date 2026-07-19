@@ -686,7 +686,7 @@ const Production = ({ userProfile }) => {
   const [targets, setTargets] = useState([]);
   const [targetForm, setTargetForm] = useState({ date: new Date().toISOString().split('T')[0], blockType: "9 Inch 3 Hole Block", quantity: "" });
   const [savingTarget, setSavingTarget] = useState(false);
-  const emptyForm = { date: "", blockType: "9 Inch 3 Hole Block", produced: "", cement: "", granite: "", diesel: "", dmgProd: "0", dmgStack: "0" };
+  const emptyForm = { date: "", blockType: "9 Inch 3 Hole Block", produced: "", cement: "", granite: "", chippings: "", diesel: "", dmgProd: "0", dmgStack: "0" };
   const [form, setForm] = useState(emptyForm);
 
   const load = async () => {
@@ -745,6 +745,7 @@ const Production = ({ userProfile }) => {
       produced: String(record.quantity_produced || ""),
       cement: String(record.cement_bags || ""),
       granite: String(record.granite_dust_kg || ""),
+      chippings: String(record.chippings_kg || ""),
       diesel: String(record.diesel_litres || ""),
       dmgProd: String(record.damaged?.production || 0),
       dmgStack: String(record.damaged?.stacking || 0),
@@ -772,6 +773,7 @@ const Production = ({ userProfile }) => {
         quantity_produced: parseInt(form.produced) || 0,
         cement_bags: parseFloat(form.cement) || 0,
         granite_dust_kg: parseFloat(form.granite) || 0,
+        chippings_kg: parseFloat(form.chippings) || 0,
         diesel_litres: parseFloat(form.diesel) || 0,
       };
       if (editTarget) {
@@ -785,6 +787,7 @@ const Production = ({ userProfile }) => {
           await inventoryService.autoDeductProduction({
             cementBags: entryData.cement_bags,
             graniteDustKg: entryData.granite_dust_kg,
+            chippingsKg: entryData.chippings_kg,
             dieselLitres: entryData.diesel_litres,
             date: entryData.date,
             reference: ref,
@@ -800,6 +803,7 @@ const Production = ({ userProfile }) => {
           await inventoryService.autoDeductProduction({
             cementBags: entryData.cement_bags,
             graniteDustKg: entryData.granite_dust_kg,
+            chippingsKg: entryData.chippings_kg,
             dieselLitres: entryData.diesel_litres,
             date: entryData.date,
             reference: `PROD-${entry.id.slice(0, 8)}`,
@@ -945,6 +949,7 @@ const Production = ({ userProfile }) => {
               { label: "Quantity Produced", key: "produced", placeholder: "e.g. 850" },
               { label: "Cement Bags Used", key: "cement", placeholder: "bags" },
               { label: "Granite Dust (kg)", key: "granite", placeholder: "kg" },
+              { label: "Chippings (kg)", key: "chippings", placeholder: "kg" },
               { label: "Diesel Used (litres)", key: "diesel", placeholder: "litres" },
               { label: "Damaged During Production", key: "dmgProd", placeholder: "0" },
               { label: "Damaged During Stacking", key: "dmgStack", placeholder: "0" },
@@ -976,7 +981,7 @@ const Production = ({ userProfile }) => {
         ) : (
           <table style={styles.table}>
             <thead>
-              <tr>{["Date", "Block Type", "Produced", "Cement (bags)", "Granite (kg)", "Diesel (L)", "Dmg Production", "Dmg Stacking", "Net Output", ""].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
+              <tr>{["Date", "Block Type", "Produced", "Cement (bags)", "Granite (kg)", "Chippings (kg)", "Diesel (L)", "Dmg Production", "Dmg Stacking", "Net Output", ""].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
             </thead>
             <tbody>
               {records.map((p) => {
@@ -995,6 +1000,7 @@ const Production = ({ userProfile }) => {
                     <td style={styles.td}>{fmt(p.quantity_produced)}</td>
                     <td style={styles.td}>{p.cement_bags}</td>
                     <td style={styles.td}>{fmt(p.granite_dust_kg)}</td>
+                    <td style={styles.td}>{fmt(p.chippings_kg)}</td>
                     <td style={styles.td}>{p.diesel_litres}</td>
                     <td style={styles.td}><span style={styles.badge(p.damaged?.production > 0 ? theme.red : theme.green)}>{p.damaged?.production || 0}</span></td>
                     <td style={styles.td}><span style={styles.badge(p.damaged?.stacking > 0 ? theme.red : theme.green)}>{p.damaged?.stacking || 0}</span></td>
