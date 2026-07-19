@@ -4201,8 +4201,11 @@ const Batches = ({ userProfile }) => {
   const [dmgTarget, setDmgTarget] = useState(null);
   const [dmgForm, setDmgForm] = useState({ qty: '', date: '', notes: '' });
   const [dmgSaving, setDmgSaving] = useState(false);
+  const [products, setProducts] = useState([]);
+  const [productsLoadFailed, setProductsLoadFailed] = useState(false);
+  const [curingId, setCuringId] = useState(null);
   const today = new Date().toISOString().split("T")[0];
-  const emptyForm = { blockType: "9 Inch 3 Hole Block", dateCured: today, qtyAccepted: "", createdBy: "", notes: "", linkedProds: [] };
+  const emptyForm = { productId: "", blockType: "", dateCured: today, qtyAccepted: "", createdBy: "", notes: "", linkedProds: [] };
   const [form, setForm] = useState(emptyForm);
 
   const load = async () => {
@@ -4213,20 +4216,35 @@ const Batches = ({ userProfile }) => {
       setProductions(p);
     } catch (e) { setAlert({ type: "error", msg: "Could not load batches: " + e.message }); }
     finally { setLoading(false); }
+    // Products power the block-type dropdown and the curing standard per batch.
+    // Loaded separately and non-blocking: a failure here must not break the
+    // batch list or the New Batch flow, which work without it (degraded).
+    productsService.getActive()
+      .then(p => { setProducts(p); setProductsLoadFailed(false); })
+      .catch(e => { console.error("Could not load products for batch curing/dropdown:", e); setProductsLoadFailed(true); });
   };
 
   useEffect(() => { load(); }, []);
 
+  // Only block products belong in a batch; curing standards are read per batch
+  // from the product FK.
+  const blockProducts = products.filter(p => p.category === "Blocks");
+  const productById = Object.fromEntries(products.map(p => [p.id, p]));
+
   const toggleProdLink = (id) => setForm(f => ({ ...f, linkedProds: f.linkedProds.includes(id) ? f.linkedProds.filter(p => p !== id) : [...f.linkedProds, id] }));
 
   const handleCreate = async () => {
-    if (!form.qtyAccepted || !form.dateCured) return setAlert({ type: "error", msg: "Quantity accepted and cure date are required." });
+    // Normal mode requires a product selection (product_id); the degraded
+    // fallback (products failed to load) requires a block_type instead.
+    if (!productsLoadFailed && !form.productId) return setAlert({ type: "error", msg: "Please select a block type." });
+    if (productsLoadFailed && !form.blockType) return setAlert({ type: "error", msg: "Please select a block type." });
+    if (!form.qtyAccepted || !form.dateCured) return setAlert({ type: "error", msg: "Quantity accepted and batch date are required." });
     setSaving(true);
     try {
       let batchNum = await batchesService.getNextNumber();
       try {
         await batchesService.create({
-          batch_number: batchNum, block_type: form.blockType, date_cured: form.dateCured,
+          batch_number: batchNum, product_id: form.productId || null, block_type: form.blockType, date_cured: form.dateCured,
           qty_accepted: parseInt(form.qtyAccepted), qty_remaining: parseInt(form.qtyAccepted),
           status: "active", notes: form.notes || null, created_by: form.createdBy || null,
         }, form.linkedProds);
@@ -4234,7 +4252,7 @@ const Batches = ({ userProfile }) => {
         if (createErr.code === '23505') {
           batchNum = await batchesService.getNextNumber();
           await batchesService.create({
-            batch_number: batchNum, block_type: form.blockType, date_cured: form.dateCured,
+            batch_number: batchNum, product_id: form.productId || null, block_type: form.blockType, date_cured: form.dateCured,
             qty_accepted: parseInt(form.qtyAccepted), qty_remaining: parseInt(form.qtyAccepted),
             status: "active", notes: form.notes || null, created_by: form.createdBy || null,
           }, form.linkedProds);
@@ -4329,6 +4347,29 @@ const Batches = ({ userProfile }) => {
     finally { setDmgSaving(false); }
   };
 
+  const handleMarkCured = async (b) => {
+    setCuringId(b.id);
+    try {
+      await batchesService.markCured(b.id, userProfile?.id || null);
+      await load();
+      setAlert({ type: "success", msg: `Batch ${b.batch_number} marked as cured.` });
+    } catch (e) { setAlert({ type: "error", msg: "Failed to mark cured: " + e.message }); }
+    finally { setCuringId(null); }
+  };
+
+  // Advisory curing state for a batch row. Returns null when curing doesn't
+  // apply (no product FK on historical rows, bought-in stock, or a product
+  // with no finalized curing standard) — the row then shows "N/A" and no action.
+  const curingInfo = (b) => {
+    const prod = b.product_id ? productById[b.product_id] : null;
+    if (!prod || prod.is_own_production !== true || prod.min_cure_days == null) return null;
+    if (b.cured_verified) return { state: "cured" };
+    if (!b.date_cured) return { state: "curing", ready: false, daysRemaining: null };
+    const ageDays = Math.floor((new Date(today) - new Date(b.date_cured)) / 86400000);
+    const daysRemaining = prod.min_cure_days - ageDays;
+    return { state: "curing", ready: daysRemaining <= 0, daysRemaining };
+  };
+
   const filteredProds = productions.filter(p => p.block_type === form.blockType);
   const totalInYard = batches.filter(b => b.status === "active").reduce((s, b) => s + Number(b.qty_remaining || 0), 0);
 
@@ -4347,7 +4388,7 @@ const Batches = ({ userProfile }) => {
             <div style={{ fontWeight: "700", fontSize: "15px", marginBottom: "18px" }}>Edit Batch — {editTarget.batch_number}</div>
             <div style={styles.grid(2)}>
               <div style={styles.formGroup}><label style={styles.label}>Block Type</label><ProductSelect value={editForm.blockType} onChange={(name) => setEditForm(f => ({ ...f, blockType: name }))} style={styles.input} /></div>
-              <div style={styles.formGroup}><label style={styles.label}>Date Cured *</label><input style={styles.input} type="date" value={editForm.dateCured} onChange={e => setEditForm(f => ({ ...f, dateCured: e.target.value }))} /></div>
+              <div style={styles.formGroup}><label style={styles.label}>Batch Date *</label><input style={styles.input} type="date" value={editForm.dateCured} onChange={e => setEditForm(f => ({ ...f, dateCured: e.target.value }))} /></div>
               <div style={styles.formGroup}><label style={styles.label}>Qty Accepted *</label><input style={styles.input} type="number" value={editForm.qtyAccepted} onChange={e => setEditForm(f => ({ ...f, qtyAccepted: e.target.value }))} /></div>
               <div style={styles.formGroup}><label style={styles.label}>Created By</label><input style={styles.input} value={editForm.createdBy} onChange={e => setEditForm(f => ({ ...f, createdBy: e.target.value }))} /></div>
               <div style={{ ...styles.formGroup, gridColumn: "span 2" }}><label style={styles.label}>Notes</label><input style={styles.input} value={editForm.notes} onChange={e => setEditForm(f => ({ ...f, notes: e.target.value }))} /></div>
@@ -4406,8 +4447,31 @@ const Batches = ({ userProfile }) => {
         <div style={{ ...styles.card, marginBottom: "20px", borderColor: theme.accent + "44" }}>
           <div style={styles.sectionTitle}>Create New Batch</div>
           <div style={styles.grid(3)}>
-            <div style={styles.formGroup}><label style={styles.label}>Block Type</label><ProductSelect value={form.blockType} onChange={(name) => setForm({ ...form, blockType: name, linkedProds: [] })} style={styles.input} /></div>
-            <div style={styles.formGroup}><label style={styles.label}>Date Cured *</label><input style={styles.input} type="date" value={form.dateCured} onChange={e => setForm({ ...form, dateCured: e.target.value })} /></div>
+            {productsLoadFailed ? (
+              // Degraded: products couldn't load (network hiccup) — fall back to
+              // the original free picker so batch creation still works. product_id
+              // stays unset for these; block_type is still recorded.
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Block Type *</label>
+                <ProductSelect value={form.blockType} onChange={(name) => setForm({ ...form, blockType: name, productId: "", linkedProds: [] })} style={styles.input} />
+              </div>
+            ) : (
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Block Type *</label>
+                <select style={styles.input} value={form.productId} onChange={e => {
+                  const p = blockProducts.find(pr => pr.id === e.target.value);
+                  setForm({ ...form, productId: e.target.value, blockType: p ? p.name : "", linkedProds: [] });
+                }}>
+                  <option value="">— Select block —</option>
+                  {blockProducts.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </div>
+            )}
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Batch Date *</label>
+              <input style={styles.input} type="date" value={form.dateCured} onChange={e => setForm({ ...form, dateCured: e.target.value })} />
+              <div style={{ fontSize: "11px", color: theme.textMuted, marginTop: "4px" }}>Date this batch was logged / cast</div>
+            </div>
             <div style={styles.formGroup}><label style={styles.label}>Qty Accepted (Good Blocks) *</label><input style={styles.input} type="number" placeholder="e.g. 2500" value={form.qtyAccepted} onChange={e => setForm({ ...form, qtyAccepted: e.target.value })} /></div>
             <div style={styles.formGroup}><label style={styles.label}>Created By</label><input style={styles.input} placeholder="Store Officer name" value={form.createdBy} onChange={e => setForm({ ...form, createdBy: e.target.value })} /></div>
             <div style={{ ...styles.formGroup, gridColumn: "span 2" }}><label style={styles.label}>Notes</label><input style={styles.input} placeholder="Optional" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></div>
@@ -4442,6 +4506,7 @@ const Batches = ({ userProfile }) => {
           const delivered = b.qty_accepted - b.qty_remaining;
           const pct = b.qty_accepted > 0 ? Math.round((delivered / b.qty_accepted) * 100) : 0;
           const isOpen = expandedId === b.id;
+          const ci = curingInfo(b);
           return (
             <div key={b.id} style={{ borderRadius: "8px", border: `1px solid ${b.status === "exhausted" ? theme.border : theme.accent + "44"}`, marginBottom: "10px", overflow: "hidden" }}>
               <div style={{ padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }} onClick={() => setExpandedId(isOpen ? null : b.id)}>
@@ -4449,7 +4514,15 @@ const Batches = ({ userProfile }) => {
                   <strong style={{ fontSize: "14px" }}>{b.batch_number}</strong>
                   <span style={{ ...styles.badge(theme.blue), marginLeft: "8px" }}>{b.block_type}</span>
                   <span style={styles.badge(b.status === "active" ? theme.green : theme.textMuted)}>{b.status}</span>
-                  <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "3px" }}>Cured: {b.date_cured} · Created by: {b.created_by || "—"}</div>
+                  {ci === null
+                    ? <span style={styles.badge(theme.textMuted)}>N/A</span>
+                    : ci.state === "cured"
+                      ? <span style={styles.badge(theme.green)}>✓ Cured</span>
+                      : <span style={styles.badge(theme.accent)}>Curing</span>}
+                  <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "3px" }}>Batch date: {b.date_cured} · Created by: {b.created_by || "—"}</div>
+                  {ci && ci.state === "curing" && !ci.ready && ci.daysRemaining != null && (
+                    <div style={{ fontSize: "11px", color: theme.accent, marginTop: "3px" }}>Curing — ready in {ci.daysRemaining} day{ci.daysRemaining === 1 ? "" : "s"}</div>
+                  )}
                 </div>
                 <div style={{ textAlign: "right", display: "flex", gap: "8px", alignItems: "center" }}>
                   <div>
@@ -4457,6 +4530,9 @@ const Batches = ({ userProfile }) => {
                     <div style={{ fontSize: "13px" }}>Remaining: <strong style={{ color: b.status === "active" ? theme.green : theme.textMuted }}>{Number(b.qty_remaining).toLocaleString()}</strong></div>
                   </div>
                   <div style={{ display: "flex", gap: "6px" }} onClick={e => e.stopPropagation()}>
+                    {ci && ci.state === "curing" && ci.ready && (
+                      <button style={{ ...styles.btn("primary"), padding: "5px 12px", fontSize: "12px", background: theme.green, color: "#000" }} onClick={() => handleMarkCured(b)} disabled={curingId === b.id}>{curingId === b.id ? "…" : "Mark Cured"}</button>
+                    )}
                     {['store_officer', 'md'].includes(userProfile?.role) && b.status === "active" && (
                       <button style={{ ...styles.btn("danger"), padding: "5px 12px", fontSize: "12px" }} onClick={() => openDmgModal(b)}>Log Damage</button>
                     )}
