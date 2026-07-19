@@ -63,8 +63,13 @@ export const productionService = {
       .ilike('notes', `%${waybillNumber}%`)
   },
 
-  async update(id, data) {
-    const { error } = await supabase.from('production_log').update(data).eq('id', id)
+  async update(id, data, userId) {
+    // Stamp the audit trail on every update: who edited and when.
+    const { error } = await supabase.from('production_log').update({
+      ...data,
+      updated_at: new Date().toISOString(),
+      updated_by: userId || null,
+    }).eq('id', id)
     if (error) throw error
   },
 
