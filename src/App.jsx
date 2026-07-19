@@ -4205,6 +4205,14 @@ const Batches = ({ userProfile }) => {
   const [productsLoadFailed, setProductsLoadFailed] = useState(false);
   const [curingId, setCuringId] = useState(null);
   const today = new Date().toISOString().split("T")[0];
+  // Mirrors the live batches RLS policies exactly (single source, so buttons
+  // can't drift out of sync with the DB the way Log Damage did):
+  //   batches_insert / batches_update → md, production_manager, assistant_production_manager, store_officer
+  //   batches_delete → md only
+  const BATCH_WRITE_ROLES = ['md', 'production_manager', 'assistant_production_manager', 'store_officer'];
+  const BATCH_DELETE_ROLES = ['md'];
+  const canWriteBatch = BATCH_WRITE_ROLES.includes(userProfile?.role);
+  const canDeleteBatch = BATCH_DELETE_ROLES.includes(userProfile?.role);
   const emptyForm = { productId: "", blockType: "", dateCured: today, qtyAccepted: "", createdBy: "", notes: "", linkedProds: [] };
   const [form, setForm] = useState(emptyForm);
 
@@ -4377,7 +4385,7 @@ const Batches = ({ userProfile }) => {
     <div>
       <div style={styles.header}>
         <div><div style={styles.pageTitle}>Batch Management</div><div style={styles.pageSubtitle}>Finished goods batches after curing — link to production logs</div></div>
-        <button style={styles.btn("primary")} onClick={() => setShowForm(!showForm)}>+ Create Batch</button>
+        {canWriteBatch && <button style={styles.btn("primary")} onClick={() => setShowForm(!showForm)}>+ Create Batch</button>}
       </div>
       {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
 
@@ -4530,14 +4538,14 @@ const Batches = ({ userProfile }) => {
                     <div style={{ fontSize: "13px" }}>Remaining: <strong style={{ color: b.status === "active" ? theme.green : theme.textMuted }}>{Number(b.qty_remaining).toLocaleString()}</strong></div>
                   </div>
                   <div style={{ display: "flex", gap: "6px" }} onClick={e => e.stopPropagation()}>
-                    {ci && ci.state === "curing" && ci.ready && (
+                    {canWriteBatch && ci && ci.state === "curing" && ci.ready && (
                       <button style={{ ...styles.btn("primary"), padding: "5px 12px", fontSize: "12px", background: theme.green, color: "#000" }} onClick={() => handleMarkCured(b)} disabled={curingId === b.id}>{curingId === b.id ? "…" : "Mark Cured"}</button>
                     )}
-                    {['store_officer', 'md'].includes(userProfile?.role) && b.status === "active" && (
+                    {canWriteBatch && b.status === "active" && (
                       <button style={{ ...styles.btn("danger"), padding: "5px 12px", fontSize: "12px" }} onClick={() => openDmgModal(b)}>Log Damage</button>
                     )}
-                    <button style={{ ...styles.btn("secondary"), padding: "5px 12px", fontSize: "12px" }} onClick={() => startEdit(b)}>Edit</button>
-                    <button style={{ ...styles.btn("danger"), padding: "5px 12px", fontSize: "12px" }} onClick={() => handleDelete(b)} disabled={deleting === b.id}>{deleting === b.id ? "…" : "Delete"}</button>
+                    {canWriteBatch && <button style={{ ...styles.btn("secondary"), padding: "5px 12px", fontSize: "12px" }} onClick={() => startEdit(b)}>Edit</button>}
+                    {canDeleteBatch && <button style={{ ...styles.btn("danger"), padding: "5px 12px", fontSize: "12px" }} onClick={() => handleDelete(b)} disabled={deleting === b.id}>{deleting === b.id ? "…" : "Delete"}</button>}
                   </div>
                 </div>
               </div>
