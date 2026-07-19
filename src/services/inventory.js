@@ -112,14 +112,18 @@ export const inventoryService = {
     return data
   },
 
-  async autoDeductProduction({ cementBags, graniteDustKg, dieselLitres, date, reference }) {
+  async autoDeductProduction({ cementBags, graniteDustKg, chippingsKg, dieselLitres, date, reference }) {
     const items = await inventoryService.getAllItems()
     const find = (keyword) => items.find(i => i.name.toLowerCase().includes(keyword.toLowerCase()))
 
     const deductions = [
-      { item: find('cement'),  qty: Number(cementBags)    || 0 },
-      { item: find('granite'), qty: Number(graniteDustKg) || 0 },
-      { item: find('diesel'),  qty: Number(dieselLitres)  || 0 },
+      { item: find('cement'),   qty: Number(cementBags)    || 0 },
+      // The dust inventory row is named "DUST" — the old 'granite' keyword never
+      // matched, so dust was silently never auto-deducted. graniteDustKg still
+      // maps to the granite_dust_kg column; only the lookup keyword is fixed.
+      { item: find('dust'),     qty: Number(graniteDustKg) || 0 },
+      { item: find('chipping'), qty: Number(chippingsKg)   || 0 },
+      { item: find('diesel'),   qty: Number(dieselLitres)  || 0 },
     ].filter(d => d.item && d.qty > 0)
 
     for (const { item, qty } of deductions) {
