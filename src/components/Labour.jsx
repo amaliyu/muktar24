@@ -13,6 +13,16 @@ const theme = {
 const naira = (n) => `₦${Math.round(Number(n) || 0).toLocaleString()}`
 const todayStr = () => new Date().toISOString().split('T')[0]
 
+// Never surface the raw Postgres unique-constraint error (uq_roster_entry_worker)
+// to the user — translate it to a friendly, actionable message.
+const friendlyEntryError = (error) => {
+  if (!error) return ''
+  if (error.code === '23505' || /uq_roster_entry_worker|duplicate key/i.test(error.message || '')) {
+    return 'This roster already has an entry for one of these workers. Please refresh and try again.'
+  }
+  return error.message || 'Could not save roster entries.'
+}
+
 function getSaturday(dateStr) {
   const d = new Date(dateStr || todayStr())
   const day = d.getDay()
@@ -629,6 +639,15 @@ function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCanc
     for (const e of entries) {
       if (!e.labour_id || !e.role_id) return setErr('All rows must have a worker and role selected.')
     }
+    // Each worker may appear at most once per roster (matches the DB unique
+    // constraint). The dropdown already blocks re-selecting a taken worker;
+    // this is the save-time guard behind it.
+    const labourIds = entries.map(e => String(e.labour_id))
+    const dupIdx = labourIds.findIndex((id, idx) => labourIds.indexOf(id) !== idx)
+    if (dupIdx !== -1) {
+      const dupWorker = pool.find(w => String(w.id) === labourIds[dupIdx])
+      return setErr(`${dupWorker?.full_name || 'A worker'} is added more than once — each worker can only appear once per roster.`)
+    }
     setSaving(true); setErr('')
     const weekEnding = getSaturday(date)
     const entryRows = (rosterId) => entries.map(e => ({
@@ -662,10 +681,19 @@ function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCanc
         submitted_date: submit ? todayStr() : editRoster.submitted_date,
       }).eq('id', editRoster.id)
       if (re) { setSaving(false); return setErr(re.message) }
-      await supabase.from('daily_roster_entries').delete().eq('roster_id', editRoster.id)
-      const { error: ee } = await supabase.from('daily_roster_entries').insert(entryRows(editRoster.id))
+      // Upsert the current set (kept workers UPDATED in place via the
+      // roster_id,labour_id unique key; new workers INSERTED) — no wholesale
+      // delete, so there is never a window where all entries are gone.
+      const { error: ue } = await supabase.from('daily_roster_entries')
+        .upsert(entryRows(editRoster.id), { onConflict: 'roster_id,labour_id' })
+      if (ue) { setSaving(false); return setErr(friendlyEntryError(ue)) }
+      // Then remove only the workers the user took off the roster: entries for
+      // this roster whose labour_id is not in the current set. (labourIds is
+      // guaranteed non-empty — empty rosters are blocked above.)
+      const { error: de } = await supabase.from('daily_roster_entries')
+        .delete().eq('roster_id', editRoster.id).not('labour_id', 'in', `(${labourIds.join(',')})`)
       setSaving(false)
-      if (ee) setErr(ee.message)
+      if (de) setErr(friendlyEntryError(de))
       else onSave()
     } else {
       const { data: roster, error: re } = await supabase.from('daily_roster').insert({
@@ -677,7 +705,7 @@ function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCanc
       if (re) { setSaving(false); return setErr(re.message) }
       const { error: ee } = await supabase.from('daily_roster_entries').insert(entryRows(roster.id))
       setSaving(false)
-      if (ee) setErr(ee.message)
+      if (ee) setErr(friendlyEntryError(ee))
       else onSave()
     }
   }
@@ -725,7 +753,10 @@ function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCanc
                   <td style={styles.td}>
                     <select style={{ ...styles.input, width: '160px' }} value={row.labour_id} onChange={e => updateRow(i, 'labour_id', e.target.value)}>
                       <option value="">— Select —</option>
-                      {activePool.map(w => <option key={w.id} value={w.id}>{w.full_name}</option>)}
+                      {activePool.map(w => {
+                        const takenElsewhere = entries.some((r, j) => j !== i && String(r.labour_id) === String(w.id))
+                        return <option key={w.id} value={w.id} disabled={takenElsewhere}>{w.full_name}{takenElsewhere ? ' (already added)' : ''}</option>
+                      })}
                     </select>
                   </td>
                   <td style={styles.td}>
