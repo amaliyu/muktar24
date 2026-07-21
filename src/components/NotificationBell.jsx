@@ -49,6 +49,7 @@ export default function NotificationBell({ userProfile, onNavigate, isMobile }) 
   const [notifications, setNotifications] = useState([])
   const [unreadCount, setUnreadCount] = useState(0)
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(false)
   const containerRef = useRef(null)
 
   const loadCount = useCallback(() => {
@@ -59,14 +60,18 @@ export default function NotificationBell({ userProfile, onNavigate, isMobile }) 
   }, [userProfile?.id])
 
   const loadNotifications = useCallback(async () => {
-    if (!userProfile?.id) return
+    // No user → nothing to load; fall through to the empty state, not an error.
+    if (!userProfile?.id) { setNotifications([]); setError(false); return }
     setLoading(true)
+    setError(false)
     try {
       const data = await notificationsService.getRecent(userProfile.id, 30)
       setNotifications(data)
       setUnreadCount(data.filter(n => !n.read_at).length)
-    } catch {
-      // silent
+    } catch (e) {
+      // Surface the failure instead of rendering a silent blank/empty panel.
+      console.error('Failed to load notifications:', e)
+      setError(true)
     } finally {
       setLoading(false)
     }
@@ -220,6 +225,17 @@ export default function NotificationBell({ userProfile, onNavigate, isMobile }) 
           <div style={{ overflowY: 'auto', flex: 1 }}>
             {loading ? (
               <div style={{ padding: '24px', textAlign: 'center', color: theme.textMuted, fontSize: '12px' }}>Loading…</div>
+            ) : error ? (
+              <div style={{ padding: '32px 16px', textAlign: 'center', fontSize: '12px' }}>
+                <div style={{ color: theme.red, fontWeight: '600', marginBottom: '8px' }}>Couldn&rsquo;t load notifications.</div>
+                <div style={{ color: theme.textMuted, marginBottom: '12px' }}>Please try again.</div>
+                <button
+                  onClick={loadNotifications}
+                  style={{ background: 'none', border: `1px solid ${theme.border}`, color: theme.blue, fontSize: '11px', fontWeight: '600', cursor: 'pointer', padding: '5px 12px', borderRadius: '6px' }}
+                >
+                  Retry
+                </button>
+              </div>
             ) : notifications.length === 0 ? (
               <div style={{ padding: '32px 16px', textAlign: 'center', color: theme.textMuted, fontSize: '12px' }}>No notifications yet</div>
             ) : (
