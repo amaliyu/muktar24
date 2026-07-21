@@ -691,7 +691,7 @@ function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCanc
       // this roster whose labour_id is not in the current set. (labourIds is
       // guaranteed non-empty — empty rosters are blocked above.)
       const { error: de } = await supabase.from('daily_roster_entries')
-        .delete().eq('roster_id', editRoster.id).not('labour_id', 'in', `(${labourIds.join(',')})`)
+        .delete().eq('roster_id', editRoster.id).not('labour_id', 'in', `(${labourIds.map(id => `"${id}"`).join(',')})`)
       setSaving(false)
       if (de) setErr(friendlyEntryError(de))
       else onSave()
