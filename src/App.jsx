@@ -824,12 +824,8 @@ const Production = ({ userProfile }) => {
 
   const handleDelete = async (record) => {
     try {
-      // Reverse raw material stock movements first
-      try {
-        const ref = `PROD-${record.id.slice(0, 8)}`;
-        await inventoryService.reverseProductionMovements(ref);
-      } catch { /* inventory may not exist */ }
-      // Delete the production entry (also cascades damage_log + batch_production_links)
+      // deleteEntry reverses this entry's raw-material stock movements before
+      // removing the row (and cascades damage_log + batch_production_links).
       await productionService.deleteEntry(record.id);
       setRecords(prev => prev.filter(r => r.id !== record.id));
       setAlert({ type: "success", msg: "Production entry deleted and raw material stock restored." });
