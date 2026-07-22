@@ -7611,6 +7611,36 @@ const AdvancesPage = ({ userProfile }) => {
   );
 };
 
+// One attached receipt row: name/date/uploader/note + a View link that fetches
+// a signed URL on click. A signing failure marks just this row, not the list.
+const PaymentRequestAttachmentRow = ({ att }) => {
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const fileName = (att.file_path || '').split('/').pop() || 'receipt';
+  const openFile = async () => {
+    setBusy(true); setFailed(false);
+    try {
+      const url = await paymentRequestsService.getAttachmentSignedUrl(att.file_path);
+      if (url) window.open(url, '_blank', 'noopener');
+      else setFailed(true);
+    } catch (e) { console.error('attachment signed URL failed', e); setFailed(true); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start', padding: '8px 0', borderBottom: `1px solid ${theme.border}44` }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: '13px', color: theme.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{fileName}</div>
+        <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '2px' }}>
+          {att.uploader_name || 'Unknown'}{att.created_at ? ` · ${new Date(att.created_at).toLocaleDateString('en-GB')}` : ''}
+        </div>
+        {att.note && <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '2px', fontStyle: 'italic' }}>{att.note}</div>}
+        {failed && <div style={{ fontSize: '11px', color: theme.red, marginTop: '2px' }}>Couldn&rsquo;t load file.</div>}
+      </div>
+      <button style={{ ...styles.btn('secondary'), padding: '4px 10px', fontSize: '11px', flexShrink: 0 }} onClick={openFile} disabled={busy}>{busy ? '…' : 'View'}</button>
+    </div>
+  );
+};
+
 // ── PAYMENT REQUESTS ──────────────────────────────────────────
 const PaymentRequestsPage = ({ userProfile }) => {
   const role = userProfile?.role;
@@ -7646,6 +7676,10 @@ const PaymentRequestsPage = ({ userProfile }) => {
   const [attachNote, setAttachNote] = useState('');
   const [attachSaving, setAttachSaving] = useState(false);
   const [attachAlert, setAttachAlert] = useState(null);
+  const [attachments, setAttachments] = useState([]);
+  const [attachLoading, setAttachLoading] = useState(false);
+  const [attachError, setAttachError] = useState(false);
+  const [dupConfirm, setDupConfirm] = useState(false);
 
   const emptyBackfillForm = { requested_by: '', amount: '', purpose: '', transaction_date: '', note: '', expense_category_id: '', disbursement_method: 'bank_transfer', bank_account_id: '', payeeMode: 'existing', supplier_id: '', payee_name: '', payee_bank_name: '', payee_account_number: '', payee_account_name: '' };
   const [showBackfill, setShowBackfill] = useState(false);
@@ -7875,14 +7909,37 @@ const PaymentRequestsPage = ({ userProfile }) => {
     finally { setActionSaving(false); }
   };
 
-  const handleUploadAttachment = async (req) => {
+  // Read-back of attachments for the open request. Never leaves a silent blank:
+  // failure sets a visible error state (the write-only-blank pattern was the bug).
+  const reloadAttachments = async (reqId) => {
+    if (!reqId) { setAttachments([]); setAttachError(false); return; }
+    setAttachLoading(true); setAttachError(false);
+    try {
+      setAttachments(await paymentRequestsService.listAttachments(reqId));
+    } catch (e) {
+      console.error('Failed to load payment-request attachments:', e);
+      setAttachError(true);
+    } finally {
+      setAttachLoading(false);
+    }
+  };
+
+  // Fetch attachments whenever a request detail is opened.
+  useEffect(() => { reloadAttachments(detailReq?.id); setDupConfirm(false); }, [detailReq?.id]);
+
+  const handleUploadAttachment = async (req, force = false) => {
     if (!attachFile) return setAttachAlert({ type: 'error', msg: 'Select a file first.' });
+    // Non-blocking duplicate guard: if receipts already exist, make the user
+    // consciously confirm rather than blindly re-upload (the root-cause bug).
+    if (!force && attachments.length > 0) { setDupConfirm(true); return; }
+    setDupConfirm(false);
     setAttachSaving(true); setAttachAlert(null);
     try {
       await paymentRequestsService.uploadAttachment(req.id, attachFile, userId, attachNote.trim() || null);
       setAttachFile(null);
       setAttachNote('');
       setAttachAlert({ type: 'success', msg: 'Receipt uploaded successfully.' });
+      await reloadAttachments(req.id); // re-render list immediately so it's visibly confirmed
     } catch (e) { setAttachAlert({ type: 'error', msg: e.message }); }
     finally { setAttachSaving(false); }
   };
@@ -8446,6 +8503,25 @@ const PaymentRequestsPage = ({ userProfile }) => {
                   <DL label="Date" value={req.created_at ? new Date(req.created_at).toLocaleDateString('en-GB') : null} />
                 </div>
               )}
+              {(canUploadEvidence || attachments.length > 0) && (
+                <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: '16px', marginTop: '4px' }}>
+                  <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '10px' }}>
+                    Receipts{!attachLoading && !attachError ? ` (${attachments.length})` : ''}
+                  </div>
+                  {attachLoading ? (
+                    <div style={{ fontSize: '13px', color: theme.textMuted }}>Loading receipts…</div>
+                  ) : attachError ? (
+                    <div style={{ fontSize: '13px', color: theme.red }}>
+                      Couldn&rsquo;t load receipts.
+                      <button style={{ ...styles.btn('secondary'), padding: '2px 8px', fontSize: '11px', marginLeft: '8px' }} onClick={() => reloadAttachments(req.id)}>Retry</button>
+                    </div>
+                  ) : attachments.length === 0 ? (
+                    <div style={{ fontSize: '13px', color: theme.textMuted }}>No receipts attached yet</div>
+                  ) : (
+                    attachments.map(a => <PaymentRequestAttachmentRow key={a.id} att={a} />)
+                  )}
+                </div>
+              )}
               {(canUploadEvidence || closureLabel) && (
                 <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: '16px', marginTop: '4px' }}>
                   <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '12px' }}>Closure Evidence</div>
@@ -8470,11 +8546,27 @@ const PaymentRequestsPage = ({ userProfile }) => {
                         <input style={styles.input} placeholder="e.g. Official receipt for delivery…"
                           value={attachNote} onChange={e => setAttachNote(e.target.value)} />
                       </div>
-                      <button style={{ ...styles.btn('primary'), background: '#a78bfa', color: '#000' }}
-                        disabled={!attachFile || attachSaving}
-                        onClick={() => handleUploadAttachment(req)}>
-                        {attachSaving ? 'Uploading…' : 'Upload Receipt'}
-                      </button>
+                      {dupConfirm ? (
+                        <div style={{ padding: '10px 12px', borderRadius: '8px', background: theme.accent + '18', border: `1px solid ${theme.accent}55` }}>
+                          <div style={{ fontSize: '12px', color: theme.text, marginBottom: '8px' }}>
+                            This request already has {attachments.length} receipt{attachments.length === 1 ? '' : 's'} attached (listed above). Upload another anyway?
+                          </div>
+                          <div style={{ display: 'flex', gap: '8px' }}>
+                            <button style={{ ...styles.btn('primary'), background: '#a78bfa', color: '#000', padding: '6px 12px', fontSize: '12px' }}
+                              disabled={attachSaving} onClick={() => handleUploadAttachment(req, true)}>
+                              {attachSaving ? 'Uploading…' : 'Upload anyway'}
+                            </button>
+                            <button style={{ ...styles.btn('secondary'), padding: '6px 12px', fontSize: '12px' }}
+                              disabled={attachSaving} onClick={() => setDupConfirm(false)}>Cancel</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button style={{ ...styles.btn('primary'), background: '#a78bfa', color: '#000' }}
+                          disabled={!attachFile || attachSaving}
+                          onClick={() => handleUploadAttachment(req)}>
+                          {attachSaving ? 'Uploading…' : 'Upload Receipt'}
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
