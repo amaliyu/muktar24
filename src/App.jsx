@@ -2911,11 +2911,13 @@ const Reports = ({ userProfile }) => <ReportsEngine userProfile={userProfile} />
 const UNITS = ["bags", "kg", "litres", "units", "tonnes", "metres", "packs"];
 const ISSUED_TO = ["Production", "Maintenance", "Logistics", "Administration", "Other"];
 
-const Inventory = ({ onLowStockChange }) => {
+const Inventory = ({ onLowStockChange, userProfile }) => {
+  // Whoever is logged in is recorded as the person who entered the movement —
+  // no free text, no override (deliberate accountability requirement).
+  const recordedBy = userProfile?.full_name || userProfile?.email || null;
   const [tab, setTab] = useState("registry");
   const [items, setItems] = useState([]);
   const [movements, setMovements] = useState([]);
-  const [staff, setStaff] = useState([]);
   const [suppliersList, setSuppliersList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -2932,8 +2934,8 @@ const Inventory = ({ onLowStockChange }) => {
 
   const today = new Date().toISOString().split("T")[0];
   const emptyItem = { name: "", unit: "bags", current_stock: "", reorder_level: "", unit_cost: "", supplier: "", date_added: today };
-  const emptyIn  = { itemId: "", quantity: "", unitCost: "", supplierId: "", supplier: "", staffName: "", date: today, notes: "" };
-  const emptyOut = { itemId: "", quantity: "", issuedTo: "Production", staffName: "", reference: "", date: today, notes: "" };
+  const emptyIn  = { itemId: "", quantity: "", unit: "kg", unitCost: "", supplierId: "", supplier: "", date: today, notes: "" };
+  const emptyOut = { itemId: "", quantity: "", unit: "kg", issuedTo: "Production", reference: "", date: today, notes: "" };
 
   const [itemForm, setItemForm]   = useState(emptyItem);
   const [inForm,   setInForm]     = useState(emptyIn);
@@ -2942,9 +2944,8 @@ const Inventory = ({ onLowStockChange }) => {
   const load = async () => {
     setLoading(true);
     try {
-      const [its, s, sups] = await Promise.all([inventoryService.getAllItems(), staffService.getPublicActive(), suppliersService.getActive().catch(() => [])]);
+      const [its, sups] = await Promise.all([inventoryService.getAllItems(), suppliersService.getActive().catch(() => [])]);
       setItems(its);
-      setStaff(s);
       setSuppliersList(sups);
       if (onLowStockChange) onLowStockChange(its.filter(i => Number(i.current_stock) <= Number(i.reorder_level)).length);
     } catch (e) {
@@ -3017,14 +3018,18 @@ const Inventory = ({ onLowStockChange }) => {
     if (suppliersList.length > 0 && !inForm.supplierId) return setAlert({ type: "error", msg: "Please select a supplier from the list." });
     setSaving(true);
     try {
+      // Storage is always the item's base unit (kg). If the item is kg and the
+      // user entered tonnes, convert to kg (× 1000, decimals preserved).
+      const inItem = items.find(i => i.id === inForm.itemId);
+      const qtyBase = (inItem?.unit === 'kg' && inForm.unit === 'tonnes') ? Number(inForm.quantity) * 1000 : Number(inForm.quantity);
       const supplierName = inForm.supplierId ? (suppliersList.find(s => s.id === inForm.supplierId)?.company_name || inForm.supplier) : inForm.supplier;
-      const movement = await inventoryService.stockIn({ itemId: inForm.itemId, quantity: Number(inForm.quantity), unitCost: Number(inForm.unitCost) || 0, supplier: supplierName, staffName: inForm.staffName, date: inForm.date, notes: inForm.notes });
-      if (inForm.supplierId && Number(inForm.quantity) > 0) {
-        const totalCost = Number(inForm.quantity) * (Number(inForm.unitCost) || 0);
+      const movement = await inventoryService.stockIn({ itemId: inForm.itemId, quantity: qtyBase, unitCost: Number(inForm.unitCost) || 0, supplier: supplierName, staffName: recordedBy, date: inForm.date, notes: inForm.notes });
+      if (inForm.supplierId && qtyBase > 0) {
+        const totalCost = qtyBase * (Number(inForm.unitCost) || 0);
         if (totalCost > 0) {
           const item = items.find(i => i.id === inForm.itemId);
           try {
-            await supplierTransactionsService.create({ supplier_id: inForm.supplierId, transaction_date: inForm.date, transaction_type: 'purchase', amount: totalCost, description: `Stock in: ${item?.name || 'item'} × ${inForm.quantity}`, linked_stock_movement_id: movement?.id || null });
+            await supplierTransactionsService.create({ supplier_id: inForm.supplierId, transaction_date: inForm.date, transaction_type: 'purchase', amount: totalCost, description: `Stock in: ${item?.name || 'item'} × ${qtyBase.toLocaleString()} ${item?.unit || ''}`.trim(), linked_stock_movement_id: movement?.id || null });
           } catch { /* non-blocking */ }
         }
       }
@@ -3043,7 +3048,10 @@ const Inventory = ({ onLowStockChange }) => {
     if (!outForm.itemId || !outForm.quantity || !outForm.date) return setAlert({ type: "error", msg: "Item, quantity, and date are required." });
     setSaving(true);
     try {
-      await inventoryService.stockOut({ itemId: outForm.itemId, quantity: Number(outForm.quantity), issuedTo: outForm.issuedTo, staffName: outForm.staffName, reference: outForm.reference, date: outForm.date, notes: outForm.notes });
+      // Base unit (kg) storage; convert tonnes→kg for kg items (decimals preserved).
+      const outItem = items.find(i => i.id === outForm.itemId);
+      const qtyBase = (outItem?.unit === 'kg' && outForm.unit === 'tonnes') ? Number(outForm.quantity) * 1000 : Number(outForm.quantity);
+      await inventoryService.stockOut({ itemId: outForm.itemId, quantity: qtyBase, issuedTo: outForm.issuedTo, staffName: recordedBy, reference: outForm.reference, date: outForm.date, notes: outForm.notes });
       await load();
       if (tab === "movements") await loadMovements();
       setOutForm(emptyOut);
@@ -3116,6 +3124,15 @@ const Inventory = ({ onLowStockChange }) => {
 
   const totalValue = items.reduce((s, i) => s + Number(i.current_stock) * Number(i.unit_cost || 0), 0);
   const TABS = [{ id: "registry", label: "Stock Registry" }, { id: "stockin", label: "Stock In" }, { id: "stockout", label: "Stock Out" }, { id: "movements", label: "Movement Log" }, { id: "report", label: "Report" }];
+
+  // Unit-toggle helpers: the kg/tonnes selector only applies to items stored in
+  // kg (dust, chippings). For bags/litres items the native unit is shown as a
+  // static label. When tonnes is chosen, preview the kg value that will be stored.
+  const inItemSel  = items.find(i => i.id === inForm.itemId);
+  const outItemSel = items.find(i => i.id === outForm.itemId);
+  const inIsKg  = inItemSel?.unit === 'kg';
+  const outIsKg = outItemSel?.unit === 'kg';
+  const kgPreview = (qty) => (qty !== '' && !isNaN(Number(qty))) ? `= ${(Number(qty) * 1000).toLocaleString()} kg` : '';
 
   return (
     <div>
@@ -3269,7 +3286,20 @@ const Inventory = ({ onLowStockChange }) => {
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Quantity Received *</label>
-              <input style={styles.input} type="number" placeholder="e.g. 100" value={inForm.quantity} onChange={e => setInForm({ ...inForm, quantity: e.target.value })} />
+              <div style={{ display: "flex", gap: "6px" }}>
+                <input style={{ ...styles.input, flex: 1 }} type="number" placeholder="e.g. 100" value={inForm.quantity} onChange={e => setInForm({ ...inForm, quantity: e.target.value })} />
+                {inIsKg ? (
+                  <select style={{ ...styles.input, width: "100px" }} value={inForm.unit} onChange={e => setInForm({ ...inForm, unit: e.target.value })}>
+                    <option value="kg">kg</option>
+                    <option value="tonnes">tonnes</option>
+                  </select>
+                ) : (
+                  <span style={{ ...styles.input, width: "100px", display: "flex", alignItems: "center", color: theme.textMuted, background: "transparent" }}>{inItemSel?.unit || "—"}</span>
+                )}
+              </div>
+              {inIsKg && inForm.unit === "tonnes" && inForm.quantity !== "" && (
+                <div style={{ fontSize: "11px", color: theme.accent, marginTop: "4px", fontWeight: "600" }}>{kgPreview(inForm.quantity)} will be stored</div>
+              )}
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Unit Cost at Purchase (₦)</label>
@@ -3294,11 +3324,8 @@ const Inventory = ({ onLowStockChange }) => {
               )}
             </div>
             <div style={styles.formGroup}>
-              <label style={styles.label}>Received By</label>
-              <select style={styles.input} value={inForm.staffName} onChange={e => setInForm({ ...inForm, staffName: e.target.value })}>
-                <option value="">— Select staff —</option>
-                {staff.map(s => <option key={s.id} value={s.full_name}>{s.full_name}</option>)}
-              </select>
+              <label style={styles.label}>Recorded By</label>
+              <div style={{ ...styles.input, background: "transparent", color: theme.textMuted, display: "flex", alignItems: "center" }}>{recordedBy || "—"}</div>
             </div>
             <div style={{ ...styles.formGroup, gridColumn: "span 2" }}>
               <label style={styles.label}>Notes</label>
@@ -3330,7 +3357,20 @@ const Inventory = ({ onLowStockChange }) => {
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Quantity Issued *</label>
-              <input style={styles.input} type="number" placeholder="e.g. 20" value={outForm.quantity} onChange={e => setOutForm({ ...outForm, quantity: e.target.value })} />
+              <div style={{ display: "flex", gap: "6px" }}>
+                <input style={{ ...styles.input, flex: 1 }} type="number" placeholder="e.g. 20" value={outForm.quantity} onChange={e => setOutForm({ ...outForm, quantity: e.target.value })} />
+                {outIsKg ? (
+                  <select style={{ ...styles.input, width: "100px" }} value={outForm.unit} onChange={e => setOutForm({ ...outForm, unit: e.target.value })}>
+                    <option value="kg">kg</option>
+                    <option value="tonnes">tonnes</option>
+                  </select>
+                ) : (
+                  <span style={{ ...styles.input, width: "100px", display: "flex", alignItems: "center", color: theme.textMuted, background: "transparent" }}>{outItemSel?.unit || "—"}</span>
+                )}
+              </div>
+              {outIsKg && outForm.unit === "tonnes" && outForm.quantity !== "" && (
+                <div style={{ fontSize: "11px", color: theme.accent, marginTop: "4px", fontWeight: "600" }}>{kgPreview(outForm.quantity)} will be stored</div>
+              )}
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Issued To</label>
@@ -3339,11 +3379,8 @@ const Inventory = ({ onLowStockChange }) => {
               </select>
             </div>
             <div style={styles.formGroup}>
-              <label style={styles.label}>Issued By</label>
-              <select style={styles.input} value={outForm.staffName} onChange={e => setOutForm({ ...outForm, staffName: e.target.value })}>
-                <option value="">— Select staff —</option>
-                {staff.map(s => <option key={s.id} value={s.full_name}>{s.full_name}</option>)}
-              </select>
+              <label style={styles.label}>Recorded By</label>
+              <div style={{ ...styles.input, background: "transparent", color: theme.textMuted, display: "flex", alignItems: "center" }}>{recordedBy || "—"}</div>
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Reference / Job No.</label>
@@ -3418,11 +3455,8 @@ const Inventory = ({ onLowStockChange }) => {
                   </div>
                 )}
                 <div style={styles.formGroup}>
-                  <label style={styles.label}>Staff / Received By</label>
-                  <select style={styles.input} value={movEditForm.staffName} onChange={e => setMovEditForm({ ...movEditForm, staffName: e.target.value })}>
-                    <option value="">— Select —</option>
-                    {staff.map(s => <option key={s.id} value={s.full_name}>{s.full_name}</option>)}
-                  </select>
+                  <label style={styles.label}>Recorded By (original)</label>
+                  <div style={{ ...styles.input, background: "transparent", color: theme.textMuted, display: "flex", alignItems: "center" }}>{movEditForm.staffName || "—"}</div>
                 </div>
                 <div style={{ ...styles.formGroup, gridColumn: "span 3" }}>
                   <label style={styles.label}>Notes</label>
@@ -10717,7 +10751,7 @@ export default function App() {
   const pages = {
     dashboard: isBoard ? <BoardDashboard userProfile={userProfile} /> : <Dashboard onNavigate={setActive} userProfile={userProfile} />,
     production: <Production userProfile={userProfile} />,
-    inventory: <Inventory onLowStockChange={setLowStockCount} />,
+    inventory: <Inventory onLowStockChange={setLowStockCount} userProfile={userProfile} />,
     batches: <Batches userProfile={userProfile} />,
     waybills: <Waybills userProfile={userProfile} />,
     vehicles: <VehicleRegistry />,
