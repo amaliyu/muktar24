@@ -140,6 +140,47 @@ export const paymentRequestsService = {
     if (error) throw error;
   },
 
+  // List all attachments (receipts) for a request, oldest first, with the
+  // uploader's name resolved via user_profiles_directory (same RLS-safe pattern
+  // as list()'s requester lookup). RLS on payment_request_attachments already
+  // lets the initiator read their own request's rows.
+  async listAttachments(paymentRequestId) {
+    const { data, error } = await supabase
+      .from('payment_request_attachments')
+      .select('id, payment_request_id, file_path, note, uploaded_by, created_at')
+      .eq('payment_request_id', paymentRequestId)
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+    const rows = data || [];
+    const ids = [...new Set(rows.map(r => r.uploaded_by).filter(Boolean))];
+    if (ids.length) {
+      const { data: profiles, error: pErr } = await supabase
+        .from('user_profiles_directory')
+        .select('id, full_name')
+        .in('id', ids);
+      if (pErr) console.error('paymentRequests.listAttachments: uploader lookup failed', pErr);
+      const map = Object.fromEntries((profiles || []).map(p => [p.id, p.full_name]));
+      for (const row of rows) row.uploader_name = map[row.uploaded_by] || null;
+    }
+    return rows;
+  },
+
+  // 1-hour signed URL for viewing an attachment file from the private
+  // 'payment-request-attachments' bucket. Mirrors receiptsService.getSignedUrl:
+  // new rows store the bare storage path; tolerate a legacy full-URL value too.
+  async getAttachmentSignedUrl(filePath) {
+    if (!filePath) return null;
+    const path = filePath.startsWith('http')
+      ? (filePath.split('/payment-request-attachments/')[1] || null)
+      : filePath;
+    if (!path) return null;
+    const { data, error } = await supabase.storage
+      .from('payment-request-attachments')
+      .createSignedUrl(path, 3600);
+    if (error) throw error;
+    return data?.signedUrl || null;
+  },
+
   async listDisbursed() {
     const { data, error } = await supabase
       .from('payment_requests')
