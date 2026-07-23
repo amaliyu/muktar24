@@ -164,7 +164,12 @@ export const inventoryService = {
     const afterUndo = oldMovement.movement_type === 'in'
       ? currentStock - Number(oldMovement.quantity)
       : currentStock + Number(oldMovement.quantity)
-    const newStock = newData.movement_type === 'in'
+    // A movement's type is immutable across an edit (this form can't turn a
+    // stock-in into a stock-out), and newData doesn't carry movement_type — so
+    // re-apply the new quantity using the authoritative type from oldMovement.
+    // Using newData.movement_type here (always undefined) made this always
+    // subtract, double-deducting on every stock-in edit.
+    const newStock = oldMovement.movement_type === 'in'
       ? afterUndo + Number(newData.quantity)
       : afterUndo - Number(newData.quantity)
     if (newStock < 0) throw new Error(`Cannot edit — would result in negative stock of ${Math.abs(newStock)} units`)
