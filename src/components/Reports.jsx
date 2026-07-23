@@ -77,7 +77,7 @@ const CATALOG = [
   { id: 'fuel_consumption',    name: 'Fuel Consumption Report',       category: 'vehicle', description: 'Fuel dispensed per vehicle, cost per trip and blocks per litre efficiency',     formats: ['pdf','excel'], roles: ['md','logistics_manager','ico'], periodType: 'range' },
   // FINANCIAL
   { id: 'expense_report',      name: 'Expense Report',                category: 'financial', description: 'All expenses by category with totals, trend and largest expenses',            formats: ['pdf','excel'], roles: ['md','accountant','ico'], periodType: 'range' },
-  { id: 'pl_report',           name: 'Profit & Loss Report',          category: 'financial', description: 'Full income statement: revenue, cost of goods, gross profit and expenses',    formats: ['pdf','excel'], roles: ['md','accountant','ico','board_member'], periodType: 'range' },
+  { id: 'pl_report',           name: 'Profit & Loss Report',          category: 'financial', description: 'Accrual income statement: revenue from goods delivered (not cash received), direct & operating costs by cost centre, gross and net profit; accrued labour, unpaid loading and unpriced items shown separately as not-yet-included',    formats: ['pdf','excel'], roles: ['md','accountant','ico','board_member'], periodType: 'range' },
   { id: 'balance_sheet',       name: 'Balance Sheet Report',          category: 'financial', description: 'Assets, liabilities and equity as at a selected date',                        formats: ['pdf','excel'], roles: ['md','accountant','ico','board_member'], periodType: 'asAt' },
   { id: 'cash_flow',           name: 'Cash Flow Report',              category: 'financial', description: 'Operating, investing and financing cash flows for a period',                   formats: ['pdf','excel'], roles: ['md','accountant','ico','board_member'], periodType: 'range' },
   { id: 'bank_recon',          name: 'Bank Reconciliation Report',    category: 'financial', description: 'Statement balance vs book balance per bank account',                           formats: ['pdf'], roles: ['md','accountant','ico'], periodType: 'range' },
@@ -394,10 +394,25 @@ const GENERATORS = {
   fuel_consumption: async (params) => fetchFuelRange(params.from, params.to),
   // 28. Expense
   expense_report: async (params) => fetchExpensesRange(params.from, params.to),
-  // 29. P&L
+  // 29. P&L — accrual income statement (delivered revenue, cost centres, memo)
   pl_report: async (params) => {
-    const [payments, expenses] = await Promise.all([fetchPaymentsRange(params.from, params.to), fetchExpensesRange(params.from, params.to)])
-    return { payments, expenses }
+    const { from, to } = params
+    const unwrap = r => { if (r.error) throw r.error; return r.data || [] }
+    // Monthly-salary accrual: payroll_lines whose run falls in the period.
+    // Two-step (run ids → lines) avoids fragile embedded-column filtering.
+    const runs = unwrap(await supabase.from('payroll_runs').select('id').gte('run_date', from).lte('run_date', to))
+    const runIds = runs.map(r => r.id)
+    const [deliveries, expenses, weeklyLabour, loadingUnpaid, payrollLines, payments] = await Promise.all([
+      supabase.from('v_delivered_revenue').select('waybill_id, waybill_date, block_type, quantity_received, unit_price, line_value, unvalued').gte('waybill_date', from).lte('waybill_date', to).then(unwrap),
+      supabase.from('expenses').select('amount, category:category_id(name, cost_center)').gte('expense_date', from).lte('expense_date', to).then(unwrap),
+      supabase.from('weekly_labour_payroll').select('total_amount').gte('week_ending', from).lte('week_ending', to).then(unwrap),
+      // Unlinked loading only — rows WITH a payroll_id are already inside
+      // weekly_labour_payroll.total_amount; including them would double-count.
+      supabase.from('truck_loading_log').select('total_amount').is('payroll_id', null).gte('date', from).lte('date', to).then(unwrap),
+      runIds.length ? supabase.from('payroll_lines').select('amount_due').in('payroll_run_id', runIds).then(unwrap) : Promise.resolve([]),
+      supabase.from('payments').select('amount_paid').eq('status', 'confirmed').gte('payment_date', from).lte('payment_date', to).then(unwrap),
+    ])
+    return { deliveries, expenses, weeklyLabour, loadingUnpaid, payrollLines, payments }
   },
   // 30. Balance Sheet
   balance_sheet: async () => {
@@ -423,6 +438,101 @@ const GENERATORS = {
     const [suppliers, txns] = await Promise.all([fetchSuppliers(), fetchSupplierTransactions(params.from, params.to)])
     return { suppliers, txns }
   },
+}
+
+// ── P&L (ACCRUAL INCOME STATEMENT) SHARED BUILDER ────────────
+// Single source of truth so the PDF and Excel renderers are identical.
+// Revenue = delivered goods (accrual), not cash received. Direct/operating
+// costs come ONLY from the expenses table; the payroll tables feed ONLY the
+// memo below net profit and never enter the profit calculation (no double
+// count — see the pl_report notes).
+const capWord = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : s
+function buildPLStatement(data) {
+  const { deliveries = [], expenses = [], weeklyLabour = [], loadingUnpaid = [], payrollLines = [], payments = [] } = data || {}
+  const num = v => Number(v) || 0
+
+  // REVENUE — delivered goods that could be priced
+  const revenue = deliveries.filter(d => d.unvalued === false).reduce((s, d) => s + num(d.line_value), 0)
+  const unvaluedCount = deliveries.filter(d => d.unvalued === true).length
+
+  // DIRECT COSTS — expenses in the 'production' cost centre, one line per category
+  const directMap = {}
+  for (const e of expenses) {
+    if (e.category?.cost_center === 'production') {
+      const k = e.category?.name || 'Uncategorised'
+      directMap[k] = (directMap[k] || 0) + num(e.amount)
+    }
+  }
+  const directLines = Object.entries(directMap).map(([label, amount]) => ({ label, amount })).sort((a, b) => b.amount - a.amount)
+  const directTotal = directLines.reduce((s, l) => s + l.amount, 0)
+  const grossProfit = revenue - directTotal
+
+  // OPERATING EXPENSES — every non-production expense, grouped by cost centre
+  // (null grouped as Uncategorised, never dropped)
+  const opMap = {}
+  for (const e of expenses) {
+    const cc = e.category?.cost_center
+    if (cc === 'production') continue
+    const key = cc || '__null__'
+    opMap[key] = (opMap[key] || 0) + num(e.amount)
+  }
+  const opLines = Object.entries(opMap)
+    .map(([key, amount]) => ({ label: key === '__null__' ? 'Uncategorised' : capWord(key), amount }))
+    .sort((a, b) => b.amount - a.amount)
+  const operatingTotal = opLines.reduce((s, l) => s + l.amount, 0)
+  const netProfit = grossProfit - operatingTotal
+
+  // NOT YET INCLUDED (memo only — from payroll tables, never in net profit)
+  const dailyLabour = weeklyLabour.reduce((s, r) => s + num(r.total_amount), 0)
+  const loadingUnpaidSum = loadingUnpaid.reduce((s, r) => s + num(r.total_amount), 0)
+  const loadingUnpaidCount = loadingUnpaid.length
+  const monthlySalaries = payrollLines.reduce((s, r) => s + num(r.amount_due), 0)
+
+  // MEMO — deposits held = confirmed cash in − delivered revenue, only if positive
+  const paymentsTotal = payments.reduce((s, r) => s + num(r.amount_paid), 0)
+  const depositsRaw = paymentsTotal - revenue
+  const deposits = depositsRaw > 0 ? depositsRaw : null
+
+  return { revenue, unvaluedCount, directLines, directTotal, grossProfit, opLines, operatingTotal,
+           netProfit, dailyLabour, loadingUnpaidSum, loadingUnpaidCount, monthlySalaries, deposits }
+}
+// Rows shared by both renderers: { label, amount(string), kind } — kind drives PDF styling.
+function plStatementRows(S) {
+  const rows = []
+  const add = (label, amount, kind) => rows.push({ label, amount, kind })
+  add('REVENUE', '', 'header')
+  add('   Goods delivered', naira(S.revenue), 'line')
+  if (S.unvaluedCount > 0) add(`   ⚠ ${S.unvaluedCount} deliveries excluded — could not be priced`, '', 'warn')
+  add('', '', 'spacer')
+  add('DIRECT COSTS', '', 'header')
+  if (S.directLines.length === 0) add('   (none recorded)', '', 'line')
+  S.directLines.forEach(l => add('   ' + l.label, naira(l.amount), 'line'))
+  add('   Total direct costs', '(' + naira(S.directTotal) + ')', 'total')
+  add('', '', 'spacer')
+  add('GROSS PROFIT', naira(S.grossProfit), 'grossprofit')
+  add('', '', 'spacer')
+  add('OPERATING EXPENSES', '', 'header')
+  if (S.opLines.length === 0) add('   (none recorded)', '', 'line')
+  S.opLines.forEach(l => add('   ' + l.label, naira(l.amount), 'line'))
+  add('   Total operating expenses', '(' + naira(S.operatingTotal) + ')', 'total')
+  add('', '', 'spacer')
+  add('NET PROFIT / (LOSS) — before items below', naira(S.netProfit), 'netprofit')
+  add('', '', 'spacer')
+  add('── NOT YET INCLUDED IN THIS STATEMENT ──', '', 'memohead')
+  add('   Daily-paid labour (weekly payroll)', naira(S.dailyLabour), 'memo')
+  add('   Loading & offloading — unpaid', naira(S.loadingUnpaidSum), 'memo')
+  add(`      ${S.loadingUnpaidCount} records not yet attached to a payroll`, '', 'memonote')
+  add('   Monthly staff salaries (accrued)', naira(S.monthlySalaries), 'memo')
+  add('   Materials consumed in production', '—', 'memo')
+  add('      (costing layer pending)', '', 'memonote')
+  add('   Unvalued deliveries', `${S.unvaluedCount} waybills`, 'memo')
+  if (S.deposits !== null) {
+    add('', '', 'spacer')
+    add('── MEMO ──', '', 'memohead')
+    add('   Customer deposits held', naira(S.deposits), 'memo')
+    add('      money received for goods not yet delivered — a liability, not revenue', '', 'memonote')
+  }
+  return rows
 }
 
 // ── PDF RENDERERS ────────────────────────────────────────────
@@ -674,16 +784,27 @@ function renderPDF(reportId, data, params, period) {
       break
     }
     case 'pl_report': {
-      const { payments, expenses } = data
-      const revenue = payments.reduce((s,p)=>s+Number(p.amount_paid),0)
-      const totalExp = expenses.reduce((s,e)=>s+Number(e.amount||0),0)
-      const net = revenue - totalExp
-      doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(30,30,30)
-      const rows = [['Revenue (Payments Received)', naira(revenue)], ['Total Expenses', naira(totalExp)], ['', ''], ['NET PROFIT / (LOSS)', naira(net)]]
+      const S = buildPLStatement(data)
+      const stmtRows = plStatementRows(S)
+      const kinds = stmtRows.map(r => r.kind)
       autoTable(doc, {
-        startY, head: [['Description', 'Amount (₦)']], body: rows,
-        styles: { fontSize: 10 }, headStyles: { fillColor: [30,40,70], textColor: 255 },
-        didParseCell: data => { if (data.row.index === 3) { data.cell.styles.fontStyle = 'bold'; data.cell.styles.fillColor = net>=0?[200,240,210]:[255,200,200] } },
+        startY,
+        head: [['', 'Amount (₦)']],
+        body: stmtRows.map(r => [r.label, r.amount]),
+        styles: { fontSize: 10, cellPadding: 1.4 },
+        headStyles: { fillColor: [30,40,70], textColor: 255 },
+        columnStyles: { 1: { halign: 'right', cellWidth: 48 } },
+        didParseCell: d => {
+          const k = kinds[d.row.index]
+          if (['header','total','grossprofit','netprofit','memohead'].includes(k)) d.cell.styles.fontStyle = 'bold'
+          if (k === 'header') d.cell.styles.fillColor = [235,238,245]
+          if (k === 'grossprofit') d.cell.styles.fillColor = [225,230,245]
+          if (k === 'netprofit') d.cell.styles.fillColor = S.netProfit >= 0 ? [200,240,210] : [255,200,200]
+          if (k === 'memohead') { d.cell.styles.textColor = [110,110,120]; d.cell.styles.fillColor = [245,245,245] }
+          if (k === 'memo') d.cell.styles.textColor = [90,90,100]
+          if (k === 'memonote') { d.cell.styles.fontStyle = 'italic'; d.cell.styles.fontSize = 8; d.cell.styles.textColor = [140,140,150] }
+          if (k === 'warn') { d.cell.styles.textColor = [200,120,0]; d.cell.styles.fontSize = 9 }
+        },
         margin: { left: 14, right: 14 },
       })
       break
@@ -793,6 +914,12 @@ function renderExcel(reportId, data, params, period) {
         data.map(f=>[fmtDate(f.date),f.vehicle?.vehicle_number||'—',Number(f.litres||0),Number(f.cost_per_litre||0),Number(f.total_cost||0)]),
         ['TOTAL','','','',data.reduce((s,f)=>s+Number(f.total_cost||0),0)])
       break
+    case 'pl_report': {
+      const S = buildPLStatement(data)
+      excelExport(filename, report.name, period, ['', 'Amount (₦)'],
+        plStatementRows(S).map(r => [r.label, r.amount]))
+      break
+    }
     default:
       excelExport(filename, report.name, period, ['No Data'], [['This report does not support Excel export yet.']])
   }
