@@ -2915,6 +2915,11 @@ const Inventory = ({ onLowStockChange, userProfile }) => {
   // Whoever is logged in is recorded as the person who entered the movement —
   // no free text, no override (deliberate accountability requirement).
   const recordedBy = userProfile?.full_name || userProfile?.email || null;
+  // Roles allowed to write stock_movements (mirrors the table's RLS UPDATE/DELETE
+  // grant). ICO and board_member can view Inventory but not write, so the
+  // Edit/Delete buttons are hidden for them rather than failing on click.
+  const MOVEMENT_WRITE_ROLES = ['md', 'store_officer', 'production_manager', 'assistant_production_manager', 'logistics_manager'];
+  const canWriteMovement = MOVEMENT_WRITE_ROLES.includes(userProfile?.role);
   const [tab, setTab] = useState("registry");
   const [items, setItems] = useState([]);
   const [movements, setMovements] = useState([]);
@@ -3515,12 +3520,12 @@ const Inventory = ({ onLowStockChange, userProfile }) => {
                         <td style={styles.td}>
                           {isAuto ? (
                             <span style={{ fontSize: "10px", color: theme.textMuted, fontStyle: "italic" }}>Auto — edit via Production Log</span>
-                          ) : (
+                          ) : canWriteMovement ? (
                             <div style={{ display: "flex", gap: "4px" }}>
                               <button style={{ ...styles.btn("secondary"), padding: "3px 8px", fontSize: "11px" }} onClick={() => startEditMovement(m)}>Edit</button>
                               <button style={{ ...styles.btn("danger"), padding: "3px 8px", fontSize: "11px" }} onClick={() => setMovConfirmDelete(m)}>Delete</button>
                             </div>
-                          )}
+                          ) : null}
                         </td>
                       </tr>
                     );
