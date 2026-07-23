@@ -167,7 +167,9 @@ async function fetchProductionRange(from, to) {
   let q = supabase.from('production_log').select('*, recorder:recorded_by(full_name)').order('date')
   if (from) q = q.gte('date', from)
   if (to)   q = q.lte('date', to)
-  const { data } = await q; return data || []
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
 }
 async function fetchDamageRange(from, to) {
   let q = supabase.from('damage_log').select('*, delivery:waybill_id(waybill_number)').order('date')
@@ -188,32 +190,42 @@ async function fetchWaybillRange(from, to) {
   let q = supabase.from('waybills').select('*, driver:driver_id(full_name), vehicle:vehicle_id(vehicle_number)').order('waybill_date')
   if (from) q = q.gte('waybill_date', from)
   if (to)   q = q.lte('waybill_date', to)
-  const { data } = await q; return data || []
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
 }
 async function fetchOrdersRange(from, to) {
   let q = supabase.from('orders').select('*, customer:customer_id(name,location), marketer:marketer_id(full_name), items:order_items(*), invoice:invoices(invoice_number,total_amount,issued_date,due_date)').order('created_at')
   if (from) q = q.gte('created_at', from + 'T00:00:00')
   if (to)   q = q.lte('created_at', to + 'T23:59:59')
-  const { data } = await q; return data || []
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
 }
 async function fetchPaymentsRange(from, to) {
   let q = supabase.from('payments').select('*, invoice:invoice_id(invoice_number, order:order_id(customer:customer_id(name)))').order('payment_date')
   if (from) q = q.gte('payment_date', from)
   if (to)   q = q.lte('payment_date', to)
   q = q.eq('status', 'confirmed')
-  const { data } = await q; return data || []
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
 }
 async function fetchExpensesRange(from, to) {
-  let q = supabase.from('expenses').select('*').order('date')
-  if (from) q = q.gte('date', from)
-  if (to)   q = q.lte('date', to)
-  const { data } = await q; return data || []
+  let q = supabase.from('expenses').select('*').order('expense_date')
+  if (from) q = q.gte('expense_date', from)
+  if (to)   q = q.lte('expense_date', to)
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
 }
 async function fetchAttendanceRange(from, to) {
   let q = supabase.from('attendance').select('*').order('date')
   if (from) q = q.gte('date', from)
   if (to)   q = q.lte('date', to)
-  const { data } = await q; return data || []
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
 }
 async function fetchAllStaff() {
   const { data } = await supabase.from('staff').select('*').eq('is_active', true).order('full_name')
@@ -235,13 +247,17 @@ async function fetchMaintenanceRange(from, to) {
   let q = supabase.from('vehicle_maintenance').select('*, vehicle:vehicle_id(vehicle_number)').order('maintenance_date')
   if (from) q = q.gte('maintenance_date', from)
   if (to)   q = q.lte('maintenance_date', to)
-  const { data } = await q; return data || []
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
 }
 async function fetchFuelRange(from, to) {
   let q = supabase.from('vehicle_fuel_log').select('*, vehicle:vehicle_id(vehicle_number)').order('date')
   if (from) q = q.gte('date', from)
   if (to)   q = q.lte('date', to)
-  const { data } = await q; return data || []
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
 }
 async function fetchInventoryItems() {
   const { data } = await supabase.from('inventory_items').select('*').order('name')
@@ -251,7 +267,9 @@ async function fetchStockMovements(from, to) {
   let q = supabase.from('stock_movements').select('*, item:item_id(name,unit)').order('date')
   if (from) q = q.gte('date', from)
   if (to)   q = q.lte('date', to)
-  const { data } = await q; return data || []
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
 }
 async function fetchCustomers() {
   const { data } = await supabase.from('customers').select('*, added_by_staff:added_by(full_name)').order('name')
@@ -265,7 +283,9 @@ async function fetchSupplierTransactions(from, to) {
   let q = supabase.from('supplier_transactions').select('*, supplier:supplier_id(name)').order('date')
   if (from) q = q.gte('date', from)
   if (to)   q = q.lte('date', to)
-  const { data } = await q; return data || []
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
 }
 
 // ── REPORT GENERATORS ────────────────────────────────────────
@@ -292,7 +312,9 @@ const GENERATORS = {
     let q = supabase.from('invoices').select('*, order:order_id(customer:customer_id(name), payments(*))').order('issued_date')
     if (params.from) q = q.gte('issued_date', params.from)
     if (params.to)   q = q.lte('issued_date', params.to)
-    const { data } = await q; return data || []
+    const { data, error } = await q
+    if (error) throw error
+    return data || []
   },
   // 9. Marketer Performance
   marketer_performance: async (params) => {
@@ -321,7 +343,9 @@ const GENERATORS = {
     let q = supabase.from('customers').select('*, added_by_staff:added_by(full_name), orders(id,created_at,order_items(quantity,unit_price,subtotal))').order('created_at')
     if (params.from) q = q.gte('created_at', params.from + 'T00:00:00')
     if (params.to)   q = q.lte('created_at', params.to + 'T23:59:59')
-    const { data } = await q; return data || []
+    const { data, error } = await q
+    if (error) throw error
+    return data || []
   },
   // 14. Daily Delivery
   daily_delivery: async (params) => fetchWaybillRange(params.date, params.date),
@@ -390,7 +414,9 @@ const GENERATORS = {
     let q = supabase.from('bank_reconciliations').select('*, account:bank_account_id(account_name,bank_name)').order('created_at', { ascending: false })
     if (params.from) q = q.gte('statement_date', params.from)
     if (params.to)   q = q.lte('statement_date', params.to)
-    const { data } = await q; return data || []
+    const { data, error } = await q
+    if (error) throw error
+    return data || []
   },
   // 33. Supplier Statement
   supplier_statement: async (params) => {
