@@ -78,8 +78,8 @@ const CATALOG = [
   // FINANCIAL
   { id: 'expense_report',      name: 'Expense Report',                category: 'financial', description: 'All expenses by category with totals, trend and largest expenses',            formats: ['pdf','excel'], roles: ['md','accountant','ico'], periodType: 'range' },
   { id: 'pl_report',           name: 'Profit & Loss Report',          category: 'financial', description: 'Accrual income statement: revenue from goods delivered (not cash received), direct & operating costs by cost centre, gross and net profit; accrued labour, unpaid loading and unpriced items shown separately as not-yet-included',    formats: ['pdf','excel'], roles: ['md','accountant','ico','board_member'], periodType: 'range' },
-  { id: 'balance_sheet',       name: 'Balance Sheet Report',          category: 'financial', description: 'Assets, liabilities and equity as at a selected date',                        formats: ['pdf','excel'], roles: ['md','accountant','ico','board_member'], periodType: 'asAt' },
-  { id: 'cash_flow',           name: 'Cash Flow Report',              category: 'financial', description: 'Operating, investing and financing cash flows for a period',                   formats: ['pdf','excel'], roles: ['md','accountant','ico','board_member'], periodType: 'range' },
+  { id: 'balance_sheet',       name: 'Balance Sheet Report',          category: 'financial', description: 'Live-computed cash, receivables, inventory and payables combined with fixed assets and equity from static opening balances (pending accountant confirmation); includes a balance check',                        formats: ['pdf','excel'], roles: ['md','accountant','ico','board_member'], periodType: 'asAt' },
+  { id: 'cash_flow',           name: 'Cash Flow Report',              category: 'financial', description: 'Operating cash flow (cash basis). Investing and financing activities are not yet tracked in this system.',                   formats: ['pdf','excel'], roles: ['md','accountant','ico','board_member'], periodType: 'range' },
   { id: 'bank_recon',          name: 'Bank Reconciliation Report',    category: 'financial', description: 'Statement balance vs book balance per bank account',                           formats: ['pdf'], roles: ['md','accountant','ico'], periodType: 'range' },
   { id: 'supplier_statement',  name: 'Supplier Statement Report',     category: 'financial', description: 'All purchases and payments per supplier with outstanding payables aging',      formats: ['pdf','excel'], roles: ['md','accountant','ico'], periodType: 'range' },
 ]
@@ -212,7 +212,7 @@ async function fetchPaymentsRange(from, to) {
   return data || []
 }
 async function fetchExpensesRange(from, to) {
-  let q = supabase.from('expenses').select('*').order('expense_date')
+  let q = supabase.from('expenses').select('*, category:category_id(name, cost_center)').order('expense_date')
   if (from) q = q.gte('expense_date', from)
   if (to)   q = q.lte('expense_date', to)
   const { data, error } = await q
@@ -280,9 +280,12 @@ async function fetchSuppliers() {
   return data || []
 }
 async function fetchSupplierTransactions(from, to) {
-  let q = supabase.from('supplier_transactions').select('*, supplier:supplier_id(name)').order('date')
-  if (from) q = q.gte('date', from)
-  if (to)   q = q.lte('date', to)
+  // Real date column is transaction_date. The old `supplier:supplier_id(name)`
+  // embed referenced a non-existent suppliers.name column (would error); the
+  // renderer resolves names via fetchSuppliers, so the embed is dropped.
+  let q = supabase.from('supplier_transactions').select('*').order('transaction_date')
+  if (from) q = q.gte('transaction_date', from)
+  if (to)   q = q.lte('transaction_date', to)
   const { data, error } = await q
   if (error) throw error
   return data || []
@@ -414,14 +417,33 @@ const GENERATORS = {
     ])
     return { deliveries, expenses, weeklyLabour, loadingUnpaid, payrollLines, payments }
   },
-  // 30. Balance Sheet
+  // 30. Balance Sheet — live working-capital positions + static opening balances
   balance_sheet: async () => {
-    const { data } = await supabase.from('opening_balances').select('*')
-    return data || []
+    const unwrap = r => { if (r.error) throw r.error; return r.data || [] }
+    const [openingBalances, banks, invoices, paymentsConfirmed, inventory, payablesExp] = await Promise.all([
+      supabase.from('opening_balances').select('category, account_name, amount, as_at_date').then(unwrap),
+      supabase.from('bank_accounts').select('current_balance').eq('is_active', true).then(unwrap),
+      supabase.from('invoices').select('total_amount').then(unwrap),
+      supabase.from('payments').select('amount_paid').eq('status', 'confirmed').then(unwrap),
+      supabase.from('inventory_items').select('current_stock, unit_cost').then(unwrap),
+      // Trade Payables = approved but not-yet-disbursed expenses (no payment_request,
+      // not ingested from a bank statement) — i.e. owed-but-unpaid. See PR note.
+      supabase.from('expenses').select('amount').eq('status', 'approved').is('payment_request_id', null).is('ingestion_source', null).then(unwrap),
+    ])
+    return { openingBalances, banks, invoices, paymentsConfirmed, inventory, payablesExp }
   },
-  // 31. Cash Flow
+  // 31. Cash Flow — true cash basis (money that actually moved)
   cash_flow: async (params) => {
-    const [payments, expenses] = await Promise.all([fetchPaymentsRange(params.from, params.to), fetchExpensesRange(params.from, params.to)])
+    const { from, to } = params
+    const unwrap = r => { if (r.error) throw r.error; return r.data || [] }
+    const [payments, expenses] = await Promise.all([
+      supabase.from('payments').select('amount_paid').eq('status', 'confirmed').gte('payment_date', from).lte('payment_date', to).then(unwrap),
+      // Confirmed cash out only: disbursed via payment_request, or approved
+      // manual expenses. Excludes pending (never paid).
+      supabase.from('expenses').select('amount')
+        .or('ingestion_source.eq.payment_request,and(ingestion_source.is.null,status.eq.approved)')
+        .gte('expense_date', from).lte('expense_date', to).then(unwrap),
+    ])
     return { payments, expenses }
   },
   // 32. Bank Recon
@@ -533,6 +555,127 @@ function plStatementRows(S) {
     add('      money received for goods not yet delivered — a liability, not revenue', '', 'memonote')
   }
   return rows
+}
+
+// ── SUPPLIER STATEMENT (with payables aging) ────────────────
+// Bucket a supplier's whole outstanding balance by the age of its oldest
+// still-unpaid purchase (payments applied FIFO to oldest purchases first).
+function supplierAging(purchaseTxns, totalPaid, asOfStr) {
+  const b = { current: 0, d31: 0, d61: 0, d90: 0 }
+  const purchases = [...purchaseTxns].sort((a, z) => new Date(a.transaction_date) - new Date(z.transaction_date))
+  const balance = purchases.reduce((s, p) => s + Number(p.amount || 0), 0) - totalPaid
+  if (balance <= 0) return b
+  let remaining = totalPaid, oldestUnpaid = null
+  for (const p of purchases) {
+    const amt = Number(p.amount || 0)
+    if (remaining >= amt) { remaining -= amt; continue }
+    oldestUnpaid = p.transaction_date; break
+  }
+  if (!oldestUnpaid) oldestUnpaid = purchases[purchases.length - 1]?.transaction_date
+  const days = oldestUnpaid ? Math.floor((new Date(asOfStr) - new Date(oldestUnpaid)) / 86400000) : 0
+  if (days <= 30) b.current = balance
+  else if (days <= 60) b.d31 = balance
+  else if (days <= 90) b.d61 = balance
+  else b.d90 = balance
+  return b
+}
+function supplierStatementRows(data) {
+  const { suppliers = [], txns = [] } = data || {}
+  const asOf = today()
+  return suppliers.map(s => {
+    const st = txns.filter(t => t.supplier_id === s.id)
+    const purchases = st.filter(t => t.transaction_type === 'purchase')
+    const purchased = purchases.reduce((sum, t) => sum + Number(t.amount || 0), 0)
+    const paid = st.filter(t => t.transaction_type === 'payment').reduce((sum, t) => sum + Number(t.amount || 0), 0)
+    const b = supplierAging(purchases, paid, asOf)
+    return { name: s.company_name || '—', purchased, paid, balance: purchased - paid, ...b }
+  })
+}
+
+// ── CASH FLOW (cash basis) ──────────────────────────────────
+function buildCashFlowRows(data) {
+  const num = v => Number(v) || 0
+  const received = (data.payments || []).reduce((s, p) => s + num(p.amount_paid), 0)
+  const paid = (data.expenses || []).reduce((s, e) => s + num(e.amount), 0)
+  const net = received - paid
+  const rows = []
+  const add = (l, a, k) => rows.push({ label: l, amount: a, kind: k })
+  add('OPERATING ACTIVITIES', '', 'header')
+  add('   Cash received from customers', naira(received), 'line')
+  add('   Cash paid for expenses', '(' + naira(paid) + ')', 'line')
+  add('   Net Operating Cash Flow', naira(net), 'subtotal')
+  add('', '', 'spacer')
+  add('INVESTING ACTIVITIES', '', 'header')
+  add('   Not currently tracked in this system', '—', 'memonote')
+  add('', '', 'spacer')
+  add('FINANCING ACTIVITIES', '', 'header')
+  add('   Not currently tracked in this system', '—', 'memonote')
+  add('', '', 'spacer')
+  add('NET CHANGE IN CASH', naira(net), 'net')
+  return { rows, net }
+}
+
+// ── BALANCE SHEET (live positions + static opening balances) ─
+function buildBalanceSheet(data) {
+  const num = v => Number(v) || 0
+  const ob = data.openingBalances || []
+  const cashAtBank = (data.banks || []).reduce((s, b) => s + num(b.current_balance), 0)
+  const receivables = (data.invoices || []).reduce((s, i) => s + num(i.total_amount), 0)
+    - (data.paymentsConfirmed || []).reduce((s, p) => s + num(p.amount_paid), 0)
+  const inventory = (data.inventory || []).reduce((s, i) => s + num(i.current_stock) * num(i.unit_cost), 0)
+  const payables = (data.payablesExp || []).reduce((s, e) => s + num(e.amount), 0)
+
+  // Static rows, excluding the four items now computed live (avoid double count)
+  const COMPUTED = new Set(['Cash on Hand', 'Trade Receivables', 'Inventory', 'Trade Payables'])
+  const pick = cat => ob.filter(o => o.category === cat && !COMPUTED.has(o.account_name))
+  const staticAssets = pick('asset'), staticLiab = pick('liability'), staticEquity = pick('equity')
+  const sum = arr => arr.reduce((s, o) => s + num(o.amount), 0)
+
+  const totalAssets = cashAtBank + receivables + inventory + sum(staticAssets)
+  const totalLE = payables + sum(staticLiab) + sum(staticEquity)
+  const balanceCheck = totalAssets - totalLE
+
+  const rows = []
+  const add = (l, a, k) => rows.push({ label: l, amount: a, kind: k })
+  const staticRow = o => add(`   ${o.account_name} · per opening balances (as at ${fmtDate(o.as_at_date)})`, naira(num(o.amount)), 'static')
+  add('ASSETS', '', 'header')
+  add('   Cash at Bank (live)', naira(cashAtBank), 'line')
+  add('   Trade Receivables (live)', naira(receivables), 'line')
+  add('   Inventory (live)', naira(inventory), 'line')
+  staticAssets.forEach(staticRow)
+  add('   Total Assets', naira(totalAssets), 'total')
+  add('', '', 'spacer')
+  add('LIABILITIES & EQUITY', '', 'header')
+  add('   Trade Payables (live)', naira(payables), 'line')
+  staticLiab.forEach(staticRow)
+  staticEquity.forEach(staticRow)
+  add('   Total Liabilities & Equity', naira(totalLE), 'total')
+  add('', '', 'spacer')
+  add(balanceCheck === 0 ? 'Balance Check: ✓ Balanced' : 'Balance Check (Assets − Liabilities & Equity)',
+      balanceCheck === 0 ? '' : naira(balanceCheck), 'balancecheck')
+  return { rows, balanceCheck }
+}
+
+// Shared statement-style autoTable used by cash flow & balance sheet.
+function statementTable(doc, startY, rows, colorFor) {
+  autoTable(doc, {
+    startY,
+    head: [['', 'Amount (₦)']],
+    body: rows.map(r => [r.label, r.amount]),
+    styles: { fontSize: 10, cellPadding: 1.4 },
+    headStyles: { fillColor: [30, 40, 70], textColor: 255 },
+    columnStyles: { 1: { halign: 'right', cellWidth: 48 } },
+    didParseCell: d => {
+      const k = rows[d.row.index]?.kind
+      if (['header', 'subtotal', 'total', 'net', 'balancecheck'].includes(k)) d.cell.styles.fontStyle = 'bold'
+      if (k === 'header') d.cell.styles.fillColor = [235, 238, 245]
+      if (k === 'static') d.cell.styles.textColor = [110, 110, 120]
+      if (k === 'memonote') { d.cell.styles.fontStyle = 'italic'; d.cell.styles.textColor = [140, 140, 150] }
+      const fill = colorFor && colorFor(k)
+      if (fill) d.cell.styles.fillColor = fill
+    },
+    margin: { left: 14, right: 14 },
+  })
 }
 
 // ── PDF RENDERERS ────────────────────────────────────────────
@@ -777,8 +920,8 @@ function renderPDF(reportId, data, params, period) {
       break
     }
     case 'expense_report': {
-      const head = ['Date', 'Category', 'Subcategory', 'Description', 'Paid To', 'Amount (₦)']
-      const body = data.map(e => [fmtDate(e.date), e.category||'—', e.subcategory||'—', e.description||'—', e.paid_to||'—', naira(e.amount)])
+      const head = ['Date', 'Category', 'Cost Center', 'Description', 'Paid To', 'Amount (₦)']
+      const body = data.map(e => [fmtDate(e.expense_date), e.category?.name||'—', e.category?.cost_center||'—', e.description||'—', e.paid_to||'—', naira(e.amount)])
       const total = data.reduce((s,e)=>s+Number(e.amount||0),0)
       pdfTable(doc, startY, head, body, ['TOTAL','','','','',naira(total)])
       break
@@ -810,16 +953,8 @@ function renderPDF(reportId, data, params, period) {
       break
     }
     case 'cash_flow': {
-      const { payments, expenses } = data
-      const inflow = payments.reduce((s,p)=>s+Number(p.amount_paid),0)
-      const outflow = expenses.reduce((s,e)=>s+Number(e.amount||0),0)
-      const net = inflow - outflow
-      autoTable(doc, {
-        startY, head: [['Category', 'Amount (₦)']], body: [['Operating Inflow (Receipts)', naira(inflow)], ['Operating Outflow (Expenses)', '('+naira(outflow)+')'], ['', ''], ['NET CASH FLOW', naira(net)]],
-        styles: { fontSize: 10 }, headStyles: { fillColor: [30,40,70], textColor: 255 },
-        didParseCell: data => { if (data.row.index === 3) data.cell.styles.fontStyle = 'bold' },
-        margin: { left: 14, right: 14 },
-      })
+      const { rows, net } = buildCashFlowRows(data)
+      statementTable(doc, startY, rows, k => k === 'net' ? (net >= 0 ? [200,240,210] : [255,200,200]) : null)
       break
     }
     case 'bank_recon': {
@@ -829,27 +964,15 @@ function renderPDF(reportId, data, params, period) {
       break
     }
     case 'supplier_statement': {
-      const { suppliers, txns } = data
-      const head = ['Supplier', 'Total Purchased (₦)', 'Total Paid (₦)', 'Balance (₦)']
-      const body = suppliers.map(s => {
-        const st = txns.filter(t=>t.supplier_id===s.id)
-        const purchased = st.filter(t=>t.transaction_type==='purchase').reduce((sum,t)=>sum+Number(t.amount),0)
-        const paid = st.filter(t=>t.transaction_type==='payment').reduce((sum,t)=>sum+Number(t.amount),0)
-        return [s.name||s.company_name||'—', naira(purchased), naira(paid), naira(purchased-paid)]
-      })
+      const head = ['Supplier', 'Total Purchased (₦)', 'Total Paid (₦)', 'Balance (₦)', 'Current', '31-60d', '61-90d', '90+d']
+      const body = supplierStatementRows(data).map(r =>
+        [r.name, naira(r.purchased), naira(r.paid), naira(r.balance), naira(r.current), naira(r.d31), naira(r.d61), naira(r.d90)])
       pdfTable(doc, startY, head, body)
       break
     }
     case 'balance_sheet': {
-      const obs = data
-      const assets = obs.filter(o=>o.category==='asset').reduce((s,o)=>s+Number(o.amount||0),0)
-      const liab = obs.filter(o=>o.category==='liability').reduce((s,o)=>s+Number(o.amount||0),0)
-      const equity = obs.filter(o=>o.category==='equity').reduce((s,o)=>s+Number(o.amount||0),0)
-      autoTable(doc, {
-        startY, head: [['Category', 'Amount (₦)']], body: [['Total Assets', naira(assets)], ['Total Liabilities', naira(liab)], ['Total Equity', naira(equity)], ['', ''], ['Total Liabilities + Equity', naira(liab+equity)]],
-        styles: { fontSize: 10 }, headStyles: { fillColor: [30,40,70], textColor: 255 },
-        margin: { left: 14, right: 14 },
-      })
+      const { rows, balanceCheck } = buildBalanceSheet(data)
+      statementTable(doc, startY, rows, k => k === 'balancecheck' && balanceCheck !== 0 ? [255,200,200] : null)
       break
     }
     default: {
@@ -892,8 +1015,8 @@ function renderExcel(reportId, data, params, period) {
         ['TOTAL','','',data.reduce((s,p)=>s+Number(p.amount_paid),0)])
       break
     case 'expense_report':
-      excelExport(filename, report.name, period, ['Date','Category','Subcategory','Description','Paid To','Amount (₦)'],
-        data.map(e=>[fmtDate(e.date),e.category||'—',e.subcategory||'—',e.description||'—',e.paid_to||'—',Number(e.amount||0)]),
+      excelExport(filename, report.name, period, ['Date','Category','Cost Center','Description','Paid To','Amount (₦)'],
+        data.map(e=>[fmtDate(e.expense_date),e.category?.name||'—',e.category?.cost_center||'—',e.description||'—',e.paid_to||'—',Number(e.amount||0)]),
         ['TOTAL','','','','',data.reduce((s,e)=>s+Number(e.amount||0),0)])
       break
     case 'staff_directory':
@@ -920,6 +1043,19 @@ function renderExcel(reportId, data, params, period) {
         plStatementRows(S).map(r => [r.label, r.amount]))
       break
     }
+    case 'supplier_statement':
+      excelExport(filename, report.name, period,
+        ['Supplier','Total Purchased (₦)','Total Paid (₦)','Balance (₦)','Current','31-60d','61-90d','90+d'],
+        supplierStatementRows(data).map(r => [r.name, r.purchased, r.paid, r.balance, r.current, r.d31, r.d61, r.d90]))
+      break
+    case 'cash_flow':
+      excelExport(filename, report.name, period, ['', 'Amount (₦)'],
+        buildCashFlowRows(data).rows.map(r => [r.label, r.amount]))
+      break
+    case 'balance_sheet':
+      excelExport(filename, report.name, period, ['', 'Amount (₦)'],
+        buildBalanceSheet(data).rows.map(r => [r.label, r.amount]))
+      break
     default:
       excelExport(filename, report.name, period, ['No Data'], [['This report does not support Excel export yet.']])
   }
