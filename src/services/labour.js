@@ -204,7 +204,9 @@ export const truckLoadingService = {
   async getLogs() {
     const { data, error } = await supabase
       .from('truck_loading_log')
-      .select('*, product:product_id(name), vehicle:vehicle_id(vehicle_number, vehicle_name), loaders:truck_loading_loaders(labour_id)')
+      // payroll:payroll_id(status) — content editing is locked by the DB once
+      // the linked payroll is ico_approved/md_approved/paid (single join, no N+1).
+      .select('*, product:product_id(name), vehicle:vehicle_id(vehicle_number, vehicle_name), loaders:truck_loading_loaders(labour_id), payroll:payroll_id(status)')
       .order('date', { ascending: false })
       .order('trip_number_for_day', { ascending: false })
     if (error) throw error

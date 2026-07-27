@@ -9886,7 +9886,12 @@ const TruckLoadingPage = ({ userProfile }) => {
       setEditingLogId(null);
       setLogAlert({ type: 'success', msg: 'Entry updated.' });
       await loadLogs();
-    } catch (e) { setLogAlert({ type: 'error', msg: e.message }); }
+    } catch (e) {
+      // Content-lock guard (truck_loading_content_guard) raises a clean,
+      // actionable message; surface it as-is instead of a raw error. Covers the
+      // race where the linked payroll gets approved between page load and save.
+      setLogAlert({ type: 'error', msg: e?.message || 'Could not update the load entry.' });
+    }
     finally { setEditLogSaving(false); }
   };
 
@@ -10112,6 +10117,12 @@ const TruckLoadingPage = ({ userProfile }) => {
                     {logs.map(log => {
                       const isHistorical = log.date && log.created_at && log.date < log.created_at.split('T')[0];
                       const isPaid = log.payment_status === 'paid';
+                      // Content lock mirrors the DB guard (truck_loading_content_guard):
+                      // unlinked logs are always editable; a linked log is editable only
+                      // while its payroll is still 'draft'. Missing linked payroll →
+                      // treat as editable (nothing is actively locking it).
+                      const payrollStatus = log.payroll?.status;
+                      const payrollEditable = !log.payroll_id || !payrollStatus || payrollStatus === 'draft';
                       const logLoaderIds = (log.loaders || []).map(l => l.labour_id);
                       const logLoaderNames = logLoaderIds.map(lid => {
                         const a = assignments.find(a => a.labour_id === lid);
@@ -10137,7 +10148,7 @@ const TruckLoadingPage = ({ userProfile }) => {
                           {canDelete && (
                             <td style={styles.td}>
                               <div style={{ display: 'flex', gap: '6px' }}>
-                                {!isPaid ? (
+                                {payrollEditable ? (
                                   <button style={{ ...styles.btn('secondary'), fontSize: '11px', padding: '3px 10px' }} onClick={() => {
                                     setEditingLogId(log.id);
                                     setEditLogForm({ vehicle_id: log.vehicle_id || '', product_id: log.product_id || '', date: log.date || '', quantity_loaded: String(log.quantity_loaded || '') });
@@ -10145,9 +10156,9 @@ const TruckLoadingPage = ({ userProfile }) => {
                                     setShowLogForm(false);
                                   }}>Edit</button>
                                 ) : (
-                                  <span style={{ fontSize: '11px', color: theme.textMuted, padding: '3px 6px' }}>Paid</span>
+                                  <span title="Locked: linked to an approved/paid payroll" style={{ fontSize: '11px', color: theme.textMuted, padding: '3px 6px' }}>{isPaid ? 'Paid' : 'Locked'}</span>
                                 )}
-                                <button style={{ ...styles.btn('danger'), fontSize: '11px', padding: '3px 10px' }} onClick={() => setDeleteTarget(log.id)} disabled={isPaid}>Delete</button>
+                                <button style={{ ...styles.btn('danger'), fontSize: '11px', padding: '3px 10px' }} onClick={() => setDeleteTarget(log.id)} disabled={!payrollEditable}>Delete</button>
                               </div>
                             </td>
                           )}
