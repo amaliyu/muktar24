@@ -17,6 +17,11 @@ const todayStr = () => new Date().toISOString().split('T')[0]
 // to the user — translate it to a friendly, actionable message.
 const friendlyEntryError = (error) => {
   if (!error) return ''
+  // Content-lock guard (daily_roster_content_guard): the DB raises a clean,
+  // actionable message ("Roster is linked to a … payroll; unlink or revert…").
+  // Surface it as-is rather than a raw Postgres error blob. Covers the race
+  // where a payroll gets approved between page load and save.
+  if (/is linked to a/i.test(error.message || '')) return error.message
   if (error.code === '23505' || /uq_roster_entry_worker|duplicate key/i.test(error.message || '')) {
     return 'This roster already has an entry for one of these workers. Please refresh and try again.'
   }
@@ -364,7 +369,9 @@ function DailyRosterTab({ pool, roles, userProfile }) {
 
   const loadRosters = useCallback(async () => {
     setLoading(true)
-    const { data } = await supabase.from('daily_roster').select('*').order('roster_date', { ascending: false })
+    // Join the linked payroll's status — content editing is locked by the DB
+    // once that payroll is ico_approved/md_approved/paid (see canEdit below).
+    const { data } = await supabase.from('daily_roster').select('*, payroll:payroll_id(status)').order('roster_date', { ascending: false })
     setRosters(data || [])
     setLoading(false)
   }, [])
@@ -489,15 +496,16 @@ function DailyRosterTab({ pool, roles, userProfile }) {
                 const mdSt = r.md_status || 'pending'
                 const paySt = r.payment_status || 'unpaid'
                 const isPaid = paySt === 'paid'
-                const isApproved = ['ico_approved', 'md_approved'].includes(icoSt) || mdSt === 'approved'
-                const canEdit = !isPaid && (
-                  (['production_manager', 'assistant_production_manager'].includes(role) && ['draft', 'submitted'].includes(icoSt)) ||
-                  role === 'md'
-                )
-                const canDelete = !isPaid && (
-                  (['production_manager', 'assistant_production_manager'].includes(role) && ['draft', 'submitted'].includes(icoSt)) ||
-                  (role === 'md' && (!isApproved || role === 'md'))
-                )
+                // Content lock mirrors the DB guard (daily_roster_content_guard):
+                // unlinked rosters are always editable; a linked roster is editable
+                // only while its payroll is still 'draft'. Missing linked payroll →
+                // treat as editable (nothing is actively locking it). Role set is
+                // unchanged — only the status gate now reads the linked payroll.
+                const payrollStatus = r.payroll?.status
+                const payrollEditable = !r.payroll_id || !payrollStatus || payrollStatus === 'draft'
+                const canWriteRole = ['production_manager', 'assistant_production_manager', 'md'].includes(role)
+                const canEdit = !isPaid && payrollEditable && canWriteRole
+                const canDelete = !isPaid && payrollEditable && canWriteRole
                 return (
                   <tr key={r.id} style={{ cursor: 'pointer' }} onClick={() => { setSelectedRoster(r); setViewMode('detail') }}>
                     <td style={styles.td}>{r.roster_date}</td>
@@ -680,7 +688,7 @@ function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCanc
         submitted_by: submit ? userProfile?.full_name : editRoster.submitted_by,
         submitted_date: submit ? todayStr() : editRoster.submitted_date,
       }).eq('id', editRoster.id)
-      if (re) { setSaving(false); return setErr(re.message) }
+      if (re) { setSaving(false); return setErr(friendlyEntryError(re)) }
       // Upsert the current set (kept workers UPDATED in place via the
       // roster_id,labour_id unique key; new workers INSERTED) — no wholesale
       // delete, so there is never a window where all entries are gone.
