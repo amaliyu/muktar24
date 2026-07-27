@@ -201,16 +201,39 @@ export const truckLoadingService = {
     if (error) throw error
   },
 
-  async getLogs() {
-    const { data, error } = await supabase
+  // Optional { from, to } narrows by date; includeNull (default true) also
+  // returns undated legacy rows so a range filter never silently hides them.
+  // No args → returns everything (unchanged for any other caller).
+  async getLogs({ from, to, includeNull = true } = {}) {
+    let q = supabase
       .from('truck_loading_log')
       // payroll:payroll_id(status) — content editing is locked by the DB once
       // the linked payroll is ico_approved/md_approved/paid (single join, no N+1).
       .select('*, product:product_id(name), vehicle:vehicle_id(vehicle_number, vehicle_name), loaders:truck_loading_loaders(labour_id), payroll:payroll_id(status)')
-      .order('date', { ascending: false })
-      .order('trip_number_for_day', { ascending: false })
+    // Single query. The .or() with a nested and(...) mirrors the proven pattern
+    // used elsewhere (bank/expense ingestion filters); "OR date is null" keeps
+    // the 53 undated backfill rows visible when includeNull is on.
+    if (from && to) {
+      q = includeNull ? q.or(`and(date.gte.${from},date.lte.${to}),date.is.null`) : q.gte('date', from).lte('date', to)
+    } else if (from) {
+      q = includeNull ? q.or(`date.gte.${from},date.is.null`) : q.gte('date', from)
+    } else if (to) {
+      q = includeNull ? q.or(`date.lte.${to},date.is.null`) : q.lte('date', to)
+    }
+    q = q.order('date', { ascending: false }).order('trip_number_for_day', { ascending: false })
+    const { data, error } = await q
     if (error) throw error
     return data || []
+  },
+
+  // Total count of undated rows (regardless of range) — for the toggle label.
+  async getUndatedCount() {
+    const { count, error } = await supabase
+      .from('truck_loading_log')
+      .select('id', { count: 'exact', head: true })
+      .is('date', null)
+    if (error) throw error
+    return count || 0
   },
 
   async createLog({ vehicle_id, product_id, date, quantity_loaded, waybill_id }, loaderIds = []) {

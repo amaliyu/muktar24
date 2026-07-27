@@ -39,7 +39,7 @@ import DataImport from './components/DataImport'
 import { vehiclesService, fuelLogService } from './services/vehicles'
 import SupplierRegistry from './components/SupplierRegistry'
 import { suppliersService, supplierTransactionsService } from './services/suppliers'
-import Labour from './components/Labour'
+import Labour, { getLastSaturday, shiftWeek, shiftDays } from './components/Labour'
 import Maintenance from './components/Maintenance'
 import Messages from './components/Messages'
 import { messagesService } from './services/messages'
@@ -9797,6 +9797,12 @@ const TruckLoadingPage = ({ userProfile }) => {
   const [logAlert, setLogAlert]       = useState(null);
   const [isBackfill, setIsBackfill]   = useState(false);
   const [waybillsForLog, setWaybillsForLog] = useState([]);
+  // Date-range filter (mirrors Labour → Payroll). Defaults to the current
+  // Sat–Sat week. includeNull keeps undated legacy rows visible by default.
+  const [rangeFrom, setRangeFrom]     = useState(() => shiftDays(getLastSaturday(), -6));
+  const [rangeTo, setRangeTo]         = useState(() => getLastSaturday());
+  const [includeNull, setIncludeNull] = useState(true);
+  const [undatedCount, setUndatedCount] = useState(0);
 
   // Log tab — edit
   const [editingLogId, setEditingLogId]   = useState(null);
@@ -9819,12 +9825,21 @@ const TruckLoadingPage = ({ userProfile }) => {
   const loadLogs = async () => {
     setEntriesLoading(true);
     try {
-      const data = await truckLoadingService.getLogs();
+      const [data, undated] = await Promise.all([
+        truckLoadingService.getLogs({ from: rangeFrom, to: rangeTo, includeNull }),
+        truckLoadingService.getUndatedCount(),
+      ]);
       setLogs(data);
+      setUndatedCount(undated);
       loadWaybillsForLog(data);
     }
     catch (e) { setLogAlert({ type: 'error', msg: e.message }); }
     finally { setEntriesLoading(false); }
+  };
+
+  const shiftRange = (weeks) => {
+    setRangeFrom(shiftWeek(rangeFrom, weeks));
+    setRangeTo(shiftWeek(rangeTo, weeks));
   };
 
   const loadRates = async () => {
@@ -9839,8 +9854,12 @@ const TruckLoadingPage = ({ userProfile }) => {
       productsService.getActive(),
     ]).then(([v, a, p]) => { setVehicles(v); setAssignments(a); setProducts(p); })
       .catch(() => {});
-    if (canLog) loadLogs();
   }, []);
+
+  // Load (and reload) the log list whenever the range or null-toggle changes.
+  useEffect(() => {
+    if (canLog) loadLogs();
+  }, [rangeFrom, rangeTo, includeNull]);
 
   useEffect(() => {
     if (tab === 'rates' && !ratesLoaded) loadRates();
@@ -9947,6 +9966,9 @@ const TruckLoadingPage = ({ userProfile }) => {
       {tab === 'log' && (
         <div>
           {logAlert && <Alert msg={logAlert.msg} type={logAlert.type} onClose={() => setLogAlert(null)} />}
+          <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '14px' }}>
+            Loading payroll (weekly scoping, ICO/MD approval, payment schedules) is prepared in <strong style={{ color: theme.textMuted }}>Labour → Payroll → Loading Payroll</strong>.
+          </div>
           <div style={{ marginBottom: '16px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             <button style={styles.btn('primary')} onClick={() => { setShowLogForm(f => !f); setLogAlert(null); setIsBackfill(false); setLogForm({ vehicle_id: '', product_id: '', date: '', quantity_loaded: '', waybill_id: '' }); setSelectedLoaders([]); }}>
               {showLogForm ? '✕ Cancel' : '+ New Log Entry'}
@@ -10094,9 +10116,35 @@ const TruckLoadingPage = ({ userProfile }) => {
             </div>
           )}
 
+          {/* Date range filter (mirrors Labour → Payroll) */}
+          <div style={{ display: 'flex', marginBottom: '14px', gap: '12px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            <div>
+              <label style={styles.label}>From</label>
+              <input type="date" style={{ ...styles.input, width: '148px' }} value={rangeFrom} onChange={e => setRangeFrom(e.target.value)} />
+            </div>
+            <div>
+              <label style={styles.label}>To</label>
+              <input type="date" style={{ ...styles.input, width: '148px' }} value={rangeTo} onChange={e => setRangeTo(e.target.value)} />
+            </div>
+            <div style={{ display: 'flex', gap: '4px', paddingBottom: '1px' }}>
+              <button style={{ ...styles.btn('secondary'), padding: '6px 10px' }} onClick={() => shiftRange(-1)}>‹</button>
+              <button style={{ ...styles.btn('secondary'), padding: '6px 10px' }} onClick={() => shiftRange(1)}>›</button>
+            </div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: theme.textMuted, cursor: 'pointer', paddingBottom: '6px' }}>
+              <input type="checkbox" checked={includeNull} onChange={e => setIncludeNull(e.target.checked)} />
+              Include entries with no date ({undatedCount})
+            </label>
+          </div>
+          {rangeFrom && rangeTo && rangeFrom > rangeTo && (
+            <div style={{ fontSize: '12px', color: theme.accent, marginBottom: '10px' }}>“From” is after “To” — showing only undated entries (if included). Swap the dates to see a range.</div>
+          )}
+
           <div style={styles.card}>
             {entriesLoading ? <Spinner /> : logs.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '20px', color: theme.textMuted }}>No log entries yet.</div>
+              <div style={{ textAlign: 'center', padding: '20px', color: theme.textMuted }}>
+                No log entries in this range.
+                {!includeNull && undatedCount > 0 && <> Tick <em>“Include entries with no date ({undatedCount})”</em> above to show undated records.</>}
+              </div>
             ) : (
               <div style={{ overflowX: 'auto' }}>
                 <table style={styles.table}>
@@ -10131,7 +10179,7 @@ const TruckLoadingPage = ({ userProfile }) => {
                       return (
                         <tr key={log.id}>
                           <td style={styles.td}>
-                            {log.date}
+                            {log.date || <span style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '4px', background: theme.red + '22', color: theme.red, border: `1px solid ${theme.red}44`, fontWeight: '700' }}>no date</span>}
                             {isHistorical && <span style={{ marginLeft: '6px', fontSize: '10px', padding: '1px 6px', borderRadius: '4px', background: '#f59e0b22', color: '#f59e0b', border: '1px solid #f59e0b44', fontWeight: '700' }}>Historical</span>}
                           </td>
                           <td style={styles.td}>{log.product?.name || '—'}</td>

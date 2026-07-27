@@ -1149,20 +1149,22 @@ function generatePaymentScheduleXLSX(payrollType, label, workers, pool) {
   XLSX.writeFile(wb, `payment-schedule-${label}.xlsx`)
 }
 
-function getLastSaturday(dateStr) {
+// Exported so other pages (e.g. Truck Loading in App.jsx) reuse the exact same
+// week-range picker logic rather than duplicating it.
+export function getLastSaturday(dateStr) {
   const d = new Date(dateStr || todayStr())
   const day = d.getDay()
   d.setDate(d.getDate() - (day === 6 ? 0 : day + 1))
   return d.toISOString().split('T')[0]
 }
 
-function shiftWeek(dateStr, weeks) {
+export function shiftWeek(dateStr, weeks) {
   const d = new Date(dateStr)
   d.setDate(d.getDate() + weeks * 7)
   return d.toISOString().split('T')[0]
 }
 
-function shiftDays(dateStr, days) {
+export function shiftDays(dateStr, days) {
   const d = new Date(dateStr)
   d.setDate(d.getDate() + days)
   return d.toISOString().split('T')[0]
