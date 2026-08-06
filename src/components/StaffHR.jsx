@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { staffService } from '../services/staff';
+import { hasRole } from '../lib/roles';
 import { attendanceService, payrollService } from '../services/attendance';
 import { advancesService } from '../services/advances';
 import { leaveService } from '../services/leave';
@@ -570,7 +571,7 @@ const StaffProfile = ({ staffId, onBack, onUpdated, roles, userProfile }) => {
     photoService.getSignedUrl(staff.photo_path).then(setPhotoSignedUrl).catch(() => setPhotoSignedUrl(null));
   }, [staff?.photo_path]);
 
-  const canUploadPhoto = userProfile?.role === 'md' || userProfile?.role === 'hr_officer';
+  const canUploadPhoto = hasRole(userProfile, 'md', 'hr_officer');
 
   const handlePhotoUpload = async (e) => {
     const file = e.target.files?.[0];
@@ -987,7 +988,7 @@ const StaffDirectory = ({ onViewProfile, userProfile }) => {
   const [pinMsg, setPinMsg] = useState(null);
   const [pinSaving, setPinSaving] = useState(false);
 
-  const canSetPin = ['md', 'hr_officer'].includes(userProfile?.role);
+  const canSetPin = hasRole(userProfile, 'md', 'hr_officer');
 
   const load = async () => {
     setLoading(true);
@@ -2075,7 +2076,7 @@ const OnboardingTab = () => {
     loadData();
   };
 
-  const canEdit = ['md', 'hr_officer'].includes(currentUser?.role);
+  const canEdit = hasRole(currentUser, 'md', 'hr_officer');
 
   if (loading) return <Spinner />;
 
