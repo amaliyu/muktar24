@@ -11,7 +11,7 @@ App: APC Manager — internal ERP for Abuja Precast Concrete Limited
 
 ## 0. HOW THIS DOCUMENT IS USED
 - This is the master. On conflict: **live DB facts win**, then this doc.
-- Repo is private → planning chats (Claude.ai) have NO GitHub access unless the repo is public. (Repo is currently PUBLIC as of Session 6 — planning chat could read it directly; revert to private when convenient and brief via this file.)
+- Repo is PRIVATE. The planning chat reads the code by cloning the repo directly via git/bash with credentials (not web fetch) — this is how every PR this session was diffed against `main` before review. Live DB state comes from the Supabase connector. So both the code and the live database are directly readable from the planning chat.
 - Division of labour: **Claude Code writes code/SQL files & opens PRs; the MD merges. Migrations are applied from the planning chat via the Supabase connector using `apply_migration` (tracked), with before/after verification.**
 - Preview = branch code against the PRODUCTION database (one Supabase project). So test data created on a preview is REAL data and must be cleaned.
 
