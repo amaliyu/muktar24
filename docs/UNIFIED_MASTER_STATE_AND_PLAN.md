@@ -3,7 +3,7 @@
 
 Repo: `amaliyu/muktar24` (PRIVATE) · Prod branch: `main` · Stack: React 18 + Vite 5 + Supabase (PostgreSQL, RLS) + Vercel
 App: APC Manager — internal ERP for Abuja Precast Concrete Limited
-**Updated: 2026-07-14 (Session 21 — dead deliveries table cleanup, labour/loading dashboard widget, staff messaging system, notification bell + messages shortcut).** All DB state verified by live query, not memory.
+**Updated: 2026-08-07 (Session 23 — Phase 6A maintenance + 6B curing sign-off, accounting-report rebuild, data-integrity fixes, multi-role access control; PRs #92–#110). Session 22 (2026-07-14) was the Phase 6 design-lock, planning-only — see §9.** All DB state verified by live query, not memory.
 **Status: BETA. A physical/manual backup system runs in parallel — NO downtime pressure.**
 **Operating mode: SLOW AND VERIFIED — fix on a branch → test on the branch's Vercel preview AS THE AFFECTED ROLE → confirm with own eyes → MD merges → re-verify production.**
 
@@ -18,6 +18,59 @@ App: APC Manager — internal ERP for Abuja Precast Concrete Limited
 ---
 
 ## 1. SESSION HISTORY (most recent first)
+
+### ✅ SESSION 23 (2026-07-15 → 2026-08-07) — PHASE 6A/6B BUILD + ACCOUNTING-REPORT REBUILD + DATA-INTEGRITY FIXES + MULTI-ROLE ACCESS
+**PRs: #92–#110 (19 PRs), all merged. This is the first build session after the Phase 6 design-lock (Session 22, §9). It combines the first two Phase 6 sub-phases (6A maintenance, 6B curing sign-off) with a large, unplanned accounting-report and data-integrity clean-up that surfaced while building — several confidently-"done" earlier features were found silently broken on inspection (see the recurring bug patterns catalogued in §10). No DB migrations were applied from this window; the few schema touches these PRs relied on (production_log audit columns, inventory unit fields) are noted per-PR and were applied via planning-chat where required.**
+
+**Session-numbering note:** Session 21 and Session 22 are BOTH dated 2026-07-14 and are distinct — S21 was the build session (PRs #84–#88, logged in §1 above); S22 was a design-only Phase 6 planning session (see the S22 entry below and §9), landed via docs-only PR #91. S22 previously had no §1 entry (only the §9 planning section, mirroring how Session 13's Phase 5 re-plan carries both a §1 stub and §8); that stub is now added below. This build session is therefore Session 23.
+
+**A. Phase 6A — Maintenance & downtime (PRs #92, #93)**
+- **Maintenance page (PR #92):** new Maintenance section — per-asset PM checklist (daily/weekly/monthly/annual items with assigned role and completion logging) plus a downtime log capturing every machine/truck stoppage with start/end, reason category (breakdown, changeover, power outage, material shortage, awaiting parts), and resolver. This is the top-priority Phase 6 sub-phase per the §9 research report — it is what makes a real, measured OEE figure possible instead of the current ~35–50% estimate.
+- **Staff-picker team filter (PR #93):** the maintenance staff/assignee picker was listing all staff; fixed to show only the asset's own team by filtering on `reports_to_staff_id` (the reporting-line FK), so a PM assigning a checklist sees only their own crew rather than the whole company.
+
+**B. Phase 6B — Curing sign-off (PRs #94, #95, #96)**
+- **Batches product + curing sign-off (PR #94):** the Batches form gained a product dropdown writing `product_id` (previously free-text block type only), an explicit "Batch Date" field, and an advisory curing sign-off — a Store Officer "ripe for picking" affirmation shown against the batch's age. Advisory-only at this stage (no hard block), the groundwork for the §9 6B minimum-curing-age check.
+- **Role-gating (PR #95, branch `claude/batches-product-curing-signoff`, stacked on #94):** Batches Edit/Delete were ungated in the UI while the DB RLS restricted them; the client now gates those actions to the same roles RLS enforces, so the buttons no longer appear for roles whose writes would silently fail.
+- **Process recovery (PR #96):** commit `b9f06d6` (part of the #95 work) landed on the #94 branch rather than a fresh branch off main. Rather than rewrite history, PR #96 opened a new PR from that branch (`claude/batches-product-curing-signoff`) against main to re-land the change cleanly. #95's content effectively re-landed as #96. Recorded as a process lesson, not a code defect.
+
+**C. Data-integrity incident — production/roster (PRs #97, #98, #99 + follow-up `fbdad15`)**
+- **Production edit audit trail + duplicate warning (PR #97):** production-log edits now stamp `updated_at`/`updated_by`; the entry form warns when a same-day, same-product row already exists (duplicate-entry guard). Bug caught pre-merge: `onClick={handleSave}` passed the React event object as the `skipDupCheck` argument — fixed to `onClick={() => handleSave()}`.
+- **Auto-deduct dust/chippings fix (PR #98):** `autoDeductProduction` matched inventory items by keyword (`find('granite')`), which never matched the real item named "DUST" — so dust and chippings consumption was never deducted from stock on production. Fixed to match the actual item records; the form field and column were wired through so the deduction fires. This is the "keyword-match inventory lookup" bug class (see §10).
+- **Roster upsert-dedupe (PR #99 + follow-up `fbdad15`):** roster edits used delete-then-reinsert, but the DELETE RLS policy was narrower than the INSERT policy — the delete silently no-op'd for some roles and duplicate worker rows accumulated. Replaced with `upsert(rows, { onConflict })` plus a duplicate-worker guard. Follow-up commit `fbdad15` fixed a PostgREST `NOT IN` filter that broke on unquoted hyphenated UUIDs by quoting each value (`"uuid1","uuid2"`). The removed-worker row count could not be empirically re-confirmed from this window (no credentialed preview / REST access — see method note in §6); the DB-level logic was verified via service-role round-trip and disclosed in the PR.
+
+**D. Messaging nav + notification states (PR #100)**
+- Messages had become unreachable for some roles because it was missing from their `ROLE_PAGES` entries; the page was re-added to the affected roles. The notification bell's empty/blank states were fixed so an empty inbox renders a proper "no notifications" state rather than a blank dropdown.
+
+**E. Inventory & production stock-event correctness (PRs #101, #102, #105)**
+- **Production-delete inventory reversal (PR #101):** deleting a production entry did not reverse the stock it had consumed/produced; `deleteEntry` now reverses the linked inventory movement so stock returns to its pre-entry level.
+- **Inventory kg/tonnes toggle + recorder (PR #102):** inventory movement entry gained a kg⇄tonnes unit toggle (storing a consistent canonical unit) and a read-only "Recorded By" field showing who logged the movement.
+- **editMovement double-deduct + role-gate (PR #105):** editing an inventory movement re-applied the deduction using the *new* movement type instead of reversing the *old* one first, double-counting stock; fixed to reverse using `oldMovement.movement_type` before applying the edit. The movement action buttons were also role-gated to match who may write.
+
+**F. Payment-request attachment read-back (PR #103)**
+- Attachments uploaded to a payment request were not shown back on the request after save (write-only). The detail view now reads back and lists the stored attachment(s) so reviewers can open the evidence they were asked to check.
+
+**G. Accounting audit — six financial reports rebuilt (PRs #104, #106, #107)**
+- **Reports date-column + error-swallow fix (PR #104):** `fetchExpensesRange` filtered on a non-existent `date` column instead of `expenses.expense_date`, so expense reports over any range returned nothing; fixed. Separately, 13 report fetchers used the `const { data } = await q; return data || []` pattern, swallowing every PostgREST error into an empty result (a report that failed looked identical to a report with no data). All 13 now surface the error instead of hiding it. This is the "swallowed-error" bug class (see §10).
+- **P&L accrual rebuild (PR #106):** the Profit & Loss report was rebuilt as a proper accrual income statement (revenue earned vs. expenses incurred in the period), replacing the earlier cash-mixed logic.
+- **Expense/supplier/cash-flow/balance-sheet rebuild (PR #107):** the remaining statements were rebuilt with every column re-verified against `information_schema.columns` first (per the rule in §6). Column traps fixed and catalogued in §10 — notably `expenses.expense_date` (not `date`), `expenses` has no `category`/`subcategory` text column (join `category_id`), `supplier_transactions.transaction_date`, and `suppliers.company_name` (not `name`) — while confirming that `production_log`/`damage_log`/`attendance`/`stock_movements`/`vehicle_fuel_log` genuinely do have a `date` column and must NOT be "fixed."
+
+**H. Edit-freedom / payroll-lock gating (PRs #108, #109)**
+- **Roster/loading payroll-lock gating (PR #108):** roster and truck-loading rows Edit/Delete are now gated on the linked payroll's status — rows belonging to a payroll that has advanced past draft (approved/paid) are locked to protect payroll integrity; unlinked or draft-linked rows stay editable.
+- **Truck Loading date-range filter (PR #109):** the Truck Loading log gained a from/to date-range filter and a null-date toggle (to surface undated legacy rows), plus a signpost pointing to the payroll flow — reusing the range-picker pattern built for payroll in Session 20.
+
+**I. Multi-role access control (PR #110)**
+- Introduced effective-roles: a user's primary role plus any active (non-revoked, non-expired) grants, returned by the `my_effective_roles()` RPC and attached to the profile via `attachEffectiveRoles`. New `src/lib/roles.js` exports `effectiveRolesOf(userProfile)` (falls back to `[userProfile.role]`) and `hasRole(userProfile, ...roles)` (checks primary OR grant — for *delegatable* permissions only).
+- Nav is now the UNION of the pages allowed by every effective role; the ICO/BOARD read-only CSS masks are relaxed on `grantedPages`. New MD-only `RoleGrantsManager` screen (list/grant/revoke, with a `check_role_conflict` separation-of-duties warning) backed by `authService.listActiveGrants/checkRoleConflict/grantRole/revokeRole`.
+- **Deliberately left as PRIMARY-role checks (NOT converted to `hasRole`):** MD-only authority, the approval-chain actor gates, and the button-level checks in four files (Labour, Reports, Maintenance, FinancialStatements). These were itemised in the PR as intentionally deferred so a granted role cannot silently inherit money-authority; converting them is a future scoped task (see §4).
+
+---
+
+### 🔵 SESSION 22 (2026-07-14) — PHASE 6 DESIGN-LOCK: OPERATIONAL EXCELLENCE (PLANNING ONLY, PR #91)
+**No code/schema. Design only. Full locked design in §9. Landed via docs-only PR #91 (adds §9 to this document).**
+- Out of an MD-commissioned external benchmarking pass (precast operation vs. global/Nigerian standards — OEE/TPM, NIS 87, imported-parts lead times, Abuja demand), the MD ratified a five-sub-phase Phase 6 roadmap (6A maintenance/downtime, 6B curing enforcement, 6C spare parts, 6D fleet status, 6E role-KPI dashboard/reminders) with a priority-ordered sequencing keyed to the report's own gap ranking. Enforcement/penalty design and the "phase 3" scorecard are explicitly out of scope for this phase.
+- Numbered as its own session (like Session 13's Phase 5 re-plan) because it is a distinct, MD-ratified design event even though it shipped no code. Build began the following session (Session 23, PRs #92 onward).
+
+---
 
 ### ✅ SESSION 21 (2026-07-14) — DEAD TABLE CLEANUP + LABOUR DASHBOARD + STAFF MESSAGING + NOTIFICATION BELL
 **PRs: #84 (dead deliveries table cleanup), #85 (labour & loading dashboard widget), #86 (staff messaging system), #87 (notification bell), #88 (messages shortcut button). All merged. DB changes applied via planning-chat migrations (deliveries table drop; messaging schema; notifications schema + triggers; user_profiles_directory is_active column; fn_is_conversation_participant SECURITY DEFINER function; fn_resolve_user_by_name helper).**
@@ -503,7 +556,15 @@ A long, multi-workstream session. All items below tested and merged unless noted
 
 ---
 
-## 2. VERIFIED LIVE STATE (queried 2026-06-25)
+## 2. VERIFIED LIVE STATE
+
+### Snapshot 2026-07-27 (latest — planning-chat live query)
+- **Schema scale:** 99 tables. **325 RLS policies, of which 234 are multi-role-aware** (post PR #110 effective-roles rollout — a policy is "multi-role-aware" when it admits a set of roles rather than a single hard-coded role).
+- **Expenses:** 456 expense records totalling **₦15,811,143**.
+- **⚠️ TOTALS ARE IN FLUX — HISTORICAL BACKFILL TO JANUARY IN PROGRESS.** Inventory and financial totals (expenses, P&L, balance sheet, cash flow, stock levels) are being back-populated with real Jan–2026-onward data and are **not yet a settled opening position**. Do NOT treat any inventory or financial aggregate as final, and do NOT "reconcile to zero" or raise discrepancy alarms off these figures until the backfill is declared complete and a physical count has been taken (see §3 queue item 1 and §5). Reports built this session (P&L/balance-sheet/cash-flow/supplier/expense — PRs #104/#106/#107) are structurally correct but read from data that is still moving.
+- All financial reports now surface PostgREST errors instead of swallowing them (PR #104) — an empty report now reliably means "no data," not "the query silently failed."
+
+### Snapshot 2026-06-25 (baseline)
 - Staff: 19 (18 active, 1 onboarding — Ransom APC-EMP-018). Invoices: 28. Payments: 20. Receipts: 8.
 - **0 policies reference auth.users. 0 allow-all overrides.**
 - **Staff PII:** `staff_select` = md/hr_officer only. Definer views `staff_public` (all authenticated), `staff_payroll` (finance-only) live.
@@ -532,7 +593,17 @@ A long, multi-workstream session. All items below tested and merged unless noted
 | 3 | RLS for remaining tables | ✅ baseline complete; **2 deeper leaks (staff-PII, invoices/payments) found & CLOSED in Session 6** |
 | 4 | HR modules | ✅ **CLOSED** — 4a ✅ (S3/S4), 4b ✅ incl. B-1/B-2 (S7/S8), 4c ✅ (S10, PR #32), 4d ✅ cards (S5) + attendance kiosk (S11, PRs #34/#35). Remaining HR-adjacent deferrals are standalone line items in §4, not under this stream |
 | 4.5 | **Full backend audit (pre-#5)** | ✅ **CLOSED (S12)** — executed, report `docs/BACKEND_AUDIT_PRE5.md`; all fixes applied (PRs #39/#40/#41 merged + DB migrations). See audit scope below. |
-| 5 | **Payment-request (EXPENDITURE) + ingestion engine** | **RE-PLANNED (S13) — DESIGN LOCKED, see §8.** Old "(revenue)" label was stale; Phase 5 is expenditure-first, revenue matching committed as sub-phase 5d. Sub-phases 5a–5e. Schema NOT started (blocked on §8 pre-schema verification, items 3 & 4 open). |
+| 5 | **Payment-request (EXPENDITURE) + ingestion engine** | **5a/5b/5c ✅ live (S17).** 5d (revenue matching) + 5e (treasury funding) queued per §8. **5c ingestion engine is deliberately LAST in the current queue (below) — parked behind the backfill/costing work.** |
+| 6 | **Phase 6 — Operational Excellence (6A–6E)** | **DESIGN LOCKED (S22, §9). BUILD STARTED (S23):** 6A maintenance/downtime ✅ (PR #92/#93), 6B curing sign-off ✅ advisory (PR #94/#95/#96). 6C spares, 6D fleet, 6E role-KPI dashboard/reminders NOT started. |
+
+### Current work queue (as of 2026-08-07 — supersedes the abstract table above for day-to-day priority)
+Closed/settled and NOT in the active queue: payroll RPC cutover (#0/#2), RLS baseline rollout (#3), the whole HR module stream (#4). The active queue, in order:
+1. **Physical count reconciliation (post-backfill)** — once the historical backfill to January (see §2 warning) is declared complete, take a real physical inventory count and reconcile it against the system's computed stock. Nothing downstream that depends on true stock levels is trustworthy until this is done. **Blocks item 2.**
+2. **WAC (weighted-average-cost) costing → cost per 1,000 blocks** — implement weighted-average unit costing on inventory consumption to produce a real cost-per-1,000-blocks figure. **Blocked on (1)** — WAC is meaningless on stock quantities/values that are still being backfilled and not yet physically verified.
+3. **Waybill → order linkage** — close the remaining gap tying a waybill (delivery) back to its originating order, so delivery/fulfilment can be reconciled against what was sold.
+4. **Bank statement parser** — the Taj-PDF / Moniepoint-Excel parser hardening (the single-point-of-failure Taj parser flagged in §8) as the practical next step toward real statement ingestion.
+5. **Opening-balance reconciliation with DOXIX** — reconcile the opening balances against the external DOXIX figures; specifically explain the ~₦147.8m opening-balance gap (₦233m fixed assets recorded vs. zero recorded debt) — see §5.
+6. **Ingestion engine (Phase 5c continuation) — LAST / parked** — the full statement-ingestion + match-state-machine build stays at the back of the queue behind the backfill, costing, and reconciliation work above.
 
 ### Phase 4 sub-roadmap — ✅ STREAM CLOSED (S11)
 All four sub-phases shipped. HR-adjacent deferrals moved to standalone line items in §4 (carry-over automation, future-hire pro-ration, EMP-018 activation, orphaned photo cleanup, card header polish).
@@ -556,6 +627,19 @@ Bounded audit, five categories:
 ---
 
 ## 4. KNOWN GAPS / FORWARD ITEMS
+
+**— Session 23 additions —**
+- **⚠️ Interlock/kerb curing standard NOT set (Phase 6B open).** The curing sign-off (PR #94) is advisory only and has no configured minimum curing age for interlock and kerb products — the NIS 87-derived default the §9 6B design calls for has not been entered/ratified. Until the MD confirms the interlock/kerb curing days, the sign-off cannot become a real system check (it stays a judgment prompt). See §5.
+- **truck_loading_log auto-expense trigger fires on the WRONG fields.** The trigger that projects a truck-loading row into an expense fires on changes to `total_amount` / `blocks_loaded`, NOT on `date`. Consequence: back-dating or correcting a loading row's `date` does not refresh the linked expense's effective period, so a corrected date can leave the expense sitting in the wrong reporting period. Flagged, not yet fixed — needs a planning-chat trigger change; do not "fix" in app code.
+- **Multi-role button-level conversions deferred in 4 files (PR #110).** The button/action gates in **Labour.jsx, Reports.jsx, Maintenance, and FinancialStatements** were deliberately left as PRIMARY-role checks rather than converted to `hasRole()` — so a *granted* (non-primary) role does not silently inherit those actions. Converting them (where safe and delegatable) is a future scoped task; MD-only authority and approval-chain actor gates should stay primary-role forever.
+- **36 unvalued deliveries.** 36 delivery/waybill rows carry no value (no price/cost attached), so any margin or fulfilment-value report understates by those rows. Part of the same data-completeness stream as the January backfill (§2) — likely closes as the backfill and waybill→order linkage (§3 queue item 3) proceed. Do not treat delivery-value totals as complete until these are valued.
+- ✅ **Phase 6A maintenance/downtime — DONE (S23, PR #92/#93).** Maintenance page (PM checklists + downtime log) live; staff-picker filtered to the asset's team via `reports_to_staff_id`. First real OEE data source now exists. Real-world usage check worth doing once crews start logging.
+- ✅ **Phase 6B curing sign-off — PARTIAL (S23, PR #94/#95/#96).** Product dropdown + `product_id`, Batch Date, and advisory Store-Officer curing sign-off live; Edit/Delete role-gated to match RLS. **Remaining:** wire the sign-off to a configured minimum curing age once the interlock/kerb standard is set (item above) to make it an enforceable check rather than advisory.
+- **Phase 6C spare-parts register — NOT started (§9).** Critical-spares register with criticality tier, on-hand qty, reorder threshold, Turkish-parts lead time, reorder alerts.
+- **Phase 6D fleet status tracking — NOT started (§9).** Active/down per truck (extends `vehicles`), repair log + expected-return date; closes the "2 of 4 trucks down with no system-visible capacity impact" blind spot.
+- **Phase 6E role-KPI dashboard + reminders — NOT started (§9).** Depends on 6A–6D data; this is where the parked Session-21 "phase 1" role-responsibility reminders become concretely buildable.
+
+**— Standing items —**
 - ✅ **Latent-bug sweep — DONE (Session 6).** All six number generators (invoice/waybill/receipt/supplier/batch/employee) audited and given collision handling; no quote/proforma/PO generator exists. Two RLS leaks (staff-PII, invoices/payments) found and closed. Per-role RLS verified for each.
 - ✅ **Silent Supabase client fallback — DONE (PR #18, Session 6/7).** `src/lib/supabase.js` now throws immediately on missing `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` instead of falling back to placeholder.
 - ✅ **Staff payroll state machine — DONE (PR #20, Session 7).** `advance_staff_payroll` RPC + `trg_staff_payroll_guard` + `staff_payroll_audit`. Approval chain: accountant creates (draft) → ICO → MD → accountant/MD marks paid. Advance deductions integrated into `payroll_lines.deductions`; net-pay fix in `openRun`.
@@ -592,6 +676,13 @@ Bounded audit, five categories:
 ---
 
 ## 5. DECISIONS / MILESTONES PENDING (MD)
+
+**— Open, needs an MD decision (Session 23) —**
+- ⬜ **Deactivate Peter Gomina's staff record.** Confirmed as a record to be deactivated (no longer active); awaiting MD go-ahead to flip `employment_status`/`is_active`. Deactivation only — not a delete (preserve history/child rows).
+- ⬜ **Confirm interlock & kerb curing days.** Phase 6B's curing sign-off (PR #94) cannot become an enforceable check until the MD confirms the minimum curing age for interlock and kerb products (NIS 87 gives a default, but the MD-configurable value must be ratified). Blocks the §4 Phase-6B remaining item.
+- ⬜ **DOXIX opening-balance reconciliation — explain the ~₦147.8m gap.** The opening position carries **₦233m in fixed assets recorded against zero recorded debt**, an implausible combination that needs explaining before opening balances can be trusted. MD/DOXIX to reconcile: either the debt side is un-recorded (liabilities missing) or the asset valuation needs revisiting. This is §3 queue item 5 and gates any final financial-statement sign-off.
+
+**— Settled / historical —**
 - ✅ **Staff-payroll approval chain — DECIDED & BUILT (Session 7).** accountant creates (draft) → ICO approves → MD approves → accountant/MD marks paid + records per-line amounts.
 - Go-live data re-entry milestone (parked) — clean opening balances; resolves dust kg→tons (~16.3t) gap & beta errors.
 - Correction-as-adjustment-movement rule (LOCKED) — corrections are new logged offsetting entries, never silent edits.
@@ -610,6 +701,10 @@ Bounded audit, five categories:
 7. After any RLS/policy change, smoke-test the app AS EACH affected role before promoting.
 8. Verify fix proposals against the live DB before applying — several "confident" diagnoses have been wrong on the facts.
 9. Every PR must be diffed against current main before MD review — branch base verified, not assumed. (Added after the PR #36 near-miss: a fix built on a stale pre-#34/#35 base would have deleted the entire kiosk feature — 946 deletions — if merged.)
+10. **Never trust a "done" claim — verify by inspection, both sides.** A feature described as working may be silently broken. Before treating anything as done: (a) diff the actual PR/code against current main, and (b) verify behaviour against the live DB by querying — do not rely on the plan doc, a commit message, or a prior "✅". Session 23 alone found dust deduction that never fired (PR #98), roster deletes that silently no-op'd (PR #99), expense reports filtering a non-existent column (PR #104), and 13 report fetchers swallowing every error (PR #104) — all previously "done." See §10 for the recurring patterns.
+11. **Verify every column against `information_schema.columns` before writing a query.** Do not assume a column name from convention or another table. Confirm the exact name/type in the target table first. This rule exists because assumed column names caused real production bugs (`expenses.date` did not exist; the real column is `expense_date`). Corollary: some tables genuinely DO have a `date` column (`production_log`, `damage_log`, `attendance`, `stock_movements`, `vehicle_fuel_log`) — verifying protects against "fixing" those by mistake too. Full trap catalogue in §10.
+
+**Method note — verification access from the coding window (Session 23):** This window can verify DB-level facts (schema, RLS logic, row round-trips) via the Supabase connector, **but that connector runs as the service role — it bypasses RLS and PostgREST parsing**, so it cannot prove how a query behaves *as a specific role through the app*. There is also **no credentialed Vercel-preview login** available here and the agent proxy blocks direct REST/curl to the Supabase host. Net effect: role-scoped, end-to-end "as the affected role in the browser" testing (Working Rule #7) cannot be fully executed from this window. Where a claim could only be proven that way, it was verified as far as possible via service-role round-trips and **the residual gap was disclosed in the PR body** rather than overstated (e.g. the removed-worker row-count re-check in PR #99). MD's live per-role test remains the authoritative check.
 
 ---
 
@@ -690,6 +785,27 @@ Bounded audit, five categories:
 | Messages shortcut button (S21, PR #88) | ✅ MERGED — MessagesBell.jsx alongside notification bell; reuses unreadMsgCount state; no new polling | — |
 | Notification Phase 1 — role reminders | ⬜ FORWARD GOAL — parked; needs agreed per-role SLAs before build | MD ratifies response-time expectations |
 | Notification Phase 3 — performance tracking | ⬜ FORWARD GOAL — parked; needs real Phase 2 usage data first | After Phase 2 bedded in |
+| **Phase 6 design-lock (S22, PR #91)** | ✅ MERGED — §9 roadmap (6A–6E) added to master doc; planning-only | Build sub-phase by sub-phase |
+| Phase 6A maintenance page (S23, PR #92) | ✅ MERGED — PM checklists + downtime log; first real OEE data source | Real-world usage check once crews log |
+| Maintenance staff-picker team filter (S23, PR #93) | ✅ MERGED — picker filtered to asset team via `reports_to_staff_id` | — |
+| Phase 6B Batches product + curing sign-off (S23, PR #94) | ✅ MERGED — product dropdown/`product_id`, Batch Date, advisory Store-Officer sign-off | Set interlock/kerb curing days (§5) to make it enforceable |
+| Batches Edit/Delete role-gate (S23, PR #95→#96) | ✅ MERGED — UI gated to match RLS; #95 re-landed as PR #96 (process recovery) | — |
+| Production audit trail + duplicate warning (S23, PR #97) | ✅ MERGED — `updated_at`/`updated_by`; same-day dup guard; `onClick` event-arg bug fixed | — |
+| Production dust/chippings auto-deduct fix (S23, PR #98) | ✅ MERGED — keyword-match lookup that never matched "DUST" fixed; deduction now fires | — |
+| Roster upsert-dedupe (S23, PR #99 + `fbdad15`) | ✅ MERGED — delete-then-reinsert (RLS silent no-op → dup rows) replaced with upsert + guard; UUID `NOT IN` quoting fix | removed-worker row-count re-check not provable from window (disclosed) |
+| Messages nav + notification empty-states (S23, PR #100) | ✅ MERGED — Messages re-added to affected `ROLE_PAGES`; blank notification states fixed | — |
+| Production-delete inventory reversal (S23, PR #101) | ✅ MERGED — `deleteEntry` reverses the linked stock movement | — |
+| Inventory kg/tonnes toggle + recorder (S23, PR #102) | ✅ MERGED — unit toggle (canonical unit) + read-only "Recorded By" | — |
+| Payment-request attachment read-back (S23, PR #103) | ✅ MERGED — stored attachments now listed on the request detail | — |
+| Reports expense_date + error-swallow fix (S23, PR #104) | ✅ MERGED — `expense_date` (was non-existent `date`); 13 fetchers stop swallowing PostgREST errors | — |
+| Inventory editMovement double-deduct + role-gate (S23, PR #105) | ✅ MERGED — reverses `oldMovement.movement_type` before applying edit; movement buttons role-gated | — |
+| P&L accrual rebuild (S23, PR #106) | ✅ MERGED — rebuilt as proper accrual income statement | Data still moving (backfill) |
+| Reports rebuild — expense/supplier/cashflow/balancesheet (S23, PR #107) | ✅ MERGED — every column re-verified vs `information_schema`; traps in §10 | Data still moving (backfill) |
+| Roster/loading payroll-lock gating (S23, PR #108) | ✅ MERGED — Edit/Delete gated on linked payroll status (locked past draft) | — |
+| Truck Loading date-range filter (S23, PR #109) | ✅ MERGED — from/to filter + null-date toggle + payroll signpost | — |
+| Multi-role access control (S23, PR #110) | ✅ MERGED — effective roles, union nav, MD `RoleGrantsManager`, `hasRole`; `src/lib/roles.js` | Button-level `hasRole` conversion in 4 files deferred (§4) |
+| Phase 6C spares / 6D fleet / 6E dashboard | ⬜ NOT started (§9) | Build after backfill/costing queue (§3) |
+| Historical backfill to January | 🟡 IN PROGRESS — totals in flux (§2) | Then physical count + WAC costing (§3) |
 | Go-live re-entry / dust gap | parked | MD triggers |
 
 ---
@@ -798,3 +914,53 @@ Live-verified (code on main + live DB query 2026-07-03). Disposition per compone
 2. **Sequencing is priority-ordered by the research report's own gap ranking**, not arbitrary: 6A (maintenance/downtime) first because it's the top-impact, lowest-cost gap per the report and is a prerequisite for ever having a real OEE number; 6B (curing) and 6D (fleet) next as cheap, high-value, independent builds; 6C (spares) after, since it benefits from 6A's downtime data existing; 6E (dashboard/reminders) last since it depends on the others having real data to surface.
 3. **Enforcement/penalty design is explicitly out of scope for this phase** — building measurement before consequence, deliberately, so the two aren't tangled together and the KPIs can be evaluated on their own merit first.
 4. **This phase supersedes/concretizes the "phase 1" and "phase 3" notification concepts** parked in Session 21 — phase 1 (role-responsibility reminders) was deferred at the time for lacking a real, agreed definition of expected duties; 6A-6D now provide that real definition (PM checklists, curing windows, spares thresholds, fleet status) instead of guessed due-dates.
+
+---
+
+## 10. COLUMN-NAME TRAPS & RECURRING BUG PATTERNS
+
+Reference material distilled from the Session 23 accounting/data-integrity clean-up. **Before writing any query, confirm the column against `information_schema.columns` for the specific table (Working Rule #11).** Do not carry an assumption from one table to another — the same concept has different column names across tables here.
+
+### 10.1 Date columns — where `date` exists and where it does NOT
+The single most expensive trap: assuming a table has a `date` column. A query that filters/sorts on a non-existent column does not error usefully through PostgREST in the patterns used here — it returns nothing (or, with the swallowed-error pattern below, an empty array that looks like "no data").
+
+**Tables that do NOT have `date` — use the real column:**
+| Table | WRONG (assumed) | RIGHT (actual) |
+|---|---|---|
+| `expenses` | `date` | **`expense_date`** |
+| `supplier_transactions` | `date` | **`transaction_date`** |
+| `payment_requests` | `date` | `transaction_date` (money-moved) / `created_at` (record-entered) — distinct, pick deliberately |
+
+**Tables that genuinely DO have a `date` column — do NOT "fix" these to something else:**
+`production_log`, `damage_log`, `attendance`, `stock_movements`, `vehicle_fuel_log`. (`stock_movements.date` is `date NOT NULL` — confirmed in §8 item 1.) When a report joins several of these plus `expenses`, some legs correctly read `date` and others correctly read `expense_date`/`transaction_date` in the SAME query — that asymmetry is correct, not a bug to "clean up."
+
+*Root cause of the original bug (PR #104):* `fetchExpensesRange` filtered `expenses` on `date`, which does not exist → every dated expense report returned empty. Fixed to `expense_date`.
+
+### 10.2 `expenses` has no free-text category columns
+- `expenses` has **no `category` text column and no `subcategory` column.** Category lives in **`category_id`** (FK) — join `expense_categories` to get a human label; never `SELECT ... category` off `expenses`.
+- `expense_categories` itself carries the parent/group structure and `is_active` (used to deactivate Labour/Salaries so they never appear as payment-request options — see §8 Decision 5). Read the label/grouping there.
+
+### 10.3 Supplier naming
+- `suppliers` — the company name column is **`company_name`, NOT `name`.** A `SELECT name` returns nothing/errors depending on path. Supplier statement / vendor pickers must read `company_name`.
+- `supplier_transactions` — date column is **`transaction_date`** (see 10.1).
+
+### 10.4 RLS delete-then-reinsert bug class (silent no-op → duplicate accumulation)
+**Pattern:** app code "replaces" a set of child rows by DELETE-ing them then INSERT-ing fresh ones (e.g. roster worker rows). **Failure mode:** if the table's DELETE RLS policy is *narrower* than its INSERT policy, the DELETE silently affects zero rows for some roles (RLS makes the rows invisible to the delete, no error raised), then the INSERT adds a fresh copy — so every "edit" **accumulates duplicates** instead of replacing.
+- **Seen in:** roster edit (PR #99) — fixed by switching to `upsert(rows, { onConflict })` + a duplicate-worker guard, so there is no delete leg to silently fail.
+- **Rule:** never model "replace these rows" as delete-then-reinsert on an RLS table unless the DELETE and INSERT policies are provably identical in scope. Prefer `upsert` on a real conflict key.
+- **Related trap (same PR):** a PostgREST `NOT IN` / `.not('id','in',...)` filter with unquoted **hyphenated UUIDs** parses wrong — each UUID must be quoted: `("uuid1","uuid2")`. Fixed in follow-up `fbdad15`.
+
+### 10.5 Swallowed-error pattern (a failed query looks like empty data)
+**Pattern:** `const { data } = await supabase...; return data || []` — the `error` is destructured away and never checked, so a query that FAILED (bad column, RLS block, network) returns `[]`, indistinguishable from a legitimately empty result. Reports built this way fail *silently and invisibly*.
+- **Seen in:** 13 Reports fetchers (PR #104), all corrected to check and surface `error`.
+- **Rule:** always destructure and act on `error`. In reporting code especially, an error must be visible (thrown or shown), because "empty report" and "broken report" must never look the same.
+
+### 10.6 Keyword-match inventory lookup (never matches the real item)
+**Pattern:** finding an inventory item by fuzzy keyword against a guessed name — e.g. `items.find(i => i.name.includes('granite'))` — when the real row is named something else (the actual item is **"DUST"**, not "granite"/"chippings").
+- **Seen in:** `autoDeductProduction` (PR #98) — dust/chippings consumption was never deducted from stock because the keyword never matched the real item name. Fixed to match the actual item records; form field + column wired through so the deduction fires.
+- **Rule:** resolve inventory items by id / exact catalogued name, never by an assumed substring. If a name-based lookup is unavoidable, verify it against the live `items` rows first.
+
+### 10.7 Reverse-then-apply on edits (avoid double-deduct)
+**Pattern:** editing a stock-affecting row re-applies the new effect without first undoing the old one → double-count.
+- **Seen in:** inventory `editMovement` (PR #105) — re-applied a deduction using the *new* `movement_type` without reversing the *old* movement first. Fixed to reverse using `oldMovement.movement_type`, then apply the edit. Same shape as the production-delete reversal gap (PR #101), where deletion didn't reverse the consumed stock at all.
+- **Rule:** any edit/delete of a row that changed stock must first reverse the row's *original* effect (using the original type/quantity), then apply the new one. Never apply the delta from the new values alone.
