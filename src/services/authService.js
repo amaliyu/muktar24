@@ -136,4 +136,41 @@ export const authService = {
     const { error } = await supabase.auth.updateUser({ password: newPassword })
     if (error) throw error
   },
+
+  // ── Multi-role grants (MD-only writes, enforced by the DB RPCs/RLS) ──
+
+  /** All active (non-revoked, non-expired) role grants across all users. */
+  async listActiveGrants() {
+    const { data, error } = await supabase
+      .from('user_role_grants')
+      .select('id, user_id, role, granted_by_name, granted_at, expires_at, reason')
+      .is('revoked_at', null)
+      .or('expires_at.is.null,expires_at.gt.' + new Date().toISOString())
+      .order('granted_at', { ascending: false })
+    if (error) throw error
+    return data || []
+  },
+
+  /** Returns a warning string if the role combo breaks separation of duties, else null. */
+  async checkRoleConflict(userId, role) {
+    const { data, error } = await supabase.rpc('check_role_conflict', { p_user_id: userId, p_new_role: role })
+    if (error) throw error
+    return data || null
+  },
+
+  /** Grant a role (MD-only). Null expiry → DB default (90 days). */
+  async grantRole(userId, role, reason, expiresAt) {
+    const { error } = await supabase.rpc('grant_user_role', {
+      p_user_id: userId, p_role: role,
+      p_reason: reason || null,
+      p_expires_at: expiresAt || null,
+    })
+    if (error) throw error
+  },
+
+  /** Revoke an active grant (MD-only). */
+  async revokeRole(userId, role) {
+    const { error } = await supabase.rpc('revoke_user_role', { p_user_id: userId, p_role: role })
+    if (error) throw error
+  },
 }

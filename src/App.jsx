@@ -1,6 +1,7 @@
 import { useState, useEffect, Component } from "react";
 import { supabase } from './lib/supabase';
 import { authService } from './services/authService';
+import { hasRole, effectiveRolesOf } from './lib/roles';
 import LoginScreen from './components/LoginScreen';
 import BoardDashboard from './components/BoardDashboard';
 import FinancialStatements from './components/FinancialStatements';
@@ -1717,7 +1718,7 @@ const Orders = ({ onNavigate, userProfile }) => {
                               {p.status === "confirmed" && (
                                 <button style={{ ...styles.btn("primary"), padding: "3px 8px", fontSize: "11px" }} onClick={() => generatePaymentReceiptPDF({ payment: p, customer: selected.customer, invoiceNumber: p._invoiceNumber, invoiceTotal: p._invoiceTotal || null, totalPaidSoFar: totalConfirmed })}>Receipt</button>
                               )}
-                              {['md','accountant'].includes(userProfile?.role) && <button style={{ ...styles.btn("secondary"), padding: "3px 8px", fontSize: "11px" }} onClick={() => { setEditPayment(p); setPayForm({ amount: String(p.amount_paid), date: p.payment_date }); setShowPayForm(true); }}>Edit</button>}
+                              {hasRole(userProfile, 'md', 'accountant') && <button style={{ ...styles.btn("secondary"), padding: "3px 8px", fontSize: "11px" }} onClick={() => { setEditPayment(p); setPayForm({ amount: String(p.amount_paid), date: p.payment_date }); setShowPayForm(true); }}>Edit</button>}
                               {userProfile?.role === 'md' && <button style={{ ...styles.btn("danger"), padding: "3px 8px", fontSize: "11px" }} onClick={() => setConfirmDelete({ ...p, type: "payment" })}>Remove</button>}
                             </div>
                           </div>
@@ -1728,14 +1729,14 @@ const Orders = ({ onNavigate, userProfile }) => {
                   <div style={{ marginTop: "16px" }}>
                     <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
                       {(selected.invoices || []).length === 0 ? (
-                        ['md','accountant','bdm'].includes(userProfile?.role) && <button style={styles.btn("primary")} onClick={handleGenerateInvoice} disabled={invoicing}>{invoicing ? "Generating…" : "Generate Invoice"}</button>
+                        hasRole(userProfile, 'md', 'accountant', 'bdm') && <button style={styles.btn("primary")} onClick={handleGenerateInvoice} disabled={invoicing}>{invoicing ? "Generating…" : "Generate Invoice"}</button>
                       ) : (
                         <>
                           <div style={{ width: "100%", fontSize: "12px", color: theme.textMuted, marginBottom: "6px" }}>
                             Invoice: <strong style={{ color: theme.accent }}>{selected.invoices[0].invoice_number}</strong>
                           </div>
                           <button style={styles.btn("primary")} onClick={handleGenerateInvoice} disabled={invoicing}>{invoicing ? "Downloading…" : "Download Invoice PDF"}</button>
-                          {['md','accountant'].includes(userProfile?.role) && <button style={styles.btn("secondary")} onClick={() => setShowPayForm(!showPayForm)}>+ Record Payment</button>}
+                          {hasRole(userProfile, 'md', 'accountant') && <button style={styles.btn("secondary")} onClick={() => setShowPayForm(!showPayForm)}>+ Record Payment</button>}
                           {userProfile?.role === 'md' && <button style={{ ...styles.btn("danger"), opacity: invDeleting ? 0.6 : 1 }} disabled={invDeleting} onClick={() => handleDeleteInvoice(selected.invoices[0])}>Delete Invoice</button>}
                         </>
                       )}
@@ -2454,7 +2455,7 @@ const Customers = ({ userProfile }) => {
 
   const isMarketer = userProfile?.role === 'marketer';
   const AMOUNT_ROLES = ['md','accountant','ico','board_member','bdm','marketer'];
-  const canSeeAmounts = AMOUNT_ROLES.includes(userProfile?.role);
+  const canSeeAmounts = hasRole(userProfile, ...AMOUNT_ROLES);
 
   const load = async () => {
     setLoading(true);
@@ -2919,7 +2920,7 @@ const Inventory = ({ onLowStockChange, userProfile }) => {
   // grant). ICO and board_member can view Inventory but not write, so the
   // Edit/Delete buttons are hidden for them rather than failing on click.
   const MOVEMENT_WRITE_ROLES = ['md', 'store_officer', 'production_manager', 'assistant_production_manager', 'logistics_manager'];
-  const canWriteMovement = MOVEMENT_WRITE_ROLES.includes(userProfile?.role);
+  const canWriteMovement = hasRole(userProfile, ...MOVEMENT_WRITE_ROLES);
   const [tab, setTab] = useState("registry");
   const [items, setItems] = useState([]);
   const [movements, setMovements] = useState([]);
@@ -4297,7 +4298,7 @@ const Batches = ({ userProfile }) => {
   //   batches_delete → md only
   const BATCH_WRITE_ROLES = ['md', 'production_manager', 'assistant_production_manager', 'store_officer'];
   const BATCH_DELETE_ROLES = ['md'];
-  const canWriteBatch = BATCH_WRITE_ROLES.includes(userProfile?.role);
+  const canWriteBatch = hasRole(userProfile, ...BATCH_WRITE_ROLES);
   const canDeleteBatch = BATCH_DELETE_ROLES.includes(userProfile?.role);
   const emptyForm = { productId: "", blockType: "", dateCured: today, qtyAccepted: "", createdBy: "", notes: "", linkedProds: [] };
   const [form, setForm] = useState(emptyForm);
@@ -5669,7 +5670,7 @@ const BankAccountsTab = ({ userProfile }) => {
   const [rejectReason, setRejectReason] = useState('');
   const [actioningId, setActioningId] = useState(null);
 
-  const canConfirm = userProfile?.role === 'md' || userProfile?.role === 'accountant';
+  const canConfirm = hasRole(userProfile, 'md', 'accountant');
 
   // Helpers for payment request reference matching
   const findPRCandidate = (tx) => {
@@ -7141,7 +7142,7 @@ const ReceiptsTab = () => {
 
 const Accounting = ({ userProfile }) => {
   const [tab, setTab] = useState('bookkeeping');
-  const isFinanceAdmin = userProfile?.role === 'md' || userProfile?.role === 'accountant';
+  const isFinanceAdmin = hasRole(userProfile, 'md', 'accountant');
   const TABS = [
     { id: 'bookkeeping', label: 'Daily Bookkeeping' },
     { id: 'pl', label: 'P&L Statement' },
@@ -7493,7 +7494,7 @@ const AdvancesPage = ({ userProfile }) => {
   };
 
   const role = userProfile?.role;
-  const canRecord = ['hr_officer', 'accountant', 'md'].includes(role);
+  const canRecord = hasRole(userProfile, 'hr_officer', 'accountant', 'md');
   const advStatusColor = s =>
     s === 'disbursed' ? theme.green :
     s === 'md_approved' ? theme.blue :
@@ -8797,7 +8798,7 @@ const LeavePage = ({ userProfile }) => {
   };
 
   const role = userProfile?.role;
-  const canRecord = ['hr_officer', 'md'].includes(role);
+  const canRecord = hasRole(userProfile, 'hr_officer', 'md');
   const leaveStatusColor = s =>
     s === 'md_approved' ? theme.green :
     s === 'ico_approved' ? theme.blue :
@@ -9516,8 +9517,8 @@ const AttendanceFlagsPage = ({ userProfile }) => {
 // ── DISCIPLINARY ──────────────────────────────────────────────
 const DisciplinaryPage = ({ userProfile }) => {
   const role = userProfile?.role;
-  const canIssue  = ['md', 'hr_officer'].includes(role);
-  const canReview = ['md', 'hr_officer'].includes(role);
+  const canIssue  = hasRole(userProfile, 'md', 'hr_officer');
+  const canReview = hasRole(userProfile, 'md', 'hr_officer');
   const canClose  = role === 'md';
 
   const [cases, setCases]         = useState([]);
@@ -9775,9 +9776,9 @@ const DisciplinaryPage = ({ userProfile }) => {
 // ── TRUCK LOADING ─────────────────────────────────────────────
 const TruckLoadingPage = ({ userProfile }) => {
   const role = userProfile?.role;
-  const canLog         = ['production_manager', 'assistant_production_manager', 'logistics_manager', 'md'].includes(role);
-  const canManageRates = ['logistics_manager', 'md'].includes(role);
-  const canDelete      = ['md', 'production_manager', 'assistant_production_manager', 'logistics_manager'].includes(role);
+  const canLog         = hasRole(userProfile, 'production_manager', 'assistant_production_manager', 'logistics_manager', 'md');
+  const canManageRates = hasRole(userProfile, 'logistics_manager', 'md');
+  const canDelete      = hasRole(userProfile, 'md', 'production_manager', 'assistant_production_manager', 'logistics_manager');
 
   const defaultTab = canLog ? 'log' : 'rates';
   const [tab, setTab] = useState(defaultTab);
@@ -10494,6 +10495,145 @@ const navItems = [
   ]},
 ];
 
+// ── ROLE GRANTS (MD-only) ─────────────────────────────────────
+// Temporary additional roles: grant/revoke, with a separation-of-duties
+// warning (advisory — MD may accept and proceed). MD is never grantable.
+const RoleGrantsManager = ({ users }) => {
+  const [grants, setGrants]   = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [gErr, setGErr]       = useState('');
+  const [gOk, setGOk]         = useState('');
+  const [form, setForm]       = useState({ user_id: '', role: '', reason: '', expires_at: '' });
+  const [conflict, setConflict] = useState(null);   // warning string awaiting confirmation
+  const [busy, setBusy]       = useState(false);
+  const [revoking, setRevoking] = useState(null);
+
+  const grantableRoles = APP_ROLES.filter(r => r.id !== 'md');
+  const userName = (id) => users.find(u => u.id === id)?.full_name || users.find(u => u.id === id)?.email || 'Unknown';
+  const userPrimary = (id) => { const u = users.find(u => u.id === id); return u ? (APP_ROLES.find(r => r.id === u.role)?.label || u.role) : '—'; };
+  const roleLabel = (id) => APP_ROLES.find(r => r.id === id)?.label || id;
+
+  const load = async () => {
+    setLoading(true);
+    try { setGrants(await authService.listActiveGrants()); }
+    catch (e) { setGErr(e?.message || 'Could not load grants'); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+
+  // Grant: check conflict first; if the DB flags one, require explicit confirm.
+  const submitGrant = async (bypassConflict = false) => {
+    setGErr(''); setGOk('');
+    if (!form.user_id || !form.role) { setGErr('Pick a user and a role.'); return; }
+    if (form.role === 'md') { setGErr('MD cannot be granted.'); return; }
+    setBusy(true);
+    try {
+      if (!bypassConflict) {
+        const warning = await authService.checkRoleConflict(form.user_id, form.role);
+        if (warning) { setConflict(warning); setBusy(false); return; }
+      }
+      const expiresIso = form.expires_at ? new Date(form.expires_at + 'T23:59:59').toISOString() : null;
+      await authService.grantRole(form.user_id, form.role, form.reason.trim() || null, expiresIso);
+      setConflict(null);
+      setForm({ user_id: '', role: '', reason: '', expires_at: '' });
+      setGOk('Role granted.');
+      setTimeout(() => setGOk(''), 3000);
+      await load();
+    } catch (e) { setGErr(e?.message || 'Grant failed.'); setConflict(null); }
+    finally { setBusy(false); }
+  };
+
+  const revoke = async (g) => {
+    setRevoking(g.id);
+    try { await authService.revokeRole(g.user_id, g.role); await load(); }
+    catch (e) { setGErr(e?.message || 'Revoke failed.'); }
+    finally { setRevoking(null); }
+  };
+
+  const fmtD = (d) => d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+  const expiringSoon = (d) => d && new Date(d) < new Date(Date.now() + 14 * 86400000);
+
+  return (
+    <div style={{ ...styles.card, marginTop: '20px' }}>
+      <div style={{ fontWeight: '700', fontSize: '15px', marginBottom: '4px' }}>Role Grants — temporary additional roles</div>
+      <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '16px' }}>
+        Grant a user extra roles beyond their primary one (e.g. cover HR or accounting while short-staffed). MD cannot be granted. Grants default to 90 days if no expiry is set.
+      </div>
+      {gErr && <Alert msg={gErr} onClose={() => setGErr('')} />}
+      {gOk  && <Alert msg={gOk} type="success" onClose={() => setGOk('')} />}
+
+      {/* Grant form */}
+      <div style={{ ...styles.grid(4), marginBottom: '10px' }}>
+        <div style={styles.formGroup}>
+          <label style={styles.label}>User</label>
+          <select style={styles.input} value={form.user_id} onChange={e => { setForm(f => ({ ...f, user_id: e.target.value })); setConflict(null); }}>
+            <option value="">— Select user —</option>
+            {[...users].sort((a,b)=>(a.full_name||'').localeCompare(b.full_name||'')).map(u => <option key={u.id} value={u.id}>{u.full_name || u.email} ({roleLabel(u.role)})</option>)}
+          </select>
+        </div>
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Role to grant</label>
+          <select style={styles.input} value={form.role} onChange={e => { setForm(f => ({ ...f, role: e.target.value })); setConflict(null); }}>
+            <option value="">— Select role —</option>
+            {grantableRoles.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}
+          </select>
+        </div>
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Expiry (optional)</label>
+          <input type="date" style={styles.input} value={form.expires_at} onChange={e => setForm(f => ({ ...f, expires_at: e.target.value }))} />
+        </div>
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Reason (optional)</label>
+          <input style={styles.input} placeholder="e.g. covering HR leave" value={form.reason} onChange={e => setForm(f => ({ ...f, reason: e.target.value }))} />
+        </div>
+      </div>
+
+      {conflict ? (
+        <div style={{ padding: '12px 14px', borderRadius: '8px', background: theme.red + '18', border: `1px solid ${theme.red}55`, marginBottom: '12px' }}>
+          <div style={{ fontSize: '13px', color: theme.text, fontWeight: '600', marginBottom: '6px' }}>⚠ Separation-of-duties warning</div>
+          <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '10px' }}>{conflict}</div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button style={styles.btn('danger')} disabled={busy} onClick={() => submitGrant(true)}>{busy ? 'Granting…' : 'Grant anyway'}</button>
+            <button style={styles.btn('secondary')} disabled={busy} onClick={() => setConflict(null)}>Cancel</button>
+          </div>
+        </div>
+      ) : (
+        <button style={styles.btn('primary')} disabled={busy} onClick={() => submitGrant(false)}>{busy ? 'Checking…' : '+ Grant Role'}</button>
+      )}
+
+      {/* Active grants */}
+      <div style={{ fontWeight: '700', fontSize: '13px', margin: '20px 0 8px' }}>Active grants ({grants.length})</div>
+      {loading ? <Spinner /> : grants.length === 0 ? (
+        <div style={{ fontSize: '13px', color: theme.textMuted, padding: '8px 0' }}>No active role grants.</div>
+      ) : (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={styles.table}>
+            <thead><tr>{['User', 'Primary Role', 'Granted Role', 'Granted By', 'Granted', 'Expires', ''].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
+            <tbody>
+              {grants.map(g => (
+                <tr key={g.id}>
+                  <td style={styles.td}>{userName(g.user_id)}</td>
+                  <td style={styles.td}><span style={{ fontSize: '12px', color: theme.textMuted }}>{userPrimary(g.user_id)}</span></td>
+                  <td style={styles.td}><span style={styles.badge(theme.accent)}>{roleLabel(g.role)}</span></td>
+                  <td style={styles.td}>{g.granted_by_name || '—'}</td>
+                  <td style={styles.td}>{fmtD(g.granted_at)}</td>
+                  <td style={styles.td}>
+                    {fmtD(g.expires_at)}
+                    {expiringSoon(g.expires_at) && <span style={{ marginLeft: '6px', fontSize: '10px', padding: '1px 6px', borderRadius: '4px', background: '#f59e0b22', color: '#f59e0b', border: '1px solid #f59e0b44', fontWeight: '700' }}>expiring soon</span>}
+                  </td>
+                  <td style={styles.td}>
+                    <button style={{ ...styles.btn('danger'), padding: '4px 10px', fontSize: '11px' }} disabled={revoking === g.id} onClick={() => revoke(g)}>{revoking === g.id ? '…' : 'Revoke'}</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ── USER MANAGEMENT ───────────────────────────────────────────
 const UserManagement = ({ userProfile }) => {
   const [users, setUsers]         = useState([]);
@@ -10776,6 +10916,8 @@ const UserManagement = ({ userProfile }) => {
           </table>
         </div>
       )}
+
+      {isMD && <RoleGrantsManager users={users} />}
     </div>
   );
 };
@@ -10847,22 +10989,37 @@ export default function App() {
     try { await supabase.auth.refreshSession(); setSessionWarning(false); } catch { /* ignore */ }
   };
 
+  // Attach the user's effective roles (primary + active grants) from the DB.
+  // Falls back to [primary role] on null/empty/error so a hiccup degrades to
+  // single-role behaviour rather than locking the user out.
+  const attachEffectiveRoles = async (profile) => {
+    if (!profile) return profile;
+    try {
+      const { data, error } = await supabase.rpc('my_effective_roles');
+      if (error) throw error;
+      const roles = Array.isArray(data) && data.length ? data : [profile.role];
+      return { ...profile, effectiveRoles: roles };
+    } catch {
+      return { ...profile, effectiveRoles: profile.role ? [profile.role] : [] };
+    }
+  };
+
   const loadProfile = async (user) => {
     try {
       const profile = await authService.getProfile(user.id);
-      setUserProfile(profile);
+      setUserProfile(await attachEffectiveRoles(profile));
       supabase.from('user_profiles').update({ last_login: new Date().toISOString() }).eq('id', user.id).then(() => {}).catch(() => {});
     } catch {
       // Auto-create profile on first login
       try {
         const namePart = user.email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
         const profile = await authService.upsertProfile(user.id, user.email, namePart, 'staff');
-        setUserProfile(profile);
-      } catch { setUserProfile({ id: user.id, email: user.email, full_name: user.email, role: 'staff', is_active: true }); }
+        setUserProfile(await attachEffectiveRoles(profile));
+      } catch { setUserProfile({ id: user.id, email: user.email, full_name: user.email, role: 'staff', is_active: true, effectiveRoles: ['staff'] }); }
     }
   };
 
-  const handleLogin = (profile) => { setUserProfile(profile); };
+  const handleLogin = async (profile) => { setUserProfile(await attachEffectiveRoles(profile)); };
   const handleLogout = async () => { await authService.signOut(); setSession(null); setUserProfile(null); setActive('dashboard'); };
 
   // Load approval badge counts (must be before any conditional returns)
@@ -10893,7 +11050,17 @@ export default function App() {
   const isICO   = role === 'ico';
   const isMD    = role === 'md';
 
-  const allowedPages = ROLE_PAGES[role] || ['dashboard'];
+  // Multi-role: navigable pages are the UNION across all effective roles.
+  // 'md' → 'all' is preserved (md can't be a granted role, so only a primary
+  // md yields 'all').
+  const effRoles = effectiveRolesOf(userProfile).length ? effectiveRolesOf(userProfile) : ['staff'];
+  const allowedPages = effRoles.some(r => ROLE_PAGES[r] === 'all')
+    ? 'all'
+    : [...new Set(effRoles.flatMap(r => ROLE_PAGES[r] || ['dashboard']))];
+  // Pages unlocked specifically by a granted (non-primary) role — used to relax
+  // the ICO/board read-only mask on exactly those pages, not everywhere.
+  const grantedRoles = effRoles.filter(r => r !== role);
+  const grantedPages = new Set(grantedRoles.flatMap(r => (ROLE_PAGES[r] && ROLE_PAGES[r] !== 'all') ? ROLE_PAGES[r] : []));
   const canSee = (pageId) => {
     if (pageId === 'my_profile') return true;
     if (pageId === 'my_hr') return !!userProfile?.staff_id;
@@ -10903,6 +11070,10 @@ export default function App() {
     .map(s => ({ ...s, items: s.items.filter(it => canSee(it.id)) }))
     .filter(s => s.items.length > 0);
   const safePage = canSee(active) ? active : (visibleNav[0]?.items[0]?.id || 'dashboard');
+  // The read-only mask still applies to a primary board/ICO viewer, but is
+  // relaxed on any page a granted role unlocks (so a granted write role works).
+  const boardMasked = isBoard && !BOARD_EXEMPT_PAGES.includes(safePage) && !grantedPages.has(safePage);
+  const icoMasked   = isICO   && !ICO_EXEMPT_PAGES.includes(safePage)   && !grantedPages.has(safePage);
 
   const pages = {
     dashboard: isBoard ? <BoardDashboard userProfile={userProfile} /> : <Dashboard onNavigate={setActive} userProfile={userProfile} />,
@@ -11011,7 +11182,7 @@ export default function App() {
         onNavigate={(page) => { setActive(page); if (isMobile) setSidebarOpen(false); }}
         isMobile={isMobile}
       />
-      <main style={{ ...styles.main, ...(isMobile ? { marginLeft: 0, padding: '16px 14px', paddingTop: '58px' } : {}) }} {...(isBoard && !BOARD_EXEMPT_PAGES.includes(safePage) ? { 'data-board-view': 'true' } : {})} {...(isICO && !ICO_EXEMPT_PAGES.includes(safePage) ? { 'data-ico-view': 'true' } : {})}>
+      <main style={{ ...styles.main, ...(isMobile ? { marginLeft: 0, padding: '16px 14px', paddingTop: '58px' } : {}) }} {...(boardMasked ? { 'data-board-view': 'true' } : {})} {...(icoMasked ? { 'data-ico-view': 'true' } : {})}>
         {/* Mobile hamburger */}
         {isMobile && (
           <button data-board-allow data-ico-allow onClick={() => setSidebarOpen(s => !s)} style={{ position: 'fixed', top: '12px', left: '12px', zIndex: 250, background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '8px', padding: '8px 12px', cursor: 'pointer', fontSize: '18px', color: theme.text, lineHeight: 1, boxShadow: '0 2px 8px rgba(0,0,0,0.3)' }}>☰</button>
@@ -11037,12 +11208,12 @@ export default function App() {
             [data-ico-view] button:not([data-ico-allow]) { display: none !important; }
           `}</style>
         )}
-        {isBoard && !BOARD_EXEMPT_PAGES.includes(safePage) && (
+        {boardMasked && (
           <div style={{ background: theme.accent+'22', border: `1px solid ${theme.accent}44`, borderRadius: '8px', padding: '8px 16px', margin: '0 0 16px', fontSize: '12px', color: theme.accent, fontWeight: '600' }}>
             👁 View Only Mode — Board Member access
           </div>
         )}
-        {isICO && !ICO_EXEMPT_PAGES.includes(safePage) && (
+        {icoMasked && (
           <div style={{ background: theme.blue+'22', border: `1px solid ${theme.blue}44`, borderRadius: '8px', padding: '8px 16px', margin: '0 0 16px', fontSize: '12px', color: theme.blue, fontWeight: '600' }}>
             🔒 Read-Only Mode — Internal Control Officer. Approvals available in Schedule Approvals and Labour modules.
           </div>
