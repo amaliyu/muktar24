@@ -1058,6 +1058,13 @@ const Orders = ({ onNavigate, userProfile }) => {
   const [orderDeleteMsg, setOrderDeleteMsg] = useState(null);
 
   const isMarketerRole = userProfile?.role === 'marketer';
+  // Roles allowed to create/edit orders. Mirrors the orders INSERT/UPDATE RLS
+  // policies (has_any_role(md, accountant, bdm, marketer)). Checked via
+  // hasRole() so a granted role works; positively listed (not "!== 'ico'") so
+  // roles the DB rejects — e.g. board_member, sales — don't see a button that
+  // would fail on click.
+  const ORDER_WRITE_ROLES = ['md', 'accountant', 'bdm', 'marketer'];
+  const canWriteOrder = hasRole(userProfile, ...ORDER_WRITE_ROLES);
 
   const load = async () => {
     setLoading(true);
@@ -1412,7 +1419,7 @@ const Orders = ({ onNavigate, userProfile }) => {
           <div style={styles.pageTitle}>Orders & Invoicing</div>
           <div style={styles.pageSubtitle}>Customer orders, payment tracking, and delivery status</div>
         </div>
-        {userProfile?.role !== 'ico' && <button style={styles.btn("primary")} onClick={() => setShowForm(!showForm)}>+ New Order</button>}
+        {canWriteOrder && <button style={styles.btn("primary")} onClick={() => setShowForm(!showForm)}>+ New Order</button>}
       </div>
 
       {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
@@ -1627,7 +1634,7 @@ const Orders = ({ onNavigate, userProfile }) => {
                 <>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
                     <div style={styles.sectionTitle}>Customer Statement — {selected.customer?.name}</div>
-                    {!orderEditMode && userProfile?.role !== 'ico' && <button style={{ ...styles.btn("secondary"), padding: "4px 12px", fontSize: "12px" }} onClick={() => startOrderEdit(selected)}>Edit Order</button>}
+                    {!orderEditMode && canWriteOrder && <button style={{ ...styles.btn("secondary"), padding: "4px 12px", fontSize: "12px" }} onClick={() => startOrderEdit(selected)}>Edit Order</button>}
                   </div>
                   <div style={{ marginBottom: "12px", fontSize: "13px", color: theme.textMuted }}>{selected.customer?.location} · {selected.customer?.phone}</div>
                   {orderEditMode ? (
@@ -9517,8 +9524,14 @@ const AttendanceFlagsPage = ({ userProfile }) => {
 // ── DISCIPLINARY ──────────────────────────────────────────────
 const DisciplinaryPage = ({ userProfile }) => {
   const role = userProfile?.role;
-  const canIssue  = hasRole(userProfile, 'md', 'hr_officer');
-  const canReview = hasRole(userProfile, 'md', 'hr_officer');
+  // NOTE: issue_disciplinary_case / advance_disciplinary enforce the actor via
+  // get_user_role() — the PRIMARY role only, NOT granted roles. So these gates
+  // must check the primary role, otherwise a user *granted* hr_officer would
+  // see Issue/Review buttons that the RPC rejects on click. (To make
+  // disciplinary truly multi-role, those RPCs would need has_any_role — a DB
+  // change, out of scope here.)
+  const canIssue  = role === 'md' || role === 'hr_officer';
+  const canReview = role === 'md' || role === 'hr_officer';
   const canClose  = role === 'md';
 
   const [cases, setCases]         = useState([]);
