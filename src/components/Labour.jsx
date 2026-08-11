@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
+import { hasRole } from '../lib/roles'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import * as XLSX from 'xlsx'
@@ -47,6 +48,18 @@ const NIGERIAN_BANKS = [
 const CATEGORIES = ['daily', 'monthly_fixed', 'piece_rate']
 const PAYMENT_TYPES = ['daily', 'monthly_fixed', 'piece_rate']
 const BONUS_TYPES = ['per_day', 'per_block', 'none']
+
+// Roles allowed to prepare a weekly labour payroll (production OR loading) and
+// to edit its draft. This MUST stay in sync with the weekly_labour_payroll
+// INSERT/UPDATE RLS policies, which permit md, production_manager,
+// assistant_production_manager, hr_officer and logistics_manager. ICO is a
+// permitted writer at the DB level but is deliberately excluded here: ICO
+// gates the payroll, it never originates one (separation of duties). Checked
+// via hasRole() so a user GRANTED one of these roles can prepare payroll too.
+// Defined once, in one place, because it was a repeated inline copy of this
+// list that silently drifted out of sync with the DB (logistics_manager was
+// dropped from the UI copy while remaining a valid DB writer).
+const PAYROLL_GENERATOR_ROLES = ['production_manager', 'assistant_production_manager', 'logistics_manager', 'hr_officer', 'md']
 
 const styles = {
   page: { padding: '24px 28px', color: theme.text, minHeight: '100vh', background: theme.bg },
@@ -1434,10 +1447,8 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
     loadRangeData()
   }
 
-  const canGenerate = !currentPayroll && workers.length > 0 &&
-    ['production_manager','assistant_production_manager','hr_officer','md'].includes(userProfile?.role)
-  const canUpdateDraft = isDraftMode &&
-    ['production_manager','assistant_production_manager','hr_officer','md'].includes(userProfile?.role)
+  const canGenerate = !currentPayroll && workers.length > 0 && hasRole(userProfile, ...PAYROLL_GENERATOR_ROLES)
+  const canUpdateDraft = isDraftMode && hasRole(userProfile, ...PAYROLL_GENERATOR_ROLES)
 
   return (
     <div>
