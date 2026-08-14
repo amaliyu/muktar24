@@ -528,7 +528,15 @@ function DailyRosterTab({ pool, roles, userProfile }) {
                 const payrollEditable = !r.payroll_id || !payrollStatus || payrollStatus === 'draft'
                 const canWriteRole = hasRole(userProfile, ...ROSTER_WRITE_ROLES)
                 const canEdit = !isPaid && payrollEditable && canWriteRole
+                // daily_roster_delete permits MD via get_user_role() with no
+                // status condition; everyone else needs the roster's OWN
+                // ico_status to be draft/submitted (NOT the linked payroll's
+                // status). r comes from select('*, …') so ico_status is present.
+                const rosterIcoStatus = r.ico_status || 'draft'
+                const icoDeletable = ['draft', 'submitted'].includes(rosterIcoStatus)
+                const isPrimaryMD = userProfile?.role === 'md'
                 const canDelete = !isPaid && payrollEditable && canWriteRole
+                                  && (isPrimaryMD || icoDeletable)
                 return (
                   <tr key={r.id} style={{ cursor: 'pointer' }} onClick={() => { setSelectedRoster(r); setViewMode('detail') }}>
                     <td style={styles.td}>{r.roster_date}</td>

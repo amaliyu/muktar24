@@ -1058,13 +1058,15 @@ const Orders = ({ onNavigate, userProfile }) => {
   const [orderDeleteMsg, setOrderDeleteMsg] = useState(null);
 
   const isMarketerRole = userProfile?.role === 'marketer';
-  // Roles allowed to create/edit orders. Mirrors the orders INSERT/UPDATE RLS
-  // policies (has_any_role(md, accountant, bdm, marketer)). Checked via
-  // hasRole() so a granted role works; positively listed (not "!== 'ico'") so
-  // roles the DB rejects — e.g. board_member, sales — don't see a button that
-  // would fail on click.
-  const ORDER_WRITE_ROLES = ['md', 'accountant', 'bdm', 'marketer'];
-  const canWriteOrder = hasRole(userProfile, ...ORDER_WRITE_ROLES);
+  // Roles that may create/edit orders. md/accountant/bdm are checked via
+  // hasRole() because orders_insert/update use has_any_role and orders_select
+  // admits them through its has_any_role branch. 'marketer' is deliberately
+  // PRIMARY-only: orders_select admits marketer solely via get_user_role(), so
+  // a *granted* marketer could insert a row it cannot then select. Marketer is
+  // not grantable.
+  const ORDER_WRITE_ROLES_GRANTABLE = ['md', 'accountant', 'bdm'];
+  const canWriteOrder = hasRole(userProfile, ...ORDER_WRITE_ROLES_GRANTABLE)
+                        || userProfile?.role === 'marketer';
 
   const load = async () => {
     setLoading(true);
