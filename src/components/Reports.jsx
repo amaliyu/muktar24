@@ -313,7 +313,9 @@ const GENERATORS = {
   revenue_report: async (params) => fetchPaymentsRange(params.from, params.to),
   // 8. Invoice
   invoice_report: async (params) => {
-    let q = supabase.from('invoices').select('*, order:order_id(customer:customer_id(name), payments(*))').order('issued_date')
+    // Drafts are quotations and cancelled invoices are void — neither is a
+    // raised invoice, so exclude both from the invoice report.
+    let q = supabase.from('invoices').select('*, order:order_id(customer:customer_id(name), payments(*))').not('status', 'in', '("draft","cancelled")').order('issued_date')
     if (params.from) q = q.gte('issued_date', params.from)
     if (params.to)   q = q.lte('issued_date', params.to)
     const { data, error } = await q
@@ -337,7 +339,8 @@ const GENERATORS = {
   },
   // 11. AR Aging
   ar_aging: async (params) => {
-    const { data: invoices } = await supabase.from('invoices').select('*, order:order_id(customer:customer_id(name)), payments(amount_paid,status)').lte('issued_date', params.date || today())
+    // Receivables aging must exclude drafts (quotations) and cancelled invoices.
+    const { data: invoices } = await supabase.from('invoices').select('*, order:order_id(customer:customer_id(name)), payments(amount_paid,status)').not('status', 'in', '("draft","cancelled")').lte('issued_date', params.date || today())
     return invoices || []
   },
   // 12. Customer History
@@ -424,7 +427,9 @@ const GENERATORS = {
     const [openingBalances, banks, invoices, paymentsConfirmed, inventory, payablesExp] = await Promise.all([
       supabase.from('opening_balances').select('category, account_name, amount, as_at_date').then(unwrap),
       supabase.from('bank_accounts').select('current_balance').eq('is_active', true).then(unwrap),
-      supabase.from('invoices').select('total_amount').then(unwrap),
+      // Trade receivables = invoice totals less confirmed payments. Drafts
+      // (quotations) and cancelled invoices are not receivables — exclude them.
+      supabase.from('invoices').select('total_amount').not('status', 'in', '("draft","cancelled")').then(unwrap),
       supabase.from('payments').select('amount_paid').eq('status', 'confirmed').then(unwrap),
       supabase.from('inventory_items').select('current_stock, unit_cost').then(unwrap),
       // Trade Payables = approved but not-yet-disbursed expenses (no payment_request,

@@ -177,6 +177,28 @@ const Alert = ({ msg, type = "error", onClose }) => (
   </div>
 );
 
+// Surface the invoice DB guard messages ("content is locked", "line items can
+// only be changed while it is a draft") cleanly rather than a raw Postgres blob.
+const cleanInvoiceError = (e) => {
+  const m = e?.message || String(e || '');
+  if (/content is locked/i.test(m) || /line items can only be changed/i.test(m)) {
+    return m.replace(/^.*?(Invoice.*)$/s, '$1').trim() || m;
+  }
+  return 'Could not save the invoice. ' + m;
+};
+
+const STATUS_BADGE = {
+  draft:     { label: 'Draft',     color: '#7c839e' },
+  issued:    { label: 'Issued',    color: '#5b8dee' },
+  paid:      { label: 'Paid',      color: '#2dd4a0' },
+  cancelled: { label: 'Cancelled', color: '#f06b6b' },
+};
+
+// Invoices that count toward an order's / customer's value, paid and receivable
+// figures — a draft is a quotation and a cancelled invoice is void, so both are
+// excluded. Pass the invoices array (e.g. liveInvoices(order.invoices)).
+const liveInvoices = (invoices) => (invoices || []).filter(inv => inv.status !== 'draft' && inv.status !== 'cancelled');
+
 const InvoiceEditorModal = ({ editor, setEditor, onSave, saving }) => {
   if (!editor) return null;
   const { items, delivery_cost, include_vat, discount } = editor;
@@ -197,7 +219,10 @@ const InvoiceEditorModal = ({ editor, setEditor, onSave, saving }) => {
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', zIndex: 1000, overflowY: 'auto', padding: '24px 16px' }}>
       <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: '12px', width: '100%', maxWidth: '720px' }}>
         <div style={{ padding: '20px 24px', borderBottom: `1px solid ${theme.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div style={{ fontSize: '16px', fontWeight: '700', color: theme.text }}>Invoice Editor</div>
+          <div>
+            <div style={{ fontSize: '16px', fontWeight: '700', color: theme.text }}>Draft Invoice Editor</div>
+            <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '2px' }}>Saves as a draft (proforma). It becomes a receivable only when issued.</div>
+          </div>
           <button style={{ ...styles.btn('secondary'), padding: '4px 10px' }} onClick={() => setEditor(null)}>✕ Close</button>
         </div>
 
@@ -272,7 +297,7 @@ const InvoiceEditorModal = ({ editor, setEditor, onSave, saving }) => {
           </div>
 
           <div style={styles.row}>
-            <button style={styles.btn('primary')} onClick={onSave} disabled={saving}>{saving ? 'Saving…' : 'Save & Download PDF'}</button>
+            <button style={styles.btn('primary')} onClick={onSave} disabled={saving}>{saving ? 'Saving…' : 'Save Draft & Download Proforma'}</button>
             <button style={styles.btn('secondary')} onClick={() => setEditor(null)}>Cancel</button>
           </div>
         </div>
@@ -384,7 +409,7 @@ const Dashboard = ({ onNavigate, userProfile }) => {
         const produced = productions.reduce((s, p) => s + (p.quantity_produced || 0), 0);
         const damages  = waybills.reduce((s, w) => s + (w.quantity_damaged || 0), 0);
         const revenue  = orders.reduce((s, o) =>
-          s + (o.invoices || []).flatMap(inv => inv.payments || []).filter(p => p.status === "confirmed").reduce((a, p) => a + p.amount_paid, 0), 0);
+          s + liveInvoices(o.invoices).flatMap(inv => inv.payments || []).filter(p => p.status === "confirmed").reduce((a, p) => a + p.amount_paid, 0), 0);
         const pending  = orders.filter(o => o.status === "pending").length;
         setStats({ staff: staffList.length, produced, orders: orders.length, revenue, pending, waybills: waybills.length, damages, lpoQueue: 0, scheduleQueue: 0, pendingRegister: 0 });
         setRecent(orders.slice(0, 5));
@@ -1056,6 +1081,10 @@ const Orders = ({ onNavigate, userProfile }) => {
   const [invDeleting, setInvDeleting] = useState(false);
   const [invDeleteMsg, setInvDeleteMsg] = useState(null);
   const [orderDeleteMsg, setOrderDeleteMsg] = useState(null);
+  const [issueTarget, setIssueTarget] = useState(null);
+  const [cancelTarget, setCancelTarget] = useState(null);
+  const [cancelReason, setCancelReason] = useState('');
+  const [invActioning, setInvActioning] = useState(false);
 
   const isMarketerRole = userProfile?.role === 'marketer';
   // Roles that may create/edit orders. md/accountant/bdm are checked via
@@ -1101,11 +1130,11 @@ const Orders = ({ onNavigate, userProfile }) => {
   }, [pickedCustomer?.id]);
 
   const orderTotal = (order) => {
-    const invoiced = (order.invoices || []).reduce((s, inv) => s + Number(inv.total_amount ?? 0), 0);
+    const invoiced = liveInvoices(order.invoices).reduce((s, inv) => s + Number(inv.total_amount ?? 0), 0);
     const itemTotal = (order.order_items || []).reduce((s, i) => s + (i.subtotal || i.quantity * i.unit_price), 0);
     return invoiced !== 0 ? invoiced : itemTotal;
   };
-  const orderPaid = (order) => (order.invoices || []).flatMap(inv => inv.payments || []).filter(p => p.status === "confirmed").reduce((s, p) => s + p.amount_paid, 0);
+  const orderPaid = (order) => liveInvoices(order.invoices).flatMap(inv => inv.payments || []).filter(p => p.status === "confirmed").reduce((s, p) => s + p.amount_paid, 0);
   const orderQty = (order) => (order.order_items || []).reduce((s, i) => s + i.quantity, 0);
 
   const updateItem = (idx, field, val) => {
@@ -1176,47 +1205,138 @@ const Orders = ({ onNavigate, userProfile }) => {
     }
   };
 
-  const handleGenerateInvoice = async () => {
-    if (!selected) return;
-    const today = new Date().toISOString().split("T")[0];
-    const due = new Date(Date.now() + 30 * 86400000).toISOString().split("T")[0];
-    let productMap = {};
+  // Map product name → unit for editor/PDF line labels.
+  const loadProductUnits = async () => {
+    const productMap = {};
     try {
       const prods = await productsService.getActive();
       prods.forEach(p => { productMap[p.name] = p.unit; });
     } catch {}
-    const buildItems = (orderItems) => orderItems.map(i => ({
-      description: i.block_type || i.description || "",
-      quantity: i.quantity,
-      unit_price: i.unit_price,
-      unit: productMap[i.block_type] || "",
-    }));
-    const existingInvoice = (selected.invoices || [])[0];
-    if (existingInvoice) {
-      const editorItems = buildItems(selected.order_items || []);
-      setInvoiceEditor({
-        invoice_number: existingInvoice.invoice_number,
-        issued_date: existingInvoice.issued_date || today,
-        due_date: existingInvoice.due_date || due,
-        items: editorItems.length > 0 ? editorItems : [{ description: "", quantity: "", unit_price: "", unit: "" }],
-        delivery_cost: "",
-        include_vat: true,
-        discount: "",
-        _existingId: existingInvoice.id,
-      });
-    } else {
-      const invoiceNumber = await invoicesService.getNextNumber();
-      const editorItems = buildItems(selected.order_items || []);
-      setInvoiceEditor({
-        invoice_number: invoiceNumber,
-        issued_date: today,
-        due_date: due,
-        items: editorItems.length > 0 ? editorItems : [{ description: "", quantity: "", unit_price: "", unit: "" }],
-        delivery_cost: "",
-        include_vat: true,
-        discount: "",
-        _existingId: null,
-      });
+    return productMap;
+  };
+
+  // Open the line-item editor. For a NEW invoice this creates a draft on save;
+  // for an EXISTING (draft) invoice it loads the saved line items, falling back
+  // to the order's own items when the invoice predates invoice_items.
+  const handleGenerateInvoice = async () => {
+    if (!selected) return;
+    setInvoicing(true);
+    try {
+      const today = new Date().toISOString().split("T")[0];
+      const due = new Date(Date.now() + 30 * 86400000).toISOString().split("T")[0];
+      const productMap = await loadProductUnits();
+      const fromOrderItems = (orderItems) => orderItems.map(i => ({
+        description: i.block_type || i.description || "",
+        quantity: i.quantity,
+        unit_price: i.unit_price,
+        unit: productMap[i.block_type] || "",
+      }));
+      const existingInvoice = (selected.invoices || [])[0];
+      if (existingInvoice) {
+        // Read saved line items; fall back to order_items if none exist yet
+        // (existing invoices have no invoice_items rows).
+        let savedItems = [];
+        try { savedItems = await invoicesService.getItems(existingInvoice.id); } catch {}
+        const editorItems = savedItems.length > 0
+          ? savedItems.map(it => ({ description: it.block_type || "", quantity: it.quantity, unit_price: it.unit_price, unit: productMap[it.block_type] || "" }))
+          : fromOrderItems(selected.order_items || []);
+        setInvoiceEditor({
+          invoice_number: existingInvoice.invoice_number,
+          issued_date: existingInvoice.issued_date || today,
+          due_date: existingInvoice.due_date || due,
+          items: editorItems.length > 0 ? editorItems : [{ description: "", quantity: "", unit_price: "", unit: "" }],
+          delivery_cost: existingInvoice.delivery_cost != null ? String(existingInvoice.delivery_cost) : "",
+          include_vat: existingInvoice.include_vat != null ? existingInvoice.include_vat : true,
+          discount: existingInvoice.discount != null ? String(existingInvoice.discount) : "",
+          status: existingInvoice.status || 'draft',
+          _existingId: existingInvoice.id,
+        });
+      } else {
+        const invoiceNumber = await invoicesService.getNextNumber();
+        const editorItems = fromOrderItems(selected.order_items || []);
+        setInvoiceEditor({
+          invoice_number: invoiceNumber,
+          issued_date: today,
+          due_date: due,
+          items: editorItems.length > 0 ? editorItems : [{ description: "", quantity: "", unit_price: "", unit: "" }],
+          delivery_cost: "",
+          include_vat: true,
+          discount: "",
+          status: 'draft',
+          _existingId: null,
+        });
+      }
+    } catch (e) {
+      setAlert({ type: "error", msg: "Could not open the invoice editor. " + (e?.message || String(e)) });
+    } finally {
+      setInvoicing(false);
+    }
+  };
+
+  // Download a PDF for an already-saved invoice without opening the editor.
+  // A draft renders as a PROFORMA INVOICE; issued/paid as an INVOICE.
+  const handleDownloadInvoicePDF = async (invoice) => {
+    if (!invoice) return;
+    setInvoicing(true);
+    try {
+      const productMap = await loadProductUnits();
+      let items = [];
+      try { items = await invoicesService.getItems(invoice.id); } catch {}
+      const pdfItems = items.length > 0
+        ? items.map(it => ({ description: it.block_type || "", quantity: it.quantity, unit_price: it.unit_price, unit: productMap[it.block_type] || "" }))
+        : (selected?.order_items || []).map(i => ({ description: i.block_type || "", quantity: i.quantity, unit_price: i.unit_price, unit: productMap[i.block_type] || "" }));
+      const customer = selected?.customer || { name: selected?.customerName, location: selected?.customerLocation, phone: selected?.customerPhone };
+      await generateInvoicePDF({
+        invoice_number: invoice.invoice_number,
+        issued_date: invoice.issued_date,
+        due_date: invoice.due_date,
+        items: pdfItems,
+        delivery_cost: Number(invoice.delivery_cost) || 0,
+        include_vat: invoice.include_vat != null ? invoice.include_vat : true,
+        discount: Number(invoice.discount) || 0,
+        status: invoice.status || 'issued',
+      }, customer);
+    } catch (e) {
+      setAlert({ type: "error", msg: "Could not generate the PDF. " + (e?.message || String(e)) });
+    } finally {
+      setInvoicing(false);
+    }
+  };
+
+  const doIssueInvoice = async (invoice) => {
+    setInvActioning(true);
+    try {
+      await invoicesService.issue(invoice.id);
+      // Issuing a draft is the point the order becomes a firm sale — advance it
+      // to 'invoiced' now (a draft/quotation left it untouched).
+      if (selected?.id) { try { await ordersService.updateStatus(selected.id, "invoiced"); } catch {} }
+      setIssueTarget(null);
+      const newOrders = await load();
+      if (newOrders) setSelected(newOrders.find(o => o.id === selected?.id) || null);
+      setAlert({ type: "success", msg: `Invoice ${invoice.invoice_number} issued — it is now a receivable.` });
+    } catch (e) {
+      setIssueTarget(null);
+      setAlert({ type: "error", msg: cleanInvoiceError(e) });
+    } finally {
+      setInvActioning(false);
+    }
+  };
+
+  const doCancelInvoice = async () => {
+    if (!cancelTarget || !cancelReason.trim()) return;
+    setInvActioning(true);
+    try {
+      await invoicesService.cancel(cancelTarget.id, { cancelled_by_name: userProfile?.full_name, cancellation_reason: cancelReason.trim() });
+      const target = cancelTarget;
+      setCancelTarget(null);
+      setCancelReason('');
+      const newOrders = await load();
+      if (newOrders) setSelected(newOrders.find(o => o.id === selected?.id) || null);
+      setAlert({ type: "success", msg: `Invoice ${target.invoice_number} cancelled.` });
+    } catch (e) {
+      setAlert({ type: "error", msg: cleanInvoiceError(e) });
+    } finally {
+      setInvActioning(false);
     }
   };
 
@@ -1234,33 +1354,44 @@ const Orders = ({ onNavigate, userProfile }) => {
       const vat = include_vat ? afterDisc * 0.075 : 0;
       const total = afterDisc + vat;
 
+      // Persist the full editor state — line items, delivery, discount and VAT
+      // toggle — not just the total (the old bug silently dropped everything but
+      // number/dates/total).
+      const contentFields = { invoice_number, issued_date, due_date, total_amount: total, delivery_cost: delivN, discount: discN, include_vat };
       const orderId = selected.id;
       let invoiceId = _existingId;
       if (_existingId) {
-        await invoicesService.update(_existingId, { invoice_number, issued_date, due_date, total_amount: total });
+        await invoicesService.update(_existingId, contentFields);
       } else {
         let newInvoice;
+        const draftFields = { order_id: orderId, status: 'draft', created_by: userProfile?.id || null, created_by_name: userProfile?.full_name || null, ...contentFields };
         try {
-          newInvoice = await invoicesService.create({ order_id: orderId, invoice_number: invNum, issued_date, due_date, total_amount: total });
+          newInvoice = await invoicesService.create({ ...draftFields, invoice_number: invNum });
         } catch (createErr) {
           if (createErr.code === '23505') {
             invNum = await invoicesService.getNextNumber();
-            newInvoice = await invoicesService.create({ order_id: orderId, invoice_number: invNum, issued_date, due_date, total_amount: total });
+            newInvoice = await invoicesService.create({ ...draftFields, invoice_number: invNum });
           } else {
             throw createErr;
           }
         }
         invoiceId = newInvoice.id;
-        await ordersService.updateStatus(orderId, "invoiced");
+        // NOTE: the order is NOT advanced to 'invoiced' here — a draft is a
+        // quotation and must leave the order status untouched. The order
+        // advances to 'invoiced' when the invoice is ISSUED (see doIssueInvoice).
       }
 
+      // Write the line items (replace-all, only when changed; DB blocks this on
+      // non-drafts, which the editor is only ever opened on).
+      await invoicesService.saveItems(invoiceId, items);
+
       const customer = selected.customer || { name: selected.customerName, location: selected.customerLocation, phone: selected.customerPhone };
-      await generateInvoicePDF({ invoice_number: invNum, issued_date, due_date, items, delivery_cost: delivN, include_vat, discount: discN }, customer);
+      await generateInvoicePDF({ invoice_number: invNum, issued_date, due_date, items, delivery_cost: delivN, include_vat, discount: discN, status: 'draft' }, customer);
 
       setInvoiceEditor(null);
       const newOrders = await load();
       if (newOrders) setSelected(newOrders.find(o => o.id === orderId) || null);
-      setAlert({ type: "success", msg: `Invoice ${invNum} saved and downloaded!` });
+      setAlert({ type: "success", msg: `Draft invoice ${invNum} saved. Proforma downloaded.` });
     } catch (e) {
       if (e.message?.includes('invoices_order_id_fkey')) {
         setInvoiceEditor(null);
@@ -1268,7 +1399,7 @@ const Orders = ({ onNavigate, userProfile }) => {
         setSelected(newOrders?.find(o => o.id === selected?.id) || null);
         setAlert({ type: "error", msg: "This order no longer exists in the system. The list has been refreshed." });
       } else {
-        setAlert({ type: "error", msg: "Failed to save invoice. " + e.message });
+        setAlert({ type: "error", msg: cleanInvoiceError(e) });
       }
     } finally {
       setInvoicing(false);
@@ -1287,8 +1418,8 @@ const Orders = ({ onNavigate, userProfile }) => {
         await paymentsService.recordPayment({ invoice_id: invoice.id, amount_paid: parseFloat(payForm.amount), payment_date: payForm.date, status: "confirmed" });
         // Check if order is now fully paid → add to pending delivery register
         try {
-          const totalInvoiced = (selected.invoices || []).reduce((s, inv) => s + Number(inv.total_amount || 0), 0);
-          const alreadyPaid = (selected.invoices || []).flatMap(inv => (inv.payments || []).filter(p => p.status === "confirmed")).reduce((s, p) => s + Number(p.amount_paid), 0);
+          const totalInvoiced = liveInvoices(selected.invoices).reduce((s, inv) => s + Number(inv.total_amount || 0), 0);
+          const alreadyPaid = liveInvoices(selected.invoices).flatMap(inv => (inv.payments || []).filter(p => p.status === "confirmed")).reduce((s, p) => s + Number(p.amount_paid), 0);
           const newTotal = alreadyPaid + parseFloat(payForm.amount);
           if (newTotal >= totalInvoiced && totalInvoiced > 0) {
             const fullOrder = await ordersService.getById(selected.id);
@@ -1415,6 +1546,35 @@ const Orders = ({ onNavigate, userProfile }) => {
     <div>
       {confirmDelete && <ConfirmModal msg={confirmDelete.type === "payment" ? `Remove payment of ${naira(confirmDelete.amount_paid)} recorded on ${confirmDelete.payment_date}? This cannot be undone.` : `Delete order for ${confirmDelete.customer?.name}? This will also delete all invoices. This cannot be undone.`} onConfirm={() => confirmDelete.type === "payment" ? handleDeletePayment(confirmDelete.id) : handleDeleteOrder(confirmDelete.id)} onCancel={() => setConfirmDelete(null)} />}
       {confirmDeleteInvoice && <ConfirmModal msg={`Delete invoice ${confirmDeleteInvoice.invoice_number}? This cannot be undone.`} onConfirm={() => doDeleteInvoice(confirmDeleteInvoice)} onCancel={() => setConfirmDeleteInvoice(null)} />}
+      {issueTarget && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: "16px" }}>
+          <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: "12px", padding: "28px 32px", maxWidth: "440px", width: "100%" }}>
+            <div style={{ fontWeight: "700", fontSize: "15px", marginBottom: "10px", color: theme.text }}>Issue invoice {issueTarget.invoice_number}?</div>
+            <div style={{ fontSize: "13px", color: theme.textMuted, marginBottom: "24px", lineHeight: "1.55" }}>
+              Issuing <strong style={{ color: theme.text }}>locks</strong> the invoice — its line items, amounts and number can no longer be changed — and it becomes a firm <strong style={{ color: theme.text }}>receivable</strong> counting toward revenue and outstanding balances. To correct it later you would cancel and reissue.
+            </div>
+            <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
+              <button style={styles.btn("secondary")} onClick={() => setIssueTarget(null)} disabled={invActioning}>Not yet</button>
+              <button style={{ ...styles.btn("primary"), background: theme.green }} onClick={() => doIssueInvoice(issueTarget)} disabled={invActioning}>{invActioning ? "Issuing…" : "Issue Invoice"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {cancelTarget && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: "16px" }}>
+          <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: "12px", padding: "28px 32px", maxWidth: "440px", width: "100%" }}>
+            <div style={{ fontWeight: "700", fontSize: "15px", marginBottom: "10px", color: theme.text }}>Cancel invoice {cancelTarget.invoice_number}</div>
+            <div style={{ fontSize: "13px", color: theme.textMuted, marginBottom: "14px", lineHeight: "1.55" }}>
+              A cancelled invoice is voided and stops counting as a receivable. This cannot be undone. Please give a reason.
+            </div>
+            <textarea style={{ ...styles.input, minHeight: "72px", resize: "vertical", marginBottom: "18px" }} placeholder="Reason for cancellation (required)…" value={cancelReason} onChange={e => setCancelReason(e.target.value)} autoFocus />
+            <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
+              <button style={styles.btn("secondary")} onClick={() => { setCancelTarget(null); setCancelReason(''); }} disabled={invActioning}>Close</button>
+              <button style={{ ...styles.btn("danger"), opacity: cancelReason.trim() ? 1 : 0.5 }} onClick={doCancelInvoice} disabled={invActioning || !cancelReason.trim()}>{invActioning ? "Cancelling…" : "Confirm Cancellation"}</button>
+            </div>
+          </div>
+        </div>
+      )}
       <InvoiceEditorModal editor={invoiceEditor} setEditor={setInvoiceEditor} onSave={handleSaveInvoice} saving={invoicing} />
       <div style={styles.header}>
         <div>
@@ -1738,17 +1898,36 @@ const Orders = ({ onNavigate, userProfile }) => {
                   <div style={{ marginTop: "16px" }}>
                     <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
                       {(selected.invoices || []).length === 0 ? (
-                        hasRole(userProfile, 'md', 'accountant', 'bdm') && <button style={styles.btn("primary")} onClick={handleGenerateInvoice} disabled={invoicing}>{invoicing ? "Generating…" : "Generate Invoice"}</button>
-                      ) : (
+                        hasRole(userProfile, 'md', 'accountant', 'bdm') && <button style={styles.btn("primary")} onClick={handleGenerateInvoice} disabled={invoicing}>{invoicing ? "Opening…" : "Create Invoice (Draft)"}</button>
+                      ) : (() => {
+                        const inv = selected.invoices[0];
+                        const status = inv.status || 'issued';
+                        const badge = STATUS_BADGE[status] || STATUS_BADGE.issued;
+                        const isDraft = status === 'draft';
+                        const hasPayments = (inv.payments || []).length > 0;
+                        const isMD = userProfile?.role === 'md';
+                        // invoice_items / draft-content writers per RLS
+                        const canEditContent = isDraft && hasRole(userProfile, 'md', 'accountant', 'bdm');
+                        // Cancel: md/accountant, on a draft or issued invoice, never on paid
+                        const canCancel = (isDraft || status === 'issued') && hasRole(userProfile, 'md', 'accountant');
+                        // Delete matches RLS exactly: md unconditional; bdm only a draft with no payments
+                        const canDelete = isMD || (userProfile?.role === 'bdm' && isDraft && !hasPayments);
+                        return (
                         <>
-                          <div style={{ width: "100%", fontSize: "12px", color: theme.textMuted, marginBottom: "6px" }}>
-                            Invoice: <strong style={{ color: theme.accent }}>{selected.invoices[0].invoice_number}</strong>
+                          <div style={{ width: "100%", display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", marginBottom: "6px" }}>
+                            <span style={{ fontSize: "12px", color: theme.textMuted }}>Invoice: <strong style={{ color: theme.accent }}>{inv.invoice_number}</strong></span>
+                            <span style={{ fontSize: "11px", fontWeight: "700", padding: "2px 8px", borderRadius: "10px", background: badge.color + '22', color: badge.color, textTransform: "uppercase", letterSpacing: "0.04em" }}>{badge.label}</span>
+                            {status === 'cancelled' && inv.cancellation_reason && <span style={{ fontSize: "11px", color: theme.textMuted }}>· {inv.cancellation_reason}</span>}
                           </div>
-                          <button style={styles.btn("primary")} onClick={handleGenerateInvoice} disabled={invoicing}>{invoicing ? "Downloading…" : "Download Invoice PDF"}</button>
-                          {hasRole(userProfile, 'md', 'accountant') && <button style={styles.btn("secondary")} onClick={() => setShowPayForm(!showPayForm)}>+ Record Payment</button>}
-                          {userProfile?.role === 'md' && <button style={{ ...styles.btn("danger"), opacity: invDeleting ? 0.6 : 1 }} disabled={invDeleting} onClick={() => handleDeleteInvoice(selected.invoices[0])}>Delete Invoice</button>}
+                          <button style={styles.btn("primary")} onClick={() => handleDownloadInvoicePDF(inv)} disabled={invoicing}>{invoicing ? "Downloading…" : (isDraft ? "Download Proforma PDF" : "Download Invoice PDF")}</button>
+                          {canEditContent && <button style={styles.btn("secondary")} onClick={handleGenerateInvoice} disabled={invoicing}>Edit Line Items</button>}
+                          {canEditContent && <button style={{ ...styles.btn("primary"), background: theme.green }} onClick={() => setIssueTarget(inv)} disabled={invActioning}>Issue Invoice</button>}
+                          {!isDraft && status !== 'cancelled' && hasRole(userProfile, 'md', 'accountant') && <button style={styles.btn("secondary")} onClick={() => setShowPayForm(!showPayForm)}>+ Record Payment</button>}
+                          {canCancel && <button style={styles.btn("secondary")} onClick={() => { setCancelTarget(inv); setCancelReason(''); }} disabled={invActioning}>Cancel Invoice</button>}
+                          {canDelete && <button style={{ ...styles.btn("danger"), opacity: invDeleting ? 0.6 : 1 }} disabled={invDeleting} onClick={() => handleDeleteInvoice(inv)}>Delete Invoice</button>}
                         </>
-                      )}
+                        );
+                      })()}
                       <button style={styles.btn("secondary")} onClick={() => onNavigate("waybills")}>View Waybills</button>
                     </div>
                     {invDeleteMsg && (
@@ -2514,12 +2693,15 @@ const Customers = ({ userProfile }) => {
 
   const getStats = (c) => {
     const orders = c.orders || [];
+    // A draft is a quotation and a cancelled invoice is void — neither counts
+    // toward what a customer owes (liveInvoices). Fall back to order line items
+    // only when the order has no live invoice (same as before for un-invoiced).
     const totalValue = orders.reduce((s, o) => {
-      const invoiced = (o.invoices || []).reduce((si, inv) => si + Number(inv.total_amount ?? 0), 0);
+      const invoiced = liveInvoices(o.invoices).reduce((si, inv) => si + Number(inv.total_amount ?? 0), 0);
       const itemTotal = (o.order_items || []).reduce((si, i) => si + Number(i.subtotal ?? i.quantity * i.unit_price), 0);
       return s + (invoiced !== 0 ? invoiced : itemTotal);
     }, 0);
-    const totalPaid = orders.reduce((s, o) => s + (o.invoices || []).flatMap(inv => inv.payments || []).filter(p => p.status === "confirmed").reduce((sp, p) => sp + Number(p.amount_paid), 0), 0);
+    const totalPaid = orders.reduce((s, o) => s + liveInvoices(o.invoices).flatMap(inv => inv.payments || []).filter(p => p.status === "confirmed").reduce((sp, p) => sp + Number(p.amount_paid), 0), 0);
     return { totalValue, totalPaid, outstanding: totalValue - totalPaid, orderCount: orders.length };
   };
 
@@ -5397,6 +5579,8 @@ const ReceivablesTab = () => {
 
   for (const order of receivables) {
     for (const inv of order.invoices || []) {
+      // Drafts (quotations) and cancelled invoices are not receivables.
+      if (inv.status === 'draft' || inv.status === 'cancelled') continue;
       const invoiced = Number(inv.total_amount || 0);
       const paid = (inv.payments || []).filter(p => p.status === 'confirmed').reduce((s, p) => s + Number(p.amount_paid || 0), 0);
       const outstanding = invoiced - paid;
@@ -5933,10 +6117,15 @@ const BankAccountsTab = ({ userProfile }) => {
           const prevPaid = (inv.payments || []).filter(p => p.status === 'confirmed').reduce((s, p) => s + Number(p.amount_paid), 0);
           const totalNow = prevPaid + amount;
           if (totalNow >= Number(inv.total_amount)) {
-            try { await invoicesService.update(inv.id, { payment_status: 'paid' }); } catch {}
-          } else {
-            try { await invoicesService.update(inv.id, { payment_status: 'partially_paid' }); } catch {}
+            // Mark fully-paid via the real `status` column (there is no
+            // `payment_status` column — the old write silently failed). Let a
+            // genuine failure surface rather than swallowing it.
+            await invoicesService.update(inv.id, { status: 'paid' });
           }
+          // Partial payment: leave the invoice as 'issued'. There is no
+          // 'partially_paid' value in the invoices_status_check constraint, so
+          // writing one would fail; the outstanding balance is derived from
+          // (total_amount − confirmed payments) instead.
           accountingService.getOpenInvoices().then(setAllInvoices).catch(() => {});
         }
         await bankTransactionsService.updateMatch(tx.id, 'matched', 'payment', payment.id, `Invoice: ${inv?.invoice_number || ''}`);
