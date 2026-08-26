@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { maintenanceService } from '../services/maintenance'
 import { getSignedDocUrl } from '../services/storage'
+import { hasRole } from '../lib/roles'
 
 const theme = {
   bg: '#0f1117', surface: '#1a1d27', card: '#21263a', border: '#2e3452',
@@ -657,7 +658,7 @@ function DowntimeTab({ assets, activeStaff, staffById, userProfile, canWrite }) 
 // ── MAINTENANCE PAGE ─────────────────────────────────────────────
 export default function Maintenance({ userProfile }) {
   const role = userProfile?.role
-  const canWrite = WRITE_ROLES.includes(role)
+  const canWrite = hasRole(userProfile, ...WRITE_ROLES)
 
   const [activeTab, setActiveTab] = useState('checklists')
   const [assets, setAssets] = useState([])

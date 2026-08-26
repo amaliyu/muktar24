@@ -3,6 +3,7 @@ import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import * as XLSX from 'xlsx'
 import { supabase } from '../lib/supabase'
+import { effectiveRolesOf } from '../lib/roles'
 
 // ── THEME ────────────────────────────────────────────────────
 const theme = {
@@ -1294,8 +1295,8 @@ function ScheduleModal({ report, onClose }) {
 // ── REPORT CARD ──────────────────────────────────────────────
 const ROLE_LABELS = { md:'MD', accountant:'Accountant', board_member:'Board', bdm:'BDM', ico:'ICO', store_officer:'Store', logistics_manager:'Logistics', marketer:'Marketer', driver:'Driver', hr_officer:'HR', production_manager:'Production', assistant_production_manager:'Asst. Production' }
 
-function ReportCard({ report, userRole, schedule, onGenerate, onSchedule }) {
-  const hasAccess = report.roles.includes(userRole)
+function ReportCard({ report, userRole, effectiveRoles = [], schedule, onGenerate, onSchedule }) {
+  const hasAccess = report.roles.some(r => effectiveRoles.includes(r))
   const catColor  = CAT_COLOR[report.category] || theme.accent
   const isDue = schedule && (() => {
     if (!schedule.frequency) return false
@@ -1353,6 +1354,10 @@ export default function Reports({ userProfile }) {
   const [schedules, setSchedules]           = useState(getSchedules())
 
   const userRole = userProfile?.role || 'staff'
+  // A report is runnable if ANY of the user's effective roles (primary + active
+  // grants) is on its access list — so a granted role can run the reports that
+  // role is entitled to. userRole is kept only for the "your role" chip display.
+  const effectiveRoles = effectiveRolesOf(userProfile)
 
   const refreshHistory  = useCallback(() => { setHistory(getHistory()); setSchedules(getSchedules()) }, [])
 
@@ -1398,6 +1403,7 @@ export default function Reports({ userProfile }) {
                   key={r.id}
                   report={r}
                   userRole={userRole}
+                  effectiveRoles={effectiveRoles}
                   schedule={schedules.find(s=>s.reportId===r.id)}
                   onGenerate={() => setGenerateModal(r)}
                   onSchedule={() => setScheduleModal(r)}

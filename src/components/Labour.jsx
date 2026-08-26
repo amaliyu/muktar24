@@ -61,6 +61,16 @@ const BONUS_TYPES = ['per_day', 'per_block', 'none']
 // dropped from the UI copy while remaining a valid DB writer).
 const PAYROLL_GENERATOR_ROLES = ['production_manager', 'assistant_production_manager', 'logistics_manager', 'hr_officer', 'md']
 
+// Roles allowed to create / edit / delete a daily roster and its entries.
+// Mirrors the daily_roster INSERT policy and the role portion of its
+// UPDATE/DELETE policies (has_any_role(md, production_manager,
+// assistant_production_manager, hr_officer)); the per-row isPaid / draft
+// guards below reproduce the DB's status conditions. ICO is in the raw
+// daily_roster UPDATE policy only for its approval step (a separate button),
+// not for editing roster content, so it is intentionally excluded here.
+// Checked via hasRole() so granted roles work.
+const ROSTER_WRITE_ROLES = ['md', 'production_manager', 'assistant_production_manager', 'hr_officer']
+
 const styles = {
   page: { padding: '24px 28px', color: theme.text, minHeight: '100vh', background: theme.bg },
   card: { background: theme.card, border: `1px solid ${theme.border}`, borderRadius: '10px', padding: '18px 20px', marginBottom: '16px' },
@@ -487,7 +497,7 @@ function DailyRosterTab({ pool, roles, userProfile }) {
           <button style={styles.tab(true)}>Roster List</button>
           <button style={styles.tab(false)} onClick={() => setViewMode('weekly')}>Weekly Summary</button>
         </div>
-        {['production_manager', 'assistant_production_manager', 'hr_officer'].includes(role) && (
+        {hasRole(userProfile, ...ROSTER_WRITE_ROLES) && (
           <button style={styles.btn('primary')} onClick={() => setViewMode('create')}>+ Create Roster</button>
         )}
       </div>
@@ -516,9 +526,17 @@ function DailyRosterTab({ pool, roles, userProfile }) {
                 // unchanged — only the status gate now reads the linked payroll.
                 const payrollStatus = r.payroll?.status
                 const payrollEditable = !r.payroll_id || !payrollStatus || payrollStatus === 'draft'
-                const canWriteRole = ['production_manager', 'assistant_production_manager', 'md'].includes(role)
+                const canWriteRole = hasRole(userProfile, ...ROSTER_WRITE_ROLES)
                 const canEdit = !isPaid && payrollEditable && canWriteRole
+                // daily_roster_delete permits MD via get_user_role() with no
+                // status condition; everyone else needs the roster's OWN
+                // ico_status to be draft/submitted (NOT the linked payroll's
+                // status). r comes from select('*, …') so ico_status is present.
+                const rosterIcoStatus = r.ico_status || 'draft'
+                const icoDeletable = ['draft', 'submitted'].includes(rosterIcoStatus)
+                const isPrimaryMD = userProfile?.role === 'md'
                 const canDelete = !isPaid && payrollEditable && canWriteRole
+                                  && (isPrimaryMD || icoDeletable)
                 return (
                   <tr key={r.id} style={{ cursor: 'pointer' }} onClick={() => { setSelectedRoster(r); setViewMode('detail') }}>
                     <td style={styles.td}>{r.roster_date}</td>
@@ -991,7 +1009,7 @@ function RosterDetail({ roster, roles, pool, userProfile, onBack, onAction, aler
           </div>
         )}
         <div style={styles.row}>
-          {['production_manager', 'assistant_production_manager'].includes(role) && icoStatus === 'draft' && (
+          {hasRole(userProfile, 'production_manager', 'assistant_production_manager') && icoStatus === 'draft' && (
             <button style={styles.btn('primary')} onClick={() => doAction('submit')} disabled={actioning}>Submit for ICO Review</button>
           )}
           {role === 'ico' && icoStatus === 'submitted' && (
