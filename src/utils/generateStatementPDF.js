@@ -14,6 +14,8 @@ function buildRows(orders, waybills, fromDate, toDate, productMap = {}) {
   // Debit rows: one per invoice (VAT-inclusive total_amount)
   for (const order of orders) {
     for (const invoice of (order.invoices || [])) {
+      // Drafts (quotations) and cancelled invoices are not charges on the account.
+      if (invoice.status === 'draft' || invoice.status === 'cancelled') continue;
       const d = invoice.issued_date;
       if (!d) continue;
       if (fromDate && d < fromDate) continue;
@@ -37,6 +39,7 @@ function buildRows(orders, waybills, fromDate, toDate, productMap = {}) {
   // Credit rows: confirmed payments on invoices
   for (const order of orders) {
     for (const invoice of (order.invoices || [])) {
+      if (invoice.status === 'draft' || invoice.status === 'cancelled') continue;
       for (const pay of (invoice.payments || [])) {
         if (pay.status !== 'confirmed') continue;
         const d = pay.payment_date;

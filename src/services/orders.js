@@ -10,7 +10,7 @@ export const ordersService = {
         marketer:marketer_id(id, full_name),
         site:site_id(id, site_name, site_address),
         order_items(*),
-        invoices(id, invoice_number, total_amount, issued_date, due_date, payments(id, amount_paid, payment_date, status))
+        invoices(id, invoice_number, total_amount, issued_date, due_date, status, delivery_cost, discount, include_vat, created_by_name, cancellation_reason, cancelled_by_name, payments(id, amount_paid, payment_date, status))
       `)
       .order('created_at', { ascending: false })
     if (from) query = query.gte('created_at', from)
@@ -29,7 +29,7 @@ export const ordersService = {
         marketer:marketer_id(id, full_name),
         site:site_id(id, site_name, site_address),
         order_items(*),
-        invoices(id, invoice_number, total_amount, issued_date, due_date, payments(id, amount_paid, payment_date, status))
+        invoices(id, invoice_number, total_amount, issued_date, due_date, status, delivery_cost, discount, include_vat, created_by_name, cancellation_reason, cancelled_by_name, payments(id, amount_paid, payment_date, status))
       `)
       .eq('marketer_id', userId)
       .order('created_at', { ascending: false })
@@ -156,7 +156,7 @@ export const customersService = {
         orders(
           id, status, created_at, site_id,
           order_items(quantity, unit_price, subtotal),
-          invoices(id, total_amount, payments(amount_paid, status))
+          invoices(id, total_amount, status, payments(amount_paid, status))
         )
       `)
       .order('created_at', { ascending: false })
@@ -173,7 +173,7 @@ export const customersService = {
         orders(
           id, status, created_at, site_id,
           order_items(quantity, unit_price, subtotal),
-          invoices(id, total_amount, payments(amount_paid, status))
+          invoices(id, total_amount, status, payments(amount_paid, status))
         )
       `)
       .eq('added_by', userId)
@@ -215,7 +215,7 @@ export const customersService = {
         id, created_at, site_id,
         order_items(block_type, quantity, unit_price, subtotal),
         invoices(
-          id, invoice_number, total_amount, issued_date,
+          id, invoice_number, total_amount, issued_date, status,
           payments(id, amount_paid, payment_date, status)
         )
       `)

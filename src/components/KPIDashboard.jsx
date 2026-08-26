@@ -214,7 +214,7 @@ export default function KPIDashboard() {
         supabase.from('payments').select('amount_paid,payment_date,invoice_id,invoice:invoice_id(order:order_id(customer:customer_id(id,name)))').eq('status','confirmed').gte('payment_date', from).lte('payment_date', to),
         supabase.from('payments').select('amount_paid').eq('status','confirmed').gte('payment_date', pFrom).lte('payment_date', pTo),
         // Invoices
-        supabase.from('invoices').select('total_amount,issued_date').gte('issued_date', from).lte('issued_date', to),
+        supabase.from('invoices').select('total_amount,issued_date').not('status', 'in', '("draft","cancelled")').gte('issued_date', from).lte('issued_date', to),
         // Orders
         supabase.from('orders').select('id,created_at,status,order_items(quantity,unit_price),customer:customer_id(id,name)').gte('created_at', from + 'T00:00:00').lte('created_at', to + 'T23:59:59'),
         // Customers
