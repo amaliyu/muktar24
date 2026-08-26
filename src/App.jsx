@@ -194,6 +194,11 @@ const STATUS_BADGE = {
   cancelled: { label: 'Cancelled', color: '#f06b6b' },
 };
 
+// Invoices that count toward an order's / customer's value, paid and receivable
+// figures — a draft is a quotation and a cancelled invoice is void, so both are
+// excluded. Pass the invoices array (e.g. liveInvoices(order.invoices)).
+const liveInvoices = (invoices) => (invoices || []).filter(inv => inv.status !== 'draft' && inv.status !== 'cancelled');
+
 const InvoiceEditorModal = ({ editor, setEditor, onSave, saving }) => {
   if (!editor) return null;
   const { items, delivery_cost, include_vat, discount } = editor;
@@ -404,7 +409,7 @@ const Dashboard = ({ onNavigate, userProfile }) => {
         const produced = productions.reduce((s, p) => s + (p.quantity_produced || 0), 0);
         const damages  = waybills.reduce((s, w) => s + (w.quantity_damaged || 0), 0);
         const revenue  = orders.reduce((s, o) =>
-          s + (o.invoices || []).flatMap(inv => inv.payments || []).filter(p => p.status === "confirmed").reduce((a, p) => a + p.amount_paid, 0), 0);
+          s + liveInvoices(o.invoices).flatMap(inv => inv.payments || []).filter(p => p.status === "confirmed").reduce((a, p) => a + p.amount_paid, 0), 0);
         const pending  = orders.filter(o => o.status === "pending").length;
         setStats({ staff: staffList.length, produced, orders: orders.length, revenue, pending, waybills: waybills.length, damages, lpoQueue: 0, scheduleQueue: 0, pendingRegister: 0 });
         setRecent(orders.slice(0, 5));
@@ -1125,11 +1130,11 @@ const Orders = ({ onNavigate, userProfile }) => {
   }, [pickedCustomer?.id]);
 
   const orderTotal = (order) => {
-    const invoiced = (order.invoices || []).reduce((s, inv) => s + Number(inv.total_amount ?? 0), 0);
+    const invoiced = liveInvoices(order.invoices).reduce((s, inv) => s + Number(inv.total_amount ?? 0), 0);
     const itemTotal = (order.order_items || []).reduce((s, i) => s + (i.subtotal || i.quantity * i.unit_price), 0);
     return invoiced !== 0 ? invoiced : itemTotal;
   };
-  const orderPaid = (order) => (order.invoices || []).flatMap(inv => inv.payments || []).filter(p => p.status === "confirmed").reduce((s, p) => s + p.amount_paid, 0);
+  const orderPaid = (order) => liveInvoices(order.invoices).flatMap(inv => inv.payments || []).filter(p => p.status === "confirmed").reduce((s, p) => s + p.amount_paid, 0);
   const orderQty = (order) => (order.order_items || []).reduce((s, i) => s + i.quantity, 0);
 
   const updateItem = (idx, field, val) => {
@@ -1302,6 +1307,9 @@ const Orders = ({ onNavigate, userProfile }) => {
     setInvActioning(true);
     try {
       await invoicesService.issue(invoice.id);
+      // Issuing a draft is the point the order becomes a firm sale — advance it
+      // to 'invoiced' now (a draft/quotation left it untouched).
+      if (selected?.id) { try { await ordersService.updateStatus(selected.id, "invoiced"); } catch {} }
       setIssueTarget(null);
       const newOrders = await load();
       if (newOrders) setSelected(newOrders.find(o => o.id === selected?.id) || null);
@@ -1368,7 +1376,9 @@ const Orders = ({ onNavigate, userProfile }) => {
           }
         }
         invoiceId = newInvoice.id;
-        await ordersService.updateStatus(orderId, "invoiced");
+        // NOTE: the order is NOT advanced to 'invoiced' here — a draft is a
+        // quotation and must leave the order status untouched. The order
+        // advances to 'invoiced' when the invoice is ISSUED (see doIssueInvoice).
       }
 
       // Write the line items (replace-all, only when changed; DB blocks this on
@@ -1408,8 +1418,8 @@ const Orders = ({ onNavigate, userProfile }) => {
         await paymentsService.recordPayment({ invoice_id: invoice.id, amount_paid: parseFloat(payForm.amount), payment_date: payForm.date, status: "confirmed" });
         // Check if order is now fully paid → add to pending delivery register
         try {
-          const totalInvoiced = (selected.invoices || []).reduce((s, inv) => s + Number(inv.total_amount || 0), 0);
-          const alreadyPaid = (selected.invoices || []).flatMap(inv => (inv.payments || []).filter(p => p.status === "confirmed")).reduce((s, p) => s + Number(p.amount_paid), 0);
+          const totalInvoiced = liveInvoices(selected.invoices).reduce((s, inv) => s + Number(inv.total_amount || 0), 0);
+          const alreadyPaid = liveInvoices(selected.invoices).flatMap(inv => (inv.payments || []).filter(p => p.status === "confirmed")).reduce((s, p) => s + Number(p.amount_paid), 0);
           const newTotal = alreadyPaid + parseFloat(payForm.amount);
           if (newTotal >= totalInvoiced && totalInvoiced > 0) {
             const fullOrder = await ordersService.getById(selected.id);
@@ -2684,15 +2694,14 @@ const Customers = ({ userProfile }) => {
   const getStats = (c) => {
     const orders = c.orders || [];
     // A draft is a quotation and a cancelled invoice is void — neither counts
-    // toward what a customer owes. Fall back to order line items only when the
-    // order has no live invoice (same as before for un-invoiced orders).
-    const liveInvoices = (o) => (o.invoices || []).filter(inv => inv.status !== 'draft' && inv.status !== 'cancelled');
+    // toward what a customer owes (liveInvoices). Fall back to order line items
+    // only when the order has no live invoice (same as before for un-invoiced).
     const totalValue = orders.reduce((s, o) => {
-      const invoiced = liveInvoices(o).reduce((si, inv) => si + Number(inv.total_amount ?? 0), 0);
+      const invoiced = liveInvoices(o.invoices).reduce((si, inv) => si + Number(inv.total_amount ?? 0), 0);
       const itemTotal = (o.order_items || []).reduce((si, i) => si + Number(i.subtotal ?? i.quantity * i.unit_price), 0);
       return s + (invoiced !== 0 ? invoiced : itemTotal);
     }, 0);
-    const totalPaid = orders.reduce((s, o) => s + liveInvoices(o).flatMap(inv => inv.payments || []).filter(p => p.status === "confirmed").reduce((sp, p) => sp + Number(p.amount_paid), 0), 0);
+    const totalPaid = orders.reduce((s, o) => s + liveInvoices(o.invoices).flatMap(inv => inv.payments || []).filter(p => p.status === "confirmed").reduce((sp, p) => sp + Number(p.amount_paid), 0), 0);
     return { totalValue, totalPaid, outstanding: totalValue - totalPaid, orderCount: orders.length };
   };
 
