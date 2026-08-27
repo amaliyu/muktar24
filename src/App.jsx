@@ -100,7 +100,6 @@ const styles = {
   alert: (type) => ({ padding: "10px 14px", borderRadius: "8px", marginBottom: "16px", background: (type === "success" ? theme.green : theme.red) + "22", border: `1px solid ${(type === "success" ? theme.green : theme.red)}44`, color: type === "success" ? theme.green : theme.red, fontSize: "13px", display: "flex", justifyContent: "space-between", alignItems: "center" }),
 };
 
-const BLOCK_TYPES = ["9 Inch 3 Hole Block", "6 Inch Block", "4 Inch Block", "Standard Interlock", "Standard Kerb Stone", "Garden Kerb"];
 const ABUJA_AREAS = [
   "Katampe","Maitama","Gwarinpa","Kubwa","Karsana","Lugbe","Jahi",
   "Lifecamp","Galadimawa","Apo","Wuse","Wuse 2","Asokoro","Garki",
@@ -220,8 +219,8 @@ const InvoiceEditorModal = ({ editor, setEditor, onSave, saving }) => {
       <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: '12px', width: '100%', maxWidth: '720px' }}>
         <div style={{ padding: '20px 24px', borderBottom: `1px solid ${theme.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
-            <div style={{ fontSize: '16px', fontWeight: '700', color: theme.text }}>Draft Invoice Editor</div>
-            <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '2px' }}>Saves as a draft (proforma). It becomes a receivable only when issued.</div>
+            <div style={{ fontSize: '16px', fontWeight: '700', color: theme.text }}>{editor._existingId ? 'Edit Invoice' : 'New Invoice (Draft)'}</div>
+            <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '2px' }}>{editor._existingId ? 'Content is editable until the invoice is tagged paid.' : 'Saves as a draft. It becomes a receivable only when issued.'}</div>
           </div>
           <button style={{ ...styles.btn('secondary'), padding: '4px 10px' }} onClick={() => setEditor(null)}>✕ Close</button>
         </div>
@@ -297,7 +296,7 @@ const InvoiceEditorModal = ({ editor, setEditor, onSave, saving }) => {
           </div>
 
           <div style={styles.row}>
-            <button style={styles.btn('primary')} onClick={onSave} disabled={saving}>{saving ? 'Saving…' : 'Save Draft & Download Proforma'}</button>
+            <button style={styles.btn('primary')} onClick={onSave} disabled={saving}>{saving ? 'Saving…' : ((editor.status || (editor._existingId ? 'issued' : 'draft')) === 'draft' ? 'Save Draft & Download Proforma' : 'Save Changes & Download PDF')}</button>
             <button style={styles.btn('secondary')} onClick={() => setEditor(null)}>Cancel</button>
           </div>
         </div>
@@ -1344,7 +1343,10 @@ const Orders = ({ onNavigate, userProfile }) => {
     if (!invoiceEditor || !selected) return;
     setInvoicing(true);
     try {
-      const { _existingId, invoice_number, issued_date, due_date, items, delivery_cost, include_vat, discount } = invoiceEditor;
+      const { _existingId, invoice_number, issued_date, due_date, items, delivery_cost, include_vat, discount, status: editorStatus } = invoiceEditor;
+      // New invoices are drafts; editing an existing one preserves its status
+      // (the editor now opens on any non-paid invoice, not just drafts).
+      const savedStatus = editorStatus || (_existingId ? 'issued' : 'draft');
       let invNum = invoice_number;
       const itemSubtotal = items.reduce((s, i) => s + (Number(i.quantity) || 0) * (Number(i.unit_price) || 0), 0);
       const delivN = Number(delivery_cost) || 0;
@@ -1381,17 +1383,19 @@ const Orders = ({ onNavigate, userProfile }) => {
         // advances to 'invoiced' when the invoice is ISSUED (see doIssueInvoice).
       }
 
-      // Write the line items (replace-all, only when changed; DB blocks this on
-      // non-drafts, which the editor is only ever opened on).
+      // Write the line items (replace-all, only when changed; the DB blocks this
+      // once the invoice is 'paid', which the editor never opens on).
       await invoicesService.saveItems(invoiceId, items);
 
       const customer = selected.customer || { name: selected.customerName, location: selected.customerLocation, phone: selected.customerPhone };
-      await generateInvoicePDF({ invoice_number: invNum, issued_date, due_date, items, delivery_cost: delivN, include_vat, discount: discN, status: 'draft' }, customer);
+      await generateInvoicePDF({ invoice_number: invNum, issued_date, due_date, items, delivery_cost: delivN, include_vat, discount: discN, status: savedStatus }, customer);
 
       setInvoiceEditor(null);
       const newOrders = await load();
       if (newOrders) setSelected(newOrders.find(o => o.id === orderId) || null);
-      setAlert({ type: "success", msg: `Draft invoice ${invNum} saved. Proforma downloaded.` });
+      const savedLabel = savedStatus === 'draft' ? 'Draft invoice' : 'Invoice';
+      const pdfLabel = savedStatus === 'draft' ? 'Proforma downloaded.' : 'PDF downloaded.';
+      setAlert({ type: "success", msg: `${savedLabel} ${invNum} saved. ${pdfLabel}` });
     } catch (e) {
       if (e.message?.includes('invoices_order_id_fkey')) {
         setInvoiceEditor(null);
@@ -1904,14 +1908,18 @@ const Orders = ({ onNavigate, userProfile }) => {
                         const status = inv.status || 'issued';
                         const badge = STATUS_BADGE[status] || STATUS_BADGE.issued;
                         const isDraft = status === 'draft';
-                        const hasPayments = (inv.payments || []).length > 0;
+                        const hasConfirmedPayment = (inv.payments || []).some(p => p.status === 'confirmed');
                         const isMD = userProfile?.role === 'md';
-                        // invoice_items / draft-content writers per RLS
-                        const canEditContent = isDraft && hasRole(userProfile, 'md', 'accountant', 'bdm');
+                        // Editable while NOT paid. Per the MD ruling ("all invoices are
+                        // proforma until tagged paid") the content/line-item guards lock
+                        // only at 'paid', and invoices_update / invoice_items_write allow
+                        // md/accountant any status and bdm while status <> 'paid'.
+                        const canEditContent = status !== 'paid' && hasRole(userProfile, 'md', 'accountant', 'bdm');
                         // Cancel: md/accountant, on a draft or issued invoice, never on paid
                         const canCancel = (isDraft || status === 'issued') && hasRole(userProfile, 'md', 'accountant');
-                        // Delete matches RLS exactly: md unconditional; bdm only a draft with no payments
-                        const canDelete = isMD || (userProfile?.role === 'bdm' && isDraft && !hasPayments);
+                        // Delete mirrors invoices_delete exactly: md unconditional; bdm any
+                        // non-paid invoice with no confirmed payment.
+                        const canDelete = isMD || (hasRole(userProfile, 'bdm') && status !== 'paid' && !hasConfirmedPayment);
                         return (
                         <>
                           <div style={{ width: "100%", display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", marginBottom: "6px" }}>
@@ -1921,7 +1929,7 @@ const Orders = ({ onNavigate, userProfile }) => {
                           </div>
                           <button style={styles.btn("primary")} onClick={() => handleDownloadInvoicePDF(inv)} disabled={invoicing}>{invoicing ? "Downloading…" : (isDraft ? "Download Proforma PDF" : "Download Invoice PDF")}</button>
                           {canEditContent && <button style={styles.btn("secondary")} onClick={handleGenerateInvoice} disabled={invoicing}>Edit Line Items</button>}
-                          {canEditContent && <button style={{ ...styles.btn("primary"), background: theme.green }} onClick={() => setIssueTarget(inv)} disabled={invActioning}>Issue Invoice</button>}
+                          {isDraft && hasRole(userProfile, 'md', 'accountant', 'bdm') && <button style={{ ...styles.btn("primary"), background: theme.green }} onClick={() => setIssueTarget(inv)} disabled={invActioning}>Issue Invoice</button>}
                           {!isDraft && status !== 'cancelled' && hasRole(userProfile, 'md', 'accountant') && <button style={styles.btn("secondary")} onClick={() => setShowPayForm(!showPayForm)}>+ Record Payment</button>}
                           {canCancel && <button style={styles.btn("secondary")} onClick={() => { setCancelTarget(inv); setCancelReason(''); }} disabled={invActioning}>Cancel Invoice</button>}
                           {canDelete && <button style={{ ...styles.btn("danger"), opacity: invDeleting ? 0.6 : 1 }} disabled={invDeleting} onClick={() => handleDeleteInvoice(inv)}>Delete Invoice</button>}
