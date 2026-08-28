@@ -200,6 +200,10 @@ const STATUS_BADGE = {
 const liveInvoices = (invoices) => (invoices || []).filter(inv => inv.status !== 'draft' && inv.status !== 'cancelled');
 
 const InvoiceEditorModal = ({ editor, setEditor, onSave, saving }) => {
+  // Active products power the line-item datalist (pick-or-type) and the
+  // optional unit-price default. Hooks must run before the early return below.
+  const [products, setProducts] = useState([]);
+  useEffect(() => { productsService.getActive().then(setProducts).catch(() => {}); }, []);
   if (!editor) return null;
   const { items, delivery_cost, include_vat, discount } = editor;
   const itemSubtotal = items.reduce((s, i) => s + (Number(i.quantity) || 0) * (Number(i.unit_price) || 0), 0);
@@ -212,8 +216,24 @@ const InvoiceEditorModal = ({ editor, setEditor, onSave, saving }) => {
   const N = n => `₦${Math.round(Number(n) || 0).toLocaleString()}`;
   const upd = (field, val) => setEditor(e => ({ ...e, [field]: val }));
   const updItem = (idx, field, val) => setEditor(e => { const it = [...e.items]; it[idx] = { ...it[idx], [field]: val }; return { ...e, items: it }; });
+  // addItem starts with an empty description — no hardcoded product default, so
+  // the datalist picker below opens blank rather than pre-selecting a product.
   const addItem = () => setEditor(e => ({ ...e, items: [...e.items, { description: '', quantity: '', unit_price: '' }] }));
   const removeItem = idx => setEditor(e => ({ ...e, items: e.items.filter((_, i) => i !== idx) }));
+  // Line-item product field: pick from the list OR type custom wording (native
+  // datalist combobox — the same "Select or type…" pattern the product form
+  // uses). The value stays in `description`, which saveItems maps to
+  // invoice_items.block_type. When it matches a product with a non-zero price
+  // and no price is set yet, offer that price as an editable default (prices are
+  // negotiated per order; almost all products are 0, so this rarely pre-fills).
+  const onDescriptionChange = (idx, val) => setEditor(e => {
+    const it = [...e.items];
+    const cur = it[idx];
+    const prod = products.find(p => p.name === val);
+    const nextPrice = (prod && Number(prod.unit_price) > 0 && !cur.unit_price) ? String(prod.unit_price) : cur.unit_price;
+    it[idx] = { ...cur, description: val, unit_price: nextPrice };
+    return { ...e, items: it };
+  });
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', zIndex: 1000, overflowY: 'auto', padding: '24px 16px' }}>
@@ -245,9 +265,12 @@ const InvoiceEditorModal = ({ editor, setEditor, onSave, saving }) => {
 
           {/* Line items */}
           <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: '8px' }}>Line Items</div>
+          <datalist id="invoice-line-products">
+            {products.map(p => <option key={p.id} value={p.name} />)}
+          </datalist>
           {items.map((item, idx) => (
             <div key={idx} style={{ display: 'flex', gap: '8px', marginBottom: '8px', alignItems: 'center' }}>
-              <input style={{ ...styles.input, flex: 2 }} placeholder="Description" value={item.description} onChange={e => updItem(idx, 'description', e.target.value)} />
+              <input list="invoice-line-products" style={{ ...styles.input, flex: 2 }} placeholder="Select or type product…" value={item.description} onChange={e => onDescriptionChange(idx, e.target.value)} />
               <input style={{ ...styles.input, flex: 1 }} type="number" placeholder="Qty" value={item.quantity} onChange={e => updItem(idx, 'quantity', e.target.value)} />
               <input style={{ ...styles.input, flex: 1 }} type="number" placeholder="Unit Price" value={item.unit_price} onChange={e => updItem(idx, 'unit_price', e.target.value)} />
               <div style={{ ...styles.input, flex: 1, background: 'transparent', color: theme.accent, fontWeight: '700', fontSize: '12px' }}>
