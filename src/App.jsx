@@ -1507,9 +1507,12 @@ const Orders = ({ onNavigate, userProfile }) => {
   const handleDeleteInvoice = async (invoice) => {
     setInvDeleteMsg(null);
     try {
+      // Mirror invoices_delete RLS: only a CONFIRMED payment blocks deletion.
+      // Pending/unconfirmed payments do not, so they must not gate the button either.
       const payments = await paymentsService.getByInvoice(invoice.id);
-      if (payments.length > 0) {
-        setInvDeleteMsg(`${payments.length} payment${payments.length > 1 ? 's are' : ' is'} recorded against this invoice and must be handled first.`);
+      const confirmed = payments.filter(p => p.status === 'confirmed');
+      if (confirmed.length > 0) {
+        setInvDeleteMsg(`${confirmed.length} confirmed payment${confirmed.length > 1 ? 's are' : ' is'} recorded against this invoice and must be handled first.`);
         return;
       }
       setConfirmDeleteInvoice(invoice);
@@ -1568,7 +1571,7 @@ const Orders = ({ onNavigate, userProfile }) => {
   return (
     <div>
       {confirmDelete && <ConfirmModal msg={confirmDelete.type === "payment" ? `Remove payment of ${naira(confirmDelete.amount_paid)} recorded on ${confirmDelete.payment_date}? This cannot be undone.` : `Delete order for ${confirmDelete.customer?.name}? This will also delete all invoices. This cannot be undone.`} onConfirm={() => confirmDelete.type === "payment" ? handleDeletePayment(confirmDelete.id) : handleDeleteOrder(confirmDelete.id)} onCancel={() => setConfirmDelete(null)} />}
-      {confirmDeleteInvoice && <ConfirmModal msg={`Delete invoice ${confirmDeleteInvoice.invoice_number}? This cannot be undone.`} onConfirm={() => doDeleteInvoice(confirmDeleteInvoice)} onCancel={() => setConfirmDeleteInvoice(null)} />}
+      {confirmDeleteInvoice && <ConfirmModal msg={`Permanently delete invoice ${confirmDeleteInvoice.invoice_number}? This cannot be undone, and it leaves a gap in the invoice number sequence.`} onConfirm={() => doDeleteInvoice(confirmDeleteInvoice)} onCancel={() => setConfirmDeleteInvoice(null)} />}
       {issueTarget && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: "16px" }}>
           <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: "12px", padding: "28px 32px", maxWidth: "440px", width: "100%" }}>
@@ -1927,14 +1930,15 @@ const Orders = ({ onNavigate, userProfile }) => {
                         const status = inv.status || 'issued';
                         const badge = STATUS_BADGE[status] || STATUS_BADGE.issued;
                         const isDraft = status === 'draft';
-                        const hasPayments = (inv.payments || []).length > 0;
+                        const hasConfirmedPayment = (inv.payments || []).some(p => p.status === 'confirmed');
                         const isMD = userProfile?.role === 'md';
                         // invoice_items / draft-content writers per RLS
                         const canEditContent = isDraft && hasRole(userProfile, 'md', 'accountant', 'bdm');
                         // Cancel: md/accountant, on a draft or issued invoice, never on paid
                         const canCancel = (isDraft || status === 'issued') && hasRole(userProfile, 'md', 'accountant');
-                        // Delete matches RLS exactly: md unconditional; bdm only a draft with no payments
-                        const canDelete = isMD || (userProfile?.role === 'bdm' && isDraft && !hasPayments);
+                        // Delete mirrors invoices_delete RLS exactly: md (primary role, never delegated)
+                        // unconditional; bdm (any granted role) on any not-yet-paid invoice with no confirmed payment.
+                        const canDelete = isMD || (hasRole(userProfile, 'bdm') && status !== 'paid' && !hasConfirmedPayment);
                         return (
                         <>
                           <div style={{ width: "100%", display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", marginBottom: "6px" }}>
