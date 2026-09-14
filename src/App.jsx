@@ -2,6 +2,8 @@ import { useState, useEffect, Component } from "react";
 import { supabase } from './lib/supabase';
 import { authService } from './services/authService';
 import LoginScreen from './components/LoginScreen';
+import InstallPrompt from './components/InstallPrompt';
+import UpdatePrompt from './components/UpdatePrompt';
 import BoardDashboard from './components/BoardDashboard';
 import FinancialStatements from './components/FinancialStatements';
 import OpeningBalances from './components/OpeningBalances';
@@ -7039,6 +7041,8 @@ export default function App() {
 
   return (
     <>
+    <InstallPrompt />
+    <UpdatePrompt />
     <style>{`
       @media (max-width: 768px) {
         * { box-sizing: border-box; }
