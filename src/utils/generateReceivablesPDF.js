@@ -50,6 +50,8 @@ export async function generateReceivablesPDF(receivables) {
   for (const order of receivables) {
     const customerName = order.customer?.name || '—';
     for (const inv of order.invoices || []) {
+      // Drafts (quotations) and cancelled invoices are not receivables.
+      if (inv.status === 'draft' || inv.status === 'cancelled') continue;
       const invoiced = Number(inv.total_amount || 0);
       const paid = (inv.payments || [])
         .filter(p => p.status === 'confirmed')

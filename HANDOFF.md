@@ -1,188 +1,115 @@
 # Abuja Precast Manager — Handoff Document
 
-> **Date:** 2026-06-09
+> **Last updated:** 2026-08-07
 > **Repo:** `amaliyu/muktar24`
-> **Live branch (Vercel):** `main`
-> **Dev branch:** `claude/analyze-test-coverage-irQFZ`
+> **Production branch:** `main` (Vercel auto-deploys from here)
+> **Master doc:** `docs/UNIFIED_MASTER_STATE_AND_PLAN.md` — the single source of truth (full session log, priority queue, decisions, §10 bug-pattern catalogue). This handoff is the short version; on any conflict, the master doc and live DB win.
 > **Reference doc:** `APP_FULL_DOC.md` (full technical reference)
 
 ---
 
-## What This Project Is
+## OPERATING RULES — Non-Negotiable
 
-A full operations management ERP for Abuja Precast Concrete. It handles orders, invoicing, waybills, deliveries, production logging, inventory, labour payroll, staff management, vehicle fleet, expenses, and financial statements — all in a single React SPA backed by Supabase.
+Restate at the start of every session; follow without exception.
 
----
+1. **MD merges only.** Claude Code never merges its own PRs. Every branch goes through a PR the MD reviews and merges.
+2. **No DB changes from the coding window.** Schema/RLS/migrations are applied from the planning chat via `apply_migration` (tracked, before/after verified). The coding window may *read/verify* the DB but does not change it.
+3. **One scope, one branch, one PR.** Each distinct piece of work gets its own `claude/<short-name>` branch and its own PR. Never stack unrelated work.
+4. **Slow and Verified.** fix on branch → Vercel preview → test as the affected role → confirm with own eyes → MD merges → re-verify on production. Never mark work done until it passes role-based testing. **Never trust a prior "done" — diff the code against main AND verify against the live DB** (master Working Rules #10/#11; Session 23 found several "done" features silently broken).
+5. **Verify every column against `information_schema` before writing a query.** Assumed column names have caused real production bugs. See the trap catalogue in master §10.
 
-## Current Branch State
-
-The dev branch (`claude/analyze-test-coverage-irQFZ`) is **2 commits ahead of `main`**:
-
-| Commit | What it does |
-|--------|-------------|
-| `a49950f` | Guards payroll submit button edge cases; restricts Monthly Fixed "Create Payroll" to authorised roles |
-| `10ee28f` | Updated `APP_FULL_DOC.md` to current state |
-
-**These commits have not been merged to `main` yet.** Merge them before deploying or building on top.
+**Verification-access reality (important):** the coding window's DB connector runs as the **service role** — it bypasses RLS and PostgREST parsing, so it cannot prove how a query behaves *as a specific role through the app*. There is no credentialed Vercel-preview login in the window and direct REST to Supabase is proxy-blocked. So end-to-end "as the affected role in the browser" testing is the MD's step; where a claim can only be proven that way, the coding window verifies as far as service-role round-trips allow and **discloses the residual gap in the PR** rather than overstating it.
 
 ---
 
-## What Was Done in This Session (in order)
+## Current State of `main`
 
-### 1. Invoice FK error fix (`9119c45`)
+`main` tip: **`7069d6d`** — "Merge PR #110 (multi-role support)".
 
-**Problem:** When the BDM tried to create an invoice, they sometimes got a raw Postgres error: `invoices_order_id_fkey`. Root cause: the Delete order button had no role restriction, so anyone could delete an order while another user had it selected.
-
-**Fixes applied:**
-- Delete order button now shows for **MD only** (`src/App.jsx:1322`)
-- `handleSaveInvoice` catches the FK error and shows a helpful message + auto-refreshes the order list
-- Guard added so invoice can't be saved if `selected` order is null
+All of PRs **#92–#110** (Session 23) are merged. No known open feature branches carrying unmerged work. `main` is the deploy source.
 
 ---
 
-### 2. Labour payroll submit button fix + recall workflow (`ce003f4`)
+## ⚠️ Live-State Warning — read before touching any financial/inventory figure
 
-**Problem:** The logistics manager's "Submit for Approval" button stayed visible after clicking. Root cause: the only way to detect a submission was to check `truck_loading_log.payment_status`, but the DB `CHECK` constraint only allows `'unpaid'` or `'paid'` — there is no intermediate "submitted" state. So the button condition never changed.
+**A historical backfill to January 2026 is IN PROGRESS.** Inventory levels and every financial aggregate (expenses, P&L, balance sheet, cash flow, stock) are being back-populated and are **not a settled opening position.**
 
-**Fix:** `LoadingWeeklySummary` now loads `weekly_labour_payroll` records directly and checks `existingPayrolls[week]`. Once a payroll row exists for a week, the button is replaced with a status badge.
-
-**Recall workflow added:** A "Recall to Draft" button was added to all three payroll types (weekly loading, weekly production, monthly fixed). It resets `status → 'draft'` and clears `ico_approved_by` / `md_approved_by`. Available to: PM, APM, Logistics Manager, HR Officer, ICO, MD — for any payroll that hasn't been marked `paid`.
-
----
-
-### 3. `assistant_production_manager` role (`f6cb287`)
-
-**New role added end-to-end:**
-- Added to `APP_ROLES` and `ROLE_PAGES` in `src/App.jsx`
-- Added to `src/components/Labour.jsx` — can submit payrolls, use recall, access all labour tabs
-- Added to `src/components/Reports.jsx` — sees production and inventory reports
-- Added `ROLE_LABELS` entry in Reports
-- Same page access as `production_manager`, **except** the Propose Rate Change button (intentionally excluded — PM-only)
-
-**Outstanding SQL needed** — see section below.
+- **Do NOT** treat any inventory or financial total as final, reconcile it to zero, or raise a discrepancy alarm off it until the backfill is declared complete **and** a physical count has been taken.
+- The financial reports rebuilt this session (P&L/balance-sheet/cash-flow/supplier/expense — PRs #104/#106/#107) are structurally correct but read data that is still moving.
+- Snapshot figures (planning-chat, 2026-07-27): **99 tables · 325 RLS policies (234 multi-role-aware) · 456 expenses = ₦15,811,143** — all provisional.
 
 ---
 
-### 4. Submit button edge case hardening (`a49950f`)
+## Recent Changes — Session 23 (PRs #92–#110)
 
-Two bugs found in `LoadingWeeklySummary` that could cause the Submit button to reappear after being clicked:
+Full detail in master §1 (Session 23). Compressed:
 
-1. `useEffect` fetching existing payrolls used `.then(({ data }) => ...)` — silently ignored Supabase errors, leaving `existingPayrolls` empty on network failure.
-2. Supabase `.single()` can return `null` for `inserted`, making `existingPayrolls[week]` falsy — button reappears.
+- **Phase 6A maintenance (PR #92/#93):** Maintenance page — per-asset PM checklists + downtime log (reason categories, resolver); staff-picker filtered to the asset's team via `reports_to_staff_id`. First real OEE data source.
+- **Phase 6B curing sign-off (PR #94/#95/#96):** Batches gained a product dropdown (`product_id`), Batch Date, and an *advisory* Store-Officer curing sign-off; Edit/Delete role-gated to match RLS. (#95 re-landed as #96 after a branch-base slip.)
+- **Data-integrity fixes:** production audit trail + duplicate warning (#97); dust/chippings auto-deduct that never fired now fires (#98); roster edit switched from delete-then-reinsert to `upsert` to stop duplicate accumulation (#99, + UUID-quoting follow-up `fbdad15`); production-delete now reverses stock (#101); inventory `editMovement` double-deduct fixed + role-gated (#105).
+- **Accounting reports rebuilt:** `expenses.expense_date` fix + 13 fetchers stop swallowing errors (#104); P&L rebuilt as accrual income statement (#106); expense/supplier/cash-flow/balance-sheet rebuilt with every column re-verified vs `information_schema` (#107).
+- **UX / access:** Messages re-added to affected roles + notification empty-states (#100); inventory kg/tonnes toggle + "Recorded By" (#102); payment-request attachment read-back (#103); roster/loading Edit/Delete gated on linked payroll status (#108); Truck Loading date-range filter + null-date toggle (#109).
+- **Multi-role (#110):** effective roles (primary + active grants via `my_effective_roles()`), union nav, MD-only `RoleGrantsManager`, `src/lib/roles.js` (`hasRole`, `effectiveRolesOf`). MD-only authority and approval-chain gates intentionally left as primary-role checks.
 
-Both fixed. Monthly Fixed "Create Payroll" button also restricted to authorised roles only (was open to any authenticated user).
-
----
-
-## SQL That Must Be Run in the Supabase SQL Editor
-
-**These have NOT been run. The app will not work fully without them.**
+The recurring bug shapes from this session (date-column traps, `expenses` category, `suppliers.company_name`, RLS delete-then-reinsert, swallowed errors, keyword inventory lookup, reverse-then-apply) are catalogued in **master §10** — read it before touching reports or stock code.
 
 ---
 
-### 1. Fix production target permissions for APM (blocking)
+## Open Threads
 
-APM users cannot set daily production targets because the RLS policy is missing their role:
+### A. Needs a person / an MD decision (cannot be built until answered)
+1. **Historical backfill to January + physical count** — finish the backfill, then take a real physical inventory count and reconcile. Everything below that depends on true stock is blocked on this.
+2. **Confirm interlock & kerb curing days** — Phase 6B's sign-off stays advisory until the MD ratifies the minimum curing age per product. (NIS 87 gives a default; MD-configurable value must be confirmed.)
+3. **DOXIX opening-balance reconciliation** — explain the ~₦147.8m gap (₦233m fixed assets recorded vs **zero** recorded debt) before opening balances can be trusted.
+4. **Deactivate Peter Gomina's staff record** — deactivation only (not delete); awaiting MD go-ahead.
+5. **Pending SQL from older handoffs — VERIFY, don't assume.** Earlier HANDOFF SQL blocks (`prod_targets_write` APM fix; seed `assistant_production_manager` into `app_roles`) were the kind of item master §4 notes were *found already applied*. Check live state before running anything; apply from the planning chat if genuinely outstanding.
 
-```sql
-DROP POLICY IF EXISTS "prod_targets_write" ON production_targets;
-CREATE POLICY "prod_targets_write" ON production_targets
-  FOR ALL
-  USING     (get_user_role() IN ('md','production_manager','assistant_production_manager','ico'))
-  WITH CHECK (get_user_role() IN ('md','production_manager','assistant_production_manager','ico'));
-```
+### B. Ready to build (scoped, no decision blocking)
+1. **Phase 6C — spare-parts register** (§9): critical-spares register (part, criticality tier, on-hand, reorder threshold, Turkish-parts lead time) + reorder alerts.
+2. **Phase 6D — fleet status tracking** (§9): active/down per truck (extends `vehicles`), repair log + expected-return date; closes the "trucks down with no visible capacity impact" blind spot.
+3. **Phase 6E — role-KPI dashboard + reminders** (§9): depends on 6A–6D data; folds in the parked Session-21 role-responsibility reminders.
+4. **Multi-role button-level conversion** in Labour.jsx / Reports.jsx / Maintenance / FinancialStatements — convert *delegatable* action gates from primary-role to `hasRole()` (leave MD-only authority and approval-chain gates as primary-role). Itemised in PR #110.
+5. **`truck_loading_log` auto-expense trigger** fires on `total_amount`/`blocks_loaded`, not `date` — correcting a loading row's date leaves its linked expense in the wrong period. Trigger fix (planning-chat), not app code.
+6. **Waybill → order linkage** and **36 unvalued deliveries** — data-completeness stream alongside the backfill; margin/fulfilment-value totals understate until closed.
 
----
-
-### 2. Seed the assistant_production_manager role (deployment safety)
-
-The role exists in the app code but is not in the database seed files. If the DB is ever rebuilt from scratch, any user with this role will fail the FK constraint on `user_profiles.role`. Run once:
-
-```sql
-INSERT INTO app_roles (id, display_name, description, is_system_role)
-VALUES (
-  'assistant_production_manager',
-  'Asst. Production Manager',
-  'Production access — targets, logs, schedule; no rate changes',
-  false
-)
-ON CONFLICT (id) DO UPDATE
-  SET display_name = EXCLUDED.display_name,
-      description  = EXCLUDED.description;
-```
-
-After running, also paste this row into `supabase/add_all_roles.sql` and `supabase/MASTER_DEPLOYMENT.sql` so it survives future full redeployments.
+### C. Sequenced further out
+- **Bank statement parser hardening** (Taj PDF is a single point of failure — master §8), then the full **Phase 5c ingestion engine**, which stays LAST behind the backfill/costing/reconciliation queue (master §3).
+- **WAC costing → cost per 1,000 blocks** — blocked on the physical count (A.1).
 
 ---
 
-## Known Limitations to Be Aware Of
+## Architecture Quick Reference
 
-| Issue | Impact | Notes |
-|-------|--------|-------|
-| `ordersService.create` is not transactional | If `order_items` insert fails, a zombie `orders` row is left | Rare; fix requires a Supabase DB function with a transaction |
-| `invoice_number` computed client-side | Two simultaneous sessions could generate the same number | Low risk — it's a display label, no DB uniqueness constraint |
-| No audit log | Changes to orders, payrolls etc. are not tracked beyond the current state | Opening balances has a history table; nothing else does |
-
----
-
-## Architecture in One Page
-
-- **No router.** Page state is a single `useState` string (`active`). Sidebar calls `setActive(pageId)`.
-- **Role access** is enforced by `canSee(pageId)` which checks `ROLE_PAGES[role]`. Pages outside the role's list are filtered from the sidebar and redirect to dashboard.
-- **ICO read-only** is enforced via a CSS attribute: when `isICO` and the page is not `labour` or `schedule_approvals`, `<main>` gets `data-ico-view="true"`, which hides all buttons that don't have `data-ico-allow`. Buttons ICO must click (approve, recall) carry `data-ico-allow`.
-- **Board member read-only** same pattern via `data-board-view`.
-- **All Supabase calls** are in `src/services/*.js`. `Labour.jsx` calls Supabase directly in a few places (payroll queries inside components).
-- **RLS is disabled** on most tables; access control is purely in the frontend. The exceptions where RLS is active: `production_targets` (has a write policy), Storage buckets.
+- **No router.** A `useState` string drives navigation. `safePage` falls back to `'dashboard'` if the current page is outside the role's allowed list. With multi-role (PR #110), the visible nav is the UNION of every effective role's pages.
+- **Role access:** `canSee(pageId)` checks `ROLE_PAGES[role]`; `'all'` = MD full access. **Effective roles:** `src/lib/roles.js` — `hasRole(profile, ...roles)` (primary OR active grant; for *delegatable* checks only) and `effectiveRolesOf(profile)`. For MD-only authority, check the PRIMARY role (`userProfile.role === 'md'`), never `hasRole`.
+- **ICO / Board read-only:** `data-ico-view` / `data-board-view` CSS masks hide all buttons except `[data-ico-allow]`; masks are relaxed on `grantedPages` for multi-role.
+- **Service layer:** Supabase calls live in `src/services/*.js` (exception: Labour.jsx makes some direct calls inline).
+- **Inline styles only.** No CSS framework.
 
 ---
 
-## Files to Know
+## Key Files
 
 | File | Why it matters |
-|------|---------------|
-| `src/App.jsx` | ~7 030 lines — almost all page components live here |
-| `src/components/Labour.jsx` | ~2 100 lines — entire labour module |
-| `src/components/Reports.jsx` | Role-gated reporting engine |
-| `src/components/StaffHR.jsx` | Staff and HR management |
-| `supabase/fix_all_priority_issues.sql` | Most recent migration — contains current RLS policies |
-| `supabase/labour_schema.sql` | Labour tables and constraints |
-| `supabase/auth_roles_financial_tables.sql` | app_roles, user_profiles, financial tables |
+|------|----------------|
+| `src/App.jsx` | ~11k lines — most page components inline (incl. TruckLoadingPage, TradingMarginReport, RoleGrantsManager, Maintenance), `ROLE_PAGES`, nav gating (`allowedPages`/`canSee`/`visibleNav`/`safePage`), ICO/Board masks |
+| `src/lib/roles.js` | Effective-role helpers (`hasRole`, `effectiveRolesOf`) — the multi-role spine (PR #110) |
+| `src/components/Labour.jsx` | Labour module (pool, roster, payroll, rates); exports `getLastSaturday`/`shiftWeek`/`shiftDays`; roster `upsert`; payroll range picker |
+| `src/components/Reports.jsx` | Role-gated reporting engine; `buildPLStatement`/`buildBalanceSheet`/`buildCashFlowRows`/`supplierStatementRows` (rebuilt PRs #104/#106/#107) |
+| `src/components/StaffHR.jsx` | Staff & HR management |
+| `src/services/labour.js` | Labour service (pool, roster, truck loading `getLogs({from,to,includeNull})`/`getUndatedCount()`, payroll joins) |
+| `src/services/inventory.js` | `editMovement` (reverse-then-apply), `autoDeductProduction` (dust/chippings) |
+| `src/services/authService.js` | Multi-role grants: `listActiveGrants`/`checkRoleConflict`/`grantRole`/`revokeRole` |
+| `docs/UNIFIED_MASTER_STATE_AND_PLAN.md` | Master session log + §10 bug-pattern catalogue — read before reports/stock work |
 | `APP_FULL_DOC.md` | Full technical reference — roles, tables, workflows |
 
 ---
 
 ## How to Continue Development
 
-1. **Merge dev branch to main** before building new features:
-   ```
-   git checkout main
-   git merge claude/analyze-test-coverage-irQFZ
-   git push origin main
-   ```
-
-2. **Run the two SQL blocks** above in Supabase before testing with an APM user.
-
-3. **Environment variables needed** (set in Vercel and in `.env.local` for local dev):
-   ```
-   VITE_SUPABASE_URL=<your project URL>
-   VITE_SUPABASE_ANON_KEY=<your anon key>
-   ```
-
-4. **Local dev:**
-   ```
-   npm install
-   npm run dev
-   ```
-
-5. **To add a new role:**
-   - Add to `APP_ROLES` array (`src/App.jsx:102`)
-   - Add to `ROLE_PAGES` constant (`src/App.jsx:118`)
-   - Add to `supabase/add_all_roles.sql` and `supabase/MASTER_DEPLOYMENT.sql`
-   - Insert into `app_roles` table in Supabase
-   - Wire up any component-level role checks (ICO approve buttons, recall buttons, etc.)
-
-6. **To add a new page:**
-   - Add a component
-   - Add the page ID to `ROLE_PAGES` for each role that should see it
-   - Add a `pages` entry in the root component (`src/App.jsx:6912`)
-   - Add a sidebar nav item in the `NAV_SECTIONS` array
+1. **Start fresh:** `git fetch origin main && git checkout main && git pull`
+2. **Branch:** `git checkout -b claude/<short-name>`
+3. **Before writing queries:** confirm columns against `information_schema` (master §10) and read the backfill warning above.
+4. **Env vars** (Vercel + `.env.local`): `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`.
+5. **Local dev:** `npm install && npm run dev` · **Build check:** `npm run build`.
+6. **Diff every PR against current main before review** (Working Rule #9) and disclose any verification gap in the PR body.

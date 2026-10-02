@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
+import { hasRole } from '../lib/roles'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import * as XLSX from 'xlsx'
@@ -12,6 +13,21 @@ const theme = {
 
 const naira = (n) => `₦${Math.round(Number(n) || 0).toLocaleString()}`
 const todayStr = () => new Date().toISOString().split('T')[0]
+
+// Never surface the raw Postgres unique-constraint error (uq_roster_entry_worker)
+// to the user — translate it to a friendly, actionable message.
+const friendlyEntryError = (error) => {
+  if (!error) return ''
+  // Content-lock guard (daily_roster_content_guard): the DB raises a clean,
+  // actionable message ("Roster is linked to a … payroll; unlink or revert…").
+  // Surface it as-is rather than a raw Postgres error blob. Covers the race
+  // where a payroll gets approved between page load and save.
+  if (/is linked to a/i.test(error.message || '')) return error.message
+  if (error.code === '23505' || /uq_roster_entry_worker|duplicate key/i.test(error.message || '')) {
+    return 'This roster already has an entry for one of these workers. Please refresh and try again.'
+  }
+  return error.message || 'Could not save roster entries.'
+}
 
 function getSaturday(dateStr) {
   const d = new Date(dateStr || todayStr())
@@ -32,6 +48,28 @@ const NIGERIAN_BANKS = [
 const CATEGORIES = ['daily', 'monthly_fixed', 'piece_rate']
 const PAYMENT_TYPES = ['daily', 'monthly_fixed', 'piece_rate']
 const BONUS_TYPES = ['per_day', 'per_block', 'none']
+
+// Roles allowed to prepare a weekly labour payroll (production OR loading) and
+// to edit its draft. This MUST stay in sync with the weekly_labour_payroll
+// INSERT/UPDATE RLS policies, which permit md, production_manager,
+// assistant_production_manager, hr_officer and logistics_manager. ICO is a
+// permitted writer at the DB level but is deliberately excluded here: ICO
+// gates the payroll, it never originates one (separation of duties). Checked
+// via hasRole() so a user GRANTED one of these roles can prepare payroll too.
+// Defined once, in one place, because it was a repeated inline copy of this
+// list that silently drifted out of sync with the DB (logistics_manager was
+// dropped from the UI copy while remaining a valid DB writer).
+const PAYROLL_GENERATOR_ROLES = ['production_manager', 'assistant_production_manager', 'logistics_manager', 'hr_officer', 'md']
+
+// Roles allowed to create / edit / delete a daily roster and its entries.
+// Mirrors the daily_roster INSERT policy and the role portion of its
+// UPDATE/DELETE policies (has_any_role(md, production_manager,
+// assistant_production_manager, hr_officer)); the per-row isPaid / draft
+// guards below reproduce the DB's status conditions. ICO is in the raw
+// daily_roster UPDATE policy only for its approval step (a separate button),
+// not for editing roster content, so it is intentionally excluded here.
+// Checked via hasRole() so granted roles work.
+const ROSTER_WRITE_ROLES = ['md', 'production_manager', 'assistant_production_manager', 'hr_officer']
 
 const styles = {
   page: { padding: '24px 28px', color: theme.text, minHeight: '100vh', background: theme.bg },
@@ -354,7 +392,9 @@ function DailyRosterTab({ pool, roles, userProfile }) {
 
   const loadRosters = useCallback(async () => {
     setLoading(true)
-    const { data } = await supabase.from('daily_roster').select('*').order('roster_date', { ascending: false })
+    // Join the linked payroll's status — content editing is locked by the DB
+    // once that payroll is ico_approved/md_approved/paid (see canEdit below).
+    const { data } = await supabase.from('daily_roster').select('*, payroll:payroll_id(status)').order('roster_date', { ascending: false })
     setRosters(data || [])
     setLoading(false)
   }, [])
@@ -457,7 +497,7 @@ function DailyRosterTab({ pool, roles, userProfile }) {
           <button style={styles.tab(true)}>Roster List</button>
           <button style={styles.tab(false)} onClick={() => setViewMode('weekly')}>Weekly Summary</button>
         </div>
-        {['production_manager', 'assistant_production_manager', 'hr_officer'].includes(role) && (
+        {hasRole(userProfile, ...ROSTER_WRITE_ROLES) && (
           <button style={styles.btn('primary')} onClick={() => setViewMode('create')}>+ Create Roster</button>
         )}
       </div>
@@ -479,15 +519,24 @@ function DailyRosterTab({ pool, roles, userProfile }) {
                 const mdSt = r.md_status || 'pending'
                 const paySt = r.payment_status || 'unpaid'
                 const isPaid = paySt === 'paid'
-                const isApproved = ['ico_approved', 'md_approved'].includes(icoSt) || mdSt === 'approved'
-                const canEdit = !isPaid && (
-                  (['production_manager', 'assistant_production_manager'].includes(role) && ['draft', 'submitted'].includes(icoSt)) ||
-                  role === 'md'
-                )
-                const canDelete = !isPaid && (
-                  (['production_manager', 'assistant_production_manager'].includes(role) && ['draft', 'submitted'].includes(icoSt)) ||
-                  (role === 'md' && (!isApproved || role === 'md'))
-                )
+                // Content lock mirrors the DB guard (daily_roster_content_guard):
+                // unlinked rosters are always editable; a linked roster is editable
+                // only while its payroll is still 'draft'. Missing linked payroll →
+                // treat as editable (nothing is actively locking it). Role set is
+                // unchanged — only the status gate now reads the linked payroll.
+                const payrollStatus = r.payroll?.status
+                const payrollEditable = !r.payroll_id || !payrollStatus || payrollStatus === 'draft'
+                const canWriteRole = hasRole(userProfile, ...ROSTER_WRITE_ROLES)
+                const canEdit = !isPaid && payrollEditable && canWriteRole
+                // daily_roster_delete permits MD via get_user_role() with no
+                // status condition; everyone else needs the roster's OWN
+                // ico_status to be draft/submitted (NOT the linked payroll's
+                // status). r comes from select('*, …') so ico_status is present.
+                const rosterIcoStatus = r.ico_status || 'draft'
+                const icoDeletable = ['draft', 'submitted'].includes(rosterIcoStatus)
+                const isPrimaryMD = userProfile?.role === 'md'
+                const canDelete = !isPaid && payrollEditable && canWriteRole
+                                  && (isPrimaryMD || icoDeletable)
                 return (
                   <tr key={r.id} style={{ cursor: 'pointer' }} onClick={() => { setSelectedRoster(r); setViewMode('detail') }}>
                     <td style={styles.td}>{r.roster_date}</td>
@@ -629,6 +678,15 @@ function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCanc
     for (const e of entries) {
       if (!e.labour_id || !e.role_id) return setErr('All rows must have a worker and role selected.')
     }
+    // Each worker may appear at most once per roster (matches the DB unique
+    // constraint). The dropdown already blocks re-selecting a taken worker;
+    // this is the save-time guard behind it.
+    const labourIds = entries.map(e => String(e.labour_id))
+    const dupIdx = labourIds.findIndex((id, idx) => labourIds.indexOf(id) !== idx)
+    if (dupIdx !== -1) {
+      const dupWorker = pool.find(w => String(w.id) === labourIds[dupIdx])
+      return setErr(`${dupWorker?.full_name || 'A worker'} is added more than once — each worker can only appear once per roster.`)
+    }
     setSaving(true); setErr('')
     const weekEnding = getSaturday(date)
     const entryRows = (rosterId) => entries.map(e => ({
@@ -661,11 +719,20 @@ function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCanc
         submitted_by: submit ? userProfile?.full_name : editRoster.submitted_by,
         submitted_date: submit ? todayStr() : editRoster.submitted_date,
       }).eq('id', editRoster.id)
-      if (re) { setSaving(false); return setErr(re.message) }
-      await supabase.from('daily_roster_entries').delete().eq('roster_id', editRoster.id)
-      const { error: ee } = await supabase.from('daily_roster_entries').insert(entryRows(editRoster.id))
+      if (re) { setSaving(false); return setErr(friendlyEntryError(re)) }
+      // Upsert the current set (kept workers UPDATED in place via the
+      // roster_id,labour_id unique key; new workers INSERTED) — no wholesale
+      // delete, so there is never a window where all entries are gone.
+      const { error: ue } = await supabase.from('daily_roster_entries')
+        .upsert(entryRows(editRoster.id), { onConflict: 'roster_id,labour_id' })
+      if (ue) { setSaving(false); return setErr(friendlyEntryError(ue)) }
+      // Then remove only the workers the user took off the roster: entries for
+      // this roster whose labour_id is not in the current set. (labourIds is
+      // guaranteed non-empty — empty rosters are blocked above.)
+      const { error: de } = await supabase.from('daily_roster_entries')
+        .delete().eq('roster_id', editRoster.id).not('labour_id', 'in', `(${labourIds.map(id => `"${id}"`).join(',')})`)
       setSaving(false)
-      if (ee) setErr(ee.message)
+      if (de) setErr(friendlyEntryError(de))
       else onSave()
     } else {
       const { data: roster, error: re } = await supabase.from('daily_roster').insert({
@@ -677,7 +744,7 @@ function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCanc
       if (re) { setSaving(false); return setErr(re.message) }
       const { error: ee } = await supabase.from('daily_roster_entries').insert(entryRows(roster.id))
       setSaving(false)
-      if (ee) setErr(ee.message)
+      if (ee) setErr(friendlyEntryError(ee))
       else onSave()
     }
   }
@@ -692,7 +759,12 @@ function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCanc
       <div style={{ ...styles.row, gap: '20px', marginBottom: '18px', alignItems: 'center' }}>
         <div style={styles.formGroup}>
           <label style={styles.label}>Roster Date</label>
-          <input type="date" style={styles.input} value={date} onChange={e => setDate(e.target.value)} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <input type="date" style={styles.input} value={date} onChange={e => setDate(e.target.value)} />
+            {date < todayStr() && (
+              <span style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '4px', background: '#f59e0b22', color: '#f59e0b', border: '1px solid #f59e0b44', fontWeight: '700', whiteSpace: 'nowrap' }}>Historical</span>
+            )}
+          </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '14px' }}>
           <input type="checkbox" id="targetMet" checked={targetMet} onChange={e => setTargetMet(e.target.checked)} style={{ width: '16px', height: '16px' }} />
@@ -720,7 +792,10 @@ function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCanc
                   <td style={styles.td}>
                     <select style={{ ...styles.input, width: '160px' }} value={row.labour_id} onChange={e => updateRow(i, 'labour_id', e.target.value)}>
                       <option value="">— Select —</option>
-                      {activePool.map(w => <option key={w.id} value={w.id}>{w.full_name}</option>)}
+                      {activePool.map(w => {
+                        const takenElsewhere = entries.some((r, j) => j !== i && String(r.labour_id) === String(w.id))
+                        return <option key={w.id} value={w.id} disabled={takenElsewhere}>{w.full_name}{takenElsewhere ? ' (already added)' : ''}</option>
+                      })}
                     </select>
                   </td>
                   <td style={styles.td}>
@@ -934,7 +1009,7 @@ function RosterDetail({ roster, roles, pool, userProfile, onBack, onAction, aler
           </div>
         )}
         <div style={styles.row}>
-          {['production_manager', 'assistant_production_manager'].includes(role) && icoStatus === 'draft' && (
+          {hasRole(userProfile, 'production_manager', 'assistant_production_manager') && icoStatus === 'draft' && (
             <button style={styles.btn('primary')} onClick={() => doAction('submit')} disabled={actioning}>Submit for ICO Review</button>
           )}
           {role === 'ico' && icoStatus === 'submitted' && (
@@ -994,415 +1069,6 @@ function WeeklySummary({ rosters, onBack }) {
                     <td style={{ ...styles.td, color: theme.accent, fontWeight: '600' }}>{naira(r.total_daily_cost)}</td>
                     <td style={styles.td}><span style={styles.badge(r.target_met ? theme.green : theme.textMuted)}>{r.target_met ? 'Yes' : 'No'}</span></td>
                     <td style={styles.td}><span style={styles.badge(statusColor(r.ico_status))}>{r.ico_status || 'draft'}</span></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-// ── TRUCK LOADING TAB ────────────────────────────────────────────────────────
-function TruckLoadingTab({ pool, userProfile }) {
-  const [subTab, setSubTab] = useState('assignments')
-  const [vehicles, setVehicles] = useState([])
-  const [assignments, setAssignments] = useState([])
-  const [logs, setLogs] = useState([])
-  const [waybills, setWaybills] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [alert, setAlert] = useState(null)
-  const [showAssignForm, setShowAssignForm] = useState(false)
-  const [showLogForm, setShowLogForm] = useState(false)
-
-  const loadData = useCallback(async () => {
-    setLoading(true)
-    const [vRes, aRes, lRes, wRes] = await Promise.all([
-      supabase.from('vehicles').select('id, vehicle_number, vehicle_name').order('vehicle_number'),
-      supabase.from('truck_loader_assignments').select('*, labour:labour_pool(id, full_name, labour_number)').eq('is_active', true),
-      supabase.from('truck_loading_log').select('*, loaders:truck_loading_loaders(labour_id, labour:labour_pool(full_name))').order('created_at', { ascending: false }),
-      supabase.from('waybills').select('id, waybill_number, waybill_date, quantity_loaded, block_type, receiver_name').order('waybill_date', { ascending: false }).limit(100),
-    ])
-    setVehicles(vRes.data || [])
-    setAssignments(aRes.data || [])
-    setLogs(lRes.data || [])
-    setWaybills(wRes.data || [])
-    setLoading(false)
-  }, [])
-
-  useEffect(() => { loadData() }, [loadData])
-
-  const handleRemoveAssignment = async (id) => {
-    const { error } = await supabase.from('truck_loader_assignments').update({ is_active: false, removed_date: todayStr() }).eq('id', id)
-    if (error) setAlert({ msg: error.message, type: 'error' })
-    else { setAlert({ msg: 'Assignment removed.', type: 'success' }); loadData() }
-  }
-
-  return (
-    <div>
-      <div style={{ ...styles.row, gap: '4px', marginBottom: '16px' }}>
-        {['assignments', 'loading_log', 'weekly_summary'].map(t => (
-          <button key={t} style={styles.tab(subTab === t)} onClick={() => setSubTab(t)}>
-            {t === 'assignments' ? 'Assignments' : t === 'loading_log' ? 'Loading Log' : 'Weekly Summary'}
-          </button>
-        ))}
-      </div>
-      {alert && <AlertBar msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
-      {loading ? <Spinner /> : (
-        <>
-          {subTab === 'assignments' && (
-            <div>
-              {userProfile?.role !== 'ico' && (
-                <div style={{ textAlign: 'right', marginBottom: '14px' }}>
-                  <button style={styles.btn('primary')} onClick={() => setShowAssignForm(true)}>+ Assign Loader</button>
-                </div>
-              )}
-              {showAssignForm && (
-                <AssignLoaderForm vehicles={vehicles} pool={pool} onSave={() => { setShowAssignForm(false); loadData() }} onCancel={() => setShowAssignForm(false)} />
-              )}
-              {vehicles.map(v => {
-                const va = assignments.filter(a => a.vehicle_id === v.id)
-                if (va.length === 0) return null
-                return (
-                  <div key={v.id} style={styles.card}>
-                    <div style={{ fontWeight: '700', marginBottom: '10px', color: theme.blue }}>{v.vehicle_number} — {v.vehicle_name}</div>
-                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                      <thead><tr>{['Labour No', 'Name', 'Assigned Date', ''].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
-                      <tbody>
-                        {va.map(a => (
-                          <tr key={a.id}>
-                            <td style={styles.td}><span style={{ fontFamily: 'monospace', color: theme.blue }}>{a.labour?.labour_number}</span></td>
-                            <td style={styles.td}>{a.labour?.full_name}</td>
-                            <td style={styles.td}>{a.assigned_date}</td>
-                            <td style={styles.td}>{userProfile?.role !== 'ico' && <button style={{ ...styles.btn('danger'), padding: '4px 10px', fontSize: '12px' }} onClick={() => handleRemoveAssignment(a.id)}>Remove</button>}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-
-          {subTab === 'loading_log' && (
-            <div>
-              {userProfile?.role !== 'ico' && (
-                <div style={{ textAlign: 'right', marginBottom: '14px' }}>
-                  <button style={styles.btn('primary')} onClick={() => setShowLogForm(true)}>+ Record Loading</button>
-                </div>
-              )}
-              {showLogForm && (
-                <LoadingLogForm waybills={waybills} pool={pool} userProfile={userProfile} onSave={() => { setShowLogForm(false); loadData() }} onCancel={() => setShowLogForm(false)} />
-              )}
-              <div style={{ ...styles.card, padding: 0, overflow: 'hidden' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                  <thead style={{ background: theme.surface }}>
-                    <tr>{['Waybill No', 'Blocks Loaded', 'Rate/Block', 'Total', 'Loaders', 'Split Each', 'Week Ending', 'Status'].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
-                  </thead>
-                  <tbody>
-                    {logs.length === 0 && <tr><td colSpan={8} style={{ ...styles.td, textAlign: 'center', color: theme.textMuted }}>No loading logs.</td></tr>}
-                    {logs.map(l => {
-                      const loaderNames = (l.loaders || []).map(x => x.labour?.full_name).filter(Boolean).join(', ')
-                      return (
-                        <tr key={l.id}>
-                          <td style={styles.td}>{l.waybill_id || '—'}</td>
-                          <td style={styles.td}>{l.blocks_loaded}</td>
-                          <td style={styles.td}>{naira(l.rate_per_block)}</td>
-                          <td style={{ ...styles.td, color: theme.accent, fontWeight: '600' }}>{naira(l.total_amount)}</td>
-                          <td style={styles.td}>{loaderNames || '—'}</td>
-                          <td style={styles.td}>{naira(l.split_per_loader)}</td>
-                          <td style={styles.td}>{l.payment_week_ending || '—'}</td>
-                          <td style={styles.td}><span style={styles.badge(statusColor(l.payment_status))}>{l.payment_status || 'unpaid'}</span></td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {subTab === 'weekly_summary' && (
-            <LoadingWeeklySummary logs={logs} pool={pool} userProfile={userProfile} onRefresh={loadData} />
-          )}
-        </>
-      )}
-    </div>
-  )
-}
-
-function AssignLoaderForm({ vehicles, pool, onSave, onCancel }) {
-  const [vehicleId, setVehicleId] = useState('')
-  const [labourId, setLabourId] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [err, setErr] = useState('')
-  const activePool = pool.filter(w => w.is_active)
-
-  const handleSave = async () => {
-    if (!vehicleId || !labourId) return setErr('Vehicle and worker are required.')
-    setSaving(true)
-    const { error } = await supabase.from('truck_loader_assignments').insert({ vehicle_id: vehicleId, labour_id: labourId, assigned_date: todayStr(), is_active: true })
-    setSaving(false)
-    if (error) setErr(error.message)
-    else onSave()
-  }
-
-  return (
-    <div style={{ ...styles.card, marginBottom: '16px' }}>
-      {err && <AlertBar msg={err} type="error" onClose={() => setErr('')} />}
-      <div style={styles.grid2}>
-        <div style={styles.formGroup}>
-          <label style={styles.label}>Vehicle</label>
-          <select style={styles.input} value={vehicleId} onChange={e => setVehicleId(e.target.value)}>
-            <option value="">— Select Vehicle —</option>
-            {vehicles.map(v => <option key={v.id} value={v.id}>{v.vehicle_number} — {v.vehicle_name}</option>)}
-          </select>
-        </div>
-        <div style={styles.formGroup}>
-          <label style={styles.label}>Worker</label>
-          <select style={styles.input} value={labourId} onChange={e => setLabourId(e.target.value)}>
-            <option value="">— Select Worker —</option>
-            {activePool.map(w => <option key={w.id} value={w.id}>{w.full_name} ({w.labour_number})</option>)}
-          </select>
-        </div>
-      </div>
-      <div style={styles.row}>
-        <button style={styles.btn('primary')} onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : 'Assign'}</button>
-        <button style={styles.btn('ghost')} onClick={onCancel}>Cancel</button>
-      </div>
-    </div>
-  )
-}
-
-function LoadingLogForm({ waybills, pool, userProfile, onSave, onCancel }) {
-  const [waybillId, setWaybillId] = useState('')
-  const [blocksLoaded, setBlocksLoaded] = useState('')
-  const [ratePerBlock] = useState(8)
-  const [selectedLoaders, setSelectedLoaders] = useState([])
-  const [saving, setSaving] = useState(false)
-  const [err, setErr] = useState('')
-  const activePool = pool.filter(w => w.is_active)
-
-  const selectedWaybill = waybills.find(w => String(w.id) === String(waybillId))
-
-  const handleWaybillSelect = (id) => {
-    setWaybillId(id)
-    const w = waybills.find(x => String(x.id) === String(id))
-    if (w?.quantity_loaded) setBlocksLoaded(String(w.quantity_loaded))
-  }
-  const total = Number(blocksLoaded || 0) * ratePerBlock
-  const split = selectedLoaders.length > 0 ? total / selectedLoaders.length : 0
-
-  const toggleLoader = (id) => {
-    setSelectedLoaders(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
-  }
-
-  const handleSave = async () => {
-    if (!waybillId || !blocksLoaded) return setErr('Waybill and blocks loaded are required.')
-    if (selectedLoaders.length === 0) return setErr('Select at least one loader.')
-    setSaving(true)
-    const weekEnding = getSaturday(selectedWaybill?.waybill_date || todayStr())
-    const { data: log, error: le } = await supabase.from('truck_loading_log').insert({
-      waybill_id: waybillId, blocks_loaded: Number(blocksLoaded), rate_per_block: ratePerBlock,
-      total_amount: total, split_per_loader: split, payment_week_ending: weekEnding,
-      payment_status: 'unpaid', submitted_by: userProfile?.full_name,
-    }).select('id').single()
-    if (le) { setSaving(false); return setErr(le.message) }
-    const loaderRows = selectedLoaders.map(lid => ({ loading_log_id: log.id, labour_id: lid }))
-    const { error: le2 } = await supabase.from('truck_loading_loaders').insert(loaderRows)
-    setSaving(false)
-    if (le2) setErr(le2.message)
-    else onSave()
-  }
-
-  return (
-    <div style={{ ...styles.card, marginBottom: '16px' }}>
-      <h4 style={{ margin: '0 0 14px' }}>Record Loading</h4>
-      {err && <AlertBar msg={err} type="error" onClose={() => setErr('')} />}
-      <div style={styles.grid2}>
-        <div style={styles.formGroup}>
-          <label style={styles.label}>Waybill</label>
-          <select style={styles.input} value={waybillId} onChange={e => handleWaybillSelect(e.target.value)}>
-            <option value="">— Select Waybill —</option>
-            {waybills.map(w => (
-              <option key={w.id} value={w.id}>
-                {w.waybill_number} — {w.receiver_name || '—'} — {w.quantity_loaded || 0} blocks — {fmtDate(w.waybill_date)}
-              </option>
-            ))}
-          </select>
-          {selectedWaybill && (
-            <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '4px' }}>
-              {selectedWaybill.block_type} · {selectedWaybill.receiver_name || 'No customer'}
-            </div>
-          )}
-        </div>
-        <div style={styles.formGroup}>
-          <label style={styles.label}>Blocks Loaded</label>
-          <input type="number" style={styles.input} value={blocksLoaded} onChange={e => setBlocksLoaded(e.target.value)} placeholder={selectedWaybill?.quantity_loaded ? `Waybill qty: ${selectedWaybill.quantity_loaded}` : 'Enter quantity'} />
-        </div>
-      </div>
-      <div style={{ ...styles.row, gap: '20px', marginBottom: '14px' }}>
-        <div style={{ fontSize: '13px' }}>Rate: <strong style={{ color: theme.accent }}>{naira(ratePerBlock)}/block</strong></div>
-        <div style={{ fontSize: '13px' }}>Total: <strong style={{ color: theme.accent }}>{naira(total)}</strong></div>
-        <div style={{ fontSize: '13px' }}>Split ({selectedLoaders.length} loaders): <strong style={{ color: theme.green }}>{naira(split)}</strong> each</div>
-      </div>
-      <div style={styles.formGroup}>
-        <label style={styles.label}>Select Loaders (multi-select)</label>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-          {activePool.map(w => (
-            <label key={w.id} style={{ display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer', padding: '5px 10px', borderRadius: '6px', background: selectedLoaders.includes(w.id) ? theme.blue + '22' : theme.surface, border: `1px solid ${selectedLoaders.includes(w.id) ? theme.blue : theme.border}`, fontSize: '13px' }}>
-              <input type="checkbox" checked={selectedLoaders.includes(w.id)} onChange={() => toggleLoader(w.id)} />
-              {w.full_name}
-            </label>
-          ))}
-        </div>
-      </div>
-      <div style={styles.row}>
-        <button style={styles.btn('primary')} onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : 'Record Loading'}</button>
-        <button style={styles.btn('ghost')} onClick={onCancel}>Cancel</button>
-      </div>
-    </div>
-  )
-}
-
-function LoadingWeeklySummary({ logs, pool, userProfile, onRefresh }) {
-  const [alert, setAlert] = useState(null)
-  const [filter, setFilter] = useState('all_unpaid')
-  const [customFrom, setCustomFrom] = useState('')
-  const [customTo, setCustomTo] = useState('')
-  const [existingPayrolls, setExistingPayrolls] = useState({})
-
-  useEffect(() => {
-    const weeks = [...new Set(logs.map(l => l.payment_week_ending).filter(Boolean))]
-    if (weeks.length === 0) { setExistingPayrolls({}); return }
-    supabase.from('weekly_labour_payroll')
-      .select('week_ending, status, id')
-      .eq('payroll_type', 'loading')
-      .in('week_ending', weeks)
-      .then(({ data, error }) => {
-        if (error) return
-        const map = {}
-        ;(data || []).forEach(p => { map[p.week_ending] = p })
-        setExistingPayrolls(map)
-      })
-  }, [logs])
-
-  const todaySat = getSaturday(todayStr())
-  const lastSat = (() => {
-    const d = new Date(todaySat)
-    d.setDate(d.getDate() - 7)
-    return d.toISOString().split('T')[0]
-  })()
-
-  const filteredLogs = logs.filter(l => {
-    const week = l.payment_week_ending || ''
-    if (filter === 'all_unpaid') return l.payment_status === 'unpaid'
-    if (filter === 'this_week') return week === todaySat
-    if (filter === 'last_week') return week === lastSat
-    if (filter === 'custom') {
-      if (customFrom && week < customFrom) return false
-      if (customTo && week > customTo) return false
-      return true
-    }
-    return true
-  })
-
-  const groups = {}
-  filteredLogs.forEach(l => {
-    const key = l.payment_week_ending || 'Unknown'
-    if (!groups[key]) groups[key] = []
-    groups[key].push(l)
-  })
-
-  const canSubmit = ['production_manager', 'assistant_production_manager', 'hr_officer', 'accountant', 'logistics_manager', 'md'].includes(userProfile?.role)
-
-  const handleSubmitPayment = async (week) => {
-    const weekLogs = logs.filter(l => l.payment_week_ending === week && l.payment_status === 'unpaid')
-    if (weekLogs.length === 0) return
-    const total = weekLogs.reduce((s, l) => s + Number(l.total_amount || 0), 0)
-    const { data: inserted, error } = await supabase.from('weekly_labour_payroll').insert({
-      week_ending: week, payroll_type: 'loading', total_amount: total,
-      worker_count: weekLogs.length, status: 'draft', prepared_by: userProfile?.full_name,
-    }).select('week_ending, status, id').single()
-    if (error) setAlert({ msg: error.message, type: 'error' })
-    else if (inserted) {
-      setExistingPayrolls(prev => ({ ...prev, [week]: inserted }))
-      setAlert({ msg: 'Loading payroll submitted for approval.', type: 'success' })
-      if (onRefresh) onRefresh()
-    }
-  }
-
-  return (
-    <div>
-      {alert && <AlertBar msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
-      <div style={{ ...styles.row, marginBottom: '16px', gap: '8px', flexWrap: 'wrap' }}>
-        {[
-          { id: 'all_unpaid', label: 'All Unpaid' },
-          { id: 'this_week', label: 'This Week' },
-          { id: 'last_week', label: 'Last Week' },
-          { id: 'custom', label: 'Custom Range' },
-        ].map(f => (
-          <button key={f.id} style={styles.tab(filter === f.id)} onClick={() => setFilter(f.id)}>{f.label}</button>
-        ))}
-        {filter === 'custom' && (
-          <>
-            <input type="date" style={{ ...styles.input, width: '140px' }} value={customFrom} onChange={e => setCustomFrom(e.target.value)} placeholder="From" />
-            <input type="date" style={{ ...styles.input, width: '140px' }} value={customTo} onChange={e => setCustomTo(e.target.value)} placeholder="To" />
-          </>
-        )}
-      </div>
-      {Object.keys(groups).length === 0 && (
-        <div style={{ ...styles.card, textAlign: 'center', color: theme.textMuted }}>No loading records match this filter.</div>
-      )}
-      {Object.entries(groups).sort(([a], [b]) => b.localeCompare(a)).map(([week, weekLogs]) => {
-        const loaderTotals = {}
-        weekLogs.forEach(l => {
-          const loaderCount = l.loaders?.length || 1
-          const split = Number(l.total_amount || 0) / loaderCount
-          ;(l.loaders || []).forEach(x => {
-            const lid = x.labour_id
-            const worker = pool.find(w => w.id === lid)
-            if (!loaderTotals[lid]) loaderTotals[lid] = { name: worker?.full_name || '?', bank: worker?.bank_name || '—', account: worker?.account_number || '—', blocks: 0, earned: 0 }
-            loaderTotals[lid].blocks += Number(l.blocks_loaded || 0) / loaderCount
-            loaderTotals[lid].earned += split
-          })
-        })
-        const weekTotal = weekLogs.reduce((s, l) => s + Number(l.total_amount || 0), 0)
-        const unpaid = weekLogs.some(l => l.payment_status === 'unpaid')
-
-        return (
-          <div key={week} style={styles.card}>
-            <div style={{ ...styles.row, justifyContent: 'space-between', marginBottom: '12px' }}>
-              <div>
-                <div style={{ fontWeight: '700', fontSize: '15px' }}>Week ending {week}</div>
-                <div style={{ fontSize: '12px', color: theme.textMuted }}>{weekLogs.length} trips</div>
-              </div>
-              <div style={{ ...styles.row, gap: '12px' }}>
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontWeight: '700', fontSize: '18px', color: theme.accent }}>{naira(weekTotal)}</div>
-                </div>
-                {existingPayrolls[week] ? (
-                  <span style={styles.badge(statusColor(existingPayrolls[week].status))}>{existingPayrolls[week].status}</span>
-                ) : (
-                  unpaid && canSubmit && (
-                    <button style={styles.btn('primary')} onClick={() => handleSubmitPayment(week)}>Submit for Approval</button>
-                  )
-                )}
-              </div>
-            </div>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead><tr>{['Loader Name', 'Bank', 'Account No.', 'Total Blocks', 'Total Earned'].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
-              <tbody>
-                {Object.values(loaderTotals).map((lt, i) => (
-                  <tr key={i}>
-                    <td style={styles.td}>{lt.name}</td>
-                    <td style={styles.td}>{lt.bank}</td>
-                    <td style={styles.td}>{lt.account}</td>
-                    <td style={styles.td}>{Math.round(lt.blocks)}</td>
-                    <td style={{ ...styles.td, color: theme.accent, fontWeight: '600' }}>{naira(lt.earned)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -1514,16 +1180,31 @@ function generatePaymentScheduleXLSX(payrollType, label, workers, pool) {
   XLSX.writeFile(wb, `payment-schedule-${label}.xlsx`)
 }
 
-function getLastSaturday(dateStr) {
+// Exported so other pages (e.g. Truck Loading in App.jsx) reuse the exact same
+// week-range picker logic rather than duplicating it.
+export function getLastSaturday(dateStr) {
   const d = new Date(dateStr || todayStr())
   const day = d.getDay()
   d.setDate(d.getDate() - (day === 6 ? 0 : day + 1))
   return d.toISOString().split('T')[0]
 }
 
+export function shiftWeek(dateStr, weeks) {
+  const d = new Date(dateStr)
+  d.setDate(d.getDate() + weeks * 7)
+  return d.toISOString().split('T')[0]
+}
+
+export function shiftDays(dateStr, days) {
+  const d = new Date(dateStr)
+  d.setDate(d.getDate() + days)
+  return d.toISOString().split('T')[0]
+}
+
 function WeeklyPayrollTab({ pool, roles, userProfile }) {
   const [subTab, setSubTab] = useState('production')
-  const [weekEnding, setWeekEnding] = useState(getLastSaturday(todayStr()))
+  const [rangeFrom, setRangeFrom] = useState(() => shiftDays(getLastSaturday(todayStr()), -6))
+  const [rangeTo, setRangeTo] = useState(() => getLastSaturday(todayStr()))
   const [rosters, setRosters] = useState([])
   const [loadingLogs, setLoadingLogs] = useState([])
   const [payrollRecords, setPayrollRecords] = useState([])
@@ -1532,22 +1213,74 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
   const [actioning, setActioning] = useState(false)
   const [recentPayrolls, setRecentPayrolls] = useState([])
   const [recentLoading, setRecentLoading] = useState(false)
+  const [recallReason, setRecallReason] = useState('')
+  const [checkedRosterIds, setCheckedRosterIds] = useState(new Set())
+  const [checkedLogIds, setCheckedLogIds] = useState(new Set())
 
-  const loadWeekData = useCallback(async () => {
-    if (!weekEnding) return
+  const loadRangeData = useCallback(async () => {
+    if (!rangeFrom || !rangeTo) return
     setLoading(true)
-    const [rRes, lRes, pRes] = await Promise.all([
-      supabase.from('daily_roster').select('*, entries:daily_roster_entries(*)').eq('payment_week_ending', weekEnding),
-      supabase.from('truck_loading_log').select('*, loaders:truck_loading_loaders(labour_id)').eq('payment_week_ending', weekEnding),
-      supabase.from('weekly_labour_payroll').select('*').eq('week_ending', weekEnding),
-    ])
-    setRosters(rRes.data || [])
-    setLoadingLogs(lRes.data || [])
-    setPayrollRecords(pRes.data || [])
-    setLoading(false)
-  }, [weekEnding])
 
-  useEffect(() => { loadWeekData() }, [loadWeekData])
+    // Step 1: fetch source rows for the range
+    const [rRes, lRes] = await Promise.all([
+      supabase.from('daily_roster')
+        .select('*, entries:daily_roster_entries(*)')
+        .gte('roster_date', rangeFrom)
+        .lte('roster_date', rangeTo),
+      supabase.from('truck_loading_log')
+        .select('*, loaders:truck_loading_loaders(labour_id)')
+        .gte('date', rangeFrom)
+        .lte('date', rangeTo),
+    ])
+    const rosterData = rRes.data || []
+    const logData = lRes.data || []
+
+    // Step 2: detect payrolls via payroll_id linkage on the fetched rows —
+    // NOT by week_ending equality, so a widened or shifted range still finds
+    // a draft that was generated for a narrower window inside it.
+    const linkedIds = [...new Set([
+      ...rosterData.filter(r => r.payroll_id != null).map(r => r.payroll_id),
+      ...logData.filter(l => l.payroll_id != null).map(l => l.payroll_id),
+    ])]
+
+    let payrollData = []
+    if (linkedIds.length > 0) {
+      const { data } = await supabase.from('weekly_labour_payroll').select('*').in('id', linkedIds)
+      payrollData = data || []
+    }
+
+    // Warn if multiple drafts for the same type exist in this range (shouldn't normally happen)
+    for (const type of ['production', 'loading']) {
+      const drafts = payrollData.filter(p => p.payroll_type === type && p.status === 'draft')
+      if (drafts.length > 1) {
+        setAlert({ msg: `Multiple draft ${type} payrolls found in this range — contact an admin to resolve (IDs: ${drafts.map(d => d.id).join(', ')}).`, type: 'warning' })
+      }
+    }
+
+    setRosters(rosterData)
+    setLoadingLogs(logData)
+    setPayrollRecords(payrollData)
+
+    // Auto-select: draft rows → those already linked to the draft; else → unassigned rows
+    // Prefer draft payroll over other statuses when multiple payrolls touch this range
+    const prodRec = payrollData.find(p => p.payroll_type === 'production' && p.status === 'draft')
+      ?? payrollData.find(p => p.payroll_type === 'production')
+    const loadRec = payrollData.find(p => p.payroll_type === 'loading' && p.status === 'draft')
+      ?? payrollData.find(p => p.payroll_type === 'loading')
+    setCheckedRosterIds(new Set(
+      rosterData
+        .filter(r => prodRec?.status === 'draft' ? r.payroll_id === prodRec.id : r.payroll_id == null)
+        .map(r => r.id)
+    ))
+    setCheckedLogIds(new Set(
+      logData
+        .filter(l => loadRec?.status === 'draft' ? l.payroll_id === loadRec.id : l.payroll_id == null)
+        .map(l => l.id)
+    ))
+    setLoading(false)
+  }, [rangeFrom, rangeTo])
+
+  useEffect(() => { loadRangeData() }, [loadRangeData])
 
   const loadRecentPayrolls = useCallback(async () => {
     setRecentLoading(true)
@@ -1560,18 +1293,52 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
     setRecentLoading(false)
   }, [])
 
-  // Refresh the list whenever the week data reloads (covers generate/approve/recall/pay)
   useEffect(() => { loadRecentPayrolls() }, [loadRecentPayrolls, payrollRecords])
 
   const openPayroll = (p) => {
     if (p.payroll_type) setSubTab(p.payroll_type)
-    setWeekEnding(p.week_ending)
+    const end = p.period_end || p.week_ending
+    const start = p.period_start || shiftDays(end, -6)
+    setRangeFrom(start)
+    setRangeTo(end)
   }
 
-  // Aggregate production workers from rosters
+  const shiftRange = (weeks) => {
+    setRangeFrom(shiftWeek(rangeFrom, weeks))
+    setRangeTo(shiftWeek(rangeTo, weeks))
+  }
+
+  // Prefer draft payroll over other statuses when multiple payrolls touch this range
+  const prodPayroll = payrollRecords.find(p => p.payroll_type === 'production' && p.status === 'draft')
+    ?? payrollRecords.find(p => p.payroll_type === 'production')
+  const loadPayroll = payrollRecords.find(p => p.payroll_type === 'loading' && p.status === 'draft')
+    ?? payrollRecords.find(p => p.payroll_type === 'loading')
+  const currentPayroll = subTab === 'production' ? prodPayroll : loadPayroll
+  const isDraftMode = currentPayroll?.status === 'draft'
+
+  // Per-tab row selection state
+  const currentCheckedIds = subTab === 'production' ? checkedRosterIds : checkedLogIds
+  const setCurrentCheckedIds = subTab === 'production' ? setCheckedRosterIds : setCheckedLogIds
+  const sourceRows = subTab === 'production' ? rosters : loadingLogs
+
+  const toggleRow = (id) => {
+    setCurrentCheckedIds(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  const allChecked = sourceRows.length > 0 && sourceRows.every(r => currentCheckedIds.has(r.id))
+  const toggleAll = () => {
+    if (allChecked) setCurrentCheckedIds(new Set())
+    else setCurrentCheckedIds(new Set(sourceRows.map(r => r.id)))
+  }
+
+  // Aggregate from checked rows only
   const productionWorkers = (() => {
     const map = {}
-    rosters.forEach(r => {
+    rosters.filter(r => checkedRosterIds.has(r.id)).forEach(r => {
       ;(r.entries || []).forEach(e => {
         const worker = pool.find(w => w.id === e.labour_id)
         const role = roles.find(x => x.id === e.role_id)
@@ -1584,10 +1351,9 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
     return Object.values(map)
   })()
 
-  // Aggregate loading workers
   const loadingWorkers = (() => {
     const map = {}
-    loadingLogs.forEach(l => {
+    loadingLogs.filter(l => checkedLogIds.has(l.id)).forEach(l => {
       const loaderCount = l.loaders?.length || 1
       const split = Number(l.total_amount || 0) / loaderCount
       ;(l.loaders || []).forEach(x => {
@@ -1600,68 +1366,132 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
     return Object.values(map)
   })()
 
-  const prodPayroll = payrollRecords.find(p => p.payroll_type === 'production')
-  const loadPayroll = payrollRecords.find(p => p.payroll_type === 'loading')
   const workers = subTab === 'production' ? productionWorkers : loadingWorkers
-  const currentPayroll = subTab === 'production' ? prodPayroll : loadPayroll
   const totalAmount = workers.reduce((s, w) => s + Number(w.total_pay || 0), 0)
 
   const handleGeneratePayroll = async () => {
-    if (workers.length === 0) return setAlert({ msg: 'No workers found for this week.', type: 'error' })
+    if (workers.length === 0) return setAlert({ msg: 'No workers in selection.', type: 'error' })
+    const isProduction = subTab === 'production'
+    const selectedIds = isProduction ? [...checkedRosterIds] : [...checkedLogIds]
+    if (selectedIds.length === 0) return setAlert({ msg: 'No rows selected.', type: 'error' })
     setActioning(true)
-    const { error } = await supabase.from('weekly_labour_payroll').insert({
-      week_ending: weekEnding, payroll_type: subTab, total_amount: totalAmount,
-      worker_count: workers.length, status: 'draft', prepared_by: userProfile?.full_name,
-    })
+
+    // Staleness guard: verify no selected row was claimed by another payroll since page load
+    const { data: staleRows } = isProduction
+      ? await supabase.from('daily_roster').select('id, payroll_id').in('id', selectedIds)
+      : await supabase.from('truck_loading_log').select('id, payroll_id').in('id', selectedIds)
+    if ((staleRows || []).some(r => r.payroll_id != null)) {
+      setActioning(false)
+      setAlert({ msg: 'Some rows were claimed by another payroll — reload and try again.', type: 'error' })
+      return
+    }
+
+    // INSERT new payroll record
+    const { data: newPayroll, error: insErr } = await supabase
+      .from('weekly_labour_payroll')
+      .insert({
+        payroll_type: subTab,
+        period_start: rangeFrom,
+        period_end: rangeTo,
+        week_ending: rangeTo,
+        total_amount: totalAmount,
+        worker_count: workers.length,
+        status: 'draft',
+        prepared_by: userProfile?.full_name,
+      })
+      .select()
+      .single()
+    if (insErr) { setActioning(false); setAlert({ msg: insErr.message, type: 'error' }); return }
+
+    // Link selected rows to the new payroll
+    const { error: linkErr } = await supabase
+      .from(isProduction ? 'daily_roster' : 'truck_loading_log')
+      .update({ payroll_id: newPayroll.id })
+      .in('id', selectedIds)
     setActioning(false)
-    if (error) setAlert({ msg: error.message, type: 'error' })
-    else { setAlert({ msg: 'Payroll generated.', type: 'success' }); loadWeekData() }
+    if (linkErr) {
+      setAlert({ msg: `Payroll created but row linking failed: ${linkErr.message}`, type: 'error' })
+    } else {
+      setAlert({ msg: 'Payroll generated.', type: 'success' })
+    }
+    loadRangeData()
   }
 
-  const handlePayrollAction = async (action, comment = '') => {
-    if (!currentPayroll) return
+  const handleUpdateDraft = async () => {
+    if (!currentPayroll || currentPayroll.status !== 'draft') return
+    if (workers.length === 0) return setAlert({ msg: 'No workers in selection.', type: 'error' })
     setActioning(true)
-    let update = {}
-    if (action === 'ico_approve') update = { status: 'ico_approved', ico_approved_by: userProfile?.full_name }
-    else if (action === 'md_approve') update = { status: 'md_approved', md_approved_by: userProfile?.full_name }
-    else if (action === 'recall') update = { status: 'draft', ico_approved_by: null, md_approved_by: null }
-    else if (action === 'mark_paid') {
-      update = { status: 'paid', payment_date: todayStr() }
+    const { error } = await supabase
+      .from('weekly_labour_payroll')
+      .update({ total_amount: totalAmount, worker_count: workers.length })
+      .eq('id', currentPayroll.id)
+    setActioning(false)
+    if (error) { setAlert({ msg: error.message, type: 'error' }) }
+    else { setAlert({ msg: 'Draft updated.', type: 'success' }); loadRangeData() }
+  }
+
+  const handlePayrollAction = async (action) => {
+    if (!currentPayroll) return
+    if (action === 'recall' && !recallReason.trim()) {
+      setAlert({ msg: 'Enter a reason before recalling.', type: 'error' })
+      return
+    }
+    setActioning(true)
+    const { error } = await supabase.rpc('advance_weekly_payroll', {
+      p_payroll_id: currentPayroll.id,
+      p_action: action,
+      p_reason: action === 'recall' ? recallReason.trim() : null,
+    })
+    if (error) { setActioning(false); setAlert({ msg: error.message, type: 'error' }); return }
+    if (action === 'mark_paid') {
       const catId = await getOrCreateCategory('Labour Wages')
       if (catId) {
-        await supabase.from('expenses').insert({
+        const { error: expErr } = await supabase.from('expenses').insert({
           category_id: catId,
-          description: `${subTab === 'production' ? 'Production' : 'Loading'} Labour Payroll — Week ending ${weekEnding}`,
+          description: `${subTab === 'production' ? 'Production' : 'Loading'} Labour Payroll — ${fmtDate(rangeFrom)} to ${fmtDate(rangeTo)}`,
           amount: totalAmount, expense_date: todayStr(), status: 'approved', vendor: 'Labour Pool',
         })
+        if (expErr) {
+          setActioning(false)
+          setAlert({ msg: 'Payroll marked paid — expense entry failed, please create it manually.', type: 'error' })
+          loadRangeData()
+          return
+        }
       }
     }
-    const { error } = await supabase.from('weekly_labour_payroll').update(update).eq('id', currentPayroll.id)
+    if (action === 'recall') setRecallReason('')
     setActioning(false)
-    if (error) setAlert({ msg: error.message, type: 'error' })
-    else { setAlert({ msg: action === 'recall' ? 'Payroll recalled to draft — corrections can now be made.' : 'Updated.', type: 'success' }); loadWeekData() }
+    setAlert({ msg: action === 'recall' ? 'Payroll recalled to draft — corrections can now be made.' : 'Updated.', type: 'success' })
+    loadRangeData()
   }
+
+  const canGenerate = !currentPayroll && workers.length > 0 && hasRole(userProfile, ...PAYROLL_GENERATOR_ROLES)
+  const canUpdateDraft = isDraftMode && hasRole(userProfile, ...PAYROLL_GENERATOR_ROLES)
 
   return (
     <div>
+      {/* Recent Payrolls */}
       <div style={{ ...styles.card, padding: 0, overflow: 'hidden', marginBottom: '16px' }}>
         <div style={{ ...styles.row, justifyContent: 'space-between', padding: '12px 16px', borderBottom: `1px solid ${theme.border}` }}>
           <div style={{ fontWeight: '700', fontSize: '14px' }}>Recent Payrolls</div>
           <button style={{ ...styles.btn('ghost'), padding: '4px 12px', fontSize: '12px' }} onClick={loadRecentPayrolls} disabled={recentLoading}>{recentLoading ? 'Loading…' : 'Refresh'}</button>
         </div>
         {recentLoading ? <div style={{ padding: '16px' }}><Spinner /></div> : recentPayrolls.length === 0 ? (
-          <div style={{ padding: '16px', color: theme.textMuted, fontSize: '13px' }}>No payrolls generated yet. Pick a week below and generate one.</div>
+          <div style={{ padding: '16px', color: theme.textMuted, fontSize: '13px' }}>No payrolls generated yet.</div>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead style={{ background: theme.surface }}>
-              <tr>{['Week Ending', 'Type', 'Workers', 'Total', 'Status', ''].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
+              <tr>{['Period', 'Type', 'Workers', 'Total', 'Status', ''].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
             </thead>
             <tbody>
               {recentPayrolls.map(p => {
-                const isOpen = p.week_ending === weekEnding && p.payroll_type === subTab
+                const isOpen = p.id === currentPayroll?.id
+                const periodLabel = p.period_start && p.period_end
+                  ? `${fmtDate(p.period_start)} – ${fmtDate(p.period_end)}`
+                  : fmtDate(p.week_ending)
                 return (
                   <tr key={p.id} style={isOpen ? { background: theme.surface } : undefined}>
-                    <td style={styles.td}>{p.week_ending}</td>
+                    <td style={styles.td}>{periodLabel}</td>
                     <td style={styles.td}>{p.payroll_type === 'production' ? 'Production' : 'Loading'}</td>
                     <td style={styles.td}>{p.worker_count ?? '—'}</td>
                     <td style={{ ...styles.td, color: theme.accent, fontWeight: '600' }}>{naira(p.total_amount)}</td>
@@ -1677,6 +1507,7 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
         )}
       </div>
 
+      {/* Sub-tab switcher */}
       <div style={{ ...styles.row, gap: '4px', marginBottom: '16px' }}>
         {['production', 'loading'].map(t => (
           <button key={t} style={styles.tab(subTab === t)} onClick={() => setSubTab(t)}>
@@ -1685,18 +1516,37 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
         ))}
       </div>
 
-      <div style={{ ...styles.row, marginBottom: '16px', gap: '12px' }}>
+      {/* Date range picker */}
+      <div style={{ ...styles.row, marginBottom: '16px', gap: '12px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
         <div>
-          <label style={styles.label}>Week Ending (Saturday)</label>
-          <input type="date" style={styles.input} value={weekEnding} onChange={e => setWeekEnding(getSaturday(e.target.value))} />
+          <label style={styles.label}>From</label>
+          <input type="date" style={{ ...styles.input, width: '148px' }} value={rangeFrom} onChange={e => setRangeFrom(e.target.value)} />
         </div>
-        <button style={{ ...styles.btn('ghost'), marginTop: '18px' }} onClick={loadWeekData}>Load Week</button>
+        <div>
+          <label style={styles.label}>To</label>
+          <input type="date" style={{ ...styles.input, width: '148px' }} value={rangeTo} onChange={e => setRangeTo(e.target.value)} />
+        </div>
+        <div style={{ display: 'flex', gap: '4px', paddingBottom: '1px' }}>
+          <button style={{ ...styles.btn('ghost'), padding: '6px 10px' }} onClick={() => shiftRange(-1)}>‹</button>
+          <button style={{ ...styles.btn('ghost'), padding: '6px 10px' }} onClick={() => shiftRange(1)}>›</button>
+        </div>
+        <button style={styles.btn('ghost')} onClick={loadRangeData}>Load Range</button>
+        {(() => {
+          const color = !currentPayroll ? theme.textMuted
+            : currentPayroll.status === 'paid' ? theme.green
+            : currentPayroll.status === 'draft' ? '#f59e0b'
+            : statusColor(currentPayroll.status)
+          const label = !currentPayroll ? 'No payroll' : (currentPayroll.status || 'draft').replace('_', ' ')
+          return <span style={styles.badge(color)}>{label}</span>
+        })()}
+        {isDraftMode && <span style={{ fontSize: '12px', color: '#f59e0b', fontWeight: '600' }}>— editing draft</span>}
       </div>
 
       {alert && <AlertBar msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
 
       {loading ? <Spinner /> : (
         <>
+          {/* Summary cards */}
           <div style={{ ...styles.row, gap: '12px', marginBottom: '16px', flexWrap: 'wrap' }}>
             <div style={{ ...styles.card, minWidth: '160px', marginBottom: 0 }}>
               <div style={{ fontSize: '11px', color: theme.textMuted, fontWeight: '700', textTransform: 'uppercase' }}>Workers</div>
@@ -1714,13 +1564,102 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
             )}
           </div>
 
+          {/* Source rows with checkboxes */}
+          <div style={{ ...styles.card, padding: 0, overflow: 'hidden', marginBottom: '12px' }}>
+            <div style={{ padding: '10px 14px', borderBottom: `1px solid ${theme.border}`, fontSize: '11px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase' }}>
+              {subTab === 'production' ? 'Daily Roster Rows' : 'Truck Loading Logs'} — select rows to include
+            </div>
+            <div style={{ overflowX: 'auto' }}>
+              {subTab === 'production' ? (
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead style={{ background: theme.surface }}>
+                    <tr>
+                      <th style={{ ...styles.th, width: '36px', paddingRight: '4px' }}>
+                        <input type="checkbox" checked={allChecked} onChange={toggleAll} />
+                      </th>
+                      {['Date', 'Workers', 'Total Cost', 'ICO', 'MD', 'Payment', 'Payroll'].map(h => <th key={h} style={styles.th}>{h}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rosters.length === 0 && <tr><td colSpan={8} style={{ ...styles.td, textAlign: 'center', color: theme.textMuted }}>No rosters in this range.</td></tr>}
+                    {rosters.map(r => {
+                      const isThisDraft = isDraftMode && r.payroll_id === currentPayroll?.id
+                      const isOtherPayroll = r.payroll_id != null && !isThisDraft
+                      return (
+                        <tr key={r.id} style={{ opacity: isOtherPayroll ? 0.45 : 1 }}>
+                          <td style={{ ...styles.td, paddingRight: '4px' }}>
+                            <input type="checkbox" checked={checkedRosterIds.has(r.id)} disabled={isOtherPayroll} onChange={() => !isOtherPayroll && toggleRow(r.id)} />
+                          </td>
+                          <td style={styles.td}>{r.roster_date}</td>
+                          <td style={styles.td}>{r.worker_count ?? '—'}</td>
+                          <td style={styles.td}>{naira(r.total_daily_cost)}</td>
+                          <td style={styles.td}><span style={styles.badge(statusColor(r.ico_status || 'draft'))}>{(r.ico_status || 'draft').replace('_', ' ')}</span></td>
+                          <td style={styles.td}><span style={styles.badge(statusColor(r.md_status || 'pending'))}>{r.md_status || 'pending'}</span></td>
+                          <td style={styles.td}><span style={styles.badge(statusColor(r.payment_status || 'unpaid'))}>{r.payment_status || 'unpaid'}</span></td>
+                          <td style={styles.td}>
+                            {isThisDraft
+                              ? <span style={{ ...styles.badge('#f59e0b'), fontSize: '9px' }}>This Draft</span>
+                              : r.payroll_id != null
+                                ? <span style={{ ...styles.badge(theme.textMuted), fontSize: '9px' }}>Other</span>
+                                : <span style={{ color: theme.textMuted, fontSize: '11px' }}>—</span>}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              ) : (
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead style={{ background: theme.surface }}>
+                    <tr>
+                      <th style={{ ...styles.th, width: '36px', paddingRight: '4px' }}>
+                        <input type="checkbox" checked={allChecked} onChange={toggleAll} />
+                      </th>
+                      {['Date', 'Waybill', 'Loaders', 'Amount', 'Payment', 'Payroll'].map(h => <th key={h} style={styles.th}>{h}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {loadingLogs.length === 0 && <tr><td colSpan={7} style={{ ...styles.td, textAlign: 'center', color: theme.textMuted }}>No loading logs in this range.</td></tr>}
+                    {loadingLogs.map(l => {
+                      const isThisDraft = isDraftMode && l.payroll_id === currentPayroll?.id
+                      const isOtherPayroll = l.payroll_id != null && !isThisDraft
+                      return (
+                        <tr key={l.id} style={{ opacity: isOtherPayroll ? 0.45 : 1 }}>
+                          <td style={{ ...styles.td, paddingRight: '4px' }}>
+                            <input type="checkbox" checked={checkedLogIds.has(l.id)} disabled={isOtherPayroll} onChange={() => !isOtherPayroll && toggleRow(l.id)} />
+                          </td>
+                          <td style={styles.td}>{l.date}</td>
+                          <td style={styles.td}>{l.waybill_number || '—'}</td>
+                          <td style={styles.td}>{l.loaders?.length ?? 0}</td>
+                          <td style={{ ...styles.td, color: theme.accent }}>{naira(l.total_amount)}</td>
+                          <td style={styles.td}><span style={styles.badge(statusColor(l.payment_status || 'unpaid'))}>{l.payment_status || 'unpaid'}</span></td>
+                          <td style={styles.td}>
+                            {isThisDraft
+                              ? <span style={{ ...styles.badge('#f59e0b'), fontSize: '9px' }}>This Draft</span>
+                              : l.payroll_id != null
+                                ? <span style={{ ...styles.badge(theme.textMuted), fontSize: '9px' }}>Other</span>
+                                : <span style={{ color: theme.textMuted, fontSize: '11px' }}>—</span>}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+
+          {/* Worker aggregate table */}
           <div style={{ ...styles.card, padding: 0, overflow: 'hidden', marginBottom: '16px' }}>
+            <div style={{ padding: '10px 14px', borderBottom: `1px solid ${theme.border}`, fontSize: '11px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase' }}>
+              Worker Summary (from checked rows)
+            </div>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead style={{ background: theme.surface }}>
                 <tr>{['Name', 'Role', subTab === 'production' ? 'Days' : 'Blocks', 'Base Rate', 'Bonus', 'Total Pay', 'Bank', 'Account'].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
               </thead>
               <tbody>
-                {workers.length === 0 && <tr><td colSpan={8} style={{ ...styles.td, textAlign: 'center', color: theme.textMuted }}>No workers for this week.</td></tr>}
+                {workers.length === 0 && <tr><td colSpan={8} style={{ ...styles.td, textAlign: 'center', color: theme.textMuted }}>No workers — check rows above to include them.</td></tr>}
                 {workers.map((w, i) => (
                   <tr key={i}>
                     <td style={styles.td}>{w.name}</td>
@@ -1744,9 +1683,13 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
             </table>
           </div>
 
+          {/* Action buttons */}
           <div style={{ ...styles.row, gap: '8px', flexWrap: 'wrap' }}>
-            {!currentPayroll && workers.length > 0 && ['production_manager','assistant_production_manager','hr_officer','md'].includes(userProfile?.role) && (
+            {canGenerate && (
               <button style={styles.btn('primary')} onClick={handleGeneratePayroll} disabled={actioning}>Generate Payroll</button>
+            )}
+            {canUpdateDraft && (
+              <button style={styles.btn('primary')} onClick={handleUpdateDraft} disabled={actioning}>Update Draft</button>
             )}
             {currentPayroll?.status === 'draft' && userProfile?.role === 'ico' && (
               <button data-ico-allow style={styles.btn('success')} onClick={() => handlePayrollAction('ico_approve')} disabled={actioning}>ICO Approve</button>
@@ -1758,22 +1701,25 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
               <button style={styles.btn('success')} onClick={() => handlePayrollAction('mark_paid')} disabled={actioning}>Mark as Paid + Create Expense</button>
             )}
             {currentPayroll && currentPayroll.status !== 'paid' && ['production_manager','assistant_production_manager','logistics_manager','hr_officer','ico','md'].includes(userProfile?.role) && (
-              <button data-ico-allow style={{ ...styles.btn('danger'), opacity: 0.85 }} onClick={() => handlePayrollAction('recall')} disabled={actioning}>Recall to Draft</button>
+              <>
+                <input data-ico-allow style={{ ...styles.input, minWidth: '200px' }} placeholder="Reason for recall (required)…" value={recallReason} onChange={e => setRecallReason(e.target.value)} />
+                <button data-ico-allow style={{ ...styles.btn('danger'), opacity: recallReason.trim() ? 0.85 : 0.4 }} onClick={() => handlePayrollAction('recall')} disabled={actioning || !recallReason.trim()}>Recall to Draft</button>
+              </>
             )}
             {currentPayroll?.status === 'paid' && (
               <button style={styles.btn('blue')} onClick={() => {
                 const pdfWorkers = workers.map(w => ({ ...w, days_or_blocks: subTab === 'production' ? w.days : Math.round(w.days_or_blocks || 0) }))
-                generatePayrollPDF(subTab, weekEnding, pdfWorkers, totalAmount, currentPayroll)
+                generatePayrollPDF(subTab, rangeTo, pdfWorkers, totalAmount, currentPayroll)
               }}>Download PDF</button>
             )}
             {['md_approved', 'paid'].includes(currentPayroll?.status) && ['accountant', 'ico', 'md'].includes(userProfile?.role) && (
               <button data-ico-allow style={styles.btn('blue')} onClick={() =>
-                generatePaymentScheduleXLSX(subTab, weekEnding, workers, pool)
+                generatePaymentScheduleXLSX(subTab, rangeTo, workers, pool)
               }>Download Payment Schedule</button>
             )}
             {['md_approved', 'paid'].includes(currentPayroll?.status) && ['accountant', 'ico', 'md'].includes(userProfile?.role) && (
               <button data-ico-allow style={styles.btn('blue')} onClick={() =>
-                generateBulkTransferXLSX(weekEnding, workers, pool)
+                generateBulkTransferXLSX(rangeTo, workers, pool)
               }>Download Bulk Transfer</button>
             )}
           </div>
@@ -1791,6 +1737,7 @@ function MonthlyFixedTab({ pool, roles, userProfile }) {
   const [loading, setLoading] = useState(false)
   const [alert, setAlert] = useState(null)
   const [actioning, setActioning] = useState(false)
+  const [recallReason, setRecallReason] = useState('')
   const [rentalVehicles, setRentalVehicles] = useState([])
 
   useEffect(() => {
@@ -1832,37 +1779,53 @@ function MonthlyFixedTab({ pool, roles, userProfile }) {
     if (fixedWorkers.length === 0) return setAlert({ msg: 'No monthly fixed workers in Labour Pool. Add workers with category "monthly_fixed" first.', type: 'error' })
     setActioning(true)
     const weekEnding = `${month}-28`
-    const { error } = await supabase.from('weekly_labour_payroll').insert({
-      week_ending: weekEnding, payroll_type: 'monthly_fixed', total_amount: totalFixed,
-      worker_count: fixedWorkers.length, status: 'draft', prepared_by: userProfile?.full_name,
-    })
+    const { error: upErr } = await supabase.from('weekly_labour_payroll').upsert(
+      { week_ending: weekEnding, payroll_type: 'monthly_fixed', total_amount: totalFixed, worker_count: fixedWorkers.length, status: 'draft', prepared_by: userProfile?.full_name },
+      { onConflict: 'week_ending,payroll_type', ignoreDuplicates: true }
+    )
     setActioning(false)
-    if (error) setAlert({ msg: error.message, type: 'error' })
-    else { setAlert({ msg: 'Monthly fixed payroll created.', type: 'success' }); loadData() }
+    if (upErr) { setAlert({ msg: upErr.message, type: 'error' }); return }
+    setAlert({ msg: 'Monthly fixed payroll created.', type: 'success' })
+    loadData()
   }
 
   const handleAction = async (action) => {
     if (!existingPayroll) return
+    if (action === 'recall' && !recallReason.trim()) {
+      setAlert({ msg: 'Enter a reason before recalling.', type: 'error' })
+      return
+    }
     setActioning(true)
-    let update = {}
-    if (action === 'ico_approve') update = { status: 'ico_approved', ico_approved_by: userProfile?.full_name }
-    else if (action === 'md_approve') update = { status: 'md_approved', md_approved_by: userProfile?.full_name }
-    else if (action === 'recall') update = { status: 'draft', ico_approved_by: null, md_approved_by: null }
-    else if (action === 'mark_paid') {
-      update = { status: 'paid', payment_date: todayStr() }
+    const { error } = await supabase.rpc('advance_weekly_payroll', {
+      p_payroll_id: existingPayroll.id,
+      p_action: action,
+      p_reason: action === 'recall' ? recallReason.trim() : null,
+    })
+    if (error) {
+      setActioning(false)
+      setAlert({ msg: error.message, type: 'error' })
+      return
+    }
+    if (action === 'mark_paid') {
       const catId = await getOrCreateCategory('Labour Wages')
       if (catId) {
-        await supabase.from('expenses').insert({
+        const { error: expErr } = await supabase.from('expenses').insert({
           category_id: catId,
           description: `Monthly Fixed Labour — ${month}`,
           amount: totalFixed, expense_date: todayStr(), status: 'approved', vendor: 'Labour Pool',
         })
+        if (expErr) {
+          setActioning(false)
+          setAlert({ msg: 'Payroll marked paid — expense entry failed, please create it manually.', type: 'error' })
+          loadData()
+          return
+        }
       }
     }
-    const { error } = await supabase.from('weekly_labour_payroll').update(update).eq('id', existingPayroll.id)
+    if (action === 'recall') setRecallReason('')
     setActioning(false)
-    if (error) setAlert({ msg: error.message, type: 'error' })
-    else { setAlert({ msg: action === 'recall' ? 'Payroll recalled to draft.' : 'Updated.', type: 'success' }); loadData() }
+    setAlert({ msg: action === 'recall' ? 'Payroll recalled to draft.' : 'Updated.', type: 'success' })
+    loadData()
   }
 
   const handlePDF = () => {
@@ -1944,7 +1907,10 @@ function MonthlyFixedTab({ pool, roles, userProfile }) {
             <button style={styles.btn('success')} onClick={() => handleAction('mark_paid')} disabled={actioning}>Mark as Paid + Create Expense</button>
           )}
           {existingPayroll && existingPayroll.status !== 'paid' && ['production_manager','assistant_production_manager','logistics_manager','hr_officer','ico','md'].includes(userProfile?.role) && (
-            <button data-ico-allow style={{ ...styles.btn('danger'), opacity: 0.85 }} onClick={() => handleAction('recall')} disabled={actioning}>Recall to Draft</button>
+            <>
+              <input data-ico-allow style={{ ...styles.input, minWidth: '200px' }} placeholder="Reason for recall (required)…" value={recallReason} onChange={e => setRecallReason(e.target.value)} />
+              <button data-ico-allow style={{ ...styles.btn('danger'), opacity: recallReason.trim() ? 0.85 : 0.4 }} onClick={() => handleAction('recall')} disabled={actioning || !recallReason.trim()}>Recall to Draft</button>
+            </>
           )}
           {existingPayroll?.status === 'paid' && (
             <button style={styles.btn('blue')} onClick={handlePDF}>Download PDF</button>
@@ -2209,7 +2175,7 @@ function ProposeRateForm({ roles, userProfile, onSave, onCancel }) {
 
 // ── MAIN COMPONENT ────────────────────────────────────────────────────────────
 export default function Labour({ userProfile }) {
-  const [activeTab, setActiveTab] = useState(userProfile?.role === 'logistics_manager' ? 'truck' : 'pool')
+  const [activeTab, setActiveTab] = useState(userProfile?.role === 'logistics_manager' ? 'payroll' : 'pool')
   const [roles, setRoles] = useState([])
   const [pool, setPool] = useState([])
   const [loading, setLoading] = useState(true)
@@ -2230,11 +2196,10 @@ export default function Labour({ userProfile }) {
 
   const isLogistics = userProfile?.role === 'logistics_manager'
   const TABS = isLogistics
-    ? [{ key: 'truck', label: 'Truck Loading' }]
+    ? [{ key: 'payroll', label: 'Payroll' }]
     : [
       { key: 'pool', label: 'Labour Pool' },
       { key: 'roster', label: 'Daily Roster' },
-      { key: 'truck', label: 'Truck Loading' },
       { key: 'payroll', label: 'Payroll' },
       { key: 'monthly', label: 'Monthly Fixed' },
       { key: 'rates', label: 'Labour Rates' },
@@ -2266,7 +2231,6 @@ export default function Labour({ userProfile }) {
         <>
           {activeTab === 'pool' && <LabourPoolTab pool={pool} roles={roles} userProfile={userProfile} onRefresh={loadSharedData} />}
           {activeTab === 'roster' && <DailyRosterTab pool={pool} roles={roles} userProfile={userProfile} />}
-          {activeTab === 'truck' && <TruckLoadingTab pool={pool} userProfile={userProfile} />}
           {activeTab === 'payroll' && <WeeklyPayrollTab pool={pool} roles={roles} userProfile={userProfile} />}
           {activeTab === 'monthly' && <MonthlyFixedTab pool={pool} roles={roles} userProfile={userProfile} />}
           {activeTab === 'rates' && <LabourRatesTab roles={roles} userProfile={userProfile} onRefresh={loadSharedData} />}

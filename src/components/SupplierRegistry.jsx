@@ -73,8 +73,17 @@ const SupplierForm = ({ supplier, onSave, onCancel }) => {
       if (supplier) {
         await suppliersService.update(supplier.id, form)
       } else {
-        const num = await suppliersService.getNextNumber()
-        await suppliersService.create({ ...form, supplier_number: num })
+        let num = await suppliersService.getNextNumber()
+        try {
+          await suppliersService.create({ ...form, supplier_number: num })
+        } catch (createErr) {
+          if (createErr.code === '23505') {
+            num = await suppliersService.getNextNumber()
+            await suppliersService.create({ ...form, supplier_number: num })
+          } else {
+            throw createErr
+          }
+        }
       }
       onSave()
     } catch (e) { setAlert(e.message) }
@@ -367,6 +376,7 @@ const SupplyHistoryTab = ({ supplierId, companyName }) => {
 // ── DOCUMENTS TAB ──────────────────────────────────────────────
 const SupplierDocumentsTab = ({ supplierId }) => {
   const [docs, setDocs] = useState([])
+  const [docUrls, setDocUrls] = useState({})
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
   const [label, setLabel] = useState('')
@@ -376,7 +386,14 @@ const SupplierDocumentsTab = ({ supplierId }) => {
 
   const load = async () => {
     setLoading(true)
-    try { setDocs(await supplierDocumentsService.getBySupplier(supplierId)) }
+    try {
+      const rows = await supplierDocumentsService.getBySupplier(supplierId)
+      setDocs(rows)
+      const entries = await Promise.all(rows.map(async d => {
+        try { return [d.id, await supplierDocumentsService.getSignedUrl(d.file_url)] } catch { return [d.id, null] }
+      }))
+      setDocUrls(Object.fromEntries(entries))
+    }
     catch { }
     finally { setLoading(false) }
   }
@@ -423,7 +440,7 @@ const SupplierDocumentsTab = ({ supplierId }) => {
                 <div style={{ fontWeight: '600', fontSize: '13px' }}>{d.document_label}</div>
                 <div style={{ fontSize: '11px', color: theme.textMuted }}>{d.file_name} {d.file_size ? `· ${(d.file_size / 1024).toFixed(0)} KB` : ''} · {new Date(d.uploaded_at).toLocaleDateString('en-NG')}</div>
               </div>
-              <a href={d.file_url} target="_blank" rel="noreferrer" style={{ fontSize: '12px', color: theme.blue }}>View</a>
+              <a href={docUrls[d.id] || undefined} target="_blank" rel="noreferrer" style={{ fontSize: '12px', color: theme.blue }}>View</a>
               <button style={{ ...styles.btn('danger'), padding: '3px 8px', fontSize: '11px' }} onClick={() => handleDelete(d)}>Delete</button>
             </div>
           ))}

@@ -159,7 +159,7 @@ export const accountingService = {
       .select(`
         id, created_at, status,
         customer:customer_id(name),
-        invoices(id, invoice_number, total_amount, issued_date,
+        invoices(id, invoice_number, total_amount, issued_date, status,
           payments(amount_paid, status)
         )
       `)
@@ -169,9 +169,12 @@ export const accountingService = {
   },
 
   async getOpenInvoices() {
+    // Payment matching applies to real (issued/paid) invoices only — a draft is
+    // a quotation and a cancelled invoice is void.
     const { data, error } = await supabase
       .from('invoices')
       .select('id, invoice_number, total_amount, issued_date, order:order_id(id, customer:customer_id(id, name, company_name)), payments(id, amount_paid, payment_date, status)')
+      .not('status', 'in', '("draft","cancelled")')
       .order('issued_date', { ascending: false })
     if (error) throw error
     return data || []

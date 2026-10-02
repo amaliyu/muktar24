@@ -1,31 +1,5 @@
 import { supabase } from '../lib/supabase'
 
-export const deliveriesService = {
-  async getAll() {
-    const { data, error } = await supabase
-      .from('deliveries')
-      .select(`
-        *,
-        order:order_id(id, customer:customer_id(name)),
-        driver:driver_id(id, full_name),
-        waybills(*)
-      `)
-      .order('delivery_date', { ascending: false })
-    if (error) throw error
-    return data || []
-  },
-
-  async create(delivery) {
-    const { data, error } = await supabase
-      .from('deliveries')
-      .insert(delivery)
-      .select()
-      .single()
-    if (error) throw error
-    return data
-  },
-}
-
 export const waybillsService = {
   async getAll({ from, to } = {}) {
     let query = supabase

@@ -201,22 +201,100 @@ export const truckLoadingService = {
     if (error) throw error
   },
 
-  async getLogs() {
-    const { data, error } = await supabase
+  // Optional { from, to } narrows by date; includeNull (default true) also
+  // returns undated legacy rows so a range filter never silently hides them.
+  // No args → returns everything (unchanged for any other caller).
+  async getLogs({ from, to, includeNull = true } = {}) {
+    let q = supabase
       .from('truck_loading_log')
-      .select('*, waybill:waybill_id(waybill_number, waybill_date, quantity_loaded, truck_number), loaders:truck_loading_loaders(*, worker:labour_id(full_name, labour_number))')
-      .order('created_at', { ascending: false })
+      // payroll:payroll_id(status) — content editing is locked by the DB once
+      // the linked payroll is ico_approved/md_approved/paid (single join, no N+1).
+      .select('*, product:product_id(name), vehicle:vehicle_id(vehicle_number, vehicle_name), loaders:truck_loading_loaders(labour_id), payroll:payroll_id(status)')
+    // Single query. The .or() with a nested and(...) mirrors the proven pattern
+    // used elsewhere (bank/expense ingestion filters); "OR date is null" keeps
+    // the 53 undated backfill rows visible when includeNull is on.
+    if (from && to) {
+      q = includeNull ? q.or(`and(date.gte.${from},date.lte.${to}),date.is.null`) : q.gte('date', from).lte('date', to)
+    } else if (from) {
+      q = includeNull ? q.or(`date.gte.${from},date.is.null`) : q.gte('date', from)
+    } else if (to) {
+      q = includeNull ? q.or(`date.lte.${to},date.is.null`) : q.lte('date', to)
+    }
+    q = q.order('date', { ascending: false }).order('trip_number_for_day', { ascending: false })
+    const { data, error } = await q
     if (error) throw error
     return data || []
   },
 
-  async createLog(log, loaderIds) {
-    const { data, error } = await supabase.from('truck_loading_log').insert(log).select().single()
+  // Total count of undated rows (regardless of range) — for the toggle label.
+  async getUndatedCount() {
+    const { count, error } = await supabase
+      .from('truck_loading_log')
+      .select('id', { count: 'exact', head: true })
+      .is('date', null)
+    if (error) throw error
+    return count || 0
+  },
+
+  async createLog({ vehicle_id, product_id, date, quantity_loaded, waybill_id }, loaderIds = []) {
+    const { data, error } = await supabase
+      .from('truck_loading_log')
+      .insert({ vehicle_id, product_id, date, quantity_loaded, ...(waybill_id ? { waybill_id } : {}) })
+      .select('*, product:product_id(name), vehicle:vehicle_id(vehicle_number, vehicle_name)')
+      .single()
     if (error) throw error
     if (loaderIds.length > 0) {
       await supabase.from('truck_loading_loaders')
         .insert(loaderIds.map(lid => ({ loading_log_id: data.id, labour_id: lid })))
     }
+    return data
+  },
+
+  async getRates() {
+    const { data, error } = await supabase
+      .from('truck_loading_rates')
+      .select('*, product:product_id(name)')
+      .order('updated_at')
+    if (error) throw error
+    return data || []
+  },
+
+  async updateRate(id, fields) {
+    const { error } = await supabase
+      .from('truck_loading_rates')
+      .update(fields)
+      .eq('id', id)
+    if (error) throw error
+  },
+
+  async deleteLog(id) {
+    const { error } = await supabase.from('truck_loading_log').delete().eq('id', id);
+    if (error) throw error;
+  },
+
+  async updateLog(id, { vehicle_id, product_id, date, quantity_loaded }) {
+    const { error } = await supabase
+      .from('truck_loading_log')
+      .update({ vehicle_id, product_id, date, quantity_loaded: Number(quantity_loaded) })
+      .eq('id', id)
+    if (error) throw error
+  },
+
+  async syncLoaders(loadingLogId, loaderIds) {
+    await supabase.from('truck_loading_loaders').delete().eq('loading_log_id', loadingLogId)
+    if (loaderIds.length > 0) {
+      const { error } = await supabase.from('truck_loading_loaders')
+        .insert(loaderIds.map(lid => ({ loading_log_id: loadingLogId, labour_id: lid })))
+      if (error) throw error
+    }
+  },
+
+  async getLogByWaybill(waybillId) {
+    const { data } = await supabase
+      .from('truck_loading_log')
+      .select('id')
+      .eq('waybill_id', waybillId)
+      .maybeSingle()
     return data
   },
 }
@@ -232,7 +310,13 @@ export const payrollService = {
   },
 
   async create(payroll) {
-    const { data, error } = await supabase.from('weekly_labour_payroll').insert(payroll).select().single()
+    const { error: upErr } = await supabase.from('weekly_labour_payroll').upsert(
+      payroll,
+      { onConflict: 'week_ending,payroll_type', ignoreDuplicates: true }
+    )
+    if (upErr) throw upErr
+    const { data, error } = await supabase.from('weekly_labour_payroll')
+      .select('*').eq('week_ending', payroll.week_ending).eq('payroll_type', payroll.payroll_type).single()
     if (error) throw error
     return data
   },

@@ -74,6 +74,15 @@ export const batchesService = {
     if (error) throw error
   },
 
+  // Advisory curing sign-off (UI-level gate only — does not touch status,
+  // stock, or quantity). Records who verified curing and when.
+  async markCured(id, userId) {
+    const { error } = await supabase.from('batches')
+      .update({ cured_verified: true, cured_verified_by: userId || null, cured_verified_at: new Date().toISOString() })
+      .eq('id', id)
+    if (error) throw error
+  },
+
   async delete(id) {
     await supabase.from('batch_production_links').delete().eq('batch_id', id)
     const { error } = await supabase.from('batches').delete().eq('id', id)

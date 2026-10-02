@@ -3,6 +3,7 @@ import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import * as XLSX from 'xlsx'
 import { supabase } from '../lib/supabase'
+import { effectiveRolesOf } from '../lib/roles'
 
 // ── THEME ────────────────────────────────────────────────────
 const theme = {
@@ -65,7 +66,7 @@ const CATALOG = [
   // STAFF
   { id: 'attendance_report',   name: 'Attendance Report',             category: 'staff', description: 'Days present vs absent per worker, attendance rate and chronic absentees',         formats: ['pdf','excel'], roles: ['md','hr_officer','ico'], periodType: 'range' },
   { id: 'payroll_report',      name: 'Payroll Report',                category: 'staff', description: 'Wages per staff member, total payroll and payment status',                         formats: ['pdf','excel'], roles: ['md','hr_officer','accountant'], periodType: 'range' },
-  { id: 'staff_directory',     name: 'Staff Directory Report',        category: 'staff', description: 'All active staff with role, type, date hired and contact details',                 formats: ['pdf','excel'], roles: ['md','hr_officer','ico'], periodType: 'today' },
+  { id: 'staff_directory',     name: 'Staff Directory Report',        category: 'staff', description: 'All active staff with role, type, date hired and contact details',                 formats: ['pdf','excel'], roles: ['md','hr_officer'], periodType: 'today' },
   // INVENTORY
   { id: 'stock_status',        name: 'Stock Status Report',           category: 'inventory', description: 'Current stock levels, reorder status, and total stock value',                  formats: ['pdf','excel'], roles: ['md','store_officer','production_manager','assistant_production_manager','ico'], periodType: 'today' },
   { id: 'stock_movement',      name: 'Stock Movement Report',         category: 'inventory', description: 'All stock in/out movements with opening and closing stock',                    formats: ['pdf','excel'], roles: ['md','store_officer','production_manager','assistant_production_manager','ico'], periodType: 'range' },
@@ -77,9 +78,9 @@ const CATALOG = [
   { id: 'fuel_consumption',    name: 'Fuel Consumption Report',       category: 'vehicle', description: 'Fuel dispensed per vehicle, cost per trip and blocks per litre efficiency',     formats: ['pdf','excel'], roles: ['md','logistics_manager','ico'], periodType: 'range' },
   // FINANCIAL
   { id: 'expense_report',      name: 'Expense Report',                category: 'financial', description: 'All expenses by category with totals, trend and largest expenses',            formats: ['pdf','excel'], roles: ['md','accountant','ico'], periodType: 'range' },
-  { id: 'pl_report',           name: 'Profit & Loss Report',          category: 'financial', description: 'Full income statement: revenue, cost of goods, gross profit and expenses',    formats: ['pdf','excel'], roles: ['md','accountant','ico','board_member'], periodType: 'range' },
-  { id: 'balance_sheet',       name: 'Balance Sheet Report',          category: 'financial', description: 'Assets, liabilities and equity as at a selected date',                        formats: ['pdf','excel'], roles: ['md','accountant','ico','board_member'], periodType: 'asAt' },
-  { id: 'cash_flow',           name: 'Cash Flow Report',              category: 'financial', description: 'Operating, investing and financing cash flows for a period',                   formats: ['pdf','excel'], roles: ['md','accountant','ico','board_member'], periodType: 'range' },
+  { id: 'pl_report',           name: 'Profit & Loss Report',          category: 'financial', description: 'Accrual income statement: revenue from goods delivered (not cash received), direct & operating costs by cost centre, gross and net profit; accrued labour, unpaid loading and unpriced items shown separately as not-yet-included',    formats: ['pdf','excel'], roles: ['md','accountant','ico','board_member'], periodType: 'range' },
+  { id: 'balance_sheet',       name: 'Balance Sheet Report',          category: 'financial', description: 'Live-computed cash, receivables, inventory and payables combined with fixed assets and equity from static opening balances (pending accountant confirmation); includes a balance check',                        formats: ['pdf','excel'], roles: ['md','accountant','ico','board_member'], periodType: 'asAt' },
+  { id: 'cash_flow',           name: 'Cash Flow Report',              category: 'financial', description: 'Operating cash flow (cash basis). Investing and financing activities are not yet tracked in this system.',                   formats: ['pdf','excel'], roles: ['md','accountant','ico','board_member'], periodType: 'range' },
   { id: 'bank_recon',          name: 'Bank Reconciliation Report',    category: 'financial', description: 'Statement balance vs book balance per bank account',                           formats: ['pdf'], roles: ['md','accountant','ico'], periodType: 'range' },
   { id: 'supplier_statement',  name: 'Supplier Statement Report',     category: 'financial', description: 'All purchases and payments per supplier with outstanding payables aging',      formats: ['pdf','excel'], roles: ['md','accountant','ico'], periodType: 'range' },
 ]
@@ -167,47 +168,76 @@ async function fetchProductionRange(from, to) {
   let q = supabase.from('production_log').select('*, recorder:recorded_by(full_name)').order('date')
   if (from) q = q.gte('date', from)
   if (to)   q = q.lte('date', to)
-  const { data } = await q; return data || []
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
 }
 async function fetchDamageRange(from, to) {
-  let q = supabase.from('damage_log').select('*, recorder:recorded_by(full_name), delivery:delivery_id(waybill_number)').order('date')
+  let q = supabase.from('damage_log').select('*, delivery:waybill_id(waybill_number)').order('date')
   if (from) q = q.gte('date', from)
   if (to)   q = q.lte('date', to)
-  const { data } = await q; return data || []
+  const { data } = await q
+  const rows = data || []
+  const ids = [...new Set(rows.map(r => r.recorded_by).filter(Boolean))]
+  if (ids.length) {
+    const { data: profiles } = await supabase.from('user_profiles_directory').select('id, full_name').in('id', ids)
+    const nameMap = {}
+    for (const p of profiles || []) nameMap[p.id] = p.full_name
+    return rows.map(r => ({ ...r, recorder: r.recorded_by ? { id: r.recorded_by, full_name: nameMap[r.recorded_by] || null } : null }))
+  }
+  return rows
 }
 async function fetchWaybillRange(from, to) {
   let q = supabase.from('waybills').select('*, driver:driver_id(full_name), vehicle:vehicle_id(vehicle_number)').order('waybill_date')
   if (from) q = q.gte('waybill_date', from)
   if (to)   q = q.lte('waybill_date', to)
-  const { data } = await q; return data || []
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
 }
 async function fetchOrdersRange(from, to) {
   let q = supabase.from('orders').select('*, customer:customer_id(name,location), marketer:marketer_id(full_name), items:order_items(*), invoice:invoices(invoice_number,total_amount,issued_date,due_date)').order('created_at')
   if (from) q = q.gte('created_at', from + 'T00:00:00')
   if (to)   q = q.lte('created_at', to + 'T23:59:59')
-  const { data } = await q; return data || []
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
 }
 async function fetchPaymentsRange(from, to) {
   let q = supabase.from('payments').select('*, invoice:invoice_id(invoice_number, order:order_id(customer:customer_id(name)))').order('payment_date')
   if (from) q = q.gte('payment_date', from)
   if (to)   q = q.lte('payment_date', to)
   q = q.eq('status', 'confirmed')
-  const { data } = await q; return data || []
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
 }
 async function fetchExpensesRange(from, to) {
-  let q = supabase.from('expenses').select('*').order('date')
-  if (from) q = q.gte('date', from)
-  if (to)   q = q.lte('date', to)
-  const { data } = await q; return data || []
+  let q = supabase.from('expenses').select('*, category:category_id(name, cost_center)').order('expense_date')
+  if (from) q = q.gte('expense_date', from)
+  if (to)   q = q.lte('expense_date', to)
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
 }
 async function fetchAttendanceRange(from, to) {
-  let q = supabase.from('attendance').select('*, staff:staff_id(full_name,role,staff_type,daily_rate)').order('date')
+  let q = supabase.from('attendance').select('*').order('date')
   if (from) q = q.gte('date', from)
   if (to)   q = q.lte('date', to)
-  const { data } = await q; return data || []
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
 }
 async function fetchAllStaff() {
   const { data } = await supabase.from('staff').select('*').eq('is_active', true).order('full_name')
+  return data || []
+}
+async function fetchPayrollStaff() {
+  const { data } = await supabase
+    .from('staff_payroll')
+    .select('id, full_name, employee_number, staff_type, daily_rate, monthly_salary, bank_name, bank_account_number, bank_account_name')
+    .eq('is_active', true)
+    .order('full_name')
   return data || []
 }
 async function fetchAllVehicles() {
@@ -218,13 +248,17 @@ async function fetchMaintenanceRange(from, to) {
   let q = supabase.from('vehicle_maintenance').select('*, vehicle:vehicle_id(vehicle_number)').order('maintenance_date')
   if (from) q = q.gte('maintenance_date', from)
   if (to)   q = q.lte('maintenance_date', to)
-  const { data } = await q; return data || []
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
 }
 async function fetchFuelRange(from, to) {
   let q = supabase.from('vehicle_fuel_log').select('*, vehicle:vehicle_id(vehicle_number)').order('date')
   if (from) q = q.gte('date', from)
   if (to)   q = q.lte('date', to)
-  const { data } = await q; return data || []
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
 }
 async function fetchInventoryItems() {
   const { data } = await supabase.from('inventory_items').select('*').order('name')
@@ -234,7 +268,9 @@ async function fetchStockMovements(from, to) {
   let q = supabase.from('stock_movements').select('*, item:item_id(name,unit)').order('date')
   if (from) q = q.gte('date', from)
   if (to)   q = q.lte('date', to)
-  const { data } = await q; return data || []
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
 }
 async function fetchCustomers() {
   const { data } = await supabase.from('customers').select('*, added_by_staff:added_by(full_name)').order('name')
@@ -245,10 +281,15 @@ async function fetchSuppliers() {
   return data || []
 }
 async function fetchSupplierTransactions(from, to) {
-  let q = supabase.from('supplier_transactions').select('*, supplier:supplier_id(name)').order('date')
-  if (from) q = q.gte('date', from)
-  if (to)   q = q.lte('date', to)
-  const { data } = await q; return data || []
+  // Real date column is transaction_date. The old `supplier:supplier_id(name)`
+  // embed referenced a non-existent suppliers.name column (would error); the
+  // renderer resolves names via fetchSuppliers, so the embed is dropped.
+  let q = supabase.from('supplier_transactions').select('*').order('transaction_date')
+  if (from) q = q.gte('transaction_date', from)
+  if (to)   q = q.lte('transaction_date', to)
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
 }
 
 // ── REPORT GENERATORS ────────────────────────────────────────
@@ -272,10 +313,14 @@ const GENERATORS = {
   revenue_report: async (params) => fetchPaymentsRange(params.from, params.to),
   // 8. Invoice
   invoice_report: async (params) => {
-    let q = supabase.from('invoices').select('*, order:order_id(customer:customer_id(name), payments(*))').order('issued_date')
+    // Drafts are quotations and cancelled invoices are void — neither is a
+    // raised invoice, so exclude both from the invoice report.
+    let q = supabase.from('invoices').select('*, order:order_id(customer:customer_id(name), payments(*))').not('status', 'in', '("draft","cancelled")').order('issued_date')
     if (params.from) q = q.gte('issued_date', params.from)
     if (params.to)   q = q.lte('issued_date', params.to)
-    const { data } = await q; return data || []
+    const { data, error } = await q
+    if (error) throw error
+    return data || []
   },
   // 9. Marketer Performance
   marketer_performance: async (params) => {
@@ -294,7 +339,8 @@ const GENERATORS = {
   },
   // 11. AR Aging
   ar_aging: async (params) => {
-    const { data: invoices } = await supabase.from('invoices').select('*, order:order_id(customer:customer_id(name)), payments(amount_paid,status)').lte('issued_date', params.date || today())
+    // Receivables aging must exclude drafts (quotations) and cancelled invoices.
+    const { data: invoices } = await supabase.from('invoices').select('*, order:order_id(customer:customer_id(name)), payments(amount_paid,status)').not('status', 'in', '("draft","cancelled")').lte('issued_date', params.date || today())
     return invoices || []
   },
   // 12. Customer History
@@ -304,7 +350,9 @@ const GENERATORS = {
     let q = supabase.from('customers').select('*, added_by_staff:added_by(full_name), orders(id,created_at,order_items(quantity,unit_price,subtotal))').order('created_at')
     if (params.from) q = q.gte('created_at', params.from + 'T00:00:00')
     if (params.to)   q = q.lte('created_at', params.to + 'T23:59:59')
-    const { data } = await q; return data || []
+    const { data, error } = await q
+    if (error) throw error
+    return data || []
   },
   // 14. Daily Delivery
   daily_delivery: async (params) => fetchWaybillRange(params.date, params.date),
@@ -318,10 +366,18 @@ const GENERATORS = {
     return data || []
   },
   // 18. Attendance
-  attendance_report: async (params) => fetchAttendanceRange(params.from, params.to),
+  attendance_report: async (params) => {
+    const att = await fetchAttendanceRange(params.from, params.to)
+    const ids = [...new Set(att.map(a => a.staff_id).filter(Boolean))]
+    const { data: staffRows } = ids.length
+      ? await supabase.from('staff_public').select('id, full_name').in('id', ids)
+      : { data: [] }
+    const nameMap = Object.fromEntries((staffRows || []).map(s => [s.id, s.full_name]))
+    return att.map(a => ({ ...a, _staff_name: nameMap[a.staff_id] || null }))
+  },
   // 19. Payroll
   payroll_report: async (params) => {
-    const [att, staff] = await Promise.all([fetchAttendanceRange(params.from, params.to), fetchAllStaff()])
+    const [att, staff] = await Promise.all([fetchAttendanceRange(params.from, params.to), fetchPayrollStaff()])
     return { att, staff }
   },
   // 20. Staff Directory
@@ -345,19 +401,55 @@ const GENERATORS = {
   fuel_consumption: async (params) => fetchFuelRange(params.from, params.to),
   // 28. Expense
   expense_report: async (params) => fetchExpensesRange(params.from, params.to),
-  // 29. P&L
+  // 29. P&L — accrual income statement (delivered revenue, cost centres, memo)
   pl_report: async (params) => {
-    const [payments, expenses] = await Promise.all([fetchPaymentsRange(params.from, params.to), fetchExpensesRange(params.from, params.to)])
-    return { payments, expenses }
+    const { from, to } = params
+    const unwrap = r => { if (r.error) throw r.error; return r.data || [] }
+    // Monthly-salary accrual: payroll_lines whose run falls in the period.
+    // Two-step (run ids → lines) avoids fragile embedded-column filtering.
+    const runs = unwrap(await supabase.from('payroll_runs').select('id').gte('run_date', from).lte('run_date', to))
+    const runIds = runs.map(r => r.id)
+    const [deliveries, expenses, weeklyLabour, loadingUnpaid, payrollLines, payments] = await Promise.all([
+      supabase.from('v_delivered_revenue').select('waybill_id, waybill_date, block_type, quantity_received, unit_price, line_value, unvalued').gte('waybill_date', from).lte('waybill_date', to).then(unwrap),
+      supabase.from('expenses').select('amount, category:category_id(name, cost_center)').gte('expense_date', from).lte('expense_date', to).then(unwrap),
+      supabase.from('weekly_labour_payroll').select('total_amount').gte('week_ending', from).lte('week_ending', to).then(unwrap),
+      // Unlinked loading only — rows WITH a payroll_id are already inside
+      // weekly_labour_payroll.total_amount; including them would double-count.
+      supabase.from('truck_loading_log').select('total_amount').is('payroll_id', null).gte('date', from).lte('date', to).then(unwrap),
+      runIds.length ? supabase.from('payroll_lines').select('amount_due').in('payroll_run_id', runIds).then(unwrap) : Promise.resolve([]),
+      supabase.from('payments').select('amount_paid').eq('status', 'confirmed').gte('payment_date', from).lte('payment_date', to).then(unwrap),
+    ])
+    return { deliveries, expenses, weeklyLabour, loadingUnpaid, payrollLines, payments }
   },
-  // 30. Balance Sheet
+  // 30. Balance Sheet — live working-capital positions + static opening balances
   balance_sheet: async () => {
-    const { data } = await supabase.from('opening_balances').select('*')
-    return data || []
+    const unwrap = r => { if (r.error) throw r.error; return r.data || [] }
+    const [openingBalances, banks, invoices, paymentsConfirmed, inventory, payablesExp] = await Promise.all([
+      supabase.from('opening_balances').select('category, account_name, amount, as_at_date').then(unwrap),
+      supabase.from('bank_accounts').select('current_balance').eq('is_active', true).then(unwrap),
+      // Trade receivables = invoice totals less confirmed payments. Drafts
+      // (quotations) and cancelled invoices are not receivables — exclude them.
+      supabase.from('invoices').select('total_amount').not('status', 'in', '("draft","cancelled")').then(unwrap),
+      supabase.from('payments').select('amount_paid').eq('status', 'confirmed').then(unwrap),
+      supabase.from('inventory_items').select('current_stock, unit_cost').then(unwrap),
+      // Trade Payables = approved but not-yet-disbursed expenses (no payment_request,
+      // not ingested from a bank statement) — i.e. owed-but-unpaid. See PR note.
+      supabase.from('expenses').select('amount').eq('status', 'approved').is('payment_request_id', null).is('ingestion_source', null).then(unwrap),
+    ])
+    return { openingBalances, banks, invoices, paymentsConfirmed, inventory, payablesExp }
   },
-  // 31. Cash Flow
+  // 31. Cash Flow — true cash basis (money that actually moved)
   cash_flow: async (params) => {
-    const [payments, expenses] = await Promise.all([fetchPaymentsRange(params.from, params.to), fetchExpensesRange(params.from, params.to)])
+    const { from, to } = params
+    const unwrap = r => { if (r.error) throw r.error; return r.data || [] }
+    const [payments, expenses] = await Promise.all([
+      supabase.from('payments').select('amount_paid').eq('status', 'confirmed').gte('payment_date', from).lte('payment_date', to).then(unwrap),
+      // Confirmed cash out only: disbursed via payment_request, or approved
+      // manual expenses. Excludes pending (never paid).
+      supabase.from('expenses').select('amount')
+        .or('ingestion_source.eq.payment_request,and(ingestion_source.is.null,status.eq.approved)')
+        .gte('expense_date', from).lte('expense_date', to).then(unwrap),
+    ])
     return { payments, expenses }
   },
   // 32. Bank Recon
@@ -365,13 +457,231 @@ const GENERATORS = {
     let q = supabase.from('bank_reconciliations').select('*, account:bank_account_id(account_name,bank_name)').order('created_at', { ascending: false })
     if (params.from) q = q.gte('statement_date', params.from)
     if (params.to)   q = q.lte('statement_date', params.to)
-    const { data } = await q; return data || []
+    const { data, error } = await q
+    if (error) throw error
+    return data || []
   },
   // 33. Supplier Statement
   supplier_statement: async (params) => {
     const [suppliers, txns] = await Promise.all([fetchSuppliers(), fetchSupplierTransactions(params.from, params.to)])
     return { suppliers, txns }
   },
+}
+
+// ── P&L (ACCRUAL INCOME STATEMENT) SHARED BUILDER ────────────
+// Single source of truth so the PDF and Excel renderers are identical.
+// Revenue = delivered goods (accrual), not cash received. Direct/operating
+// costs come ONLY from the expenses table; the payroll tables feed ONLY the
+// memo below net profit and never enter the profit calculation (no double
+// count — see the pl_report notes).
+const capWord = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : s
+function buildPLStatement(data) {
+  const { deliveries = [], expenses = [], weeklyLabour = [], loadingUnpaid = [], payrollLines = [], payments = [] } = data || {}
+  const num = v => Number(v) || 0
+
+  // REVENUE — delivered goods that could be priced
+  const revenue = deliveries.filter(d => d.unvalued === false).reduce((s, d) => s + num(d.line_value), 0)
+  const unvaluedCount = deliveries.filter(d => d.unvalued === true).length
+
+  // DIRECT COSTS — expenses in the 'production' cost centre, one line per category
+  const directMap = {}
+  for (const e of expenses) {
+    if (e.category?.cost_center === 'production') {
+      const k = e.category?.name || 'Uncategorised'
+      directMap[k] = (directMap[k] || 0) + num(e.amount)
+    }
+  }
+  const directLines = Object.entries(directMap).map(([label, amount]) => ({ label, amount })).sort((a, b) => b.amount - a.amount)
+  const directTotal = directLines.reduce((s, l) => s + l.amount, 0)
+  const grossProfit = revenue - directTotal
+
+  // OPERATING EXPENSES — every non-production expense, grouped by cost centre
+  // (null grouped as Uncategorised, never dropped)
+  const opMap = {}
+  for (const e of expenses) {
+    const cc = e.category?.cost_center
+    if (cc === 'production') continue
+    const key = cc || '__null__'
+    opMap[key] = (opMap[key] || 0) + num(e.amount)
+  }
+  const opLines = Object.entries(opMap)
+    .map(([key, amount]) => ({ label: key === '__null__' ? 'Uncategorised' : capWord(key), amount }))
+    .sort((a, b) => b.amount - a.amount)
+  const operatingTotal = opLines.reduce((s, l) => s + l.amount, 0)
+  const netProfit = grossProfit - operatingTotal
+
+  // NOT YET INCLUDED (memo only — from payroll tables, never in net profit)
+  const dailyLabour = weeklyLabour.reduce((s, r) => s + num(r.total_amount), 0)
+  const loadingUnpaidSum = loadingUnpaid.reduce((s, r) => s + num(r.total_amount), 0)
+  const loadingUnpaidCount = loadingUnpaid.length
+  const monthlySalaries = payrollLines.reduce((s, r) => s + num(r.amount_due), 0)
+
+  // MEMO — deposits held = confirmed cash in − delivered revenue, only if positive
+  const paymentsTotal = payments.reduce((s, r) => s + num(r.amount_paid), 0)
+  const depositsRaw = paymentsTotal - revenue
+  const deposits = depositsRaw > 0 ? depositsRaw : null
+
+  return { revenue, unvaluedCount, directLines, directTotal, grossProfit, opLines, operatingTotal,
+           netProfit, dailyLabour, loadingUnpaidSum, loadingUnpaidCount, monthlySalaries, deposits }
+}
+// Rows shared by both renderers: { label, amount(string), kind } — kind drives PDF styling.
+function plStatementRows(S) {
+  const rows = []
+  const add = (label, amount, kind) => rows.push({ label, amount, kind })
+  add('REVENUE', '', 'header')
+  add('   Goods delivered', naira(S.revenue), 'line')
+  if (S.unvaluedCount > 0) add(`   ⚠ ${S.unvaluedCount} deliveries excluded — could not be priced`, '', 'warn')
+  add('', '', 'spacer')
+  add('DIRECT COSTS', '', 'header')
+  if (S.directLines.length === 0) add('   (none recorded)', '', 'line')
+  S.directLines.forEach(l => add('   ' + l.label, naira(l.amount), 'line'))
+  add('   Total direct costs', '(' + naira(S.directTotal) + ')', 'total')
+  add('', '', 'spacer')
+  add('GROSS PROFIT', naira(S.grossProfit), 'grossprofit')
+  add('', '', 'spacer')
+  add('OPERATING EXPENSES', '', 'header')
+  if (S.opLines.length === 0) add('   (none recorded)', '', 'line')
+  S.opLines.forEach(l => add('   ' + l.label, naira(l.amount), 'line'))
+  add('   Total operating expenses', '(' + naira(S.operatingTotal) + ')', 'total')
+  add('', '', 'spacer')
+  add('NET PROFIT / (LOSS) — before items below', naira(S.netProfit), 'netprofit')
+  add('', '', 'spacer')
+  add('── NOT YET INCLUDED IN THIS STATEMENT ──', '', 'memohead')
+  add('   Daily-paid labour (weekly payroll)', naira(S.dailyLabour), 'memo')
+  add('   Loading & offloading — unpaid', naira(S.loadingUnpaidSum), 'memo')
+  add(`      ${S.loadingUnpaidCount} records not yet attached to a payroll`, '', 'memonote')
+  add('   Monthly staff salaries (accrued)', naira(S.monthlySalaries), 'memo')
+  add('   Materials consumed in production', '—', 'memo')
+  add('      (costing layer pending)', '', 'memonote')
+  add('   Unvalued deliveries', `${S.unvaluedCount} waybills`, 'memo')
+  if (S.deposits !== null) {
+    add('', '', 'spacer')
+    add('── MEMO ──', '', 'memohead')
+    add('   Customer deposits held', naira(S.deposits), 'memo')
+    add('      money received for goods not yet delivered — a liability, not revenue', '', 'memonote')
+  }
+  return rows
+}
+
+// ── SUPPLIER STATEMENT (with payables aging) ────────────────
+// Bucket a supplier's whole outstanding balance by the age of its oldest
+// still-unpaid purchase (payments applied FIFO to oldest purchases first).
+function supplierAging(purchaseTxns, totalPaid, asOfStr) {
+  const b = { current: 0, d31: 0, d61: 0, d90: 0 }
+  const purchases = [...purchaseTxns].sort((a, z) => new Date(a.transaction_date) - new Date(z.transaction_date))
+  const balance = purchases.reduce((s, p) => s + Number(p.amount || 0), 0) - totalPaid
+  if (balance <= 0) return b
+  let remaining = totalPaid, oldestUnpaid = null
+  for (const p of purchases) {
+    const amt = Number(p.amount || 0)
+    if (remaining >= amt) { remaining -= amt; continue }
+    oldestUnpaid = p.transaction_date; break
+  }
+  if (!oldestUnpaid) oldestUnpaid = purchases[purchases.length - 1]?.transaction_date
+  const days = oldestUnpaid ? Math.floor((new Date(asOfStr) - new Date(oldestUnpaid)) / 86400000) : 0
+  if (days <= 30) b.current = balance
+  else if (days <= 60) b.d31 = balance
+  else if (days <= 90) b.d61 = balance
+  else b.d90 = balance
+  return b
+}
+function supplierStatementRows(data) {
+  const { suppliers = [], txns = [] } = data || {}
+  const asOf = today()
+  return suppliers.map(s => {
+    const st = txns.filter(t => t.supplier_id === s.id)
+    const purchases = st.filter(t => t.transaction_type === 'purchase')
+    const purchased = purchases.reduce((sum, t) => sum + Number(t.amount || 0), 0)
+    const paid = st.filter(t => t.transaction_type === 'payment').reduce((sum, t) => sum + Number(t.amount || 0), 0)
+    const b = supplierAging(purchases, paid, asOf)
+    return { name: s.company_name || '—', purchased, paid, balance: purchased - paid, ...b }
+  })
+}
+
+// ── CASH FLOW (cash basis) ──────────────────────────────────
+function buildCashFlowRows(data) {
+  const num = v => Number(v) || 0
+  const received = (data.payments || []).reduce((s, p) => s + num(p.amount_paid), 0)
+  const paid = (data.expenses || []).reduce((s, e) => s + num(e.amount), 0)
+  const net = received - paid
+  const rows = []
+  const add = (l, a, k) => rows.push({ label: l, amount: a, kind: k })
+  add('OPERATING ACTIVITIES', '', 'header')
+  add('   Cash received from customers', naira(received), 'line')
+  add('   Cash paid for expenses', '(' + naira(paid) + ')', 'line')
+  add('   Net Operating Cash Flow', naira(net), 'subtotal')
+  add('', '', 'spacer')
+  add('INVESTING ACTIVITIES', '', 'header')
+  add('   Not currently tracked in this system', '—', 'memonote')
+  add('', '', 'spacer')
+  add('FINANCING ACTIVITIES', '', 'header')
+  add('   Not currently tracked in this system', '—', 'memonote')
+  add('', '', 'spacer')
+  add('NET CHANGE IN CASH', naira(net), 'net')
+  return { rows, net }
+}
+
+// ── BALANCE SHEET (live positions + static opening balances) ─
+function buildBalanceSheet(data) {
+  const num = v => Number(v) || 0
+  const ob = data.openingBalances || []
+  const cashAtBank = (data.banks || []).reduce((s, b) => s + num(b.current_balance), 0)
+  const receivables = (data.invoices || []).reduce((s, i) => s + num(i.total_amount), 0)
+    - (data.paymentsConfirmed || []).reduce((s, p) => s + num(p.amount_paid), 0)
+  const inventory = (data.inventory || []).reduce((s, i) => s + num(i.current_stock) * num(i.unit_cost), 0)
+  const payables = (data.payablesExp || []).reduce((s, e) => s + num(e.amount), 0)
+
+  // Static rows, excluding the four items now computed live (avoid double count)
+  const COMPUTED = new Set(['Cash on Hand', 'Trade Receivables', 'Inventory', 'Trade Payables'])
+  const pick = cat => ob.filter(o => o.category === cat && !COMPUTED.has(o.account_name))
+  const staticAssets = pick('asset'), staticLiab = pick('liability'), staticEquity = pick('equity')
+  const sum = arr => arr.reduce((s, o) => s + num(o.amount), 0)
+
+  const totalAssets = cashAtBank + receivables + inventory + sum(staticAssets)
+  const totalLE = payables + sum(staticLiab) + sum(staticEquity)
+  const balanceCheck = totalAssets - totalLE
+
+  const rows = []
+  const add = (l, a, k) => rows.push({ label: l, amount: a, kind: k })
+  const staticRow = o => add(`   ${o.account_name} · per opening balances (as at ${fmtDate(o.as_at_date)})`, naira(num(o.amount)), 'static')
+  add('ASSETS', '', 'header')
+  add('   Cash at Bank (live)', naira(cashAtBank), 'line')
+  add('   Trade Receivables (live)', naira(receivables), 'line')
+  add('   Inventory (live)', naira(inventory), 'line')
+  staticAssets.forEach(staticRow)
+  add('   Total Assets', naira(totalAssets), 'total')
+  add('', '', 'spacer')
+  add('LIABILITIES & EQUITY', '', 'header')
+  add('   Trade Payables (live)', naira(payables), 'line')
+  staticLiab.forEach(staticRow)
+  staticEquity.forEach(staticRow)
+  add('   Total Liabilities & Equity', naira(totalLE), 'total')
+  add('', '', 'spacer')
+  add(balanceCheck === 0 ? 'Balance Check: ✓ Balanced' : 'Balance Check (Assets − Liabilities & Equity)',
+      balanceCheck === 0 ? '' : naira(balanceCheck), 'balancecheck')
+  return { rows, balanceCheck }
+}
+
+// Shared statement-style autoTable used by cash flow & balance sheet.
+function statementTable(doc, startY, rows, colorFor) {
+  autoTable(doc, {
+    startY,
+    head: [['', 'Amount (₦)']],
+    body: rows.map(r => [r.label, r.amount]),
+    styles: { fontSize: 10, cellPadding: 1.4 },
+    headStyles: { fillColor: [30, 40, 70], textColor: 255 },
+    columnStyles: { 1: { halign: 'right', cellWidth: 48 } },
+    didParseCell: d => {
+      const k = rows[d.row.index]?.kind
+      if (['header', 'subtotal', 'total', 'net', 'balancecheck'].includes(k)) d.cell.styles.fontStyle = 'bold'
+      if (k === 'header') d.cell.styles.fillColor = [235, 238, 245]
+      if (k === 'static') d.cell.styles.textColor = [110, 110, 120]
+      if (k === 'memonote') { d.cell.styles.fontStyle = 'italic'; d.cell.styles.textColor = [140, 140, 150] }
+      const fill = colorFor && colorFor(k)
+      if (fill) d.cell.styles.fillColor = fill
+    },
+    margin: { left: 14, right: 14 },
+  })
 }
 
 // ── PDF RENDERERS ────────────────────────────────────────────
@@ -523,7 +833,7 @@ function renderPDF(reportId, data, params, period) {
       const rows = data
       const staffMap = {}
       rows.forEach(a => {
-        const k = a.staff?.full_name || a.staff_id
+        const k = a._staff_name || a.staff_id
         if (!staffMap[k]) staffMap[k] = { days: 0, present: 0, rate: 0 }
         staffMap[k].days++
         if (a.present) staffMap[k].present++
@@ -616,38 +926,41 @@ function renderPDF(reportId, data, params, period) {
       break
     }
     case 'expense_report': {
-      const head = ['Date', 'Category', 'Subcategory', 'Description', 'Paid To', 'Amount (₦)']
-      const body = data.map(e => [fmtDate(e.date), e.category||'—', e.subcategory||'—', e.description||'—', e.paid_to||'—', naira(e.amount)])
+      const head = ['Date', 'Category', 'Cost Center', 'Description', 'Paid To', 'Amount (₦)']
+      const body = data.map(e => [fmtDate(e.expense_date), e.category?.name||'—', e.category?.cost_center||'—', e.description||'—', e.paid_to||'—', naira(e.amount)])
       const total = data.reduce((s,e)=>s+Number(e.amount||0),0)
       pdfTable(doc, startY, head, body, ['TOTAL','','','','',naira(total)])
       break
     }
     case 'pl_report': {
-      const { payments, expenses } = data
-      const revenue = payments.reduce((s,p)=>s+Number(p.amount_paid),0)
-      const totalExp = expenses.reduce((s,e)=>s+Number(e.amount||0),0)
-      const net = revenue - totalExp
-      doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(30,30,30)
-      const rows = [['Revenue (Payments Received)', naira(revenue)], ['Total Expenses', naira(totalExp)], ['', ''], ['NET PROFIT / (LOSS)', naira(net)]]
+      const S = buildPLStatement(data)
+      const stmtRows = plStatementRows(S)
+      const kinds = stmtRows.map(r => r.kind)
       autoTable(doc, {
-        startY, head: [['Description', 'Amount (₦)']], body: rows,
-        styles: { fontSize: 10 }, headStyles: { fillColor: [30,40,70], textColor: 255 },
-        didParseCell: data => { if (data.row.index === 3) { data.cell.styles.fontStyle = 'bold'; data.cell.styles.fillColor = net>=0?[200,240,210]:[255,200,200] } },
+        startY,
+        head: [['', 'Amount (₦)']],
+        body: stmtRows.map(r => [r.label, r.amount]),
+        styles: { fontSize: 10, cellPadding: 1.4 },
+        headStyles: { fillColor: [30,40,70], textColor: 255 },
+        columnStyles: { 1: { halign: 'right', cellWidth: 48 } },
+        didParseCell: d => {
+          const k = kinds[d.row.index]
+          if (['header','total','grossprofit','netprofit','memohead'].includes(k)) d.cell.styles.fontStyle = 'bold'
+          if (k === 'header') d.cell.styles.fillColor = [235,238,245]
+          if (k === 'grossprofit') d.cell.styles.fillColor = [225,230,245]
+          if (k === 'netprofit') d.cell.styles.fillColor = S.netProfit >= 0 ? [200,240,210] : [255,200,200]
+          if (k === 'memohead') { d.cell.styles.textColor = [110,110,120]; d.cell.styles.fillColor = [245,245,245] }
+          if (k === 'memo') d.cell.styles.textColor = [90,90,100]
+          if (k === 'memonote') { d.cell.styles.fontStyle = 'italic'; d.cell.styles.fontSize = 8; d.cell.styles.textColor = [140,140,150] }
+          if (k === 'warn') { d.cell.styles.textColor = [200,120,0]; d.cell.styles.fontSize = 9 }
+        },
         margin: { left: 14, right: 14 },
       })
       break
     }
     case 'cash_flow': {
-      const { payments, expenses } = data
-      const inflow = payments.reduce((s,p)=>s+Number(p.amount_paid),0)
-      const outflow = expenses.reduce((s,e)=>s+Number(e.amount||0),0)
-      const net = inflow - outflow
-      autoTable(doc, {
-        startY, head: [['Category', 'Amount (₦)']], body: [['Operating Inflow (Receipts)', naira(inflow)], ['Operating Outflow (Expenses)', '('+naira(outflow)+')'], ['', ''], ['NET CASH FLOW', naira(net)]],
-        styles: { fontSize: 10 }, headStyles: { fillColor: [30,40,70], textColor: 255 },
-        didParseCell: data => { if (data.row.index === 3) data.cell.styles.fontStyle = 'bold' },
-        margin: { left: 14, right: 14 },
-      })
+      const { rows, net } = buildCashFlowRows(data)
+      statementTable(doc, startY, rows, k => k === 'net' ? (net >= 0 ? [200,240,210] : [255,200,200]) : null)
       break
     }
     case 'bank_recon': {
@@ -657,27 +970,15 @@ function renderPDF(reportId, data, params, period) {
       break
     }
     case 'supplier_statement': {
-      const { suppliers, txns } = data
-      const head = ['Supplier', 'Total Purchased (₦)', 'Total Paid (₦)', 'Balance (₦)']
-      const body = suppliers.map(s => {
-        const st = txns.filter(t=>t.supplier_id===s.id)
-        const purchased = st.filter(t=>t.transaction_type==='purchase').reduce((sum,t)=>sum+Number(t.amount),0)
-        const paid = st.filter(t=>t.transaction_type==='payment').reduce((sum,t)=>sum+Number(t.amount),0)
-        return [s.name||s.company_name||'—', naira(purchased), naira(paid), naira(purchased-paid)]
-      })
+      const head = ['Supplier', 'Total Purchased (₦)', 'Total Paid (₦)', 'Balance (₦)', 'Current', '31-60d', '61-90d', '90+d']
+      const body = supplierStatementRows(data).map(r =>
+        [r.name, naira(r.purchased), naira(r.paid), naira(r.balance), naira(r.current), naira(r.d31), naira(r.d61), naira(r.d90)])
       pdfTable(doc, startY, head, body)
       break
     }
     case 'balance_sheet': {
-      const obs = data
-      const assets = obs.filter(o=>o.category==='asset').reduce((s,o)=>s+Number(o.amount||0),0)
-      const liab = obs.filter(o=>o.category==='liability').reduce((s,o)=>s+Number(o.amount||0),0)
-      const equity = obs.filter(o=>o.category==='equity').reduce((s,o)=>s+Number(o.amount||0),0)
-      autoTable(doc, {
-        startY, head: [['Category', 'Amount (₦)']], body: [['Total Assets', naira(assets)], ['Total Liabilities', naira(liab)], ['Total Equity', naira(equity)], ['', ''], ['Total Liabilities + Equity', naira(liab+equity)]],
-        styles: { fontSize: 10 }, headStyles: { fillColor: [30,40,70], textColor: 255 },
-        margin: { left: 14, right: 14 },
-      })
+      const { rows, balanceCheck } = buildBalanceSheet(data)
+      statementTable(doc, startY, rows, k => k === 'balancecheck' && balanceCheck !== 0 ? [255,200,200] : null)
       break
     }
     default: {
@@ -720,8 +1021,8 @@ function renderExcel(reportId, data, params, period) {
         ['TOTAL','','',data.reduce((s,p)=>s+Number(p.amount_paid),0)])
       break
     case 'expense_report':
-      excelExport(filename, report.name, period, ['Date','Category','Subcategory','Description','Paid To','Amount (₦)'],
-        data.map(e=>[fmtDate(e.date),e.category||'—',e.subcategory||'—',e.description||'—',e.paid_to||'—',Number(e.amount||0)]),
+      excelExport(filename, report.name, period, ['Date','Category','Cost Center','Description','Paid To','Amount (₦)'],
+        data.map(e=>[fmtDate(e.expense_date),e.category?.name||'—',e.category?.cost_center||'—',e.description||'—',e.paid_to||'—',Number(e.amount||0)]),
         ['TOTAL','','','','',data.reduce((s,e)=>s+Number(e.amount||0),0)])
       break
     case 'staff_directory':
@@ -741,6 +1042,25 @@ function renderExcel(reportId, data, params, period) {
       excelExport(filename, report.name, period, ['Date','Vehicle','Litres','Cost/Litre (₦)','Total Cost (₦)'],
         data.map(f=>[fmtDate(f.date),f.vehicle?.vehicle_number||'—',Number(f.litres||0),Number(f.cost_per_litre||0),Number(f.total_cost||0)]),
         ['TOTAL','','','',data.reduce((s,f)=>s+Number(f.total_cost||0),0)])
+      break
+    case 'pl_report': {
+      const S = buildPLStatement(data)
+      excelExport(filename, report.name, period, ['', 'Amount (₦)'],
+        plStatementRows(S).map(r => [r.label, r.amount]))
+      break
+    }
+    case 'supplier_statement':
+      excelExport(filename, report.name, period,
+        ['Supplier','Total Purchased (₦)','Total Paid (₦)','Balance (₦)','Current','31-60d','61-90d','90+d'],
+        supplierStatementRows(data).map(r => [r.name, r.purchased, r.paid, r.balance, r.current, r.d31, r.d61, r.d90]))
+      break
+    case 'cash_flow':
+      excelExport(filename, report.name, period, ['', 'Amount (₦)'],
+        buildCashFlowRows(data).rows.map(r => [r.label, r.amount]))
+      break
+    case 'balance_sheet':
+      excelExport(filename, report.name, period, ['', 'Amount (₦)'],
+        buildBalanceSheet(data).rows.map(r => [r.label, r.amount]))
       break
     default:
       excelExport(filename, report.name, period, ['No Data'], [['This report does not support Excel export yet.']])
@@ -915,11 +1235,11 @@ function GenerateModal({ report, userProfile, onClose, onGenerated }) {
         </div>
 
         <div style={{ display:'flex', gap:'10px', flexWrap:'wrap' }}>
-          <button data-board-allow style={styles.btn('primary')} onClick={()=>handleGenerate('pdf')} disabled={loading}>
+          <button data-board-allow data-ico-allow style={styles.btn('primary')} onClick={()=>handleGenerate('pdf')} disabled={loading}>
             {loading ? 'Generating…' : '⬇ Generate PDF'}
           </button>
           {report.formats.includes('excel') && (
-            <button data-board-allow style={styles.btn('secondary')} onClick={()=>handleGenerate('excel')} disabled={loading}>
+            <button data-board-allow data-ico-allow style={styles.btn('secondary')} onClick={()=>handleGenerate('excel')} disabled={loading}>
               ⬇ Generate Excel
             </button>
           )}
@@ -980,8 +1300,8 @@ function ScheduleModal({ report, onClose }) {
 // ── REPORT CARD ──────────────────────────────────────────────
 const ROLE_LABELS = { md:'MD', accountant:'Accountant', board_member:'Board', bdm:'BDM', ico:'ICO', store_officer:'Store', logistics_manager:'Logistics', marketer:'Marketer', driver:'Driver', hr_officer:'HR', production_manager:'Production', assistant_production_manager:'Asst. Production' }
 
-function ReportCard({ report, userRole, schedule, onGenerate, onSchedule }) {
-  const hasAccess = report.roles.includes(userRole)
+function ReportCard({ report, userRole, effectiveRoles = [], schedule, onGenerate, onSchedule }) {
+  const hasAccess = report.roles.some(r => effectiveRoles.includes(r))
   const catColor  = CAT_COLOR[report.category] || theme.accent
   const isDue = schedule && (() => {
     if (!schedule.frequency) return false
@@ -1017,7 +1337,7 @@ function ReportCard({ report, userRole, schedule, onGenerate, onSchedule }) {
       <div style={{ marginTop:'auto', display:'flex', gap:'8px', alignItems:'center' }}>
         {hasAccess ? (
           <>
-            <button data-board-allow style={{ ...styles.btn('primary'), padding:'6px 14px', fontSize:'12px' }} onClick={onGenerate}>Generate</button>
+            <button data-board-allow data-ico-allow style={{ ...styles.btn('primary'), padding:'6px 14px', fontSize:'12px' }} onClick={onGenerate}>Generate</button>
             <button style={{ ...styles.btn('secondary'), padding:'6px 10px', fontSize:'11px' }} onClick={onSchedule}>Schedule</button>
           </>
         ) : (
@@ -1039,6 +1359,10 @@ export default function Reports({ userProfile }) {
   const [schedules, setSchedules]           = useState(getSchedules())
 
   const userRole = userProfile?.role || 'staff'
+  // A report is runnable if ANY of the user's effective roles (primary + active
+  // grants) is on its access list — so a granted role can run the reports that
+  // role is entitled to. userRole is kept only for the "your role" chip display.
+  const effectiveRoles = effectiveRolesOf(userProfile)
 
   const refreshHistory  = useCallback(() => { setHistory(getHistory()); setSchedules(getSchedules()) }, [])
 
@@ -1084,6 +1408,7 @@ export default function Reports({ userProfile }) {
                   key={r.id}
                   report={r}
                   userRole={userRole}
+                  effectiveRoles={effectiveRoles}
                   schedule={schedules.find(s=>s.reportId===r.id)}
                   onGenerate={() => setGenerateModal(r)}
                   onSchedule={() => setScheduleModal(r)}

@@ -10,7 +10,7 @@ export const ordersService = {
         marketer:marketer_id(id, full_name),
         site:site_id(id, site_name, site_address),
         order_items(*),
-        invoices(id, invoice_number, total_amount, issued_date, due_date, payments(id, amount_paid, payment_date, status))
+        invoices(id, invoice_number, total_amount, issued_date, due_date, status, delivery_cost, discount, include_vat, created_by_name, cancellation_reason, cancelled_by_name, payments(id, amount_paid, payment_date, status))
       `)
       .order('created_at', { ascending: false })
     if (from) query = query.gte('created_at', from)
@@ -29,7 +29,7 @@ export const ordersService = {
         marketer:marketer_id(id, full_name),
         site:site_id(id, site_name, site_address),
         order_items(*),
-        invoices(id, invoice_number, total_amount, issued_date, due_date, payments(id, amount_paid, payment_date, status))
+        invoices(id, invoice_number, total_amount, issued_date, due_date, status, delivery_cost, discount, include_vat, created_by_name, cancellation_reason, cancelled_by_name, payments(id, amount_paid, payment_date, status))
       `)
       .eq('marketer_id', userId)
       .order('created_at', { ascending: false })
@@ -71,6 +71,25 @@ export const ordersService = {
     return newOrder
   },
 
+  async getForDelivery({ from, to } = {}) {
+    let query = supabase
+      .from('orders')
+      .select(`
+        *,
+        customer:customer_id(*),
+        marketer:marketer_id(id, full_name),
+        site:site_id(id, site_name, site_address),
+        order_items_delivery(id, order_id, block_type, quantity, created_at),
+        invoices(id, invoice_number, issued_date, due_date)
+      `)
+      .order('created_at', { ascending: false })
+    if (from) query = query.gte('created_at', from)
+    if (to)   query = query.lte('created_at', to + 'T23:59:59')
+    const { data, error } = await query
+    if (error) throw error
+    return data || []
+  },
+
   async updateStatus(id, status) {
     const { data, error } = await supabase
       .from('orders')
@@ -94,7 +113,13 @@ export const ordersService = {
   async delete(id) {
     const { data: invoices } = await supabase.from('invoices').select('id').eq('order_id', id)
     if (invoices?.length) {
-      await supabase.from('payments').delete().in('invoice_id', invoices.map(i => i.id))
+      const invoiceIds = invoices.map(i => i.id)
+      const { data: pmts } = await supabase.from('payments').select('id').in('invoice_id', invoiceIds)
+      if (pmts?.length) {
+        const err = new Error(`${pmts.length} payment(s) exist against this order's invoices and must be removed first.`)
+        err.code = 'PAYMENTS_EXIST'
+        throw err
+      }
       await supabase.from('invoices').delete().eq('order_id', id)
     }
     const { error } = await supabase.from('orders').delete().eq('id', id)
@@ -131,7 +156,7 @@ export const customersService = {
         orders(
           id, status, created_at, site_id,
           order_items(quantity, unit_price, subtotal),
-          invoices(id, total_amount, payments(amount_paid, status))
+          invoices(id, total_amount, status, payments(amount_paid, status))
         )
       `)
       .order('created_at', { ascending: false })
@@ -148,7 +173,7 @@ export const customersService = {
         orders(
           id, status, created_at, site_id,
           order_items(quantity, unit_price, subtotal),
-          invoices(id, total_amount, payments(amount_paid, status))
+          invoices(id, total_amount, status, payments(amount_paid, status))
         )
       `)
       .eq('added_by', userId)
@@ -190,7 +215,7 @@ export const customersService = {
         id, created_at, site_id,
         order_items(block_type, quantity, unit_price, subtotal),
         invoices(
-          id, invoice_number, total_amount, issued_date,
+          id, invoice_number, total_amount, issued_date, status,
           payments(id, amount_paid, payment_date, status)
         )
       `)

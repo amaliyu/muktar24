@@ -240,11 +240,13 @@ export const balanceSheetService = {
       result.inventoryItems = data || []
     } catch (_) { /* non-fatal */ }
 
-    // Accounts receivable — sum of (invoice total − confirmed payments)
+    // Accounts receivable — sum of (invoice total − confirmed payments).
+    // Drafts (quotations) and cancelled invoices are NOT receivables.
     try {
       const { data } = await supabase
         .from('invoices')
         .select('total_amount, payments(amount_paid, status)')
+        .not('status', 'in', '("draft","cancelled")')
 
       if (data) {
         result.receivables = data.reduce((total, invoice) => {
@@ -304,12 +306,17 @@ export const incomeStatementService = {
       adjustments:   [],
     }
 
-    // Confirmed payment receipts with order line details (for revenue breakdown)
+    // Confirmed payment receipts with order line details (for revenue breakdown).
+    // Exclude payments tied to draft/cancelled invoices so revenue never counts
+    // a quotation or a cancelled sale. !inner drops rows whose invoice is
+    // filtered out; every payment has an invoice_id (verified), so nothing
+    // legitimate is lost.
     try {
       const { data } = await supabase
         .from('payments')
-        .select('amount_paid, invoice:invoice_id(order:order_id(order_items(block_type, quantity, unit_price)))')
+        .select('amount_paid, invoice:invoice_id!inner(status, order:order_id(order_items(block_type, quantity, unit_price)))')
         .eq('status', 'confirmed')
+        .not('invoice.status', 'in', '("draft","cancelled")')
         .gte('payment_date', fromDate)
         .lte('payment_date', toDate)
       result.payments = data || []

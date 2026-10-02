@@ -91,4 +91,11 @@ export const payrollService = {
     const { error } = await supabase.from('payroll_lines').update(updates).eq('id', id)
     if (error) throw error
   },
+
+  async advanceRun(id, action, reason = null) {
+    const { data, error } = await supabase.rpc('advance_staff_payroll',
+      { p_run_id: id, p_action: action, p_reason: reason });
+    if (error) throw error;
+    return data;
+  },
 }

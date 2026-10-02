@@ -4,10 +4,7 @@ export const rolesService = {
   async getAll() {
     const { data, error } = await supabase
       .from('staff_roles')
-      .select(`
-        *,
-        staff_count:staff(count)
-      `)
+      .select('*')
       .order('department')
       .order('role_name')
     if (error) throw error
@@ -47,6 +44,15 @@ export const rolesService = {
   },
 }
 
+function storagePath(fileUrl) {
+  if (!fileUrl) return null
+  if (fileUrl.startsWith('http')) {
+    const m = fileUrl.match(/staff-documents\/(.+)$/)
+    return m ? m[1] : null
+  }
+  return fileUrl
+}
+
 export const documentsService = {
   async getByStaff(staffId) {
     const { data, error } = await supabase
@@ -55,7 +61,19 @@ export const documentsService = {
       .eq('staff_id', staffId)
       .order('uploaded_at', { ascending: false })
     if (error) throw error
-    return data || []
+    const docs = data || []
+    await Promise.all(docs.map(async (doc) => {
+      const path = storagePath(doc.file_url)
+      if (path) {
+        const { data: sd } = await supabase.storage
+          .from('staff-documents')
+          .createSignedUrl(path, 3600)
+        doc.displayUrl = sd?.signedUrl || null
+      } else {
+        doc.displayUrl = null
+      }
+    }))
+    return docs
   },
 
   async upload(staffId, file, label, uploadedBy = '') {
@@ -66,16 +84,12 @@ export const documentsService = {
       .upload(path, file, { upsert: false })
     if (storageErr) throw storageErr
 
-    const { data: { publicUrl } } = supabase.storage
-      .from('staff-documents')
-      .getPublicUrl(storageData.path)
-
     const { data, error } = await supabase
       .from('staff_documents')
       .insert({
         staff_id: staffId,
         document_label: label,
-        file_url: publicUrl,
+        file_url: storageData.path,
         file_name: file.name,
         file_size: file.size,
         uploaded_by: uploadedBy,
@@ -87,30 +101,70 @@ export const documentsService = {
   },
 
   async delete(id, fileUrl) {
-    // Extract storage path from public URL
-    const match = fileUrl?.match(/staff-documents\/(.+)$/)
-    if (match) {
-      await supabase.storage.from('staff-documents').remove([match[1]])
+    const path = storagePath(fileUrl)
+    if (path) {
+      await supabase.storage.from('staff-documents').remove([path])
     }
     const { error } = await supabase.from('staff_documents').delete().eq('id', id)
     if (error) throw error
   },
 }
 
+export const photoService = {
+  async upload(staffId, file) {
+    const ext = file.name.split('.').pop().toLowerCase() || 'jpg';
+    const path = `${staffId}/photo_${Date.now()}.${ext}`;
+    const { data, error } = await supabase.storage
+      .from('staff-photos')
+      .upload(path, file, { upsert: true, contentType: file.type });
+    if (error) throw error;
+    // Persist path on staff record
+    const { error: upErr } = await supabase
+      .from('staff')
+      .update({ photo_path: data.path })
+      .eq('id', staffId);
+    if (upErr) throw upErr;
+    return data.path;
+  },
+
+  async getSignedUrl(path, expiresIn = 3600) {
+    const { data, error } = await supabase.storage
+      .from('staff-photos')
+      .createSignedUrl(path, expiresIn);
+    if (error) throw error;
+    return data.signedUrl;
+  },
+
+  async markChecklistPhotoComplete(staffId, completedBy) {
+    const { data: existing } = await supabase
+      .from('staff_onboarding_checklist')
+      .select('id')
+      .eq('staff_id', staffId)
+      .eq('item_key', 'photo')
+      .maybeSingle();
+
+    const payload = {
+      staff_id: staffId,
+      item_key: 'photo',
+      is_complete: true,
+      completed_at: new Date().toISOString(),
+      completed_by: completedBy,
+    };
+
+
+    if (existing) {
+      await supabase.from('staff_onboarding_checklist').update(payload).eq('id', existing.id);
+    } else {
+      await supabase.from('staff_onboarding_checklist').insert(payload);
+    }
+  },
+}
+
 export const hrStaffService = {
   async getNextEmployeeNumber() {
-    const { data } = await supabase
-      .from('staff')
-      .select('employee_number')
-      .order('created_at', { ascending: false })
-      .limit(50)
-    if (!data?.length) return 'APC-EMP-001'
-    const nums = data
-      .map(s => s.employee_number?.match(/(\d+)$/)?.[1])
-      .filter(Boolean)
-      .map(Number)
-    const max = nums.length > 0 ? Math.max(...nums) : 0
-    return `APC-EMP-${String(max + 1).padStart(3, '0')}`
+    const { data, error } = await supabase.rpc('get_next_employee_number')
+    if (error) throw error
+    return data
   },
 
   async getById(id) {

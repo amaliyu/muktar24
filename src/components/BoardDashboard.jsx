@@ -228,7 +228,7 @@ export default function BoardDashboard({ userProfile }) {
         // 4: All bank accounts
         supabase.from('bank_accounts').select('current_balance'),
         // 5: Invoices for receivables
-        supabase.from('invoices').select('id, total_amount, issued_date, order:order_id(customer:customer_id(id, name)), payments(amount_paid, status)'),
+        supabase.from('invoices').select('id, total_amount, issued_date, order:order_id(customer:customer_id(id, name)), payments(amount_paid, status)').not('status', 'in', '("draft","cancelled")'),
         // 6: Production this month
         supabase.from('production_log').select('quantity_produced').gte('date', thisMonthStart),
         // 7: Active orders with items

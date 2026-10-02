@@ -74,6 +74,37 @@ export const bankTransactionsService = {
       .eq('id', id);
     if (error) throw error;
   },
+
+  async suggestMatch(id, matchedToType, matchedToId) {
+    const { data, error } = await supabase.rpc('suggest_bank_match', {
+      p_bank_transaction_id: id,
+      p_matched_to_type: matchedToType,
+      p_matched_to_id: matchedToId,
+    });
+    if (error) throw error;
+    return data;
+  },
+
+  async confirmMatch(id, action, reason) {
+    const { data, error } = await supabase.rpc('confirm_bank_match', {
+      p_bank_transaction_id: id,
+      p_action: action,
+      p_reason: reason || null,
+    });
+    if (error) throw error;
+    return data;
+  },
+
+  async getSuggested(accountId) {
+    const { data, error } = await supabase
+      .from('bank_transactions')
+      .select('*')
+      .eq('bank_account_id', accountId)
+      .eq('match_status', 'suggested')
+      .order('transaction_date', { ascending: false });
+    if (error) throw error;
+    return data || [];
+  },
 };
 
 export const bankImportBatchesService = {
@@ -108,6 +139,13 @@ export const bankReconciliationsService = {
   },
 };
 
+// Resolve the storage path from a stored file_url value.
+// New rows store the bare storage path; legacy rows stored the full public URL.
+function receiptStoragePath(fileUrl) {
+  if (!fileUrl) return null;
+  return fileUrl.startsWith('http') ? (fileUrl.split('/receipts/')[1] || null) : fileUrl;
+}
+
 export const receiptsService = {
   async getAll(from, to, search) {
     let q = supabase
@@ -139,31 +177,45 @@ export const receiptsService = {
     const path = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
     const { error: uploadErr } = await supabase.storage.from('receipts').upload(path, file);
     if (uploadErr) throw uploadErr;
-    const { data: { publicUrl } } = supabase.storage.from('receipts').getPublicUrl(path);
-    const receiptNumber = await receiptsService.getNextNumber();
-    const { data, error } = await supabase.from('receipts').insert({
+    const basePayload = {
       expense_id: metadata.expense_id || null,
-      receipt_number: receiptNumber,
       receipt_date: metadata.receipt_date,
       vendor_name: metadata.vendor_name || '',
       amount: Number(metadata.amount) || 0,
       receipt_type: ext === 'pdf' ? 'pdf' : 'photo',
-      file_url: publicUrl,
+      file_url: path,
       file_name: file.name,
       uploaded_by: metadata.uploaded_by || 'Admin',
       uploaded_at: new Date().toISOString(),
       tax_category: metadata.tax_category || '',
       notes: metadata.notes || '',
-    }).select('*').single();
+    };
+    let receiptNumber = await receiptsService.getNextNumber();
+    let { data, error } = await supabase.from('receipts')
+      .insert({ ...basePayload, receipt_number: receiptNumber }).select('*').single();
+    if (error?.code === '23505') {
+      receiptNumber = await receiptsService.getNextNumber();
+      ({ data, error } = await supabase.from('receipts')
+        .insert({ ...basePayload, receipt_number: receiptNumber }).select('*').single());
+    }
     if (error) throw error;
     return data;
   },
 
+  // Returns a 1-hour signed URL for a receipt's stored file_url (path or legacy
+  // public URL). Callers use this instead of rendering file_url directly, so
+  // the bucket can be flipped to private without breaking receipt viewing.
+  async getSignedUrl(fileUrl) {
+    const path = receiptStoragePath(fileUrl);
+    if (!path) return null;
+    const { data, error } = await supabase.storage.from('receipts').createSignedUrl(path, 3600);
+    if (error) throw error;
+    return data?.signedUrl || null;
+  },
+
   async delete(id, fileUrl) {
-    if (fileUrl) {
-      const parts = fileUrl.split('/object/public/receipts/');
-      if (parts[1]) await supabase.storage.from('receipts').remove([parts[1]]);
-    }
+    const path = receiptStoragePath(fileUrl);
+    if (path) await supabase.storage.from('receipts').remove([path]);
     const { error } = await supabase.from('receipts').delete().eq('id', id);
     if (error) throw error;
   },

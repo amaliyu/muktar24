@@ -1,0 +1,206 @@
+import { supabase } from '../lib/supabase';
+
+export const paymentRequestsService = {
+  async list() {
+    const { data, error } = await supabase
+      .from('payment_requests')
+      .select('*, supplier:supplier_id(company_name, bank_name, bank_account_number, bank_account_name)')
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    const rows = data || [];
+    const ids = [...new Set(rows.map(r => r.requested_by).filter(Boolean))];
+    if (ids.length) {
+      const { data: profiles, error: profilesErr } = await supabase
+        .from('user_profiles_directory')
+        .select('id, full_name')
+        .in('id', ids);
+      if (profilesErr) console.error('paymentRequests.list: requester lookup failed', profilesErr);
+      const map = Object.fromEntries((profiles || []).map(p => [p.id, p.full_name]));
+      for (const row of rows) row.requester = { full_name: map[row.requested_by] || null };
+    }
+    return rows;
+  },
+
+  async listMine(userId) {
+    const { data, error } = await supabase
+      .from('payment_requests')
+      .select('*, supplier:supplier_id(company_name, bank_name, bank_account_number, bank_account_name)')
+      .eq('requested_by', userId)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data || [];
+  },
+
+  async create({ amount, purpose, expense_category_id, disbursement_method, supplier_id, payee_name, payee_bank_name, payee_account_number, payee_account_name, category_other_note, order_item_id }) {
+    const { data: ref, error: refErr } = await supabase.rpc('get_next_payment_request_reference');
+    if (refErr) throw refErr;
+    const { data: { user } } = await supabase.auth.getUser();
+    const { data, error } = await supabase
+      .from('payment_requests')
+      .insert({
+        reference: ref,
+        requested_by: user.id,
+        amount,
+        purpose: purpose || null,
+        expense_category_id: expense_category_id || null,
+        disbursement_method: disbursement_method || 'bank_transfer',
+        supplier_id: supplier_id || null,
+        payee_name: payee_name || null,
+        payee_bank_name: payee_bank_name || null,
+        payee_account_number: payee_account_number || null,
+        payee_account_name: payee_account_name || null,
+        category_other_note: category_other_note || null,
+        order_item_id: order_item_id || null,
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  },
+
+  async update(id, fields) {
+    const { error } = await supabase
+      .from('payment_requests')
+      .update(fields)
+      .eq('id', id);
+    if (error) throw error;
+  },
+
+  async backfill({ requested_by, amount, purpose, transaction_date, note, payee_name, payee_bank_name, payee_account_number, payee_account_name, supplier_id, disbursement_method, bank_account_id, expense_category_id }) {
+    const { data, error } = await supabase.rpc('backfill_payment_request', {
+      p_requested_by: requested_by,
+      p_amount: amount,
+      p_purpose: purpose,
+      p_transaction_date: transaction_date,
+      p_note: note,
+      p_payee_name: payee_name || null,
+      p_payee_bank_name: payee_bank_name || null,
+      p_payee_account_number: payee_account_number || null,
+      p_payee_account_name: payee_account_name || null,
+      p_supplier_id: supplier_id || null,
+      p_disbursement_method: disbursement_method || 'bank_transfer',
+      p_bank_account_id: bank_account_id || null,
+      p_expense_category_id: expense_category_id || null,
+    });
+    if (error) throw error;
+    return data;
+  },
+
+  async advance(id, action, reason = null, bankAccountId = null) {
+    const { data, error } = await supabase.rpc('advance_payment_request', {
+      p_request_id: id,
+      p_action: action,
+      p_reason: reason,
+      p_bank_account_id: bankAccountId,
+    });
+    if (error) throw error;
+    return data;
+  },
+
+  async getActiveSuppliers() {
+    const { data, error } = await supabase
+      .from('suppliers')
+      .select('id, company_name, bank_name, bank_account_number, bank_account_name')
+      .eq('status', 'active')
+      .order('company_name');
+    if (error) throw error;
+    return data || [];
+  },
+
+  async getPendingVendors() {
+    const { data, error } = await supabase
+      .from('suppliers')
+      .select('id, company_name, bank_name, bank_account_number, bank_account_name, created_at')
+      .eq('status', 'pending_verification')
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data || [];
+  },
+
+  async approveVendor(id) {
+    const { error } = await supabase.rpc('approve_vendor', { p_supplier_id: id });
+    if (error) throw error;
+  },
+
+  async uploadAttachment(paymentRequestId, file, uploadedBy, note) {
+    const ext = file.name.split('.').pop();
+    const path = `${paymentRequestId}/${Date.now()}.${ext}`;
+    const { data: storageData, error: upErr } = await supabase.storage
+      .from('payment-request-attachments')
+      .upload(path, file);
+    if (upErr) throw upErr;
+    const { error } = await supabase
+      .from('payment_request_attachments')
+      .insert({
+        payment_request_id: paymentRequestId,
+        file_path: storageData.path,
+        uploaded_by: uploadedBy,
+        note: note || null,
+      });
+    if (error) throw error;
+  },
+
+  // List all attachments (receipts) for a request, oldest first, with the
+  // uploader's name resolved via user_profiles_directory (same RLS-safe pattern
+  // as list()'s requester lookup). RLS on payment_request_attachments already
+  // lets the initiator read their own request's rows.
+  async listAttachments(paymentRequestId) {
+    const { data, error } = await supabase
+      .from('payment_request_attachments')
+      .select('id, payment_request_id, file_path, note, uploaded_by, created_at')
+      .eq('payment_request_id', paymentRequestId)
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+    const rows = data || [];
+    const ids = [...new Set(rows.map(r => r.uploaded_by).filter(Boolean))];
+    if (ids.length) {
+      const { data: profiles, error: pErr } = await supabase
+        .from('user_profiles_directory')
+        .select('id, full_name')
+        .in('id', ids);
+      if (pErr) console.error('paymentRequests.listAttachments: uploader lookup failed', pErr);
+      const map = Object.fromEntries((profiles || []).map(p => [p.id, p.full_name]));
+      for (const row of rows) row.uploader_name = map[row.uploaded_by] || null;
+    }
+    return rows;
+  },
+
+  // 1-hour signed URL for viewing an attachment file from the private
+  // 'payment-request-attachments' bucket. Mirrors receiptsService.getSignedUrl:
+  // new rows store the bare storage path; tolerate a legacy full-URL value too.
+  async getAttachmentSignedUrl(filePath) {
+    if (!filePath) return null;
+    const path = filePath.startsWith('http')
+      ? (filePath.split('/payment-request-attachments/')[1] || null)
+      : filePath;
+    if (!path) return null;
+    const { data, error } = await supabase.storage
+      .from('payment-request-attachments')
+      .createSignedUrl(path, 3600);
+    if (error) throw error;
+    return data?.signedUrl || null;
+  },
+
+  async listDisbursed() {
+    const { data, error } = await supabase
+      .from('payment_requests')
+      .select('id, reference, amount, purpose, payee_name, payee_bank_name, payee_account_number, status, supplier:supplier_id(company_name)')
+      .in('status', ['disbursed', 'closed'])
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data || [];
+  },
+
+  async createSupplierFromPaymentRequest({ company_name, bank_name, bank_account_number, bank_account_name, contact_person, phone }) {
+    const { data, error } = await supabase.rpc('create_supplier_from_payment_request', {
+      p_company_name: company_name,
+      p_bank_name: bank_name || null,
+      p_bank_account_number: bank_account_number || null,
+      p_bank_account_name: bank_account_name || null,
+      p_contact_person: contact_person || null,
+      p_phone: phone || null,
+    });
+    if (error) throw error;
+    return data;
+  },
+};

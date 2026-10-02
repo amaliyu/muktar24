@@ -1,8 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
 import { staffService } from '../services/staff';
+import { hasRole } from '../lib/roles';
 import { attendanceService, payrollService } from '../services/attendance';
-import { rolesService, documentsService, hrStaffService } from '../services/hrService';
+import { advancesService } from '../services/advances';
+import { leaveService } from '../services/leave';
+import { leaveBalanceService } from '../services/leaveBalance';
+import { rolesService, documentsService, hrStaffService, photoService } from '../services/hrService';
 import { generatePayrollPDF } from '../utils/generatePayrollPDF';
+import { generateIDCardPDF, generateBusinessCardPDF } from '../utils/cardGenerator';
 import { supabase } from '../lib/supabase';
 
 const theme = {
@@ -30,6 +35,14 @@ const styles = {
 };
 const naira = (n) => `₦${(n || 0).toLocaleString()}`;
 const fmt = (n) => (n || 0).toLocaleString();
+
+const getMissingFields = (staff) => {
+  const missing = [];
+  if (!staff.job_title?.trim()) missing.push('job title');
+  if (!staff.photo_path)        missing.push('photo');
+  if (!staff.phone?.trim())     missing.push('phone');
+  return missing;
+};
 
 const NIGERIAN_STATES = [
   "Abia","Adamawa","Akwa Ibom","Anambra","Bauchi","Bayelsa","Benue","Borno",
@@ -221,8 +234,8 @@ const StaffFormModal = ({ onClose, onSaved, editTarget, roles }) => {
     full_name: "", date_of_birth: "", gender: "", marital_status: "",
     state_of_origin: "", lga_of_origin: "", home_address: "", nin: "",
     // Tab 2 — Employment
-    employee_number: "", department: "", role_id: "", staff_type: "permanent",
-    date_hired: "", monthly_salary: "", daily_rate: "", employment_status: "active",
+    employee_number: "", department: "", role_id: "", job_title: "", staff_type: "permanent",
+    date_hired: "", monthly_salary: "", daily_rate: "", employment_status: "onboarding",
     // Tab 3 — Contact & Emergency
     phone: "", email: "",
     emergency_contact_name: "", emergency_contact_phone: "", emergency_contact_relationship: "",
@@ -252,6 +265,7 @@ const StaffFormModal = ({ onClose, onSaved, editTarget, roles }) => {
         employee_number: editTarget.employee_number || "",
         department: editTarget.department || "",
         role_id: editTarget.role_id || "",
+        job_title: editTarget.job_title || "",
         staff_type: editTarget.staff_type || "permanent",
         date_hired: editTarget.date_hired || "",
         monthly_salary: String(editTarget.monthly_salary || ""),
@@ -299,12 +313,13 @@ const StaffFormModal = ({ onClose, onSaved, editTarget, roles }) => {
         employee_number: form.employee_number || null,
         department: form.department || null,
         role_id: form.role_id || null,
+        job_title: form.job_title?.trim() || null,
         role: roles.find(r => String(r.id) === String(form.role_id))?.role_name || form.department || "Staff",
         staff_type: form.staff_type,
         date_hired: form.date_hired || null,
         monthly_salary: form.staff_type === "permanent" ? parseFloat(form.monthly_salary) || null : null,
         daily_rate: form.staff_type === "daily" ? parseFloat(form.daily_rate) || null : null,
-        employment_status: form.employment_status || "active",
+        employment_status: form.employment_status || "onboarding",
         phone: form.phone || null,
         email: form.email || null,
         emergency_contact_name: form.emergency_contact_name || null,
@@ -324,7 +339,18 @@ const StaffFormModal = ({ onClose, onSaved, editTarget, roles }) => {
       if (editTarget) {
         result = await staffService.update(editTarget.id, payload);
       } else {
-        result = await staffService.create({ ...payload, is_active: true });
+        try {
+          result = await staffService.create(payload);
+        } catch (createErr) {
+          if (createErr.code === '23505') {
+            const nextEmpNum = await hrStaffService.getNextEmployeeNumber();
+            payload.employee_number = nextEmpNum;
+            setForm(f => ({ ...f, employee_number: nextEmpNum }));
+            result = await staffService.create(payload);
+          } else {
+            throw createErr;
+          }
+        }
       }
       onSaved(result);
       onClose();
@@ -406,6 +432,10 @@ const StaffFormModal = ({ onClose, onSaved, editTarget, roles }) => {
                     {filteredRoles.map(r => <option key={r.id} value={r.id}>{r.role_name}</option>)}
                   </select>
                 </div>
+              </div>
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Job Title <span style={{ color: "#f5a623" }}>(required for ID / business card)</span></label>
+                <input style={styles.input} placeholder="e.g. Internal Control Officer" value={form.job_title} onChange={e => upd("job_title", e.target.value)} />
               </div>
               <div style={styles.grid(3)}>
                 <div style={styles.formGroup}><label style={styles.label}>Staff Type</label>
@@ -498,7 +528,7 @@ const StaffFormModal = ({ onClose, onSaved, editTarget, roles }) => {
 };
 
 // ── STAFF PROFILE ─────────────────────────────────────────────
-const StaffProfile = ({ staffId, onBack, onUpdated, roles }) => {
+const StaffProfile = ({ staffId, onBack, onUpdated, roles, userProfile }) => {
   const [staff, setStaff] = useState(null);
   const [loading, setLoading] = useState(true);
   const [documents, setDocuments] = useState([]);
@@ -513,6 +543,11 @@ const StaffProfile = ({ staffId, onBack, onUpdated, roles }) => {
   const [uploading, setUploading] = useState(false);
   const [uploadLabel, setUploadLabel] = useState("Offer Letter");
   const fileInputRef = useRef(null);
+  const [photoSignedUrl, setPhotoSignedUrl] = useState(null);
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [generatingIDCard, setGeneratingIDCard] = useState(false);
+  const [generatingBizCard, setGeneratingBizCard] = useState(false);
+  const photoFileRef = useRef(null);
 
   const loadStaff = async () => {
     setLoading(true);
@@ -529,6 +564,52 @@ const StaffProfile = ({ staffId, onBack, onUpdated, roles }) => {
   };
 
   useEffect(() => { loadStaff(); loadDocs(); }, [staffId]);
+
+  // Fetch signed URL whenever photo_path changes
+  useEffect(() => {
+    if (!staff?.photo_path) { setPhotoSignedUrl(null); return; }
+    photoService.getSignedUrl(staff.photo_path).then(setPhotoSignedUrl).catch(() => setPhotoSignedUrl(null));
+  }, [staff?.photo_path]);
+
+  const canUploadPhoto = hasRole(userProfile, 'md', 'hr_officer');
+
+  const handlePhotoUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPhotoUploading(true); setAlert(null);
+    try {
+      const path = await photoService.upload(staff.id, file);
+      const signedUrl = await photoService.getSignedUrl(path);
+      setPhotoSignedUrl(signedUrl);
+      setStaff(s => ({ ...s, photo_path: path }));
+      const completedBy = userProfile?.full_name || userProfile?.email || 'HR';
+      await photoService.markChecklistPhotoComplete(staff.id, completedBy);
+      setAlert({ type: "success", msg: "Photo uploaded and profile updated." });
+    } catch (e) {
+      setAlert({ type: "error", msg: "Photo upload failed: " + e.message });
+    } finally {
+      setPhotoUploading(false);
+      if (photoFileRef.current) photoFileRef.current.value = "";
+    }
+  };
+
+  const handleDownloadIDCard = async () => {
+    setGeneratingIDCard(true); setAlert(null);
+    try {
+      await generateIDCardPDF(staff, photoSignedUrl);
+    } catch (e) {
+      setAlert({ type: "error", msg: "ID card generation failed: " + e.message });
+    } finally { setGeneratingIDCard(false); }
+  };
+
+  const handleDownloadBizCard = async () => {
+    setGeneratingBizCard(true); setAlert(null);
+    try {
+      await generateBusinessCardPDF(staff);
+    } catch (e) {
+      setAlert({ type: "error", msg: "Business card generation failed: " + e.message });
+    } finally { setGeneratingBizCard(false); }
+  };
 
   useEffect(() => {
     if (tab === "attendance" && staff) {
@@ -598,26 +679,84 @@ const StaffProfile = ({ staffId, onBack, onUpdated, roles }) => {
       {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
 
       {/* Profile Header */}
-      <div style={{ ...styles.card, marginBottom: "24px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "16px" }}>
-        <div style={{ display: "flex", gap: "16px", alignItems: "center" }}>
-          {staff.profile_photo_url ? (
-            <img src={staff.profile_photo_url} alt={staff.full_name} style={{ width: "60px", height: "60px", borderRadius: "50%", objectFit: "cover" }} />
-          ) : (
-            <div style={{ width: "60px", height: "60px", borderRadius: "50%", background: theme.accent + "33", color: theme.accent, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "20px", fontWeight: "700" }}>{initials}</div>
-          )}
-          <div>
-            <div style={{ fontSize: "20px", fontWeight: "700", color: theme.text }}>{staff.full_name}</div>
-            <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "2px" }}>{staff.employee_number}</div>
-            <div style={{ display: "flex", gap: "6px", marginTop: "6px" }}>
-              <span style={styles.badge(theme.blue)}>{deptName}</span>
-              <span style={styles.badge(theme.accent)}>{roleName}</span>
+      <div style={{ ...styles.card, marginBottom: "24px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "16px" }}>
+          {/* Left: photo + name */}
+          <div style={{ display: "flex", gap: "16px", alignItems: "flex-start" }}>
+            {/* Photo + upload */}
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "6px" }}>
+              {photoSignedUrl || staff.profile_photo_url ? (
+                <img src={photoSignedUrl || staff.profile_photo_url} alt={staff.full_name} style={{ width: "68px", height: "68px", borderRadius: "10px", objectFit: "cover", border: `2px solid ${theme.blue}44` }} />
+              ) : (
+                <div style={{ width: "68px", height: "68px", borderRadius: "10px", background: theme.accent + "33", color: theme.accent, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "22px", fontWeight: "700" }}>{initials}</div>
+              )}
+              {canUploadPhoto && (
+                <>
+                  <input ref={photoFileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handlePhotoUpload} />
+                  <button
+                    style={{ ...styles.btn("secondary"), padding: "3px 8px", fontSize: "10px", whiteSpace: "nowrap" }}
+                    onClick={() => photoFileRef.current?.click()}
+                    disabled={photoUploading}
+                  >
+                    {photoUploading ? "Uploading…" : "Upload Photo"}
+                  </button>
+                </>
+              )}
+            </div>
+            {/* Name + badges + incomplete flag */}
+            <div>
+              <div style={{ fontSize: "20px", fontWeight: "700", color: theme.text }}>{staff.full_name}</div>
+              <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "2px" }}>{staff.employee_number}</div>
+              <div style={{ display: "flex", gap: "6px", marginTop: "6px", flexWrap: "wrap" }}>
+                <span style={styles.badge(theme.blue)}>{deptName}</span>
+                <span style={styles.badge(theme.accent)}>{roleName}</span>
+                {staff.job_title && <span style={styles.badge(theme.blue)}>{staff.job_title}</span>}
+              </div>
+              {(() => {
+                const missing = getMissingFields(staff);
+                return missing.length > 0 ? (
+                  <div style={{ fontSize: "12px", color: "#f5a623", marginTop: "8px", fontWeight: "600" }}>
+                    ⚠ Incomplete profile — missing: {missing.join(', ')}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: "12px", color: theme.green, marginTop: "8px" }}>✓ Profile complete</div>
+                );
+              })()}
             </div>
           </div>
-        </div>
-        <div style={{ textAlign: "right" }}>
-          <span style={styles.badge(statusColor)}>{staff.employment_status || "active"}</span>
-          <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "6px" }}>Date Hired: {staff.date_hired || "—"}</div>
-          <button style={{ ...styles.btn("secondary"), marginTop: "8px", fontSize: "12px" }} onClick={() => setEditMode(true)}>Edit Profile</button>
+
+          {/* Right: status + actions */}
+          <div style={{ textAlign: "right", display: "flex", flexDirection: "column", gap: "6px", alignItems: "flex-end" }}>
+            <span style={styles.badge(statusColor)}>{staff.employment_status || "active"}</span>
+            <div style={{ fontSize: "12px", color: theme.textMuted }}>Hired: {staff.date_hired || "—"}</div>
+            <button style={{ ...styles.btn("secondary"), fontSize: "12px" }} onClick={() => setEditMode(true)}>Edit Profile</button>
+
+            {/* ID Card button */}
+            {staff.employment_status === "active" && staff.photo_path ? (
+              <button style={{ ...styles.btn("primary"), fontSize: "12px" }} onClick={handleDownloadIDCard} disabled={generatingIDCard}>
+                {generatingIDCard ? "Generating…" : "↓ ID Card"}
+              </button>
+            ) : (
+              <button
+                style={{ ...styles.btn("secondary"), fontSize: "12px", opacity: 0.5, cursor: "not-allowed" }}
+                disabled
+                title="Staff must be active and have a photo before an ID card can be issued"
+              >
+                ↓ ID Card
+              </button>
+            )}
+
+            {/* Business Card button */}
+            {staff.employment_status === "active" ? (
+              <button style={{ ...styles.btn("secondary"), fontSize: "12px" }} onClick={handleDownloadBizCard} disabled={generatingBizCard}>
+                {generatingBizCard ? "Generating…" : "↓ Business Card"}
+              </button>
+            ) : (
+              <button style={{ ...styles.btn("secondary"), fontSize: "12px", opacity: 0.5, cursor: "not-allowed" }} disabled title="Staff must be active">
+                ↓ Business Card
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -678,6 +817,7 @@ const StaffProfile = ({ staffId, onBack, onUpdated, roles }) => {
               ["Employee Number", staff.employee_number],
               ["Department", deptName],
               ["Role", roleName],
+              ["Job Title", staff.job_title],
               ["Staff Type", staff.staff_type],
               ["Date Hired", staff.date_hired],
               ["Employment Status", staff.employment_status],
@@ -801,7 +941,7 @@ const StaffProfile = ({ staffId, onBack, onUpdated, roles }) => {
                       <td style={styles.td}>{doc.uploaded_at ? new Date(doc.uploaded_at).toLocaleDateString() : "—"}</td>
                       <td style={styles.td}>
                         <div style={{ display: "flex", gap: "6px" }}>
-                          <a href={doc.file_url} target="_blank" rel="noopener noreferrer" style={{ ...styles.btn("secondary"), padding: "4px 10px", fontSize: "11px", textDecoration: "none" }}>View</a>
+                          <a href={doc.displayUrl || '#'} target="_blank" rel="noopener noreferrer" style={{ ...styles.btn("secondary"), padding: "4px 10px", fontSize: "11px", textDecoration: "none" }}>View</a>
                           <button style={{ ...styles.btn("danger"), padding: "4px 10px", fontSize: "11px" }} onClick={() => handleDeleteDoc(doc)}>Delete</button>
                         </div>
                       </td>
@@ -831,7 +971,7 @@ const StaffProfile = ({ staffId, onBack, onUpdated, roles }) => {
 };
 
 // ── STAFF DIRECTORY ───────────────────────────────────────────
-const StaffDirectory = ({ onViewProfile }) => {
+const StaffDirectory = ({ onViewProfile, userProfile }) => {
   const [staff, setStaff] = useState([]);
   const [roles, setRoles] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -843,6 +983,12 @@ const StaffDirectory = ({ onViewProfile }) => {
   const [filterType, setFilterType] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
   const [search, setSearch] = useState("");
+  const [pinTarget, setPinTarget] = useState(null);
+  const [pinValue, setPinValue] = useState('');
+  const [pinMsg, setPinMsg] = useState(null);
+  const [pinSaving, setPinSaving] = useState(false);
+
+  const canSetPin = hasRole(userProfile, 'md', 'hr_officer');
 
   const load = async () => {
     setLoading(true);
@@ -857,13 +1003,29 @@ const StaffDirectory = ({ onViewProfile }) => {
 
   const handleSave = () => { load(); setShowForm(false); setEditTarget(null); };
 
+  const handleSetPin = async () => {
+    if (!pinTarget || pinValue.length < 4) return;
+    setPinSaving(true); setPinMsg(null);
+    try {
+      const { error } = await supabase.rpc('set_staff_pin', { p_staff_id: pinTarget.id, p_pin: pinValue });
+      if (error) throw error;
+      setPinMsg({ type: 'success', msg: 'PIN set successfully.' });
+      setPinValue('');
+      setTimeout(() => { setPinTarget(null); setPinMsg(null); }, 1500);
+    } catch (e) {
+      setPinMsg({ type: 'error', msg: e.message });
+    } finally {
+      setPinSaving(false);
+    }
+  };
+
   const filtered = staff.filter(s => {
     if (search && !s.full_name?.toLowerCase().includes(search.toLowerCase()) && !s.employee_number?.toLowerCase().includes(search.toLowerCase())) return false;
     if (filterDept && s.department !== filterDept) return false;
     if (filterRole && String(s.role_id) !== String(filterRole)) return false;
     if (filterType && s.staff_type !== filterType) return false;
-    if (filterStatus === "active" && !s.is_active) return false;
-    if (filterStatus === "inactive" && s.is_active) return false;
+    if (filterStatus === "active" && s.employment_status !== "active") return false;
+    if (filterStatus === "onboarding" && s.employment_status !== "onboarding") return false;
     if (filterStatus === "suspended" && s.employment_status !== "suspended") return false;
     if (filterStatus === "terminated" && s.employment_status !== "terminated") return false;
     return true;
@@ -871,15 +1033,16 @@ const StaffDirectory = ({ onViewProfile }) => {
 
   const depts = [...new Set(staff.map(s => s.department).filter(Boolean))];
   const filteredRolesForDropdown = roles.filter(r => !filterDept || r.department === filterDept);
-  const activeCount = staff.filter(s => s.is_active).length;
+  const activeCount = staff.filter(s => s.employment_status === "active").length;
   const permCount = staff.filter(s => s.staff_type === "permanent").length;
   const dailyCount = staff.filter(s => s.staff_type === "daily").length;
 
   const statusColor = (s) => {
     if (s.employment_status === "terminated") return theme.red;
     if (s.employment_status === "suspended") return theme.accent;
+    if (s.employment_status === "onboarding") return theme.blue;
     if (s.employment_status === "resigned") return theme.textMuted;
-    return s.is_active ? theme.green : theme.red;
+    return s.employment_status === "active" ? theme.green : theme.red;
   };
 
   return (
@@ -925,9 +1088,9 @@ const StaffDirectory = ({ onViewProfile }) => {
           <div>
             <label style={styles.label}>Status</label>
             <select style={{ ...styles.input, width: "140px" }} value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
-              <option value="">All Active</option>
+              <option value="">All</option>
               <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
+              <option value="onboarding">Onboarding</option>
               <option value="suspended">Suspended</option>
               <option value="terminated">Terminated</option>
             </select>
@@ -954,6 +1117,14 @@ const StaffDirectory = ({ onViewProfile }) => {
                       <td style={styles.td}>
                         <strong style={{ cursor: "pointer", color: theme.accent }} onClick={() => onViewProfile(s.id)}>{s.full_name}</strong>
                         {s.employee_number && <div style={{ fontSize: "11px", color: theme.textMuted }}>{s.employee_number}</div>}
+                        {(() => {
+                          const missing = getMissingFields(s);
+                          return missing.length > 0 ? (
+                            <div style={{ fontSize: "10px", color: "#f5a623", marginTop: "2px", fontWeight: "600" }}>
+                              ⚠ Missing: {missing.join(', ')}
+                            </div>
+                          ) : null;
+                        })()}
                       </td>
                       <td style={styles.td}>
                         <span style={styles.badge(theme.blue)}>{s.department || "—"}</span>
@@ -962,11 +1133,12 @@ const StaffDirectory = ({ onViewProfile }) => {
                       <td style={styles.td}><span style={styles.badge(s.staff_type === "permanent" ? theme.blue : s.staff_type === "daily" ? theme.accent : theme.textMuted)}>{s.staff_type}</span></td>
                       <td style={styles.td}>{s.staff_type === "permanent" ? naira(s.monthly_salary) + "/mo" : naira(s.daily_rate) + "/day"}</td>
                       <td style={styles.td}>{s.date_hired || "—"}</td>
-                      <td style={styles.td}><span style={styles.badge(statusColor(s))}>{s.employment_status || (s.is_active ? "active" : "inactive")}</span></td>
+                      <td style={styles.td}><span style={styles.badge(statusColor(s))}>{s.employment_status || "active"}</span></td>
                       <td style={styles.td}>
                         <div style={{ display: "flex", gap: "6px" }}>
                           <button style={{ ...styles.btn("primary"), padding: "4px 10px", fontSize: "11px" }} onClick={() => onViewProfile(s.id)}>Profile</button>
                           <button style={{ ...styles.btn("secondary"), padding: "4px 10px", fontSize: "11px" }} onClick={() => { setEditTarget(s); setShowForm(true); }}>Edit</button>
+                          {canSetPin && <button style={{ ...styles.btn("secondary"), padding: "4px 10px", fontSize: "11px" }} onClick={() => { setPinTarget(s); setPinValue(''); setPinMsg(null); }}>Set PIN</button>}
                         </div>
                       </td>
                     </tr>
@@ -985,6 +1157,43 @@ const StaffDirectory = ({ onViewProfile }) => {
           onClose={() => { setShowForm(false); setEditTarget(null); }}
           onSaved={handleSave}
         />
+      )}
+
+      {pinTarget && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: "12px", padding: "24px", width: "340px", maxWidth: "95vw" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+              <div style={{ fontWeight: "700", fontSize: "15px", color: theme.text }}>Set Kiosk PIN — {pinTarget.full_name}</div>
+              <button onClick={() => { setPinTarget(null); setPinValue(''); setPinMsg(null); }} style={{ background: "none", border: "none", cursor: "pointer", color: theme.textMuted, fontSize: "22px", lineHeight: 1 }}>×</button>
+            </div>
+            {pinMsg && <Alert msg={pinMsg.msg} type={pinMsg.type} onClose={() => setPinMsg(null)} />}
+            <div style={styles.formGroup}>
+              <label style={styles.label}>New PIN (4–6 digits)</label>
+              <input
+                type="password"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={6}
+                autoFocus
+                style={styles.input}
+                placeholder="Enter 4–6 digit PIN"
+                value={pinValue}
+                onChange={e => setPinValue(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                onKeyDown={e => { if (e.key === 'Enter' && pinValue.length >= 4) handleSetPin(); }}
+              />
+              <div style={{ fontSize: "11px", color: theme.textMuted, marginTop: "6px" }}>
+                PIN is hashed server-side via SHA-256. It cannot be retrieved once set.
+              </div>
+            </div>
+            <button
+              style={{ ...styles.btn("primary"), width: "100%" }}
+              disabled={pinSaving || pinValue.length < 4}
+              onClick={handleSetPin}
+            >
+              {pinSaving ? "Saving…" : "Set PIN"}
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -1036,7 +1245,12 @@ const AttendanceTab = () => {
       const records = rows.map(r => ({ staff_id: r.staff_id, date: attendanceDate, present: r.present, hours_worked: r.hours_worked ? parseFloat(r.hours_worked) : null, notes: r.notes || null, recorded_by: "Admin" }));
       await attendanceService.saveAll(records);
       setAlert({ type: "success", msg: `Attendance saved for ${attendanceDate} (${rows.filter(r => r.present).length} present, ${rows.filter(r => !r.present).length} absent).` });
-    } catch (e) { setAlert({ type: "error", msg: "Failed to save: " + e.message }); }
+    } catch (e) {
+      const msg = e.message?.includes('not active') || e.message?.includes('not eligible')
+        ? 'This staff member is not active and cannot be added to attendance/payroll.'
+        : 'Failed to save: ' + e.message;
+      setAlert({ type: "error", msg });
+    }
     finally { setSaving(false); }
   };
 
@@ -1177,8 +1391,253 @@ const AttendanceTab = () => {
   );
 };
 
+// ── LEAVE BALANCES TAB ────────────────────────────────────────
+const LeaveBalancesTab = ({ userProfile }) => {
+  const isMD = userProfile?.role === 'md';
+  const currentYear = new Date().getFullYear();
+
+  const [policy, setPolicy] = useState(null);
+  const [balances, setBalances] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [alert, setAlert] = useState(null);
+  const [seeding, setSeeding] = useState(false);
+  const [activating, setActivating] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(null);
+  const [entitlementEdits, setEntitlementEdits] = useState({});
+  const [savingKey, setSavingKey] = useState(null);
+  const [yearendConfirm, setYearendConfirm] = useState(null);
+  const [yearendSaving, setYearendSaving] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [p, b] = await Promise.all([
+        leaveBalanceService.getPolicySettings(),
+        leaveBalanceService.getBalances(currentYear),
+      ]);
+      setPolicy(p);
+      setBalances(b);
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const handleSeed = async () => {
+    setSeeding(true); setAlert(null);
+    try {
+      await leaveBalanceService.seedDraft(currentYear);
+      await load();
+      setAlert({ type: 'success', msg: `Draft balances seeded for ${currentYear} — review and edit entitlements, then activate.` });
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setSeeding(false); }
+  };
+
+  const handleSetActive = async (active) => {
+    setActivating(true); setAlert(null); setShowConfirm(null);
+    try {
+      await leaveBalanceService.setPolicyActive(active);
+      await load();
+      setAlert({ type: 'success', msg: active ? 'Leave policy is now active — balances will update as leave is approved.' : 'Leave policy deactivated.' });
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setActivating(false); }
+  };
+
+  const handleRollover = async () => {
+    setYearendSaving(true); setAlert(null); setYearendConfirm(null);
+    try {
+      const count = await leaveBalanceService.runRollover(currentYear);
+      setAlert({ type: 'success', msg: `Rollover complete — ${count} balance row(s) created for ${currentYear + 1}.` });
+      await load();
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setYearendSaving(false); }
+  };
+
+  const handleExpireCarryover = async () => {
+    setYearendSaving(true); setAlert(null); setYearendConfirm(null);
+    try {
+      const count = await leaveBalanceService.expireCarryover(currentYear);
+      setAlert({ type: 'success', msg: `Carry-over expired — ${count} row(s) updated for ${currentYear}.` });
+      await load();
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setYearendSaving(false); }
+  };
+
+  const handleSaveEntitlement = async (staffId, leaveType, days) => {
+    const key = `${staffId}_${leaveType}`;
+    setSavingKey(key); setAlert(null);
+    try {
+      await leaveBalanceService.setEntitlement(staffId, currentYear, leaveType, Number(days));
+      setEntitlementEdits(ed => { const n = { ...ed }; delete n[key]; return n; });
+      await load();
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setSavingKey(null); }
+  };
+
+  const byStaff = {};
+  for (const row of balances) {
+    const sid = row.staff_id;
+    if (!byStaff[sid]) byStaff[sid] = { name: row.staff?.full_name || '—', annual: null, sick: null };
+    if (row.leave_type === 'annual') byStaff[sid].annual = row;
+    if (row.leave_type === 'sick') byStaff[sid].sick = row;
+  }
+  const staffRows = Object.entries(byStaff);
+  const policyActive = policy?.active === true;
+
+  return (
+    <div>
+      {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
+
+      {isMD && (
+        <div style={{ ...styles.card, marginBottom: '20px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
+            <div>
+              <div style={styles.sectionTitle}>Leave Policy — {currentYear}</div>
+              <div style={{ fontSize: '13px', color: theme.textMuted }}>Defaults: 15 annual days / 12 sick days / 5 carry-over days</div>
+            </div>
+            <span style={styles.badge(policyActive ? theme.green : theme.textMuted)}>{policyActive ? '● Active' : '○ Inactive'}</span>
+          </div>
+          {policyActive && policy?.activated_at && (
+            <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '12px' }}>
+              Activated {new Date(policy.activated_at).toLocaleString()}
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+            {!policyActive && (
+              <button style={styles.btn('secondary')} onClick={handleSeed} disabled={seeding}>
+                {seeding ? 'Seeding…' : `⊕ Seed Draft (${currentYear})`}
+              </button>
+            )}
+            {showConfirm === 'activate' ? (
+              <>
+                <span style={{ fontSize: '13px', color: theme.text }}>Activate for {currentYear}? Balances will start tracking from now.</span>
+                <button style={styles.btn('primary')} onClick={() => handleSetActive(true)} disabled={activating}>{activating ? 'Activating…' : 'Confirm Activate'}</button>
+                <button style={styles.btn('secondary')} onClick={() => setShowConfirm(null)}>Cancel</button>
+              </>
+            ) : showConfirm === 'deactivate' ? (
+              <>
+                <span style={{ fontSize: '13px', color: theme.text }}>Deactivate leave policy?</span>
+                <button style={{ ...styles.btn('secondary'), borderColor: theme.red, color: theme.red }} onClick={() => handleSetActive(false)} disabled={activating}>{activating ? 'Deactivating…' : 'Confirm Deactivate'}</button>
+                <button style={styles.btn('secondary')} onClick={() => setShowConfirm(null)}>Cancel</button>
+              </>
+            ) : (
+              <>
+                {!policyActive && balances.length > 0 && (
+                  <button style={styles.btn('primary')} onClick={() => setShowConfirm('activate')}>✓ Activate Policy</button>
+                )}
+                {policyActive && (
+                  <button style={{ ...styles.btn('secondary'), borderColor: theme.red, color: theme.red }} onClick={() => setShowConfirm('deactivate')}>Deactivate</button>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {isMD && (
+        <div style={{ ...styles.card, marginBottom: '20px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+            <div style={styles.sectionTitle}>Year-end Controls</div>
+          </div>
+          <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '12px' }}>
+            Run rollover at the start of a new leave year; expire carry-over after March 31.
+          </div>
+          {yearendConfirm === 'rollover' ? (
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '13px', color: theme.text }}>Create {currentYear + 1} balances from {currentYear}? Unused annual days will carry over.</span>
+              <button style={styles.btn('primary')} onClick={handleRollover} disabled={yearendSaving}>{yearendSaving ? 'Running…' : 'Confirm Rollover'}</button>
+              <button style={styles.btn('secondary')} onClick={() => setYearendConfirm(null)}>Cancel</button>
+            </div>
+          ) : yearendConfirm === 'expire' ? (
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '13px', color: theme.text }}>Zero out remaining carry-over in {currentYear} balances?</span>
+              <button style={{ ...styles.btn('secondary'), borderColor: theme.red, color: theme.red }} onClick={handleExpireCarryover} disabled={yearendSaving}>{yearendSaving ? 'Expiring…' : 'Confirm Expire'}</button>
+              <button style={styles.btn('secondary')} onClick={() => setYearendConfirm(null)}>Cancel</button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <button style={styles.btn('secondary')} onClick={() => setYearendConfirm('rollover')} disabled={yearendSaving}>
+                ↻ Run {currentYear + 1} Rollover
+              </button>
+              <button style={{ ...styles.btn('secondary'), borderColor: theme.red, color: theme.red }} onClick={() => setYearendConfirm('expire')} disabled={yearendSaving}>
+                ✕ Expire {currentYear} Carry-over
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div style={styles.card}>
+        <div style={styles.sectionTitle}>Leave Balances {currentYear}</div>
+        {loading ? <Spinner /> : staffRows.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '32px', color: theme.textMuted }}>
+            {isMD ? `No balances yet — click "Seed Draft (${currentYear})" to create entries for all permanent staff.` : 'Leave balances not yet set up.'}
+          </div>
+        ) : (
+          <table style={styles.table}>
+            <thead>
+              <tr>
+                {['Staff','Ann. Entitled','Ann. Used','Ann. Balance','Sick Entitled','Sick Used','Sick Balance'].map(h => <th key={h} style={styles.th}>{h}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {staffRows.map(([staffId, row]) => {
+                const ann = row.annual, sick = row.sick;
+                const annBal = ann != null ? ann.balance : null;
+                const sickBal = sick != null ? sick.balance : null;
+                const annKey = `${staffId}_annual`, sickKey = `${staffId}_sick`;
+                return (
+                  <tr key={staffId}>
+                    <td style={styles.td}><strong>{row.name}</strong></td>
+                    <td style={styles.td}>
+                      {isMD && !policyActive && ann ? (
+                        <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                          <input style={{ ...styles.input, width: '60px', padding: '4px 6px' }} type="number" min="0"
+                            value={entitlementEdits[annKey] ?? ann.entitled_days}
+                            onChange={e => setEntitlementEdits(ed => ({ ...ed, [annKey]: e.target.value }))} />
+                          {entitlementEdits[annKey] !== undefined && (
+                            <button style={{ ...styles.btn('primary'), fontSize: '11px', padding: '3px 7px' }}
+                              onClick={() => handleSaveEntitlement(staffId, 'annual', entitlementEdits[annKey])}
+                              disabled={savingKey === annKey}>{savingKey === annKey ? '…' : '✓'}</button>
+                          )}
+                        </div>
+                      ) : <span>{ann?.entitled_days ?? '—'}</span>}
+                    </td>
+                    <td style={styles.td}>{ann?.used_days ?? '—'}</td>
+                    <td style={styles.td}>
+                      {annBal !== null ? <strong style={{ color: annBal < 0 ? theme.red : theme.green }}>{annBal}{annBal < 0 ? ' ⚠' : ''}</strong> : '—'}
+                    </td>
+                    <td style={styles.td}>
+                      {isMD && !policyActive && sick ? (
+                        <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                          <input style={{ ...styles.input, width: '60px', padding: '4px 6px' }} type="number" min="0"
+                            value={entitlementEdits[sickKey] ?? sick.entitled_days}
+                            onChange={e => setEntitlementEdits(ed => ({ ...ed, [sickKey]: e.target.value }))} />
+                          {entitlementEdits[sickKey] !== undefined && (
+                            <button style={{ ...styles.btn('primary'), fontSize: '11px', padding: '3px 7px' }}
+                              onClick={() => handleSaveEntitlement(staffId, 'sick', entitlementEdits[sickKey])}
+                              disabled={savingKey === sickKey}>{savingKey === sickKey ? '…' : '✓'}</button>
+                          )}
+                        </div>
+                      ) : <span>{sick?.entitled_days ?? '—'}</span>}
+                    </td>
+                    <td style={styles.td}>{sick?.used_days ?? '—'}</td>
+                    <td style={styles.td}>
+                      {sickBal !== null ? <strong style={{ color: sickBal < 0 ? theme.red : theme.green }}>{sickBal}{sickBal < 0 ? ' ⚠' : ''}</strong> : '—'}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+};
+
 // ── PAYROLL TAB ───────────────────────────────────────────────
-const PayrollTab = () => {
+const PayrollTab = ({ userProfile }) => {
   const today = new Date().toISOString().split("T")[0];
   const firstOfMonth = today.slice(0, 8) + "01";
   const [view, setView] = useState("new");
@@ -1196,6 +1655,8 @@ const PayrollTab = () => {
   const [runLines, setRunLines] = useState([]);
   const [paymentEdits, setPaymentEdits] = useState({});
   const [pdfLoading, setPdfLoading] = useState(false);
+  const [recallReason, setRecallReason] = useState("");
+  const [actionSaving, setActionSaving] = useState(false);
 
   const loadRuns = async () => {
     setRunsLoading(true);
@@ -1209,22 +1670,36 @@ const PayrollTab = () => {
     if (!periodFrom || !periodTo) return setAlert({ type: "error", msg: "Select a period." });
     setCalcLoading(true); setAlert(null);
     try {
-      const [allStaff, attendanceCounts] = await Promise.all([
+      const [allStaff, attendanceCounts, advanceMap, unpaidLeaveMap] = await Promise.all([
         staffService.getActive(),
         attendanceService.getCountsByRange(periodFrom, periodTo),
+        advancesService.getOutstandingByStaff(),
+        leaveService.getUnpaidApprovedOverlapping(periodFrom, periodTo),
       ]);
+      const periodFromDate = new Date(periodFrom), periodToDate = new Date(periodTo);
       const lines = allStaff.map(s => {
         const daysPresent = attendanceCounts[s.id] || 0;
-        let amountDue = 0;
+        let amountDue = 0, leaveDeduction = 0;
         if (s.staff_type === "daily") {
           amountDue = daysPresent * (s.daily_rate || 0);
         } else {
-          const from = new Date(periodFrom), to = new Date(periodTo);
-          const daysInMonth = new Date(from.getFullYear(), from.getMonth() + 1, 0).getDate();
-          const daysInPeriod = Math.round((to - from) / 86400000) + 1;
+          const daysInMonth = new Date(periodFromDate.getFullYear(), periodFromDate.getMonth() + 1, 0).getDate();
+          const daysInPeriod = Math.round((periodToDate - periodFromDate) / 86400000) + 1;
           amountDue = ((s.monthly_salary || 0) / daysInMonth) * daysInPeriod;
+          const leaveRows = unpaidLeaveMap[s.id] || [];
+          const totalUnpaidDays = leaveRows.reduce((sum, lr) => {
+            const overlap = Math.floor((Math.min(new Date(lr.end_date), periodToDate) - Math.max(new Date(lr.start_date), periodFromDate)) / 86400000) + 1;
+            return sum + Math.max(0, overlap);
+          }, 0);
+          leaveDeduction = Math.round(totalUnpaidDays * ((s.monthly_salary || 0) / daysInMonth));
         }
-        return { staff_id: s.id, full_name: s.full_name, role: s.staffRole?.role_name || s.role || "—", staff_type: s.staff_type, days_present: daysPresent, daily_rate: s.daily_rate || 0, monthly_salary: s.monthly_salary || 0, amount_due: Math.round(amountDue) };
+        const adv = advanceMap[s.id];
+        const roundedDue = Math.round(amountDue);
+        leaveDeduction = Math.min(leaveDeduction, roundedDue);                                   // leave can't exceed gross
+        let advance_deduction = adv ? Math.min(adv.installment_amount, adv.outstanding_balance) : 0;
+        advance_deduction = Math.max(0, Math.min(advance_deduction, roundedDue - leaveDeduction)); // advance absorbs remainder, never negative
+        const deductions = advance_deduction + leaveDeduction;
+        return { staff_id: s.id, full_name: s.full_name, role: s.staffRole?.role_name || s.role || "—", staff_type: s.staff_type, days_present: daysPresent, daily_rate: s.daily_rate || 0, monthly_salary: s.monthly_salary || 0, amount_due: roundedDue, deductions, advance_deduction, leave_deduction: leaveDeduction };
       });
       setCalcLines(lines);
       setStep(2);
@@ -1241,13 +1716,17 @@ const PayrollTab = () => {
   const handleApprove = async () => {
     setSaving(true); setAlert(null);
     try {
-      const run = { period_from: periodFrom, period_to: periodTo, run_date: today, total_daily_wages: totalDaily, total_permanent_salaries: totalPerm, total_payroll: grandTotal, prepared_by: preparedBy, status: "approved" };
-      const lines = calcLines.map(l => ({ staff_id: l.staff_id, staff_type: l.staff_type, days_present: l.days_present, daily_rate: l.daily_rate, monthly_salary: l.monthly_salary, amount_due: l.amount_due }));
+      const run = { period_from: periodFrom, period_to: periodTo, run_date: today, total_daily_wages: totalDaily, total_permanent_salaries: totalPerm, total_payroll: grandTotal, prepared_by: preparedBy, status: "draft" };
+      const lines = calcLines.map(l => ({ staff_id: l.staff_id, staff_type: l.staff_type, days_present: l.days_present, daily_rate: l.daily_rate, monthly_salary: l.monthly_salary, amount_due: l.amount_due, deductions: l.deductions || 0, advance_deduction: l.advance_deduction ?? l.deductions ?? 0 }));
       await payrollService.createRun(run, lines);
-      setAlert({ type: "success", msg: `Payroll approved — ${naira(grandTotal)} total for ${calcLines.length} staff.` });
+      setAlert({ type: "success", msg: `Payroll run submitted for approval — ${naira(grandTotal)} total for ${calcLines.length} staff.` });
       setStep(1); setCalcLines([]); setView("history"); loadRuns();
-    } catch (e) { setAlert({ type: "error", msg: "Failed to save payroll: " + e.message }); }
-    finally { setSaving(false); }
+    } catch (e) {
+      const msg = e.message?.includes('not active') || e.message?.includes('not eligible')
+        ? 'This staff member is not active and cannot be added to payroll.'
+        : 'Failed to save payroll: ' + e.message;
+      setAlert({ type: "error", msg });
+    }
   };
 
   const openRun = async (run) => {
@@ -1256,9 +1735,23 @@ const PayrollTab = () => {
       const { lines } = await payrollService.getRunWithLines(run.id);
       setRunLines(lines);
       const edits = {};
-      lines.forEach(l => { edits[l.id] = { amount_paid: String(l.amount_paid || l.amount_due || ""), payment_date: l.payment_date || today, payment_method: l.payment_method || "cash" }; });
+      lines.forEach(l => {
+        const net = Math.max(0, (l.amount_due || 0) - (l.deductions || 0));
+        edits[l.id] = { amount_paid: String(l.amount_paid || net), payment_date: l.payment_date || today, payment_method: l.payment_method || "cash" };
+      });
       setPaymentEdits(edits);
     } catch (e) { setAlert({ type: "error", msg: e.message }); }
+  };
+
+  const handleAdvanceRun = async (action, reason = null) => {
+    setActionSaving(true); setAlert(null);
+    try {
+      await payrollService.advanceRun(selectedRun.id, action, reason || null);
+      setRecallReason("");
+      await loadRuns();
+      setSelectedRun(null);
+    } catch (e) { setAlert({ type: "error", msg: e.message }); }
+    finally { setActionSaving(false); }
   };
 
   const handleRecordPayments = async () => {
@@ -1268,7 +1761,7 @@ const PayrollTab = () => {
         const e = paymentEdits[l.id] || {};
         return payrollService.updateLine(l.id, { amount_paid: parseFloat(e.amount_paid) || 0, payment_date: e.payment_date || today, payment_method: e.payment_method || "cash" });
       }));
-      await payrollService.updateRun(selectedRun.id, { status: "paid" });
+      await payrollService.advanceRun(selectedRun.id, 'mark_paid');
       setAlert({ type: "success", msg: "Payments recorded — payroll marked as PAID." });
       loadRuns(); setSelectedRun(null);
     } catch (e) { setAlert({ type: "error", msg: "Failed to record payments: " + e.message }); }
@@ -1282,7 +1775,7 @@ const PayrollTab = () => {
     finally { setPdfLoading(false); }
   };
 
-  const statusColor = s => s === "paid" ? theme.green : s === "approved" ? theme.blue : theme.accent;
+  const statusColor = s => s === "paid" ? theme.green : s === "md_approved" ? theme.blue : s === "ico_approved" ? theme.accent : theme.textMuted;
 
   return (
     <div>
@@ -1328,7 +1821,7 @@ const PayrollTab = () => {
                 <div style={{ ...styles.card, marginBottom: "16px" }}>
                   <div style={styles.sectionTitle}>Daily Workers</div>
                   <table style={styles.table}>
-                    <thead><tr>{["Name","Role","Days Present","Daily Rate","Amount Due"].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
+                    <thead><tr>{["Name","Role","Days Present","Daily Rate","Amount Due","Deductions","Net Pay"].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
                     <tbody>
                       {dailyLines.map(l => (
                         <tr key={l.staff_id}>
@@ -1337,6 +1830,8 @@ const PayrollTab = () => {
                           <td style={styles.td}><span style={{ color: theme.accent, fontWeight: "700" }}>{l.days_present} days</span></td>
                           <td style={styles.td}>{naira(l.daily_rate)}/day</td>
                           <td style={styles.td}><strong style={{ color: theme.green }}>{naira(l.amount_due)}</strong></td>
+                          <td style={styles.td}>{l.deductions > 0 ? <span style={{ color: theme.red }}>−{naira(l.deductions)}</span> : <span style={{ color: theme.textMuted }}>—</span>}</td>
+                          <td style={styles.td}><strong style={{ color: theme.blue }}>{naira(l.amount_due - l.deductions)}</strong></td>
                         </tr>
                       ))}
                     </tbody>
@@ -1347,7 +1842,7 @@ const PayrollTab = () => {
                 <div style={{ ...styles.card, marginBottom: "16px" }}>
                   <div style={styles.sectionTitle}>Permanent Staff</div>
                   <table style={styles.table}>
-                    <thead><tr>{["Name","Role","Monthly Salary","Pro-rated Amount"].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
+                    <thead><tr>{["Name","Role","Monthly Salary","Pro-rated Amount","Deductions","Net Pay"].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
                     <tbody>
                       {permLines.map(l => (
                         <tr key={l.staff_id}>
@@ -1355,6 +1850,8 @@ const PayrollTab = () => {
                           <td style={styles.td}>{l.role}</td>
                           <td style={styles.td}>{naira(l.monthly_salary)}/mo</td>
                           <td style={styles.td}><strong style={{ color: theme.blue }}>{naira(l.amount_due)}</strong></td>
+                          <td style={styles.td}>{l.deductions > 0 ? <span style={{ color: theme.red }}>−{naira(l.deductions)}{l.leave_deduction > 0 && <span style={{ fontSize: "11px", color: theme.textMuted, display: "block" }}>{l.advance_deduction > 0 && <>Loan {naira(l.advance_deduction)} + </>}Leave {naira(l.leave_deduction)}</span>}</span> : <span style={{ color: theme.textMuted }}>—</span>}</td>
+                          <td style={styles.td}><strong style={{ color: theme.green }}>{naira(l.amount_due - l.deductions)}</strong></td>
                         </tr>
                       ))}
                     </tbody>
@@ -1434,6 +1931,43 @@ const PayrollTab = () => {
               <button style={{ ...styles.btn("primary"), fontSize: "12px" }} onClick={() => handleDownloadPDF(selectedRun, runLines)} disabled={pdfLoading}>{pdfLoading ? "Generating…" : "↓ Download PDF"}</button>
             </div>
           </div>
+          {(() => {
+            const role = userProfile?.role;
+            const status = selectedRun.status;
+            const canRecall = ['ico','md','accountant'].includes(role) && ['ico_approved','md_approved'].includes(status);
+            if (status === 'paid' || (!canRecall && !(status === 'draft' && role === 'ico') && !(status === 'ico_approved' && role === 'md'))) return null;
+            return (
+              <div style={{ ...styles.card, marginBottom: "16px", display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+                {status === 'draft' && role === 'ico' && (
+                  <button style={styles.btn("primary")} onClick={() => handleAdvanceRun('ico_approve')} disabled={actionSaving}>
+                    {actionSaving ? "Saving…" : "✓ ICO Approve"}
+                  </button>
+                )}
+                {status === 'ico_approved' && role === 'md' && (
+                  <button style={styles.btn("primary")} onClick={() => handleAdvanceRun('md_approve')} disabled={actionSaving}>
+                    {actionSaving ? "Saving…" : "✓ MD Approve"}
+                  </button>
+                )}
+                {canRecall && (
+                  <>
+                    <input
+                      style={{ ...styles.input, width: "260px" }}
+                      placeholder="Recall reason (required)…"
+                      value={recallReason}
+                      onChange={e => setRecallReason(e.target.value)}
+                    />
+                    <button
+                      style={styles.btn("danger")}
+                      onClick={() => recallReason.trim() && handleAdvanceRun('recall', recallReason.trim())}
+                      disabled={actionSaving || !recallReason.trim()}
+                    >
+                      {actionSaving ? "Saving…" : "↩ Recall to Draft"}
+                    </button>
+                  </>
+                )}
+              </div>
+            );
+          })()}
           <div style={styles.grid(3)}>
             <StatCard label="Daily Wages" value={naira(selectedRun.total_daily_wages)} sub="Daily workers" accent={theme.accent} />
             <StatCard label="Salaries" value={naira(selectedRun.total_permanent_salaries)} sub="Permanent staff" accent={theme.blue} />
@@ -1442,22 +1976,24 @@ const PayrollTab = () => {
           <div style={styles.card}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
               <div style={styles.sectionTitle}>Payment Details</div>
-              {selectedRun.status !== "paid" && (
+              {selectedRun.status === 'md_approved' && ['accountant','md'].includes(userProfile?.role) && (
                 <button style={styles.btn("primary")} onClick={handleRecordPayments} disabled={saving}>{saving ? "Saving…" : "Record Payments & Mark Paid"}</button>
               )}
             </div>
             <table style={styles.table}>
-              <thead><tr>{["Name","Role","Type","Amount Due","Amount Paid","Date","Method","Notes"].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
+              <thead><tr>{["Name","Role","Type","Amount Due","Deduction","Amount Paid","Date","Method","Notes"].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
               <tbody>
                 {runLines.map(l => {
                   const e = paymentEdits[l.id] || {};
                   const editable = selectedRun.status !== "paid";
+                  const leaveDeductionDerived = (l.deductions || 0) - (l.advance_deduction || 0);
                   return (
                     <tr key={l.id}>
                       <td style={styles.td}><strong>{l.staff?.full_name || "—"}</strong></td>
                       <td style={styles.td}>{l.staff?.role || "—"}</td>
                       <td style={styles.td}><span style={styles.badge(l.staff_type === "permanent" ? theme.blue : theme.accent)}>{l.staff_type}</span></td>
                       <td style={styles.td}><strong style={{ color: theme.accent }}>{naira(l.amount_due)}</strong></td>
+                      <td style={styles.td}>{(l.deductions || 0) > 0 ? <span style={{ color: theme.red }}>−{naira(l.deductions)}{leaveDeductionDerived > 0 && <span style={{ fontSize: "11px", color: theme.textMuted, display: "block" }}>{(l.advance_deduction || 0) > 0 && <>Loan {naira(l.advance_deduction)} + </>}Leave {naira(leaveDeductionDerived)}</span>}</span> : <span style={{ color: theme.textMuted }}>—</span>}</td>
                       <td style={styles.td}>{editable ? <input style={{ ...styles.input, width: "110px" }} type="number" value={e.amount_paid} onChange={ev => setPaymentEdits(pe => ({ ...pe, [l.id]: { ...pe[l.id], amount_paid: ev.target.value } }))} /> : naira(l.amount_paid)}</td>
                       <td style={styles.td}>{editable ? <input type="date" style={{ ...styles.input, width: "130px" }} value={e.payment_date} onChange={ev => setPaymentEdits(pe => ({ ...pe, [l.id]: { ...pe[l.id], payment_date: ev.target.value } }))} /> : l.payment_date || "—"}</td>
                       <td style={styles.td}>{editable ? <select style={{ ...styles.input, width: "110px" }} value={e.payment_method} onChange={ev => setPaymentEdits(pe => ({ ...pe, [l.id]: { ...pe[l.id], payment_method: ev.target.value } }))}><option value="cash">Cash</option><option value="transfer">Transfer</option></select> : l.payment_method || "—"}</td>
@@ -1474,8 +2010,150 @@ const PayrollTab = () => {
   );
 };
 
+// ── ONBOARDING TAB ────────────────────────────────────────────
+const OnboardingTab = () => {
+  const [onboardingStaff, setOnboardingStaff] = useState([]);
+  const [templates, setTemplates] = useState([]);
+  const [checklists, setChecklists] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [actioning, setActioning] = useState({});
+  const [alert, setAlert] = useState(null);
+  const [currentUser, setCurrentUser] = useState(null);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) return;
+      supabase.from('user_profiles').select('full_name, role').eq('id', user.id).single()
+        .then(({ data }) => { if (data) setCurrentUser(data); });
+    });
+  }, []);
+
+  const loadData = async () => {
+    setLoading(true);
+    const [staffRes, tplRes] = await Promise.all([
+      supabase.from('staff').select('*, staffRole:role_id(role_name)').eq('employment_status', 'onboarding').order('full_name'),
+      supabase.from('onboarding_checklist_templates').select('*').order('sort_order'),
+    ]);
+    const staff = staffRes.data || [];
+    setOnboardingStaff(staff);
+    setTemplates(tplRes.data || []);
+    if (staff.length > 0) {
+      const { data: rows } = await supabase.from('staff_onboarding_checklist')
+        .select('*').in('staff_id', staff.map(s => s.id));
+      const grouped = {};
+      staff.forEach(s => { grouped[s.id] = {}; });
+      (rows || []).forEach(r => { grouped[r.staff_id][r.item_key] = r; });
+      setChecklists(grouped);
+    }
+    setLoading(false);
+  };
+  useEffect(() => { loadData(); }, []);
+
+  const handleToggle = async (staffId, itemKey, nowComplete) => {
+    const now = new Date().toISOString();
+    const completedBy = currentUser?.full_name || currentUser?.role || 'hr';
+    const existing = checklists[staffId]?.[itemKey];
+    const patch = { is_complete: nowComplete, completed_at: nowComplete ? now : null, completed_by: nowComplete ? completedBy : null };
+    const { error } = existing
+      ? await supabase.from('staff_onboarding_checklist').update(patch).eq('id', existing.id)
+      : await supabase.from('staff_onboarding_checklist').insert({ staff_id: staffId, item_key: itemKey, ...patch });
+    if (error) { setAlert({ type: 'error', msg: error.message }); return; }
+    setChecklists(prev => ({
+      ...prev,
+      [staffId]: { ...prev[staffId], [itemKey]: { ...existing, staff_id: staffId, item_key: itemKey, ...patch } },
+    }));
+  };
+
+  const handleActivate = async (s) => {
+    setActioning(prev => ({ ...prev, [s.id]: true }));
+    const { error } = await supabase.from('staff').update({ employment_status: 'active' }).eq('id', s.id);
+    setActioning(prev => ({ ...prev, [s.id]: false }));
+    if (error) {
+      setAlert({ type: 'error', msg: 'Complete all required checklist items before activating this staff member.' });
+      return;
+    }
+    setAlert({ type: 'success', msg: `${s.full_name} activated successfully.` });
+    loadData();
+  };
+
+  const canEdit = hasRole(currentUser, 'md', 'hr_officer');
+
+  if (loading) return <Spinner />;
+
+  return (
+    <div>
+      {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
+      {onboardingStaff.length === 0 ? (
+        <div style={{ ...styles.card, textAlign: 'center', padding: '40px', color: theme.textMuted }}>
+          No staff currently in onboarding.
+        </div>
+      ) : onboardingStaff.map(s => {
+        const items = checklists[s.id] || {};
+        const allRequired = templates.filter(t => t.is_required);
+        const allDone = allRequired.every(t => items[t.item_key]?.is_complete);
+        return (
+          <div key={s.id} style={{ ...styles.card, marginBottom: '16px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '14px' }}>
+              <div>
+                <div style={{ fontWeight: '700', fontSize: '15px' }}>{s.full_name}</div>
+                <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '2px' }}>
+                  {s.staffRole?.role_name || s.role || '—'} · {s.staff_type} · Hired {s.date_hired || '—'}
+                </div>
+              </div>
+              {canEdit && (
+                <button
+                  style={{ ...styles.btn(allDone ? 'primary' : 'secondary'), opacity: allDone ? 1 : 0.5 }}
+                  onClick={() => handleActivate(s)}
+                  disabled={actioning[s.id] || !allDone}
+                  title={allDone ? 'Activate staff member' : 'Complete all required items first'}
+                >
+                  {actioning[s.id] ? 'Activating…' : 'Activate'}
+                </button>
+              )}
+            </div>
+            <table style={styles.table}>
+              <thead>
+                <tr>
+                  {['Checklist Item', 'Required', 'Complete', 'Completed By', 'Date'].map(h => <th key={h} style={styles.th}>{h}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {templates.map(t => {
+                  const row = items[t.item_key];
+                  return (
+                    <tr key={t.item_key}>
+                      <td style={styles.td}>
+                        <div style={{ fontWeight: '600' }}>{t.label}</div>
+                        {t.description && <div style={{ fontSize: '11px', color: theme.textMuted }}>{t.description}</div>}
+                      </td>
+                      <td style={styles.td}>
+                        <span style={styles.badge(t.is_required ? theme.accent : theme.textMuted)}>{t.is_required ? 'Required' : 'Optional'}</span>
+                      </td>
+                      <td style={styles.td}>
+                        <input
+                          type="checkbox"
+                          checked={!!row?.is_complete}
+                          disabled={!canEdit}
+                          onChange={e => handleToggle(s.id, t.item_key, e.target.checked)}
+                          style={{ width: '16px', height: '16px', cursor: canEdit ? 'pointer' : 'default' }}
+                        />
+                      </td>
+                      <td style={styles.td}>{row?.completed_by || '—'}</td>
+                      <td style={styles.td}>{row?.completed_at ? new Date(row.completed_at).toLocaleDateString('en-GB') : '—'}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
 // ── MAIN STAFF COMPONENT ──────────────────────────────────────
-const Staff = () => {
+const Staff = ({ userProfile }) => {
   const [tab, setTab] = useState("directory");
   const [profileStaffId, setProfileStaffId] = useState(null);
   const [roles, setRoles] = useState([]);
@@ -1494,7 +2172,7 @@ const Staff = () => {
           </div>
           <button style={styles.btn("secondary")} onClick={() => setProfileStaffId(null)}>← Back to Directory</button>
         </div>
-        <StaffProfile staffId={profileStaffId} onBack={() => setProfileStaffId(null)} roles={roles} />
+        <StaffProfile staffId={profileStaffId} onBack={() => setProfileStaffId(null)} roles={roles} userProfile={userProfile} />
       </div>
     );
   }
@@ -1508,14 +2186,16 @@ const Staff = () => {
         </div>
       </div>
       <div style={{ display: "flex", gap: "8px", marginBottom: "24px", borderBottom: `1px solid ${theme.border}`, paddingBottom: "12px" }}>
-        {[["directory","Staff Directory"],["attendance","Attendance"],["payroll","Payroll"],["roles","Roles"]].map(([id, label]) => (
+        {[["directory","Staff Directory"],["onboarding","Onboarding"],["attendance","Attendance"],["payroll","Payroll"],["leave_balances","Leave Balances"],["roles","Roles"]].map(([id, label]) => (
           <button key={id} style={{ ...styles.btn(tab === id ? "primary" : "secondary"), fontSize: "13px" }} onClick={() => setTab(id)}>{label}</button>
         ))}
       </div>
-      {tab === "directory"  && <StaffDirectory onViewProfile={setProfileStaffId} roles={roles} />}
-      {tab === "attendance" && <AttendanceTab />}
-      {tab === "payroll"    && <PayrollTab />}
-      {tab === "roles"      && <RolesTab />}
+      {tab === "directory"     && <StaffDirectory onViewProfile={setProfileStaffId} roles={roles} userProfile={userProfile} />}
+      {tab === "onboarding"    && <OnboardingTab />}
+      {tab === "attendance"    && <AttendanceTab />}
+      {tab === "payroll"       && <PayrollTab userProfile={userProfile} />}
+      {tab === "leave_balances" && <LeaveBalancesTab userProfile={userProfile} />}
+      {tab === "roles"         && <RolesTab />}
     </div>
   );
 };

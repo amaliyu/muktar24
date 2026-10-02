@@ -132,6 +132,108 @@ export function detectCategory(desc, amount) {
   return null;
 }
 
+// Like parseAmount but returns null (not 0) when the value is absent or
+// unparseable — needed so callers can distinguish "zero balance" from "no data".
+function parseAmountNullable(v) {
+  if (v === null || v === undefined || v === '') return null;
+  if (typeof v === 'number') return isNaN(v) ? null : v;
+  const s = String(v).trim().replace(/[,₦\s]/g, '');
+  if (!s || !/\d/.test(s)) return null;
+  const n = parseFloat(s);
+  return isNaN(n) ? null : n;
+}
+
+// Scan `rows` for a cell whose text includes any of `labelKeywords`; then
+// return the first parseable number found to the right of that cell in the
+// same row, or (if none) in the immediately following row.
+function findValueNearLabel(rows, ...labelKeywords) {
+  for (let ri = 0; ri < rows.length; ri++) {
+    const row = rows[ri];
+    for (let ci = 0; ci < row.length; ci++) {
+      const cell = String(row[ci] || '').trim().toLowerCase();
+      if (labelKeywords.some(kw => cell.includes(kw))) {
+        // Same row — cells to the right
+        for (let ni = ci + 1; ni < row.length; ni++) {
+          const v = parseAmountNullable(row[ni]);
+          if (v !== null) return v;
+        }
+        // Next row — first parseable cell
+        if (ri + 1 < rows.length) {
+          for (const nc of rows[ri + 1]) {
+            const v = parseAmountNullable(nc);
+            if (v !== null) return v;
+          }
+        }
+        return null; // label found but no adjacent value
+      }
+    }
+  }
+  return null;
+}
+
+// Extract balance-check values from raw parsed rows.
+//
+// Primary path (TAJ Bank): looks for a TRANS SUMMARY block whose rows carry
+// "Total Credit", "Total Debit", and "Available Balance" directly — those are
+// the source of truth rather than a re-sum of every parsed row.
+//
+// Returns:
+//   openingBalance  — from "Balance Brought Forward" / "Opening Balance" row
+//   totalCredit     — from TRANS SUMMARY block, or null if not found
+//   totalDebit      — from TRANS SUMMARY block, or null if not found
+//   closingBalance  — "Available Balance" from TRANS SUMMARY, or null if not found
+export function extractStatementSummary(rawRows, colMap) {
+  // Opening balance — "Balance Brought Forward" / "Opening Balance" row
+  let openingBalance = null;
+  for (const row of rawRows) {
+    const joined = row.map(c => String(c || '').trim()).join(' ').toLowerCase();
+    if (
+      joined.includes('balance brought forward') ||
+      joined.includes('brought forward') ||
+      joined.includes('opening balance')
+    ) {
+      // Prefer the balance column (most reliable)
+      if (colMap && colMap.balance >= 0 && colMap.balance < row.length) {
+        const v = parseAmountNullable(row[colMap.balance]);
+        if (v !== null && v > 0) { openingBalance = v; break; }
+      }
+      // Fallback: scan non-date, non-description cells to avoid picking up
+      // date serials or text that happen to parse as numbers
+      const skipCols = new Set(
+        [colMap?.date, colMap?.description].filter(i => typeof i === 'number' && i >= 0)
+      );
+      for (let ci = 0; ci < row.length; ci++) {
+        if (skipCols.has(ci)) continue;
+        const v = parseAmountNullable(row[ci]);
+        if (v !== null && v > 0) { openingBalance = v; break; }
+      }
+      break;
+    }
+  }
+
+  // TRANS SUMMARY block — search all rows for the header
+  let summaryStart = -1;
+  for (let i = 0; i < rawRows.length; i++) {
+    const joined = rawRows[i].map(c => String(c || '').trim()).join(' ').toLowerCase();
+    if (joined.includes('trans summary') || joined.includes('transaction summary')) {
+      summaryStart = i;
+      break;
+    }
+  }
+
+  if (summaryStart < 0) {
+    return { openingBalance, totalCredit: null, totalDebit: null, closingBalance: null };
+  }
+
+  const block = rawRows.slice(summaryStart, Math.min(summaryStart + 15, rawRows.length));
+  return {
+    openingBalance,
+    totalCredit:    findValueNearLabel(block, 'total credit', 'total deposit'),
+    totalDebit:     findValueNearLabel(block, 'total debit', 'total withdrawal'),
+    closingBalance: findValueNearLabel(block, 'available balance', 'closing balance'),
+  };
+}
+
 export function autoMapColumns(headers) {
   const h = headers.map(c => String(c || '').toLowerCase().trim());
   const find = (kws) => {
@@ -268,7 +370,15 @@ const EXPENSE_KEYWORDS = {
   'Bank Charges':       ['stamp', 'stampduty', 'sms alert', 'commission', 'charge'],
 };
 
-export function autoMatchTransactions(transactions, payments, expenses, accountType, { invoices = [], customers = [] } = {}) {
+// Extract the integer payment-request number from a description or reference string.
+// Handles APC-PR-042, APCPR042, "apc pr 42", embedded anywhere, case/space/hyphen insensitive.
+// Returns the integer or null.
+export function extractPRReference(text) {
+  const m = String(text || '').replace(/[-\s]/g, '').toUpperCase().match(/APCPR(\d+)/);
+  return m ? parseInt(m[1], 10) : null;
+}
+
+export function autoMatchTransactions(transactions, payments, expenses, accountType, { invoices = [], customers = [], paymentRequests = [] } = {}) {
   const daysDiff = (a, b) => Math.abs(new Date(a) - new Date(b)) / 86400000;
 
   return transactions.map(tx => {
@@ -282,6 +392,26 @@ export function autoMatchTransactions(transactions, payments, expenses, accountT
     // Bank charge / stamp duty
     if (tx.auto_category === 'Bank Charges') {
       return { ...tx, autoMatch: { type: 'bank_charge', id: null, label: 'Bank Charge / Stamp Duty', confidence: 'high' } };
+    }
+
+    // Payment request reference match — highest priority for debits, before expense matching.
+    // Reference AND amount must both agree for auto-suggestion. Reference-only with a mismatched
+    // amount surfaces as a discrepancy that blocks auto-matching (Decision 12 amount-agreement gate).
+    if (tx.debit > 0 && paymentRequests.length) {
+      const prNum = extractPRReference(tx.description);
+      if (prNum !== null) {
+        const pr = paymentRequests.find(p =>
+          extractPRReference(p.reference) === prNum &&
+          ['disbursed', 'closed'].includes(p.status)
+        );
+        if (pr) {
+          if (Math.abs(Number(pr.amount) - tx.debit) < 0.01) {
+            return { ...tx, autoMatch: { type: 'payment_request', id: pr.id, label: `${pr.reference} · ${pr.payee_name || pr.purpose || ''}`, confidence: 'high' } };
+          }
+          // Reference found but amount differs — flag, do not auto-suggest
+          return { ...tx, autoMatch: null, prDiscrepancy: { prId: pr.id, prRef: pr.reference, prAmt: Number(pr.amount), txAmt: tx.debit } };
+        }
+      }
     }
 
     let best = null;

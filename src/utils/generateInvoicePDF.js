@@ -12,7 +12,12 @@ export async function generateInvoicePDF(invoiceData, customer) {
     delivery_cost = 0,
     include_vat = true,
     discount = 0,
+    status = 'issued',
   } = invoiceData;
+
+  // A draft is a quotation → render as a PROFORMA INVOICE. Issued/paid render
+  // the normal INVOICE. Same generator, one branch on status.
+  const isProforma = status === 'draft';
 
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const W   = doc.internal.pageSize.getWidth();
@@ -38,14 +43,21 @@ export async function generateInvoicePDF(invoiceData, customer) {
   doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(80);
   doc.text('RC: 1838184', ml + 33, 19);
 
-  doc.setFontSize(22); doc.setFont('helvetica', 'bold'); doc.setTextColor(245, 166, 35);
-  doc.text('INVOICE', mr, 15, { align: 'right' });
+  doc.setFont('helvetica', 'bold'); doc.setTextColor(245, 166, 35);
+  doc.setFontSize(isProforma ? 15 : 22);
+  doc.text(isProforma ? 'PROFORMA INVOICE' : 'INVOICE', mr, 15, { align: 'right' });
 
   doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(40);
   doc.text(`No: ${String(invoice_number || '—')}`, mr, 21, { align: 'right' });
   doc.text(`Date: ${String(issued_date || new Date().toISOString().split('T')[0])}`, mr, 26, { align: 'right' });
 
   doc.setDrawColor(180); doc.setLineWidth(0.5); doc.line(ml, 30, mr, 30);
+
+  // Proforma disclaimer — a quotation is not a demand for payment.
+  if (isProforma) {
+    doc.setFontSize(8.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(200, 50, 50);
+    doc.text('This is a proforma invoice and is not a demand for payment.', W / 2, 34.5, { align: 'center' });
+  }
 
   // ── BILL TO ───────────────────────────────────────────────────
   let leftY = 37;
@@ -174,5 +186,5 @@ export async function generateInvoicePDF(invoiceData, customer) {
   doc.text('1, Dutse Alhaji, Behind Tipper Garage, Beside Istanbul Quarry, Off Bwari Expressway, Bmuko Village, Abuja, Nigeria.', W / 2, footerY + 13, { align: 'center' });
   doc.text('Tel: 09055541433, 07030647949   |   Email: iabujaprecast@gmail.com', W / 2, footerY + 18, { align: 'center' });
 
-  doc.save(`${invoice_number || 'invoice'}.pdf`);
+  doc.save(`${isProforma ? 'PROFORMA_' : ''}${invoice_number || 'invoice'}.pdf`);
 }

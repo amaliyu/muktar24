@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase'
+import { getSignedDocUrl, docStoragePath } from './storage'
 
 const today = () => new Date().toISOString().split('T')[0]
 const plusDays = (d) => { const dt = new Date(); dt.setDate(dt.getDate() + d); return dt.toISOString().split('T')[0] }
@@ -95,8 +96,11 @@ export const maintenanceService = {
     const path = `receipts/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
     const { data, error } = await supabase.storage.from('vehicle-documents').upload(path, file)
     if (error) throw error
-    const { data: { publicUrl } } = supabase.storage.from('vehicle-documents').getPublicUrl(data.path)
-    return publicUrl
+    return data.path
+  },
+
+  getSignedUrl(value) {
+    return getSignedDocUrl('vehicle-documents', value)
   },
 }
 
@@ -156,9 +160,8 @@ export const vehicleDocumentsService = {
     const path = `${vehicleId}/${Date.now()}.${ext}`
     const { data: sd, error: se } = await supabase.storage.from('vehicle-documents').upload(path, file)
     if (se) throw se
-    const { data: { publicUrl } } = supabase.storage.from('vehicle-documents').getPublicUrl(sd.path)
     const { data, error } = await supabase.from('vehicle_documents').insert({
-      vehicle_id: vehicleId, document_label: label, file_url: publicUrl,
+      vehicle_id: vehicleId, document_label: label, file_url: sd.path,
       file_name: file.name, file_size: file.size,
       expiry_date: expiryDate || null, uploaded_by: uploadedBy || '',
     }).select().single()
@@ -166,9 +169,13 @@ export const vehicleDocumentsService = {
     return data
   },
 
+  getSignedUrl(value) {
+    return getSignedDocUrl('vehicle-documents', value)
+  },
+
   async delete(id, fileUrl) {
-    const match = fileUrl?.match(/vehicle-documents\/(.+)$/)
-    if (match) await supabase.storage.from('vehicle-documents').remove([match[1]])
+    const path = docStoragePath('vehicle-documents', fileUrl)
+    if (path) await supabase.storage.from('vehicle-documents').remove([path])
     const { error } = await supabase.from('vehicle_documents').delete().eq('id', id)
     if (error) throw error
   },

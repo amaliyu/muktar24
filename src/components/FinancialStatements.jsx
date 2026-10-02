@@ -2,12 +2,20 @@ import React, { useState, useEffect, useCallback } from 'react'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { balanceSheetService, incomeStatementService, cashFlowService, openingBalancesService, financialAdjustmentsService } from '../services/financialService'
+import { hasRole } from '../lib/roles'
 
 const theme = {
   bg: '#0f1117', surface: '#1a1d27', card: '#21263a', border: '#2e3452',
   accent: '#f5a623', green: '#2dd4a0', red: '#f06b6b', blue: '#5b8dee',
   text: '#e8eaf0', textMuted: '#7c839e',
 }
+
+// Roles allowed to edit opening balances and post financial adjustments.
+// Mirrors the opening_balances / financial_adjustments INSERT/UPDATE RLS
+// policies (has_any_role(md, accountant)). Checked via hasRole() so a granted
+// role works. Deletes on both tables are MD-only at the DB level and are not
+// exposed as buttons here.
+const FINANCIAL_EDIT_ROLES = ['md', 'accountant']
 
 const naira = n => `₦${Math.round(Number(n) || 0).toLocaleString()}`
 const fmt   = n => Math.round(Number(n) || 0).toLocaleString()
@@ -66,7 +74,7 @@ const BalanceSheetTab = ({ userProfile }) => {
   const [adjForm, setAdjForm] = useState({ account_name: '', amount: '', reason: '' })
   const [showAdjForm, setShowAdjForm] = useState(false)
 
-  const canEdit = ['md', 'accountant'].includes(userProfile?.role)
+  const canEdit = hasRole(userProfile, ...FINANCIAL_EDIT_ROLES)
 
   const load = useCallback(async (date, setFn) => {
     setLoading(true); setErr('')
@@ -469,7 +477,7 @@ const IncomeStatementTab = ({ userProfile }) => {
   const [err, setErr] = useState('')
   const [drilldown, setDrilldown] = useState(null)
 
-  const canEdit = ['md', 'accountant'].includes(userProfile?.role)
+  const canEdit = hasRole(userProfile, ...FINANCIAL_EDIT_ROLES)
 
   useEffect(() => {
     setLoading(true); setErr('')
@@ -680,7 +688,7 @@ const CashFlowTab = ({ userProfile }) => {
   const [adjForm, setAdjForm] = useState({ type: 'operating', account_name: '', amount: '', reason: '' })
   const [showAdjForm, setShowAdjForm] = useState(false)
 
-  const canEdit = ['md', 'accountant'].includes(userProfile?.role)
+  const canEdit = hasRole(userProfile, ...FINANCIAL_EDIT_ROLES)
 
   useEffect(() => {
     setLoading(true); setErr('')

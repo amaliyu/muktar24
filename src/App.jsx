@@ -1,6 +1,7 @@
 import { useState, useEffect, Component } from "react";
 import { supabase } from './lib/supabase';
 import { authService } from './services/authService';
+import { hasRole, effectiveRolesOf } from './lib/roles';
 import LoginScreen from './components/LoginScreen';
 import InstallPrompt from './components/InstallPrompt';
 import UpdatePrompt from './components/UpdatePrompt';
@@ -12,7 +13,7 @@ import { staffService } from './services/staff';
 import Staff from './components/StaffHR';
 import { ordersService, customersService, customerSitesService } from './services/orders';
 import { waybillsService } from './services/deliveries';
-import { invoicesService, paymentsService } from './services/payments';
+import { invoicesService, paymentsService, orderPaymentsService } from './services/payments';
 import { inventoryService } from './services/inventory';
 import { lpoService } from './services/lpo';
 import { pendingDeliveryService } from './services/pendingDelivery';
@@ -34,14 +35,30 @@ import { generateManagementAccountsPDF } from './utils/generateManagementAccount
 import { bankAccountsService, bankTransactionsService, bankImportBatchesService, bankReconciliationsService, receiptsService } from './services/bank'
 import { generateReconciliationPDF } from './utils/generateReconciliationPDF'
 import { generatePaymentReceiptPDF } from './utils/generatePaymentReceiptPDF'
-import { parseFile, autoMapColumns, mapRowsToTransactions, autoMatchTransactions, detectCategory, extractCustomerFromDesc } from './utils/parseBankStatement';
+import { parseFile, autoMapColumns, mapRowsToTransactions, autoMatchTransactions, detectCategory, extractCustomerFromDesc, extractStatementSummary, extractPRReference } from './utils/parseBankStatement';
 import VehicleRegistry from './components/VehicleRegistry'
 import KPIDashboard from './components/KPIDashboard'
 import DataImport from './components/DataImport'
 import { vehiclesService, fuelLogService } from './services/vehicles'
 import SupplierRegistry from './components/SupplierRegistry'
 import { suppliersService, supplierTransactionsService } from './services/suppliers'
-import Labour from './components/Labour'
+import Labour, { getLastSaturday, shiftWeek, shiftDays } from './components/Labour'
+import Maintenance from './components/Maintenance'
+import Messages from './components/Messages'
+import { messagesService } from './services/messages'
+import NotificationBell from './components/NotificationBell'
+import MessagesBell from './components/MessagesBell'
+import { advancesService } from './services/advances'
+import { paymentRequestsService } from './services/paymentRequests'
+import { truckLoadingService, labourPoolService } from './services/labour'
+import { leaveService } from './services/leave'
+import { leaveBalanceService } from './services/leaveBalance'
+import { meService } from './services/me'
+import { disciplinaryService } from './services/disciplinary'
+import { kioskService } from './services/kioskService'
+import AttendanceKiosk from './components/AttendanceKiosk'
+import { photoService } from './services/hrService'
+import { generateIDCardPDF, generateBusinessCardPDF } from './utils/cardGenerator'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 
@@ -114,27 +131,41 @@ const APP_ROLES = [
   { id: 'hr_officer',         label: 'HR Officer' },
   { id: 'production_manager',           label: 'Production Manager' },
   { id: 'assistant_production_manager', label: 'Assistant Production Manager' },
+  { id: 'staff',                        label: 'Staff (Employee — Self-Service Only)' },
 ];
 
 // Pages each role is allowed to access. 'all' = unrestricted.
 const ROLE_PAGES = {
   md:                 'all',
-  ico:                ['dashboard','production','inventory','batches','waybills','vehicles','staff','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile'],
-  accountant:         ['dashboard','customers','orders','reports','kpi_dashboard','accounting','suppliers','products','my_profile','data_import','labour','waybills'],
-  board_member:       ['dashboard','production','inventory','batches','waybills','vehicles','staff','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile'],
-  bdm:                ['dashboard','customers','orders','pending_register','daily_schedule','lpo_approvals','reports','kpi_dashboard','my_profile'],
-  store_officer:      ['dashboard','inventory','batches','waybills','pending_register','daily_schedule','products','reports','my_profile'],
-  logistics_manager:  ['dashboard','waybills','vehicles','labour','pending_register','daily_schedule','customers','my_profile'],
-  marketer:           ['dashboard','customers','orders','products','my_profile'],
-  driver:             ['dashboard','waybills','my_profile'],
-  hr_officer:         ['dashboard','staff','reports','labour','my_profile'],
-  production_manager:           ['dashboard','production','inventory','batches','reports','products','labour','my_profile'],
-  assistant_production_manager: ['dashboard','production','inventory','batches','reports','products','labour','my_profile'],
+  ico:                ['dashboard','production','inventory','batches','maintenance','waybills','vehicles','labour','truck_loading','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','advances','leave','payment_requests','messages'],
+  accountant:         ['dashboard','customers','orders','reports','kpi_dashboard','accounting','suppliers','products','my_profile','data_import','labour','waybills','advances','leave','payment_requests','truck_loading','trading_margin','messages'],
+  board_member:       ['dashboard','production','inventory','batches','maintenance','waybills','vehicles','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','trading_margin','messages'],
+  bdm:                ['dashboard','customers','orders','pending_register','daily_schedule','lpo_approvals','reports','kpi_dashboard','my_profile','payment_requests','trading_margin','messages'],
+  store_officer:      ['dashboard','inventory','batches','maintenance','waybills','pending_register','daily_schedule','products','reports','my_profile','messages'],
+  logistics_manager:  ['dashboard','waybills','vehicles','labour','truck_loading','maintenance','pending_register','daily_schedule','customers','my_profile','payment_requests','messages'],
+  marketer:           ['dashboard','customers','orders','products','my_profile','messages'],
+  driver:             ['dashboard','waybills','my_profile','messages'],
+  hr_officer:         ['dashboard','staff','reports','labour','my_profile','advances','leave','disciplinary','attendance_kiosk','attendance_flags','payment_requests','messages'],
+  kiosk_device:       ['attendance_kiosk'],
+  production_manager:           ['dashboard','production','inventory','batches','maintenance','reports','products','labour','truck_loading','my_profile','attendance_flags','payment_requests','messages'],
+  assistant_production_manager: ['dashboard','production','inventory','batches','maintenance','reports','products','labour','truck_loading','my_profile','attendance_flags','messages'],
   // legacy roles — kept for any existing users
-  operations:         ['dashboard','production','inventory','batches','waybills','vehicles','staff','pending_register','daily_schedule','lpo_approvals','my_profile'],
+  operations:         ['dashboard','production','inventory','batches','waybills','vehicles','pending_register','daily_schedule','lpo_approvals','my_profile'],
   sales:              ['dashboard','customers','orders','my_profile'],
-  staff:              ['dashboard','my_profile'],
+  staff:              ['my_hr','my_profile','messages'],
 };
+
+// Pages where the read-only CSS mask does NOT apply — the role can fully
+// interact (its landing page + self-service + the modules it approves in).
+// SINGLE SOURCE for both the mask and the read-only banner. Add new fully-
+// interactive pages here, in ONE place — the old inline &&-chains are how
+// my_hr got missed (see BACKEND_AUDIT_PRE5.md, Category 4).
+// NOTE: read-only pages where only export/nav buttons should work
+// (accounting, reports, kpi_dashboard, daily_schedule) are NOT listed here —
+// those buttons carry per-element data-ico-allow / data-board-allow instead,
+// so write actions stay hidden.
+const ICO_EXEMPT_PAGES   = ['dashboard', 'labour', 'truck_loading', 'schedule_approvals', 'advances', 'leave', 'my_hr', 'payment_requests', 'maintenance'];
+const BOARD_EXEMPT_PAGES = ['dashboard', 'my_profile', 'my_hr', 'maintenance'];
 
 // ── UI HELPERS ───────────────────────────────────────────────
 const Spinner = () => (
@@ -148,7 +179,33 @@ const Alert = ({ msg, type = "error", onClose }) => (
   </div>
 );
 
+// Surface the invoice DB guard messages ("content is locked", "line items can
+// only be changed while it is a draft") cleanly rather than a raw Postgres blob.
+const cleanInvoiceError = (e) => {
+  const m = e?.message || String(e || '');
+  if (/content is locked/i.test(m) || /line items can only be changed/i.test(m)) {
+    return m.replace(/^.*?(Invoice.*)$/s, '$1').trim() || m;
+  }
+  return 'Could not save the invoice. ' + m;
+};
+
+const STATUS_BADGE = {
+  draft:     { label: 'Draft',     color: '#7c839e' },
+  issued:    { label: 'Issued',    color: '#5b8dee' },
+  paid:      { label: 'Paid',      color: '#2dd4a0' },
+  cancelled: { label: 'Cancelled', color: '#f06b6b' },
+};
+
+// Invoices that count toward an order's / customer's value, paid and receivable
+// figures — a draft is a quotation and a cancelled invoice is void, so both are
+// excluded. Pass the invoices array (e.g. liveInvoices(order.invoices)).
+const liveInvoices = (invoices) => (invoices || []).filter(inv => inv.status !== 'draft' && inv.status !== 'cancelled');
+
 const InvoiceEditorModal = ({ editor, setEditor, onSave, saving }) => {
+  // Active products power the line-item datalist (pick-or-type) and the
+  // optional unit-price default. Hooks must run before the early return below.
+  const [products, setProducts] = useState([]);
+  useEffect(() => { productsService.getActive().then(setProducts).catch(() => {}); }, []);
   if (!editor) return null;
   const { items, delivery_cost, include_vat, discount } = editor;
   const itemSubtotal = items.reduce((s, i) => s + (Number(i.quantity) || 0) * (Number(i.unit_price) || 0), 0);
@@ -161,14 +218,33 @@ const InvoiceEditorModal = ({ editor, setEditor, onSave, saving }) => {
   const N = n => `₦${Math.round(Number(n) || 0).toLocaleString()}`;
   const upd = (field, val) => setEditor(e => ({ ...e, [field]: val }));
   const updItem = (idx, field, val) => setEditor(e => { const it = [...e.items]; it[idx] = { ...it[idx], [field]: val }; return { ...e, items: it }; });
+  // addItem starts with an empty description — no hardcoded product default, so
+  // the datalist picker below opens blank rather than pre-selecting a product.
   const addItem = () => setEditor(e => ({ ...e, items: [...e.items, { description: '', quantity: '', unit_price: '' }] }));
   const removeItem = idx => setEditor(e => ({ ...e, items: e.items.filter((_, i) => i !== idx) }));
+  // Line-item product field: pick from the list OR type custom wording (native
+  // datalist combobox — the same "Select or type…" pattern the product form
+  // uses). The value stays in `description`, which saveItems maps to
+  // invoice_items.block_type. When it matches a product with a non-zero price
+  // and no price is set yet, offer that price as an editable default (prices are
+  // negotiated per order; almost all products are 0, so this rarely pre-fills).
+  const onDescriptionChange = (idx, val) => setEditor(e => {
+    const it = [...e.items];
+    const cur = it[idx];
+    const prod = products.find(p => p.name === val);
+    const nextPrice = (prod && Number(prod.unit_price) > 0 && !cur.unit_price) ? String(prod.unit_price) : cur.unit_price;
+    it[idx] = { ...cur, description: val, unit_price: nextPrice };
+    return { ...e, items: it };
+  });
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', zIndex: 1000, overflowY: 'auto', padding: '24px 16px' }}>
       <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: '12px', width: '100%', maxWidth: '720px' }}>
         <div style={{ padding: '20px 24px', borderBottom: `1px solid ${theme.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div style={{ fontSize: '16px', fontWeight: '700', color: theme.text }}>Invoice Editor</div>
+          <div>
+            <div style={{ fontSize: '16px', fontWeight: '700', color: theme.text }}>Draft Invoice Editor</div>
+            <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '2px' }}>Saves as a draft (proforma). It becomes a receivable only when issued.</div>
+          </div>
           <button style={{ ...styles.btn('secondary'), padding: '4px 10px' }} onClick={() => setEditor(null)}>✕ Close</button>
         </div>
 
@@ -191,9 +267,12 @@ const InvoiceEditorModal = ({ editor, setEditor, onSave, saving }) => {
 
           {/* Line items */}
           <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: '8px' }}>Line Items</div>
+          <datalist id="invoice-line-products">
+            {products.map(p => <option key={p.id} value={p.name} />)}
+          </datalist>
           {items.map((item, idx) => (
             <div key={idx} style={{ display: 'flex', gap: '8px', marginBottom: '8px', alignItems: 'center' }}>
-              <input style={{ ...styles.input, flex: 2 }} placeholder="Description" value={item.description} onChange={e => updItem(idx, 'description', e.target.value)} />
+              <input list="invoice-line-products" style={{ ...styles.input, flex: 2 }} placeholder="Select or type product…" value={item.description} onChange={e => onDescriptionChange(idx, e.target.value)} />
               <input style={{ ...styles.input, flex: 1 }} type="number" placeholder="Qty" value={item.quantity} onChange={e => updItem(idx, 'quantity', e.target.value)} />
               <input style={{ ...styles.input, flex: 1 }} type="number" placeholder="Unit Price" value={item.unit_price} onChange={e => updItem(idx, 'unit_price', e.target.value)} />
               <div style={{ ...styles.input, flex: 1, background: 'transparent', color: theme.accent, fontWeight: '700', fontSize: '12px' }}>
@@ -243,7 +322,7 @@ const InvoiceEditorModal = ({ editor, setEditor, onSave, saving }) => {
           </div>
 
           <div style={styles.row}>
-            <button style={styles.btn('primary')} onClick={onSave} disabled={saving}>{saving ? 'Saving…' : 'Save & Download PDF'}</button>
+            <button style={styles.btn('primary')} onClick={onSave} disabled={saving}>{saving ? 'Saving…' : 'Save Draft & Download Proforma'}</button>
             <button style={styles.btn('secondary')} onClick={() => setEditor(null)}>Cancel</button>
           </div>
         </div>
@@ -266,7 +345,7 @@ const ConfirmModal = ({ msg, onConfirm, onCancel }) => (
 );
 
 const Icon = ({ name, size = 16 }) => {
-  const icons = { dashboard: "⊞", production: "🏭", orders: "📋", staff: "👥", waybill: "📄", reports: "📊", inventory: "📦", batches: "🗂", pending: "⏳", schedule: "📅", lpo: "📝", approve: "✓", settings: "⚙", products: "🧱", truck: "🚛", supplier: "🏢", logout: "→" };
+  const icons = { dashboard: "⊞", production: "🏭", orders: "📋", staff: "👥", waybill: "📄", reports: "📊", inventory: "📦", batches: "🗂", pending: "⏳", schedule: "📅", lpo: "📝", approve: "✓", settings: "⚙", products: "🧱", truck: "🚛", supplier: "🏢", maintenance: "🔧", logout: "→" };
   return <span style={{ fontSize: size }}>{icons[name] || "•"}</span>;
 };
 
@@ -316,9 +395,10 @@ const Dashboard = ({ onNavigate, userProfile }) => {
 
   const firstOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
   const todayIso = new Date().toISOString().split('T')[0];
+  const weekStart = (() => { const d = new Date(); d.setDate(d.getDate() - d.getDay()); return d.toISOString().split('T')[0]; })();
   const [dateRange, setDateRange] = useState({ from: firstOfMonth, to: todayIso });
 
-  const [stats, setStats] = useState({ staff: 0, produced: 0, orders: 0, revenue: 0, pending: 0, waybills: 0, damages: 0, lpoQueue: 0, scheduleQueue: 0, pendingRegister: 0 });
+  const [stats, setStats] = useState({ staff: 0, produced: 0, orders: 0, revenue: 0, pending: 0, waybills: 0, damages: 0, lpoQueue: 0, scheduleQueue: 0, pendingRegister: 0, blocksLoadedWeek: 0, activeLoadersToday: 0, pendingPayroll: 0, rosterHeadcountToday: 0 });
   const [finishedGoods, setFinishedGoods] = useState([]);
   const [recent, setRecent] = useState([]);
   const [vehicleAlerts, setVehicleAlerts] = useState([]);
@@ -346,7 +426,7 @@ const Dashboard = ({ onNavigate, userProfile }) => {
 
       try {
         const [staffList, productions, orders, waybills] = await Promise.all([
-          needsStaff    ? staffService.getAll()                              : Promise.resolve([]),
+          needsStaff    ? staffService.getPublicList()                        : Promise.resolve([]),
           productionService.getAll({ from: dateRange.from, to: dateRange.to }),
           needsOrders   ? ordersService.getAll({ from: dateRange.from, to: dateRange.to })   : Promise.resolve([]),
           needsWaybills ? waybillsService.getAll({ from: dateRange.from, to: dateRange.to }) : Promise.resolve([]),
@@ -354,7 +434,7 @@ const Dashboard = ({ onNavigate, userProfile }) => {
         const produced = productions.reduce((s, p) => s + (p.quantity_produced || 0), 0);
         const damages  = waybills.reduce((s, w) => s + (w.quantity_damaged || 0), 0);
         const revenue  = orders.reduce((s, o) =>
-          s + (o.invoices || []).flatMap(inv => inv.payments || []).filter(p => p.status === "confirmed").reduce((a, p) => a + p.amount_paid, 0), 0);
+          s + liveInvoices(o.invoices).flatMap(inv => inv.payments || []).filter(p => p.status === "confirmed").reduce((a, p) => a + p.amount_paid, 0), 0);
         const pending  = orders.filter(o => o.status === "pending").length;
         setStats({ staff: staffList.length, produced, orders: orders.length, revenue, pending, waybills: waybills.length, damages, lpoQueue: 0, scheduleQueue: 0, pendingRegister: 0 });
         setRecent(orders.slice(0, 5));
@@ -388,6 +468,18 @@ const Dashboard = ({ onNavigate, userProfile }) => {
         setFinishedGoods(grouped.map(f => ({ ...f, unit: productUnitMap[f.block_type] || 'pieces' })));
         setVehicleAlerts(expiring);
         setRentalVehicles(rentals);
+
+        const needsLabour = can('production_manager', 'assistant_production_manager', 'logistics_manager', 'hr_officer', 'ico', 'md', 'board_member');
+        if (needsLabour) {
+          const [labourLoadLogs, labourPayroll, labourRoster] = await Promise.all([
+            supabase.from('truck_loading_log').select('quantity_loaded, date, loaders:truck_loading_loaders(labour_id)').gte('date', weekStart).lte('date', todayIso).then(r => r.data || []).catch(() => []),
+            supabase.from('weekly_labour_payroll').select('id', { count: 'exact', head: true }).in('status', ['draft', 'ico_approved', 'md_approved']).then(r => r.count || 0).catch(() => 0),
+            supabase.from('daily_roster').select('entries:daily_roster_entries(id)').eq('roster_date', todayIso).maybeSingle().then(r => r.data?.entries?.length || 0).catch(() => 0),
+          ]);
+          const blocksLoadedWeek = labourLoadLogs.reduce((s, r) => s + (r.quantity_loaded || 0), 0);
+          const activeLoaderSet = new Set(labourLoadLogs.filter(r => r.date === todayIso).flatMap(r => (r.loaders || []).map(l => l.labour_id)));
+          setStats(s => ({ ...s, blocksLoadedWeek, activeLoadersToday: activeLoaderSet.size, pendingPayroll: labourPayroll, rosterHeadcountToday: labourRoster }));
+        }
       } catch { /* workflow tables may not exist yet */ } finally {
         setLoading(false);
       }
@@ -443,6 +535,15 @@ const Dashboard = ({ onNavigate, userProfile }) => {
       <StatCard key="damages" label="Transit Damages" value={fmt(stats.damages)} sub="Blocks damaged in delivery" accent={theme.red} />,
   ].filter(Boolean);
 
+  const row3 = can('production_manager', 'assistant_production_manager', 'logistics_manager', 'hr_officer', 'ico', 'md', 'board_member') ? [
+    <StatCard key="blocksLoaded" label="Blocks Loaded This Week" value={fmt(stats.blocksLoadedWeek)} sub="Qty dispatched this week" accent={theme.blue} />,
+    <StatCard key="activeLoaders" label="Active Loaders Today" value={stats.activeLoadersToday} sub="Workers on today's loads" accent={theme.accent} />,
+    <div key="pendingPayroll" style={{ cursor: 'pointer' }} onClick={() => onNavigate('labour')}>
+      <StatCard label="Pending Payroll" value={stats.pendingPayroll} sub="Payrolls awaiting approval" accent={theme.accent} />
+    </div>,
+    <StatCard key="rosterHeadcount" label="Roster Headcount Today" value={stats.rosterHeadcountToday} sub="Workers on today's roster" accent={theme.green} />,
+  ] : [];
+
   const showLpo      = can('md', 'ico', 'bdm') && stats.lpoQueue > 0;
   const showSchedule = can('md', 'ico') && stats.scheduleQueue > 0;
   const showPending  = can('md', 'board_member', 'ico', 'bdm', 'store_officer', 'logistics_manager') && stats.pendingRegister > 0;
@@ -478,6 +579,12 @@ const Dashboard = ({ onNavigate, userProfile }) => {
         <>
           {row1.length > 0 && <div style={styles.grid(row1.length)}>{row1}</div>}
           {row2.length > 0 && <div style={styles.grid(row2.length)}>{row2}</div>}
+          {row3.length > 0 && (
+            <>
+              <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em', marginTop: '8px', marginBottom: '8px' }}>Labour &amp; Loading</div>
+              <div style={styles.grid(row3.length)}>{row3}</div>
+            </>
+          )}
           {(showLpo || showSchedule || showPending) && (
             <div style={{ display: "flex", gap: "12px", marginBottom: "16px", flexWrap: "wrap" }}>
               {showLpo && (
@@ -602,8 +709,24 @@ const Dashboard = ({ onNavigate, userProfile }) => {
 };
 
 // ── PRODUCTION ────────────────────────────────────────────────
-const Production = () => {
+// Compact relative-time formatter for the "edited" indicator.
+const fmtRelativeTime = (iso) => {
+  if (!iso) return "";
+  const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 30) return `${days}d ago`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months}mo ago`;
+  return `${Math.floor(months / 12)}y ago`;
+};
+
+const Production = ({ userProfile }) => {
   const [showForm, setShowForm] = useState(false);
+  const [dupWarning, setDupWarning] = useState(null);
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -614,7 +737,7 @@ const Production = () => {
   const [targets, setTargets] = useState([]);
   const [targetForm, setTargetForm] = useState({ date: new Date().toISOString().split('T')[0], blockType: "9 Inch 3 Hole Block", quantity: "" });
   const [savingTarget, setSavingTarget] = useState(false);
-  const emptyForm = { date: "", blockType: "9 Inch 3 Hole Block", produced: "", cement: "", granite: "", diesel: "", dmgProd: "0", dmgStack: "0" };
+  const emptyForm = { date: "", blockType: "9 Inch 3 Hole Block", produced: "", cement: "", granite: "", chippings: "", diesel: "", dmgProd: "0", dmgStack: "0" };
   const [form, setForm] = useState(emptyForm);
 
   const load = async () => {
@@ -673,6 +796,7 @@ const Production = () => {
       produced: String(record.quantity_produced || ""),
       cement: String(record.cement_bags || ""),
       granite: String(record.granite_dust_kg || ""),
+      chippings: String(record.chippings_kg || ""),
       diesel: String(record.diesel_litres || ""),
       dmgProd: String(record.damaged?.production || 0),
       dmgStack: String(record.damaged?.stacking || 0),
@@ -680,8 +804,16 @@ const Production = () => {
     setShowForm(true);
   };
 
-  const handleSave = async () => {
+  const handleSave = async (skipDupCheck = false) => {
     if (!form.date || !form.produced) return setAlert({ type: "error", msg: "Date and quantity produced are required." });
+    // Create path only: warn (non-blocking) if a same-date + block-type entry
+    // already exists. Fail open — a check error must never block a valid save.
+    if (!editTarget && !skipDupCheck) {
+      try {
+        const dup = records.find(r => r.date === form.date && r.block_type === form.blockType);
+        if (dup) { setDupWarning(dup); return; }
+      } catch (e) { console.error("Duplicate-entry check failed, proceeding:", e); }
+    }
     setSaving(true);
     setAlert(null);
     try {
@@ -692,10 +824,11 @@ const Production = () => {
         quantity_produced: parseInt(form.produced) || 0,
         cement_bags: parseFloat(form.cement) || 0,
         granite_dust_kg: parseFloat(form.granite) || 0,
+        chippings_kg: parseFloat(form.chippings) || 0,
         diesel_litres: parseFloat(form.diesel) || 0,
       };
       if (editTarget) {
-        await productionService.update(editTarget.id, entryData);
+        await productionService.update(editTarget.id, entryData, userProfile?.id);
         await productionService.clearDamages(editTarget.id);
         if (dmgProd > 0) await productionService.logDamage({ date: form.date, block_type: form.blockType, stage: "production", quantity_damaged: dmgProd, production_log_id: editTarget.id });
         if (dmgStack > 0) await productionService.logDamage({ date: form.date, block_type: form.blockType, stage: "stacking", quantity_damaged: dmgStack, production_log_id: editTarget.id });
@@ -705,6 +838,7 @@ const Production = () => {
           await inventoryService.autoDeductProduction({
             cementBags: entryData.cement_bags,
             graniteDustKg: entryData.granite_dust_kg,
+            chippingsKg: entryData.chippings_kg,
             dieselLitres: entryData.diesel_litres,
             date: entryData.date,
             reference: ref,
@@ -720,6 +854,7 @@ const Production = () => {
           await inventoryService.autoDeductProduction({
             cementBags: entryData.cement_bags,
             graniteDustKg: entryData.granite_dust_kg,
+            chippingsKg: entryData.chippings_kg,
             dieselLitres: entryData.diesel_litres,
             date: entryData.date,
             reference: `PROD-${entry.id.slice(0, 8)}`,
@@ -740,12 +875,8 @@ const Production = () => {
 
   const handleDelete = async (record) => {
     try {
-      // Reverse raw material stock movements first
-      try {
-        const ref = `PROD-${record.id.slice(0, 8)}`;
-        await inventoryService.reverseProductionMovements(ref);
-      } catch { /* inventory may not exist */ }
-      // Delete the production entry (also cascades damage_log + batch_production_links)
+      // deleteEntry reverses this entry's raw-material stock movements before
+      // removing the row (and cascades damage_log + batch_production_links).
       await productionService.deleteEntry(record.id);
       setRecords(prev => prev.filter(r => r.id !== record.id));
       setAlert({ type: "success", msg: "Production entry deleted and raw material stock restored." });
@@ -778,6 +909,20 @@ const Production = () => {
         onConfirm={() => handleDelete(confirmDelete)}
         onCancel={() => setConfirmDelete(null)}
       />}
+      {dupWarning && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: "12px", padding: "28px 32px", maxWidth: "440px", width: "90%" }}>
+            <div style={{ fontWeight: "700", fontSize: "15px", marginBottom: "10px", color: theme.text }}>Possible duplicate entry</div>
+            <div style={{ fontSize: "13px", color: theme.textMuted, marginBottom: "24px", lineHeight: "1.5" }}>
+              An entry for <strong style={{ color: theme.text }}>{dupWarning.date}</strong> — <strong style={{ color: theme.text }}>{dupWarning.block_type}</strong> already exists ({fmt(dupWarning.quantity_produced)} produced). Do you want to edit that entry instead, or continue creating a new one?
+            </div>
+            <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
+              <button style={styles.btn("secondary")} onClick={() => { const m = dupWarning; setDupWarning(null); startEdit(m); }}>Edit existing</button>
+              <button style={styles.btn("primary")} onClick={() => { setDupWarning(null); handleSave(true); }}>Create anyway</button>
+            </div>
+          </div>
+        </div>
+      )}
       <div style={styles.header}>
         <div>
           <div style={styles.pageTitle}>Production Log</div>
@@ -851,6 +996,7 @@ const Production = () => {
               { label: "Quantity Produced", key: "produced", placeholder: "e.g. 850" },
               { label: "Cement Bags Used", key: "cement", placeholder: "bags" },
               { label: "Granite Dust (kg)", key: "granite", placeholder: "kg" },
+              { label: "Chippings (kg)", key: "chippings", placeholder: "kg" },
               { label: "Diesel Used (litres)", key: "diesel", placeholder: "litres" },
               { label: "Damaged During Production", key: "dmgProd", placeholder: "0" },
               { label: "Damaged During Stacking", key: "dmgStack", placeholder: "0" },
@@ -862,7 +1008,7 @@ const Production = () => {
             ))}
           </div>
           <div style={styles.row}>
-            <button style={styles.btn("primary")} onClick={handleSave} disabled={saving}>{saving ? "Saving…" : editTarget ? "Update Entry" : "Save Entry"}</button>
+            <button style={styles.btn("primary")} onClick={() => handleSave()} disabled={saving}>{saving ? "Saving…" : editTarget ? "Update Entry" : "Save Entry"}</button>
             <button style={styles.btn("secondary")} onClick={() => { setShowForm(false); setForm(emptyForm); setEditTarget(null); }}>Cancel</button>
           </div>
         </div>
@@ -882,18 +1028,26 @@ const Production = () => {
         ) : (
           <table style={styles.table}>
             <thead>
-              <tr>{["Date", "Block Type", "Produced", "Cement (bags)", "Granite (kg)", "Diesel (L)", "Dmg Production", "Dmg Stacking", "Net Output", ""].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
+              <tr>{["Date", "Block Type", "Produced", "Cement (bags)", "Granite (kg)", "Chippings (kg)", "Diesel (L)", "Dmg Production", "Dmg Stacking", "Net Output", ""].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
             </thead>
             <tbody>
               {records.map((p) => {
                 const net = (p.quantity_produced || 0) - (p.damaged?.production || 0) - (p.damaged?.stacking || 0);
                 return (
                   <tr key={p.id}>
-                    <td style={styles.td}>{p.date}</td>
+                    <td style={styles.td}>
+                      {p.date}
+                      {p.updated_at && (
+                        <div style={{ fontSize: "10px", color: theme.textMuted, marginTop: "2px", fontStyle: "italic" }} title={`Edited ${new Date(p.updated_at).toLocaleString()}`}>
+                          (edited {fmtRelativeTime(p.updated_at)})
+                        </div>
+                      )}
+                    </td>
                     <td style={styles.td}><span style={styles.badge(theme.blue)}>{p.block_type}</span></td>
                     <td style={styles.td}>{fmt(p.quantity_produced)}</td>
                     <td style={styles.td}>{p.cement_bags}</td>
                     <td style={styles.td}>{fmt(p.granite_dust_kg)}</td>
+                    <td style={styles.td}>{fmt(p.chippings_kg)}</td>
                     <td style={styles.td}>{p.diesel_litres}</td>
                     <td style={styles.td}><span style={styles.badge(p.damaged?.production > 0 ? theme.red : theme.green)}>{p.damaged?.production || 0}</span></td>
                     <td style={styles.td}><span style={styles.badge(p.damaged?.stacking > 0 ? theme.red : theme.green)}>{p.damaged?.stacking || 0}</span></td>
@@ -916,7 +1070,7 @@ const Production = () => {
 };
 
 // ── ORDERS ────────────────────────────────────────────────────
-const emptyItem = () => ({ blockType: "9 Inch 3 Hole Block", quantity: "", unitPrice: "", unit: "pieces" });
+const emptyItem = () => ({ blockType: "9 Inch 3 Hole Block", quantity: "", unitPrice: "", unit: "pieces", sourceType: "manufactured", costBasis: "" });
 
 const Orders = ({ onNavigate, userProfile }) => {
   const [orders, setOrders] = useState([]);
@@ -940,6 +1094,7 @@ const Orders = ({ onNavigate, userProfile }) => {
   const emptyForm = { customerName: "", customerPhone: "", customerLocation: "", marketerId: "", items: [emptyItem()], isLpo: false, lpoSubmittedBy: "" };
   const [form, setForm] = useState(emptyForm);
   const [lpoDocUrl, setLpoDocUrl] = useState("");
+  const [lpoDocSignedUrl, setLpoDocSignedUrl] = useState("");
   const [lpoDocName, setLpoDocName] = useState("");
   const [lpoDocSize, setLpoDocSize] = useState(0);
   const [lpoDocUploading, setLpoDocUploading] = useState(false);
@@ -947,8 +1102,25 @@ const Orders = ({ onNavigate, userProfile }) => {
   const [orderEditMode, setOrderEditMode] = useState(false);
   const [orderEditItems, setOrderEditItems] = useState([]);
   const [orderEditMarketer, setOrderEditMarketer] = useState("");
+  const [confirmDeleteInvoice, setConfirmDeleteInvoice] = useState(null);
+  const [invDeleting, setInvDeleting] = useState(false);
+  const [invDeleteMsg, setInvDeleteMsg] = useState(null);
+  const [orderDeleteMsg, setOrderDeleteMsg] = useState(null);
+  const [issueTarget, setIssueTarget] = useState(null);
+  const [cancelTarget, setCancelTarget] = useState(null);
+  const [cancelReason, setCancelReason] = useState('');
+  const [invActioning, setInvActioning] = useState(false);
 
   const isMarketerRole = userProfile?.role === 'marketer';
+  // Roles that may create/edit orders. md/accountant/bdm are checked via
+  // hasRole() because orders_insert/update use has_any_role and orders_select
+  // admits them through its has_any_role branch. 'marketer' is deliberately
+  // PRIMARY-only: orders_select admits marketer solely via get_user_role(), so
+  // a *granted* marketer could insert a row it cannot then select. Marketer is
+  // not grantable.
+  const ORDER_WRITE_ROLES_GRANTABLE = ['md', 'accountant', 'bdm'];
+  const canWriteOrder = hasRole(userProfile, ...ORDER_WRITE_ROLES_GRANTABLE)
+                        || userProfile?.role === 'marketer';
 
   const load = async () => {
     setLoading(true);
@@ -959,7 +1131,7 @@ const Orders = ({ onNavigate, userProfile }) => {
       const fetchCustomers = isMarketerRole
         ? customersService.getAllForMarketer(userProfile.id)
         : customersService.getAll();
-      const [o, s, c] = await Promise.all([fetchOrders, staffService.getActive(), fetchCustomers]);
+      const [o, s, c] = await Promise.all([fetchOrders, staffService.getPublicActive(), fetchCustomers]);
       setOrders(o);
       setStaff(s);
       setAllCustomers(c);
@@ -983,11 +1155,11 @@ const Orders = ({ onNavigate, userProfile }) => {
   }, [pickedCustomer?.id]);
 
   const orderTotal = (order) => {
-    const invoiced = (order.invoices || []).reduce((s, inv) => s + Number(inv.total_amount ?? 0), 0);
+    const invoiced = liveInvoices(order.invoices).reduce((s, inv) => s + Number(inv.total_amount ?? 0), 0);
     const itemTotal = (order.order_items || []).reduce((s, i) => s + (i.subtotal || i.quantity * i.unit_price), 0);
     return invoiced !== 0 ? invoiced : itemTotal;
   };
-  const orderPaid = (order) => (order.invoices || []).flatMap(inv => inv.payments || []).filter(p => p.status === "confirmed").reduce((s, p) => s + p.amount_paid, 0);
+  const orderPaid = (order) => liveInvoices(order.invoices).flatMap(inv => inv.payments || []).filter(p => p.status === "confirmed").reduce((s, p) => s + p.amount_paid, 0);
   const orderQty = (order) => (order.order_items || []).reduce((s, i) => s + i.quantity, 0);
 
   const updateItem = (idx, field, val) => {
@@ -1000,8 +1172,9 @@ const Orders = ({ onNavigate, userProfile }) => {
     if (!file) return;
     setLpoDocUploading(true);
     try {
-      const url = await lpoService.uploadDocument(file);
-      setLpoDocUrl(url);
+      const path = await lpoService.uploadDocument(file);
+      setLpoDocUrl(path);
+      setLpoDocSignedUrl(await lpoService.getSignedUrl(path).catch(() => ""));
       setLpoDocName(file.name);
       setLpoDocSize(file.size);
     } catch (e) {
@@ -1033,7 +1206,7 @@ const Orders = ({ onNavigate, userProfile }) => {
       }
       const newOrder = await ordersService.create({
         order: { customer_id: customerId, marketer_id: form.marketerId || null, status: "pending", is_lpo: form.isLpo || false, site_id: siteId },
-        items: form.items.map(i => ({ block_type: i.blockType, quantity: parseInt(i.quantity), unit_price: parseFloat(i.unitPrice) })),
+        items: form.items.map(i => ({ block_type: i.blockType, quantity: parseInt(i.quantity), unit_price: parseFloat(i.unitPrice), source_type: i.sourceType || 'manufactured', cost_basis: (i.sourceType === 'resale' && i.costBasis) ? parseFloat(i.costBasis) : null })),
       });
       if (form.isLpo) {
         try {
@@ -1042,7 +1215,7 @@ const Orders = ({ onNavigate, userProfile }) => {
       }
       await load();
       setForm(emptyForm);
-      setLpoDocUrl(""); setLpoDocName(""); setLpoDocSize(0);
+      setLpoDocUrl(""); setLpoDocSignedUrl(""); setLpoDocName(""); setLpoDocSize(0);
       setPickedCustomer(null);
       setPickedSiteId("");
       setCustomerSites([]);
@@ -1057,49 +1230,138 @@ const Orders = ({ onNavigate, userProfile }) => {
     }
   };
 
-  const handleGenerateInvoice = async () => {
-    if (!selected) return;
-    const today = new Date().toISOString().split("T")[0];
-    const due = new Date(Date.now() + 30 * 86400000).toISOString().split("T")[0];
-    let productMap = {};
+  // Map product name → unit for editor/PDF line labels.
+  const loadProductUnits = async () => {
+    const productMap = {};
     try {
       const prods = await productsService.getActive();
       prods.forEach(p => { productMap[p.name] = p.unit; });
     } catch {}
-    const buildItems = (orderItems) => orderItems.map(i => ({
-      description: i.block_type || i.description || "",
-      quantity: i.quantity,
-      unit_price: i.unit_price,
-      unit: productMap[i.block_type] || "",
-    }));
-    const existingInvoice = (selected.invoices || [])[0];
-    if (existingInvoice) {
-      const editorItems = buildItems(selected.order_items || []);
-      setInvoiceEditor({
-        invoice_number: existingInvoice.invoice_number,
-        issued_date: existingInvoice.issued_date || today,
-        due_date: existingInvoice.due_date || due,
-        items: editorItems.length > 0 ? editorItems : [{ description: "", quantity: "", unit_price: "", unit: "" }],
-        delivery_cost: "",
-        include_vat: true,
-        discount: "",
-        _existingId: existingInvoice.id,
-      });
-    } else {
-      const count = orders.reduce((s, o) => s + (o.invoices || []).length, 0);
-      const year = new Date().getFullYear();
-      const invoiceNumber = `APC-INV-${year}-${String((count || 0) + 1).padStart(3, "0")}`;
-      const editorItems = buildItems(selected.order_items || []);
-      setInvoiceEditor({
-        invoice_number: invoiceNumber,
-        issued_date: today,
-        due_date: due,
-        items: editorItems.length > 0 ? editorItems : [{ description: "", quantity: "", unit_price: "", unit: "" }],
-        delivery_cost: "",
-        include_vat: true,
-        discount: "",
-        _existingId: null,
-      });
+    return productMap;
+  };
+
+  // Open the line-item editor. For a NEW invoice this creates a draft on save;
+  // for an EXISTING (draft) invoice it loads the saved line items, falling back
+  // to the order's own items when the invoice predates invoice_items.
+  const handleGenerateInvoice = async () => {
+    if (!selected) return;
+    setInvoicing(true);
+    try {
+      const today = new Date().toISOString().split("T")[0];
+      const due = new Date(Date.now() + 30 * 86400000).toISOString().split("T")[0];
+      const productMap = await loadProductUnits();
+      const fromOrderItems = (orderItems) => orderItems.map(i => ({
+        description: i.block_type || i.description || "",
+        quantity: i.quantity,
+        unit_price: i.unit_price,
+        unit: productMap[i.block_type] || "",
+      }));
+      const existingInvoice = (selected.invoices || [])[0];
+      if (existingInvoice) {
+        // Read saved line items; fall back to order_items if none exist yet
+        // (existing invoices have no invoice_items rows).
+        let savedItems = [];
+        try { savedItems = await invoicesService.getItems(existingInvoice.id); } catch {}
+        const editorItems = savedItems.length > 0
+          ? savedItems.map(it => ({ description: it.block_type || "", quantity: it.quantity, unit_price: it.unit_price, unit: productMap[it.block_type] || "" }))
+          : fromOrderItems(selected.order_items || []);
+        setInvoiceEditor({
+          invoice_number: existingInvoice.invoice_number,
+          issued_date: existingInvoice.issued_date || today,
+          due_date: existingInvoice.due_date || due,
+          items: editorItems.length > 0 ? editorItems : [{ description: "", quantity: "", unit_price: "", unit: "" }],
+          delivery_cost: existingInvoice.delivery_cost != null ? String(existingInvoice.delivery_cost) : "",
+          include_vat: existingInvoice.include_vat != null ? existingInvoice.include_vat : true,
+          discount: existingInvoice.discount != null ? String(existingInvoice.discount) : "",
+          status: existingInvoice.status || 'draft',
+          _existingId: existingInvoice.id,
+        });
+      } else {
+        const invoiceNumber = await invoicesService.getNextNumber();
+        const editorItems = fromOrderItems(selected.order_items || []);
+        setInvoiceEditor({
+          invoice_number: invoiceNumber,
+          issued_date: today,
+          due_date: due,
+          items: editorItems.length > 0 ? editorItems : [{ description: "", quantity: "", unit_price: "", unit: "" }],
+          delivery_cost: "",
+          include_vat: true,
+          discount: "",
+          status: 'draft',
+          _existingId: null,
+        });
+      }
+    } catch (e) {
+      setAlert({ type: "error", msg: "Could not open the invoice editor. " + (e?.message || String(e)) });
+    } finally {
+      setInvoicing(false);
+    }
+  };
+
+  // Download a PDF for an already-saved invoice without opening the editor.
+  // A draft renders as a PROFORMA INVOICE; issued/paid as an INVOICE.
+  const handleDownloadInvoicePDF = async (invoice) => {
+    if (!invoice) return;
+    setInvoicing(true);
+    try {
+      const productMap = await loadProductUnits();
+      let items = [];
+      try { items = await invoicesService.getItems(invoice.id); } catch {}
+      const pdfItems = items.length > 0
+        ? items.map(it => ({ description: it.block_type || "", quantity: it.quantity, unit_price: it.unit_price, unit: productMap[it.block_type] || "" }))
+        : (selected?.order_items || []).map(i => ({ description: i.block_type || "", quantity: i.quantity, unit_price: i.unit_price, unit: productMap[i.block_type] || "" }));
+      const customer = selected?.customer || { name: selected?.customerName, location: selected?.customerLocation, phone: selected?.customerPhone };
+      await generateInvoicePDF({
+        invoice_number: invoice.invoice_number,
+        issued_date: invoice.issued_date,
+        due_date: invoice.due_date,
+        items: pdfItems,
+        delivery_cost: Number(invoice.delivery_cost) || 0,
+        include_vat: invoice.include_vat != null ? invoice.include_vat : true,
+        discount: Number(invoice.discount) || 0,
+        status: invoice.status || 'issued',
+      }, customer);
+    } catch (e) {
+      setAlert({ type: "error", msg: "Could not generate the PDF. " + (e?.message || String(e)) });
+    } finally {
+      setInvoicing(false);
+    }
+  };
+
+  const doIssueInvoice = async (invoice) => {
+    setInvActioning(true);
+    try {
+      await invoicesService.issue(invoice.id);
+      // Issuing a draft is the point the order becomes a firm sale — advance it
+      // to 'invoiced' now (a draft/quotation left it untouched).
+      if (selected?.id) { try { await ordersService.updateStatus(selected.id, "invoiced"); } catch {} }
+      setIssueTarget(null);
+      const newOrders = await load();
+      if (newOrders) setSelected(newOrders.find(o => o.id === selected?.id) || null);
+      setAlert({ type: "success", msg: `Invoice ${invoice.invoice_number} issued — it is now a receivable.` });
+    } catch (e) {
+      setIssueTarget(null);
+      setAlert({ type: "error", msg: cleanInvoiceError(e) });
+    } finally {
+      setInvActioning(false);
+    }
+  };
+
+  const doCancelInvoice = async () => {
+    if (!cancelTarget || !cancelReason.trim()) return;
+    setInvActioning(true);
+    try {
+      await invoicesService.cancel(cancelTarget.id, { cancelled_by_name: userProfile?.full_name, cancellation_reason: cancelReason.trim() });
+      const target = cancelTarget;
+      setCancelTarget(null);
+      setCancelReason('');
+      const newOrders = await load();
+      if (newOrders) setSelected(newOrders.find(o => o.id === selected?.id) || null);
+      setAlert({ type: "success", msg: `Invoice ${target.invoice_number} cancelled.` });
+    } catch (e) {
+      setAlert({ type: "error", msg: cleanInvoiceError(e) });
+    } finally {
+      setInvActioning(false);
     }
   };
 
@@ -1108,6 +1370,7 @@ const Orders = ({ onNavigate, userProfile }) => {
     setInvoicing(true);
     try {
       const { _existingId, invoice_number, issued_date, due_date, items, delivery_cost, include_vat, discount } = invoiceEditor;
+      let invNum = invoice_number;
       const itemSubtotal = items.reduce((s, i) => s + (Number(i.quantity) || 0) * (Number(i.unit_price) || 0), 0);
       const delivN = Number(delivery_cost) || 0;
       const discN = Number(discount) || 0;
@@ -1116,23 +1379,44 @@ const Orders = ({ onNavigate, userProfile }) => {
       const vat = include_vat ? afterDisc * 0.075 : 0;
       const total = afterDisc + vat;
 
+      // Persist the full editor state — line items, delivery, discount and VAT
+      // toggle — not just the total (the old bug silently dropped everything but
+      // number/dates/total).
+      const contentFields = { invoice_number, issued_date, due_date, total_amount: total, delivery_cost: delivN, discount: discN, include_vat };
       const orderId = selected.id;
       let invoiceId = _existingId;
       if (_existingId) {
-        await invoicesService.update(_existingId, { invoice_number, issued_date, due_date, total_amount: total });
+        await invoicesService.update(_existingId, contentFields);
       } else {
-        const newInvoice = await invoicesService.create({ order_id: orderId, invoice_number, issued_date, due_date, total_amount: total });
+        let newInvoice;
+        const draftFields = { order_id: orderId, status: 'draft', created_by: userProfile?.id || null, created_by_name: userProfile?.full_name || null, ...contentFields };
+        try {
+          newInvoice = await invoicesService.create({ ...draftFields, invoice_number: invNum });
+        } catch (createErr) {
+          if (createErr.code === '23505') {
+            invNum = await invoicesService.getNextNumber();
+            newInvoice = await invoicesService.create({ ...draftFields, invoice_number: invNum });
+          } else {
+            throw createErr;
+          }
+        }
         invoiceId = newInvoice.id;
-        await ordersService.updateStatus(orderId, "invoiced");
+        // NOTE: the order is NOT advanced to 'invoiced' here — a draft is a
+        // quotation and must leave the order status untouched. The order
+        // advances to 'invoiced' when the invoice is ISSUED (see doIssueInvoice).
       }
 
+      // Write the line items (replace-all, only when changed; DB blocks this on
+      // non-drafts, which the editor is only ever opened on).
+      await invoicesService.saveItems(invoiceId, items);
+
       const customer = selected.customer || { name: selected.customerName, location: selected.customerLocation, phone: selected.customerPhone };
-      await generateInvoicePDF({ invoice_number, issued_date, due_date, items, delivery_cost: delivN, include_vat, discount: discN }, customer);
+      await generateInvoicePDF({ invoice_number: invNum, issued_date, due_date, items, delivery_cost: delivN, include_vat, discount: discN, status: 'draft' }, customer);
 
       setInvoiceEditor(null);
       const newOrders = await load();
       if (newOrders) setSelected(newOrders.find(o => o.id === orderId) || null);
-      setAlert({ type: "success", msg: `Invoice ${invoice_number} saved and downloaded!` });
+      setAlert({ type: "success", msg: `Draft invoice ${invNum} saved. Proforma downloaded.` });
     } catch (e) {
       if (e.message?.includes('invoices_order_id_fkey')) {
         setInvoiceEditor(null);
@@ -1140,7 +1424,7 @@ const Orders = ({ onNavigate, userProfile }) => {
         setSelected(newOrders?.find(o => o.id === selected?.id) || null);
         setAlert({ type: "error", msg: "This order no longer exists in the system. The list has been refreshed." });
       } else {
-        setAlert({ type: "error", msg: "Failed to save invoice. " + e.message });
+        setAlert({ type: "error", msg: cleanInvoiceError(e) });
       }
     } finally {
       setInvoicing(false);
@@ -1159,8 +1443,8 @@ const Orders = ({ onNavigate, userProfile }) => {
         await paymentsService.recordPayment({ invoice_id: invoice.id, amount_paid: parseFloat(payForm.amount), payment_date: payForm.date, status: "confirmed" });
         // Check if order is now fully paid → add to pending delivery register
         try {
-          const totalInvoiced = (selected.invoices || []).reduce((s, inv) => s + Number(inv.total_amount || 0), 0);
-          const alreadyPaid = (selected.invoices || []).flatMap(inv => (inv.payments || []).filter(p => p.status === "confirmed")).reduce((s, p) => s + Number(p.amount_paid), 0);
+          const totalInvoiced = liveInvoices(selected.invoices).reduce((s, inv) => s + Number(inv.total_amount || 0), 0);
+          const alreadyPaid = liveInvoices(selected.invoices).flatMap(inv => (inv.payments || []).filter(p => p.status === "confirmed")).reduce((s, p) => s + Number(p.amount_paid), 0);
           const newTotal = alreadyPaid + parseFloat(payForm.amount);
           if (newTotal >= totalInvoiced && totalInvoiced > 0) {
             const fullOrder = await ordersService.getById(selected.id);
@@ -1207,8 +1491,57 @@ const Orders = ({ onNavigate, userProfile }) => {
     }
   };
 
+  const handleDeleteOrderClick = async (order) => {
+    setOrderDeleteMsg(null);
+    try {
+      const invoiceIds = (order.invoices || []).map(i => i.id);
+      const payments = await orderPaymentsService.getByOrderInvoices(invoiceIds);
+      if (payments.length > 0) {
+        setOrderDeleteMsg(`${payments.length} payment${payments.length > 1 ? 's are' : ' is'} recorded against this order's invoice(s) and must be removed first.`);
+        return;
+      }
+      setConfirmDelete(order);
+    } catch (e) {
+      setAlert({ type: 'error', msg: 'Could not check order payments: ' + (e?.message || String(e)) });
+    }
+  };
+
+  const handleDeleteInvoice = async (invoice) => {
+    setInvDeleteMsg(null);
+    try {
+      const payments = await paymentsService.getByInvoice(invoice.id);
+      if (payments.length > 0) {
+        setInvDeleteMsg(`${payments.length} payment${payments.length > 1 ? 's are' : ' is'} recorded against this invoice and must be handled first.`);
+        return;
+      }
+      setConfirmDeleteInvoice(invoice);
+    } catch (e) {
+      setAlert({ type: 'error', msg: 'Could not check invoice payments: ' + (e?.message || String(e)) });
+    }
+  };
+
+  const doDeleteInvoice = async (invoice) => {
+    setInvDeleting(true);
+    try {
+      await invoicesService.delete(invoice.id);
+      setConfirmDeleteInvoice(null);
+      const newOrders = await load();
+      if (newOrders) setSelected(newOrders.find(o => o.id === selected?.id) || null);
+      setAlert({ type: 'success', msg: `Invoice ${invoice.invoice_number} deleted.` });
+    } catch (e) {
+      setConfirmDeleteInvoice(null);
+      if (e?.code === '23503' || e?.message?.includes('foreign key')) {
+        setInvDeleteMsg('This invoice has payments recorded against it and cannot be deleted.');
+      } else {
+        setAlert({ type: 'error', msg: e?.message || 'Delete failed.' });
+      }
+    } finally {
+      setInvDeleting(false);
+    }
+  };
+
   const startOrderEdit = (order) => {
-    setOrderEditItems((order.order_items || []).map(i => ({ blockType: i.block_type, quantity: String(i.quantity), unitPrice: String(i.unit_price) })));
+    setOrderEditItems((order.order_items || []).map(i => ({ blockType: i.block_type, quantity: String(i.quantity), unitPrice: String(i.unit_price), sourceType: i.source_type || 'manufactured', costBasis: i.cost_basis != null ? String(i.cost_basis) : '' })));
     setOrderEditMarketer(order.marketer_id || "");
     setOrderEditMode(true);
   };
@@ -1218,7 +1551,7 @@ const Orders = ({ onNavigate, userProfile }) => {
     try {
       await ordersService.updateOrder(selected.id, {
         marketerId: orderEditMarketer || null,
-        items: orderEditItems.map(i => ({ block_type: i.blockType, quantity: parseInt(i.quantity), unit_price: parseFloat(i.unitPrice) })),
+        items: orderEditItems.map(i => ({ block_type: i.blockType, quantity: parseInt(i.quantity), unit_price: parseFloat(i.unitPrice), source_type: i.sourceType || 'manufactured', cost_basis: (i.sourceType === 'resale' && i.costBasis) ? parseFloat(i.costBasis) : null })),
       });
       const newOrders = await load();
       if (newOrders) setSelected(newOrders.find(o => o.id === selected.id) || null);
@@ -1236,17 +1569,53 @@ const Orders = ({ onNavigate, userProfile }) => {
 
   return (
     <div>
-      {confirmDelete && <ConfirmModal msg={confirmDelete.type === "payment" ? `Remove payment of ${naira(confirmDelete.amount_paid)} recorded on ${confirmDelete.payment_date}? This cannot be undone.` : `Delete order for ${confirmDelete.customer?.name}? This will also delete all invoices and payments.`} onConfirm={() => confirmDelete.type === "payment" ? handleDeletePayment(confirmDelete.id) : handleDeleteOrder(confirmDelete.id)} onCancel={() => setConfirmDelete(null)} />}
+      {confirmDelete && <ConfirmModal msg={confirmDelete.type === "payment" ? `Remove payment of ${naira(confirmDelete.amount_paid)} recorded on ${confirmDelete.payment_date}? This cannot be undone.` : `Delete order for ${confirmDelete.customer?.name}? This will also delete all invoices. This cannot be undone.`} onConfirm={() => confirmDelete.type === "payment" ? handleDeletePayment(confirmDelete.id) : handleDeleteOrder(confirmDelete.id)} onCancel={() => setConfirmDelete(null)} />}
+      {confirmDeleteInvoice && <ConfirmModal msg={`Delete invoice ${confirmDeleteInvoice.invoice_number}? This cannot be undone.`} onConfirm={() => doDeleteInvoice(confirmDeleteInvoice)} onCancel={() => setConfirmDeleteInvoice(null)} />}
+      {issueTarget && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: "16px" }}>
+          <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: "12px", padding: "28px 32px", maxWidth: "440px", width: "100%" }}>
+            <div style={{ fontWeight: "700", fontSize: "15px", marginBottom: "10px", color: theme.text }}>Issue invoice {issueTarget.invoice_number}?</div>
+            <div style={{ fontSize: "13px", color: theme.textMuted, marginBottom: "24px", lineHeight: "1.55" }}>
+              Issuing <strong style={{ color: theme.text }}>locks</strong> the invoice — its line items, amounts and number can no longer be changed — and it becomes a firm <strong style={{ color: theme.text }}>receivable</strong> counting toward revenue and outstanding balances. To correct it later you would cancel and reissue.
+            </div>
+            <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
+              <button style={styles.btn("secondary")} onClick={() => setIssueTarget(null)} disabled={invActioning}>Not yet</button>
+              <button style={{ ...styles.btn("primary"), background: theme.green }} onClick={() => doIssueInvoice(issueTarget)} disabled={invActioning}>{invActioning ? "Issuing…" : "Issue Invoice"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {cancelTarget && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: "16px" }}>
+          <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: "12px", padding: "28px 32px", maxWidth: "440px", width: "100%" }}>
+            <div style={{ fontWeight: "700", fontSize: "15px", marginBottom: "10px", color: theme.text }}>Cancel invoice {cancelTarget.invoice_number}</div>
+            <div style={{ fontSize: "13px", color: theme.textMuted, marginBottom: "14px", lineHeight: "1.55" }}>
+              A cancelled invoice is voided and stops counting as a receivable. This cannot be undone. Please give a reason.
+            </div>
+            <textarea style={{ ...styles.input, minHeight: "72px", resize: "vertical", marginBottom: "18px" }} placeholder="Reason for cancellation (required)…" value={cancelReason} onChange={e => setCancelReason(e.target.value)} autoFocus />
+            <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
+              <button style={styles.btn("secondary")} onClick={() => { setCancelTarget(null); setCancelReason(''); }} disabled={invActioning}>Close</button>
+              <button style={{ ...styles.btn("danger"), opacity: cancelReason.trim() ? 1 : 0.5 }} onClick={doCancelInvoice} disabled={invActioning || !cancelReason.trim()}>{invActioning ? "Cancelling…" : "Confirm Cancellation"}</button>
+            </div>
+          </div>
+        </div>
+      )}
       <InvoiceEditorModal editor={invoiceEditor} setEditor={setInvoiceEditor} onSave={handleSaveInvoice} saving={invoicing} />
       <div style={styles.header}>
         <div>
           <div style={styles.pageTitle}>Orders & Invoicing</div>
           <div style={styles.pageSubtitle}>Customer orders, payment tracking, and delivery status</div>
         </div>
-        {userProfile?.role !== 'ico' && <button style={styles.btn("primary")} onClick={() => setShowForm(!showForm)}>+ New Order</button>}
+        {canWriteOrder && <button style={styles.btn("primary")} onClick={() => setShowForm(!showForm)}>+ New Order</button>}
       </div>
 
       {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
+      {orderDeleteMsg && (
+        <div style={{ margin: "0 0 12px", padding: "10px 14px", background: theme.red + '18', border: `1px solid ${theme.red}44`, borderRadius: "6px", fontSize: "13px", color: theme.red, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span>{orderDeleteMsg}</span>
+          <button style={{ background: "none", border: "none", color: theme.red, cursor: "pointer", fontWeight: "700", fontSize: "14px", padding: "0 4px" }} onClick={() => setOrderDeleteMsg(null)}>×</button>
+        </div>
+      )}
 
       {showForm && (
         <div style={{ ...styles.card, marginBottom: "24px", borderColor: theme.accent + "44" }}>
@@ -1321,27 +1690,45 @@ const Orders = ({ onNavigate, userProfile }) => {
           <div style={{ marginBottom: "16px" }}>
             <div style={{ fontSize: "12px", fontWeight: "700", color: theme.textMuted, marginBottom: "10px", textTransform: "uppercase", letterSpacing: "0.06em" }}>Order Items</div>
             {form.items.map((item, idx) => (
-              <div key={idx} style={{ display: "flex", gap: "10px", marginBottom: "10px", alignItems: "flex-end" }}>
-                <div style={{ flex: 1 }}>
-                  {idx === 0 && <label style={styles.label}>Block Type</label>}
-                  <ProductSelect value={item.blockType} onChange={(name, unit) => { const its = [...form.items]; its[idx] = { ...its[idx], blockType: name, unit }; setForm({ ...form, items: its }); }} style={styles.input} />
-                </div>
-                <div style={{ flex: 1 }}>
-                  {idx === 0 && <label style={styles.label}>Quantity</label>}
-                  <input style={styles.input} type="number" placeholder="e.g. 10000" value={item.quantity} onChange={e => updateItem(idx, "quantity", e.target.value)} />
-                </div>
-                <div style={{ flex: 1 }}>
-                  {idx === 0 && <label style={styles.label}>Unit Price (₦)</label>}
-                  <input style={styles.input} type="number" placeholder="e.g. 250" value={item.unitPrice} onChange={e => updateItem(idx, "unitPrice", e.target.value)} />
-                </div>
-                <div style={{ flex: 1 }}>
-                  {idx === 0 && <label style={styles.label}>Subtotal</label>}
-                  <div style={{ ...styles.input, background: "transparent", color: theme.accent, fontWeight: "700" }}>
-                    {item.quantity && item.unitPrice ? naira(parseInt(item.quantity) * parseFloat(item.unitPrice)) : "—"}
+              <div key={idx} style={{ marginBottom: "12px", padding: item.sourceType === 'resale' ? "10px" : "0", background: item.sourceType === 'resale' ? theme.accent + "08" : "transparent", borderRadius: "6px", border: item.sourceType === 'resale' ? `1px solid ${theme.accent}33` : "1px solid transparent" }}>
+                <div style={{ display: "flex", gap: "10px", marginBottom: item.sourceType === 'resale' ? "8px" : "0", alignItems: "flex-end" }}>
+                  <div style={{ flex: 1 }}>
+                    {idx === 0 && <label style={styles.label}>Block Type</label>}
+                    <ProductSelect value={item.blockType} onChange={(name, unit) => { const its = [...form.items]; its[idx] = { ...its[idx], blockType: name, unit }; setForm({ ...form, items: its }); }} style={styles.input} />
                   </div>
+                  <div style={{ flex: 1 }}>
+                    {idx === 0 && <label style={styles.label}>Quantity</label>}
+                    <input style={styles.input} type="number" placeholder="e.g. 10000" value={item.quantity} onChange={e => updateItem(idx, "quantity", e.target.value)} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    {idx === 0 && <label style={styles.label}>Unit Price (₦)</label>}
+                    <input style={styles.input} type="number" placeholder="e.g. 250" value={item.unitPrice} onChange={e => updateItem(idx, "unitPrice", e.target.value)} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    {idx === 0 && <label style={styles.label}>Subtotal</label>}
+                    <div style={{ ...styles.input, background: "transparent", color: theme.accent, fontWeight: "700" }}>
+                      {item.quantity && item.unitPrice ? naira(parseInt(item.quantity) * parseFloat(item.unitPrice)) : "—"}
+                    </div>
+                  </div>
+                  <div style={{ flex: "0 0 auto" }}>
+                    {idx === 0 && <label style={styles.label}>Source</label>}
+                    <div style={{ display: "flex", gap: "3px" }}>
+                      {["manufactured", "resale"].map(t => (
+                        <button key={t} type="button" style={{ ...styles.btn(item.sourceType === t ? "primary" : "secondary"), padding: "6px 9px", fontSize: "11px" }} onClick={() => updateItem(idx, "sourceType", t)}>
+                          {t === "manufactured" ? "Mfg" : "Resale"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {form.items.length > 1 && (
+                    <button style={{ ...styles.btn("danger"), padding: "9px 12px", alignSelf: "flex-end" }} onClick={() => setForm({ ...form, items: form.items.filter((_, i) => i !== idx) })}>✕</button>
+                  )}
                 </div>
-                {form.items.length > 1 && (
-                  <button style={{ ...styles.btn("danger"), padding: "9px 12px", alignSelf: idx === 0 ? "flex-end" : "center" }} onClick={() => setForm({ ...form, items: form.items.filter((_, i) => i !== idx) })}>✕</button>
+                {item.sourceType === 'resale' && (
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    <label style={{ ...styles.label, marginBottom: 0, fontSize: "12px", whiteSpace: "nowrap" }}>Partner cost (₦):</label>
+                    <input style={{ ...styles.input, maxWidth: "200px" }} type="number" min="0" placeholder="Cost basis (optional)" value={item.costBasis} onChange={e => updateItem(idx, "costBasis", e.target.value)} />
+                  </div>
                 )}
               </div>
             ))}
@@ -1366,8 +1753,8 @@ const Orders = ({ onNavigate, userProfile }) => {
                   <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
                     <span style={{ fontSize: "12px", color: theme.green }}>✓ {lpoDocName}</span>
                     <span style={{ fontSize: "11px", color: theme.textMuted }}>({(lpoDocSize / 1024).toFixed(1)} KB)</span>
-                    <a href={lpoDocUrl} target="_blank" rel="noreferrer" style={{ fontSize: "11px", color: theme.blue, textDecoration: "underline" }}>Preview</a>
-                    <button style={{ ...styles.btn("danger"), padding: "2px 8px", fontSize: "11px" }} onClick={() => { setLpoDocUrl(""); setLpoDocName(""); setLpoDocSize(0); }}>Remove</button>
+                    {lpoDocSignedUrl && <a href={lpoDocSignedUrl} target="_blank" rel="noreferrer" style={{ fontSize: "11px", color: theme.blue, textDecoration: "underline" }}>Preview</a>}
+                    <button style={{ ...styles.btn("danger"), padding: "2px 8px", fontSize: "11px" }} onClick={() => { setLpoDocUrl(""); setLpoDocSignedUrl(""); setLpoDocName(""); setLpoDocSize(0); }}>Remove</button>
                   </div>
                 ) : (
                   <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
@@ -1383,7 +1770,7 @@ const Orders = ({ onNavigate, userProfile }) => {
           </div>
           <div style={styles.row}>
             <button style={styles.btn(form.isLpo ? "secondary" : "primary")} onClick={handleSave} disabled={saving || lpoDocUploading}>{saving ? "Saving…" : form.isLpo ? "Submit LPO for MD Approval" : "Create Order"}</button>
-            <button style={styles.btn("secondary")} onClick={() => { setShowForm(false); setForm(emptyForm); setLpoDocUrl(""); setLpoDocName(""); setLpoDocSize(0); }}>Cancel</button>
+            <button style={styles.btn("secondary")} onClick={() => { setShowForm(false); setForm(emptyForm); setLpoDocUrl(""); setLpoDocSignedUrl(""); setLpoDocName(""); setLpoDocSize(0); }}>Cancel</button>
           </div>
         </div>
       )}
@@ -1413,7 +1800,7 @@ const Orders = ({ onNavigate, userProfile }) => {
                     <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
                       {o.is_lpo && <span style={styles.badge(theme.blue)}>LPO</span>}
                       <span style={styles.badge(statusColor(o.status))}>{o.status}</span>
-                      {userProfile?.role === 'md' && <button style={{ ...styles.btn("danger"), padding: "3px 9px", fontSize: "11px" }} onClick={e => { e.stopPropagation(); setConfirmDelete(o); }}>Delete</button>}
+                      {userProfile?.role === 'md' && <button style={{ ...styles.btn("danger"), padding: "3px 9px", fontSize: "11px" }} onClick={e => { e.stopPropagation(); handleDeleteOrderClick(o); }}>Delete</button>}
                     </div>
                   </div>
                   <div style={{ marginTop: "8px", display: "flex", gap: "20px", fontSize: "12px", color: theme.textMuted }}>
@@ -1434,7 +1821,7 @@ const Orders = ({ onNavigate, userProfile }) => {
                 <>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
                     <div style={styles.sectionTitle}>Customer Statement — {selected.customer?.name}</div>
-                    {!orderEditMode && userProfile?.role !== 'ico' && <button style={{ ...styles.btn("secondary"), padding: "4px 12px", fontSize: "12px" }} onClick={() => startOrderEdit(selected)}>Edit Order</button>}
+                    {!orderEditMode && canWriteOrder && <button style={{ ...styles.btn("secondary"), padding: "4px 12px", fontSize: "12px" }} onClick={() => startOrderEdit(selected)}>Edit Order</button>}
                   </div>
                   <div style={{ marginBottom: "12px", fontSize: "13px", color: theme.textMuted }}>{selected.customer?.location} · {selected.customer?.phone}</div>
                   {orderEditMode ? (
@@ -1448,12 +1835,27 @@ const Orders = ({ onNavigate, userProfile }) => {
                         </select>
                       </div>
                       {orderEditItems.map((item, idx) => (
-                        <div key={idx} style={{ display: "flex", gap: "8px", marginBottom: "8px", alignItems: "center" }}>
-                          <ProductSelect value={item.blockType} onChange={(name, unit) => { const it = [...orderEditItems]; it[idx] = { ...it[idx], blockType: name, unit }; setOrderEditItems(it); }} style={{ ...styles.input, flex: 1 }} />
-                          <input style={{ ...styles.input, flex: 1 }} type="number" placeholder="Qty" value={item.quantity} onChange={e => { const it = [...orderEditItems]; it[idx] = { ...it[idx], quantity: e.target.value }; setOrderEditItems(it); }} />
-                          <input style={{ ...styles.input, flex: 1 }} type="number" placeholder="Unit Price" value={item.unitPrice} onChange={e => { const it = [...orderEditItems]; it[idx] = { ...it[idx], unitPrice: e.target.value }; setOrderEditItems(it); }} />
-                          <div style={{ ...styles.input, flex: 1, background: "transparent", color: theme.accent, fontWeight: "700" }}>{item.quantity && item.unitPrice ? naira(parseInt(item.quantity) * parseFloat(item.unitPrice)) : "—"}</div>
-                          {orderEditItems.length > 1 && <button style={{ ...styles.btn("danger"), padding: "8px 10px" }} onClick={() => setOrderEditItems(orderEditItems.filter((_, i) => i !== idx))}>✕</button>}
+                        <div key={idx} style={{ marginBottom: "10px", padding: item.sourceType === 'resale' ? "8px" : "0", background: item.sourceType === 'resale' ? theme.accent + "08" : "transparent", borderRadius: "6px", border: item.sourceType === 'resale' ? `1px solid ${theme.accent}33` : "1px solid transparent" }}>
+                          <div style={{ display: "flex", gap: "8px", marginBottom: item.sourceType === 'resale' ? "6px" : "0", alignItems: "center" }}>
+                            <ProductSelect value={item.blockType} onChange={(name, unit) => { const it = [...orderEditItems]; it[idx] = { ...it[idx], blockType: name, unit }; setOrderEditItems(it); }} style={{ ...styles.input, flex: 1 }} />
+                            <input style={{ ...styles.input, flex: 1 }} type="number" placeholder="Qty" value={item.quantity} onChange={e => { const it = [...orderEditItems]; it[idx] = { ...it[idx], quantity: e.target.value }; setOrderEditItems(it); }} />
+                            <input style={{ ...styles.input, flex: 1 }} type="number" placeholder="Unit Price" value={item.unitPrice} onChange={e => { const it = [...orderEditItems]; it[idx] = { ...it[idx], unitPrice: e.target.value }; setOrderEditItems(it); }} />
+                            <div style={{ ...styles.input, flex: 1, background: "transparent", color: theme.accent, fontWeight: "700" }}>{item.quantity && item.unitPrice ? naira(parseInt(item.quantity) * parseFloat(item.unitPrice)) : "—"}</div>
+                            <div style={{ display: "flex", gap: "3px", flexShrink: 0 }}>
+                              {["manufactured", "resale"].map(t => (
+                                <button key={t} type="button" style={{ ...styles.btn(item.sourceType === t ? "primary" : "secondary"), padding: "5px 8px", fontSize: "11px" }} onClick={() => { const it = [...orderEditItems]; it[idx] = { ...it[idx], sourceType: t }; setOrderEditItems(it); }}>
+                                  {t === "manufactured" ? "Mfg" : "Resale"}
+                                </button>
+                              ))}
+                            </div>
+                            {orderEditItems.length > 1 && <button style={{ ...styles.btn("danger"), padding: "8px 10px" }} onClick={() => setOrderEditItems(orderEditItems.filter((_, i) => i !== idx))}>✕</button>}
+                          </div>
+                          {item.sourceType === 'resale' && (
+                            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                              <label style={{ ...styles.label, marginBottom: 0, fontSize: "12px", whiteSpace: "nowrap" }}>Partner cost (₦):</label>
+                              <input style={{ ...styles.input, maxWidth: "180px" }} type="number" min="0" placeholder="Cost basis (optional)" value={item.costBasis} onChange={e => { const it = [...orderEditItems]; it[idx] = { ...it[idx], costBasis: e.target.value }; setOrderEditItems(it); }} />
+                            </div>
+                          )}
                         </div>
                       ))}
                       {orderEditItems.length < 5 && <button style={{ ...styles.btn("secondary"), fontSize: "12px", marginBottom: "10px" }} onClick={() => setOrderEditItems([...orderEditItems, emptyItem()])}>+ Add Item</button>}
@@ -1467,7 +1869,10 @@ const Orders = ({ onNavigate, userProfile }) => {
                     <div style={styles.sectionTitle}>Order Items</div>
                     {(selected.order_items || []).map((item, i) => (
                       <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${theme.border}22`, fontSize: "13px" }}>
-                        <span>{item.block_type} × {fmt(item.quantity)}</span>
+                        <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                          {item.block_type} × {fmt(item.quantity)}
+                          {item.source_type === 'resale' && <span style={styles.badge(theme.blue)}>Resale{item.cost_basis != null ? ` · cost ${naira(item.cost_basis)}` : ''}</span>}
+                        </span>
                         <span>{naira(item.subtotal || item.quantity * item.unit_price)}</span>
                       </div>
                     ))}
@@ -1507,8 +1912,8 @@ const Orders = ({ onNavigate, userProfile }) => {
                               {p.status === "confirmed" && (
                                 <button style={{ ...styles.btn("primary"), padding: "3px 8px", fontSize: "11px" }} onClick={() => generatePaymentReceiptPDF({ payment: p, customer: selected.customer, invoiceNumber: p._invoiceNumber, invoiceTotal: p._invoiceTotal || null, totalPaidSoFar: totalConfirmed })}>Receipt</button>
                               )}
-                              {userProfile?.role !== 'ico' && <button style={{ ...styles.btn("secondary"), padding: "3px 8px", fontSize: "11px" }} onClick={() => { setEditPayment(p); setPayForm({ amount: String(p.amount_paid), date: p.payment_date }); setShowPayForm(true); }}>Edit</button>}
-                              {userProfile?.role !== 'ico' && <button style={{ ...styles.btn("danger"), padding: "3px 8px", fontSize: "11px" }} onClick={() => setConfirmDelete({ ...p, type: "payment" })}>Remove</button>}
+                              {hasRole(userProfile, 'md', 'accountant') && <button style={{ ...styles.btn("secondary"), padding: "3px 8px", fontSize: "11px" }} onClick={() => { setEditPayment(p); setPayForm({ amount: String(p.amount_paid), date: p.payment_date }); setShowPayForm(true); }}>Edit</button>}
+                              {userProfile?.role === 'md' && <button style={{ ...styles.btn("danger"), padding: "3px 8px", fontSize: "11px" }} onClick={() => setConfirmDelete({ ...p, type: "payment" })}>Remove</button>}
                             </div>
                           </div>
                         ))}
@@ -1518,18 +1923,44 @@ const Orders = ({ onNavigate, userProfile }) => {
                   <div style={{ marginTop: "16px" }}>
                     <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
                       {(selected.invoices || []).length === 0 ? (
-                        userProfile?.role !== 'ico' && <button style={styles.btn("primary")} onClick={handleGenerateInvoice} disabled={invoicing}>{invoicing ? "Generating…" : "Generate Invoice"}</button>
-                      ) : (
+                        hasRole(userProfile, 'md', 'accountant', 'bdm') && <button style={styles.btn("primary")} onClick={handleGenerateInvoice} disabled={invoicing}>{invoicing ? "Opening…" : "Create Invoice (Draft)"}</button>
+                      ) : (() => {
+                        const inv = selected.invoices[0];
+                        const status = inv.status || 'issued';
+                        const badge = STATUS_BADGE[status] || STATUS_BADGE.issued;
+                        const isDraft = status === 'draft';
+                        const hasPayments = (inv.payments || []).length > 0;
+                        const isMD = userProfile?.role === 'md';
+                        // invoice_items / draft-content writers per RLS
+                        const canEditContent = isDraft && hasRole(userProfile, 'md', 'accountant', 'bdm');
+                        // Cancel: md/accountant, on a draft or issued invoice, never on paid
+                        const canCancel = (isDraft || status === 'issued') && hasRole(userProfile, 'md', 'accountant');
+                        // Delete matches RLS exactly: md unconditional; bdm only a draft with no payments
+                        const canDelete = isMD || (userProfile?.role === 'bdm' && isDraft && !hasPayments);
+                        return (
                         <>
-                          <div style={{ width: "100%", fontSize: "12px", color: theme.textMuted, marginBottom: "6px" }}>
-                            Invoice: <strong style={{ color: theme.accent }}>{selected.invoices[0].invoice_number}</strong>
+                          <div style={{ width: "100%", display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", marginBottom: "6px" }}>
+                            <span style={{ fontSize: "12px", color: theme.textMuted }}>Invoice: <strong style={{ color: theme.accent }}>{inv.invoice_number}</strong></span>
+                            <span style={{ fontSize: "11px", fontWeight: "700", padding: "2px 8px", borderRadius: "10px", background: badge.color + '22', color: badge.color, textTransform: "uppercase", letterSpacing: "0.04em" }}>{badge.label}</span>
+                            {status === 'cancelled' && inv.cancellation_reason && <span style={{ fontSize: "11px", color: theme.textMuted }}>· {inv.cancellation_reason}</span>}
                           </div>
-                          <button style={styles.btn("primary")} onClick={handleGenerateInvoice} disabled={invoicing}>{invoicing ? "Downloading…" : "Download Invoice PDF"}</button>
-                          {userProfile?.role !== 'ico' && <button style={styles.btn("secondary")} onClick={() => setShowPayForm(!showPayForm)}>+ Record Payment</button>}
+                          <button style={styles.btn("primary")} onClick={() => handleDownloadInvoicePDF(inv)} disabled={invoicing}>{invoicing ? "Downloading…" : (isDraft ? "Download Proforma PDF" : "Download Invoice PDF")}</button>
+                          {canEditContent && <button style={styles.btn("secondary")} onClick={handleGenerateInvoice} disabled={invoicing}>Edit Line Items</button>}
+                          {canEditContent && <button style={{ ...styles.btn("primary"), background: theme.green }} onClick={() => setIssueTarget(inv)} disabled={invActioning}>Issue Invoice</button>}
+                          {!isDraft && status !== 'cancelled' && hasRole(userProfile, 'md', 'accountant') && <button style={styles.btn("secondary")} onClick={() => setShowPayForm(!showPayForm)}>+ Record Payment</button>}
+                          {canCancel && <button style={styles.btn("secondary")} onClick={() => { setCancelTarget(inv); setCancelReason(''); }} disabled={invActioning}>Cancel Invoice</button>}
+                          {canDelete && <button style={{ ...styles.btn("danger"), opacity: invDeleting ? 0.6 : 1 }} disabled={invDeleting} onClick={() => handleDeleteInvoice(inv)}>Delete Invoice</button>}
                         </>
-                      )}
+                        );
+                      })()}
                       <button style={styles.btn("secondary")} onClick={() => onNavigate("waybills")}>View Waybills</button>
                     </div>
+                    {invDeleteMsg && (
+                      <div style={{ marginTop: "10px", padding: "10px 14px", background: theme.red + '18', border: `1px solid ${theme.red}44`, borderRadius: "6px", fontSize: "13px", color: theme.red, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span>{invDeleteMsg}</span>
+                        <button style={{ background: "none", border: "none", color: theme.red, cursor: "pointer", fontWeight: "700", fontSize: "14px", padding: "0 4px" }} onClick={() => setInvDeleteMsg(null)}>×</button>
+                      </div>
+                    )}
                     {showPayForm && (
                       <div style={{ marginTop: "12px", padding: "14px", background: theme.surface, borderRadius: "8px", border: `1px solid ${theme.border}` }}>
                         <div style={{ fontSize: "11px", fontWeight: "700", color: theme.textMuted, marginBottom: "10px", textTransform: "uppercase", letterSpacing: "0.06em" }}>{editPayment ? "Edit Payment" : "Record Payment"}</div>
@@ -1578,8 +2009,12 @@ const Waybills = ({ userProfile }) => {
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [editTarget, setEditTarget] = useState(null);
   const [selectedOrderId, setSelectedOrderId] = useState("");
-  const emptyForm = { waybillDate: "", vehicleId: "", driverId: "", truckNumber: "", physicalWaybillNumber: "", blockType: "9 Inch 3 Hole Block", quantityLoaded: "", quantityReceived: "", quantityDamaged: "0", batchId: "", scheduleItemId: "", dieselLitres: "", storeOfficer: "", notes: "" };
+  const emptyForm = { waybillDate: "", vehicleId: "", driverId: "", truckNumber: "", physicalWaybillNumber: "", blockType: "9 Inch 3 Hole Block", quantityLoaded: "", quantityReceived: "", quantityDamaged: "0", batchId: "", scheduleItemId: "", dieselLitres: "", storeOfficerId: "", signedByName: "", notes: "" };
   const [form, setForm] = useState(emptyForm);
+  const [loaderAssignments, setLoaderAssignments] = useState([]);
+  const [wbPool, setWbPool] = useState([]);
+  const [waybillLoaders, setWaybillLoaders] = useState(null);
+  const [loaderSearch, setLoaderSearch] = useState('');
 
   const isDriverRole = userProfile?.role === 'driver';
   const driverStaffId = userProfile?.staff_id;
@@ -1592,17 +2027,23 @@ const Waybills = ({ userProfile }) => {
         : isDriverRole && !driverStaffId
           ? Promise.resolve([])
           : waybillsService.getAll();
-      const [w, s, v] = await Promise.all([fetchWaybills, staffService.getActive(), vehiclesService.getActive().catch(() => [])]);
+      const [w, s, v, a, pool] = await Promise.all([
+        fetchWaybills, staffService.getPublicActive(), vehiclesService.getActive().catch(() => []),
+        truckLoadingService.getAssignments().catch(() => []),
+        labourPoolService.getAll().catch(() => []),
+      ]);
       setWaybills(w);
       setStaff(s);
       setVehicles(v);
+      setLoaderAssignments(a);
+      setWbPool(pool);
     } catch {
       setAlert({ type: "error", msg: "Could not load waybills." });
     }
     if (isDriverRole) { setLoading(false); return; } // drivers don't need orders/batches/schedules
     try {
       const [orders, activeBatches, allBatches, approvedScheds] = await Promise.all([
-        ordersService.getAll(),
+        ordersService.getForDelivery().catch(() => []),
         batchesService.getActive().catch(() => []),
         batchesService.getAll().catch(() => []),
         schedulesService.getApproved().catch(() => []),
@@ -1635,9 +2076,12 @@ const Waybills = ({ userProfile }) => {
       batchId: w.batch_id || "",
       scheduleItemId: w.schedule_item_id || "",
       dieselLitres: String(w.diesel_given_litres || ""),
-      storeOfficer: w.store_officer || "",
+      storeOfficerId: w.store_officer_id || "",
+      signedByName: w.signed_by_name || "",
       notes: w.notes || "",
     });
+    setWaybillLoaders(null);
+    setLoaderSearch('');
     setSelectedOrderId("");
     setShowForm(true);
   };
@@ -1651,6 +2095,7 @@ const Waybills = ({ userProfile }) => {
     try {
       const damaged = parseInt(form.quantityDamaged) || 0;
       const dieselLitres = parseFloat(form.dieselLitres) || 0;
+      const soName = staff.find(s => s.id === form.storeOfficerId)?.full_name || '';
       const waybillData = {
         vehicle_id: form.vehicleId || null,
         driver_id: form.driverId || null,
@@ -1663,7 +2108,8 @@ const Waybills = ({ userProfile }) => {
         waybill_date: form.waybillDate,
         schedule_item_id: form.scheduleItemId || null,
         diesel_given_litres: dieselLitres || null,
-        store_officer: form.storeOfficer || null,
+        store_officer_id: form.storeOfficerId || null,
+        signed_by_name: form.signedByName || null,
         notes: form.notes || null,
       };
 
@@ -1681,9 +2127,16 @@ const Waybills = ({ userProfile }) => {
         // Sync fuel log for this waybill
         try {
           if (form.vehicleId || editTarget.vehicle_id) {
-            await fuelLogService.upsertForWaybill(form.vehicleId || editTarget.vehicle_id, editTarget.id, form.waybillDate, dieselLitres, form.storeOfficer);
+            await fuelLogService.upsertForWaybill(form.vehicleId || editTarget.vehicle_id, editTarget.id, form.waybillDate, dieselLitres, soName);
           }
         } catch { /* non-blocking */ }
+        // Sync loaders if user explicitly set them
+        if (waybillLoaders !== null) {
+          try {
+            const logRow = await truckLoadingService.getLogByWaybill(editTarget.id);
+            if (logRow) await truckLoadingService.syncLoaders(logRow.id, waybillLoaders);
+          } catch { /* non-blocking */ }
+        }
         // Apply new effects
         try {
           await finishedGoodsService.decrease(form.blockType, newLoaded);
@@ -1701,20 +2154,36 @@ const Waybills = ({ userProfile }) => {
         await load();
         setAlert({ type: "success", msg: `Waybill ${editTarget.waybill_number} updated and stock adjusted.` });
       } else {
-        const nextNum = await waybillsService.getNextNumber();
-        const waybillNumber = `APC-WB-${String(nextNum).padStart(3, "0")}`;
+        let waybillNumber = `APC-WB-${String(await waybillsService.getNextNumber()).padStart(3, "0")}`;
         const qtyLoaded = parseInt(form.quantityLoaded) || 0;
         const qtyReceived = parseInt(form.quantityReceived) || 0;
-        const created = await waybillsService.create({ ...waybillData, batch_id: form.batchId || null, waybill_number: waybillNumber, receiver_name: selectedOrder?.customer?.name || null, order_id: selectedOrder?.id || null });
+        let created;
+        try {
+          created = await waybillsService.create({ ...waybillData, batch_id: form.batchId || null, waybill_number: waybillNumber, receiver_name: selectedOrder?.customer?.name || null, order_id: selectedOrder?.id || null });
+        } catch (createErr) {
+          if (createErr.code === '23505') {
+            waybillNumber = `APC-WB-${String(await waybillsService.getNextNumber()).padStart(3, "0")}`;
+            created = await waybillsService.create({ ...waybillData, batch_id: form.batchId || null, waybill_number: waybillNumber, receiver_name: selectedOrder?.customer?.name || null, order_id: selectedOrder?.id || null });
+          } else {
+            throw createErr;
+          }
+        }
         if (damaged > 0) {
           await productionService.logDamage({ date: form.waybillDate, block_type: form.blockType, stage: "delivery", quantity_damaged: damaged, notes: `Transit damage on waybill ${waybillNumber}` });
         }
         // Auto-create fuel log entry if diesel was given
         try {
           if (form.vehicleId && dieselLitres > 0) {
-            await fuelLogService.upsertForWaybill(form.vehicleId, created.id, form.waybillDate, dieselLitres, form.storeOfficer);
+            await fuelLogService.upsertForWaybill(form.vehicleId, created.id, form.waybillDate, dieselLitres, soName);
           }
         } catch { /* non-blocking */ }
+        // Sync loaders if user explicitly set them (trigger may have already populated from standing crew)
+        if (waybillLoaders !== null) {
+          try {
+            const logRow = await truckLoadingService.getLogByWaybill(created.id);
+            if (logRow) await truckLoadingService.syncLoaders(logRow.id, waybillLoaders);
+          } catch { /* non-blocking */ }
+        }
         // Side effects (non-blocking)
         try {
           if (qtyLoaded > 0) await finishedGoodsService.decrease(form.blockType, qtyLoaded);
@@ -1735,6 +2204,8 @@ const Waybills = ({ userProfile }) => {
       setSelectedOrderId("");
       setShowForm(false);
       setEditTarget(null);
+      setWaybillLoaders(null);
+      setLoaderSearch('');
     } catch (e) {
       setAlert({ type: "error", msg: "Failed to save waybill. " + e.message });
     } finally {
@@ -1833,6 +2304,9 @@ const Waybills = ({ userProfile }) => {
               <label style={styles.label}>Vehicle</label>
               <select style={styles.input} value={form.vehicleId} onChange={e => {
                 const v = vehicles.find(v => v.id === e.target.value);
+                const crew = loaderAssignments.filter(a => a.vehicle_id === e.target.value).map(a => a.labour_id);
+                setWaybillLoaders(crew);
+                setLoaderSearch('');
                 setForm({ ...form, vehicleId: e.target.value, truckNumber: v?.vehicle_number || form.truckNumber, driverId: v?.assigned_driver_id || form.driverId });
               }}>
                 <option value="">— Select vehicle (optional) —</option>
@@ -1843,7 +2317,7 @@ const Waybills = ({ userProfile }) => {
               <label style={styles.label}>Driver</label>
               <select style={styles.input} value={form.driverId} onChange={e => setForm({ ...form, driverId: e.target.value })}>
                 <option value="">— Select driver —</option>
-                {staff.map(s => <option key={s.id} value={s.id}>{s.full_name} ({s.role})</option>)}
+                {staff.filter(s => s.role?.trim().toLowerCase() === 'driver').map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
               </select>
             </div>
             <div style={styles.formGroup}>
@@ -1891,16 +2365,21 @@ const Waybills = ({ userProfile }) => {
               <label style={styles.label}>Quantity Damaged in Transit</label>
               <input style={styles.input} type="number" placeholder="0" value={form.quantityDamaged} onChange={e => setForm({ ...form, quantityDamaged: e.target.value })} />
             </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Store Officer</label>
+              <select style={styles.input} value={form.storeOfficerId} onChange={e => setForm({ ...form, storeOfficerId: e.target.value })}>
+                <option value="">— Select store officer —</option>
+                {staff.filter(s => s.role?.trim().toLowerCase() === 'store officer').map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
+              </select>
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Receiver's Signature (Name)</label>
+              <input style={styles.input} placeholder="Name of person who received and signed for the delivery" value={form.signedByName} onChange={e => setForm({ ...form, signedByName: e.target.value })} />
+            </div>
             {form.vehicleId && (
               <div style={styles.formGroup}>
                 <label style={styles.label}>Diesel Given to Driver (litres)</label>
                 <input style={styles.input} type="number" placeholder="e.g. 80" value={form.dieselLitres} onChange={e => setForm({ ...form, dieselLitres: e.target.value })} />
-              </div>
-            )}
-            {form.vehicleId && parseFloat(form.dieselLitres) > 0 && (
-              <div style={styles.formGroup}>
-                <label style={styles.label}>Dispensed By (Store Officer)</label>
-                <input style={styles.input} placeholder="Name of store officer" value={form.storeOfficer} onChange={e => setForm({ ...form, storeOfficer: e.target.value })} />
               </div>
             )}
             {editTarget ? (
@@ -1919,7 +2398,7 @@ const Waybills = ({ userProfile }) => {
                     </option>
                   ))}
                 </select>
-                {activeOrders.length === 0 && <div style={{ fontSize: "11px", color: theme.red, marginTop: "4px" }}>No customers with active invoices. Generate an invoice first.</div>}
+                {activeOrders.length === 0 && <div style={{ fontSize: "11px", color: theme.red, marginTop: "4px" }}>No invoiced orders found. Contact your administrator if an order should appear here.</div>}
               </div>
             )}
             <div style={styles.formGroup}>
@@ -1927,6 +2406,71 @@ const Waybills = ({ userProfile }) => {
               <input style={styles.input} placeholder="Optional notes" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
             </div>
           </div>
+          {form.vehicleId && wbPool.length > 0 && (
+            <div style={{ marginBottom: '14px' }}>
+              <label style={styles.label}>Loaders (optional)</label>
+              {waybillLoaders !== null ? (
+                <div>
+                  {waybillLoaders.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '6px' }}>
+                      {waybillLoaders.map(lid => {
+                        const worker = wbPool.find(p => p.id === lid);
+                        return (
+                          <span key={lid} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: theme.accent + '22', border: `1px solid ${theme.accent}44`, borderRadius: '4px', padding: '3px 8px', fontSize: '12px', color: theme.text }}>
+                            {worker?.full_name || lid}
+                            <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: theme.red, padding: 0, fontSize: '13px', lineHeight: 1 }}
+                              onClick={() => setWaybillLoaders(l => l.filter(x => x !== lid))}>×</button>
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <div style={{ position: 'relative' }}>
+                    <input
+                      style={{ ...styles.input, marginBottom: '2px' }}
+                      placeholder="Search to add a loader…"
+                      value={loaderSearch}
+                      onChange={e => setLoaderSearch(e.target.value)}
+                    />
+                    {loaderSearch.trim() && (
+                      <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: theme.card, border: `1px solid ${theme.border}`, borderRadius: '6px', zIndex: 10, maxHeight: '180px', overflowY: 'auto' }}>
+                        {wbPool
+                          .filter(p => !waybillLoaders.includes(p.id) && p.full_name.toLowerCase().includes(loaderSearch.toLowerCase()))
+                          .slice(0, 8)
+                          .map(p => (
+                            <div key={p.id}
+                              style={{ padding: '8px 12px', cursor: 'pointer', fontSize: '13px', color: theme.text }}
+                              onClick={() => { setWaybillLoaders(l => [...l, p.id]); setLoaderSearch(''); }}
+                              onMouseEnter={e => e.currentTarget.style.background = theme.surface}
+                              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                            >
+                              {p.full_name}
+                            </div>
+                          ))
+                        }
+                        {wbPool.filter(p => !waybillLoaders.includes(p.id) && p.full_name.toLowerCase().includes(loaderSearch.toLowerCase())).length === 0 && (
+                          <div style={{ padding: '8px 12px', fontSize: '12px', color: theme.textMuted }}>No matches</div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <span style={{ fontSize: '12px', color: theme.textMuted }}>
+                    {editTarget ? 'Loaders set by trigger.' : 'Standing crew will be auto-assigned.'}
+                  </span>
+                  <button style={{ ...styles.btn('secondary'), fontSize: '12px' }}
+                    onClick={() => {
+                      const crew = loaderAssignments.filter(a => a.vehicle_id === form.vehicleId).map(a => a.labour_id);
+                      setWaybillLoaders(crew);
+                    }}>
+                    Override
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
           {parseInt(form.quantityDamaged) > 0 && (
             <div style={{ ...styles.alert("error"), marginBottom: "14px" }}>
               <span>⚠️ {form.quantityDamaged} damaged blocks will be automatically logged to the damage register as transit damage.</span>
@@ -1934,7 +2478,7 @@ const Waybills = ({ userProfile }) => {
           )}
           <div style={styles.row}>
             <button style={styles.btn("primary")} onClick={handleSave} disabled={saving}>{saving ? "Saving…" : editTarget ? "Update Waybill" : "Record Waybill"}</button>
-            <button style={styles.btn("secondary")} onClick={() => { setShowForm(false); setForm(emptyForm); setSelectedOrderId(""); setEditTarget(null); }}>Cancel</button>
+            <button style={styles.btn("secondary")} onClick={() => { setShowForm(false); setForm(emptyForm); setSelectedOrderId(""); setEditTarget(null); setWaybillLoaders(null); setLoaderSearch(''); }}>Cancel</button>
           </div>
         </div>
       )}
@@ -2123,6 +2667,8 @@ const Customers = ({ userProfile }) => {
   const [stmtSiteId, setStmtSiteId] = useState("");
 
   const isMarketer = userProfile?.role === 'marketer';
+  const AMOUNT_ROLES = ['md','accountant','ico','board_member','bdm','marketer'];
+  const canSeeAmounts = hasRole(userProfile, ...AMOUNT_ROLES);
 
   const load = async () => {
     setLoading(true);
@@ -2130,7 +2676,7 @@ const Customers = ({ userProfile }) => {
       const fetchCustomers = isMarketer
         ? customersService.getAllWithStatsForMarketer(userProfile.id)
         : customersService.getAllWithStats();
-      const [c, s] = await Promise.all([fetchCustomers, staffService.getAll()]);
+      const [c, s] = await Promise.all([fetchCustomers, staffService.getPublicList()]);
       setCustomers(c);
       setStaff(s);
       return c;
@@ -2172,12 +2718,15 @@ const Customers = ({ userProfile }) => {
 
   const getStats = (c) => {
     const orders = c.orders || [];
+    // A draft is a quotation and a cancelled invoice is void — neither counts
+    // toward what a customer owes (liveInvoices). Fall back to order line items
+    // only when the order has no live invoice (same as before for un-invoiced).
     const totalValue = orders.reduce((s, o) => {
-      const invoiced = (o.invoices || []).reduce((si, inv) => si + Number(inv.total_amount ?? 0), 0);
+      const invoiced = liveInvoices(o.invoices).reduce((si, inv) => si + Number(inv.total_amount ?? 0), 0);
       const itemTotal = (o.order_items || []).reduce((si, i) => si + Number(i.subtotal ?? i.quantity * i.unit_price), 0);
       return s + (invoiced !== 0 ? invoiced : itemTotal);
     }, 0);
-    const totalPaid = orders.reduce((s, o) => s + (o.invoices || []).flatMap(inv => inv.payments || []).filter(p => p.status === "confirmed").reduce((sp, p) => sp + Number(p.amount_paid), 0), 0);
+    const totalPaid = orders.reduce((s, o) => s + liveInvoices(o.invoices).flatMap(inv => inv.payments || []).filter(p => p.status === "confirmed").reduce((sp, p) => sp + Number(p.amount_paid), 0), 0);
     return { totalValue, totalPaid, outstanding: totalValue - totalPaid, orderCount: orders.length };
   };
 
@@ -2343,8 +2892,8 @@ const Customers = ({ userProfile }) => {
                     <div style={{ fontSize: "11px", color: theme.textMuted, marginTop: "2px" }}>{c.phone}{c.location ? ` · ${c.location}` : ""}</div>
                     <div style={{ display: "flex", gap: "12px", marginTop: "6px", fontSize: "11px" }}>
                       <span style={{ color: theme.textMuted }}>{orderCount} order{orderCount !== 1 ? "s" : ""}</span>
-                      <span style={{ color: theme.accent }}>{naira(totalValue)}</span>
-                      {outstanding > 0 && <span style={{ color: theme.red }}>Owes {naira(outstanding)}</span>}
+                      {canSeeAmounts && (<span style={{ color: theme.accent }}>{naira(totalValue)}</span>)}
+                      {canSeeAmounts && outstanding > 0 && <span style={{ color: theme.red }}>Owes {naira(outstanding)}</span>}
                     </div>
                   </div>
                 );
@@ -2388,9 +2937,9 @@ const Customers = ({ userProfile }) => {
 
                 <div style={styles.grid(4)}>
                   <StatCard label="Orders" value={orderCount} sub="All time" accent={theme.blue} />
-                  <StatCard label="Total Value" value={naira(totalValue)} sub="All orders" accent={theme.accent} />
-                  <StatCard label="Total Paid" value={naira(totalPaid)} sub="Confirmed" accent={theme.green} />
-                  <StatCard label="Outstanding" value={naira(outstanding)} sub="Balance due" accent={outstanding > 0 ? theme.red : theme.green} />
+                  {canSeeAmounts && (<StatCard label="Total Value" value={naira(totalValue)} sub="All orders" accent={theme.accent} />)}
+                  {canSeeAmounts && (<StatCard label="Total Paid" value={naira(totalPaid)} sub="Confirmed" accent={theme.green} />)}
+                  {canSeeAmounts && (<StatCard label="Outstanding" value={naira(outstanding)} sub="Balance due" accent={outstanding > 0 ? theme.red : theme.green} />)}
                 </div>
 
                 {/* ── SITES ── */}
@@ -2530,7 +3079,7 @@ const Customers = ({ userProfile }) => {
                   )}
                 </div>
 
-                <div style={{ marginTop: "20px", paddingTop: "16px", borderTop: `1px solid ${theme.border}` }}>
+                {canSeeAmounts && (<div style={{ marginTop: "20px", paddingTop: "16px", borderTop: `1px solid ${theme.border}` }}>
                   <div style={{ ...styles.sectionTitle, marginBottom: "10px" }}>Download Statement</div>
                   <div style={{ display: "flex", gap: "10px", alignItems: "flex-end", flexWrap: "wrap" }}>
                     {sites.length > 1 && (
@@ -2562,7 +3111,7 @@ const Customers = ({ userProfile }) => {
                   <div style={{ fontSize: "11px", color: theme.textMuted, marginTop: "6px" }}>
                     {stmtFrom || stmtTo ? `Showing: ${stmtFrom || "all time"} → ${stmtTo || "present"}` : "Showing: all time (set dates to filter)"}
                   </div>
-                </div>
+                </div>)}
               </div>
             );
           })()}
@@ -2579,11 +3128,18 @@ const Reports = ({ userProfile }) => <ReportsEngine userProfile={userProfile} />
 const UNITS = ["bags", "kg", "litres", "units", "tonnes", "metres", "packs"];
 const ISSUED_TO = ["Production", "Maintenance", "Logistics", "Administration", "Other"];
 
-const Inventory = ({ onLowStockChange }) => {
+const Inventory = ({ onLowStockChange, userProfile }) => {
+  // Whoever is logged in is recorded as the person who entered the movement —
+  // no free text, no override (deliberate accountability requirement).
+  const recordedBy = userProfile?.full_name || userProfile?.email || null;
+  // Roles allowed to write stock_movements (mirrors the table's RLS UPDATE/DELETE
+  // grant). ICO and board_member can view Inventory but not write, so the
+  // Edit/Delete buttons are hidden for them rather than failing on click.
+  const MOVEMENT_WRITE_ROLES = ['md', 'store_officer', 'production_manager', 'assistant_production_manager', 'logistics_manager'];
+  const canWriteMovement = hasRole(userProfile, ...MOVEMENT_WRITE_ROLES);
   const [tab, setTab] = useState("registry");
   const [items, setItems] = useState([]);
   const [movements, setMovements] = useState([]);
-  const [staff, setStaff] = useState([]);
   const [suppliersList, setSuppliersList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -2600,8 +3156,8 @@ const Inventory = ({ onLowStockChange }) => {
 
   const today = new Date().toISOString().split("T")[0];
   const emptyItem = { name: "", unit: "bags", current_stock: "", reorder_level: "", unit_cost: "", supplier: "", date_added: today };
-  const emptyIn  = { itemId: "", quantity: "", unitCost: "", supplierId: "", supplier: "", staffName: "", date: today, notes: "" };
-  const emptyOut = { itemId: "", quantity: "", issuedTo: "Production", staffName: "", reference: "", date: today, notes: "" };
+  const emptyIn  = { itemId: "", quantity: "", unit: "kg", unitCost: "", supplierId: "", supplier: "", date: today, notes: "" };
+  const emptyOut = { itemId: "", quantity: "", unit: "kg", issuedTo: "Production", reference: "", date: today, notes: "" };
 
   const [itemForm, setItemForm]   = useState(emptyItem);
   const [inForm,   setInForm]     = useState(emptyIn);
@@ -2610,9 +3166,8 @@ const Inventory = ({ onLowStockChange }) => {
   const load = async () => {
     setLoading(true);
     try {
-      const [its, s, sups] = await Promise.all([inventoryService.getAllItems(), staffService.getActive(), suppliersService.getActive().catch(() => [])]);
+      const [its, sups] = await Promise.all([inventoryService.getAllItems(), suppliersService.getActive().catch(() => [])]);
       setItems(its);
-      setStaff(s);
       setSuppliersList(sups);
       if (onLowStockChange) onLowStockChange(its.filter(i => Number(i.current_stock) <= Number(i.reorder_level)).length);
     } catch (e) {
@@ -2685,14 +3240,18 @@ const Inventory = ({ onLowStockChange }) => {
     if (suppliersList.length > 0 && !inForm.supplierId) return setAlert({ type: "error", msg: "Please select a supplier from the list." });
     setSaving(true);
     try {
+      // Storage is always the item's base unit (kg). If the item is kg and the
+      // user entered tonnes, convert to kg (× 1000, decimals preserved).
+      const inItem = items.find(i => i.id === inForm.itemId);
+      const qtyBase = (inItem?.unit === 'kg' && inForm.unit === 'tonnes') ? Number(inForm.quantity) * 1000 : Number(inForm.quantity);
       const supplierName = inForm.supplierId ? (suppliersList.find(s => s.id === inForm.supplierId)?.company_name || inForm.supplier) : inForm.supplier;
-      const movement = await inventoryService.stockIn({ itemId: inForm.itemId, quantity: Number(inForm.quantity), unitCost: Number(inForm.unitCost) || 0, supplier: supplierName, staffName: inForm.staffName, date: inForm.date, notes: inForm.notes });
-      if (inForm.supplierId && Number(inForm.quantity) > 0) {
-        const totalCost = Number(inForm.quantity) * (Number(inForm.unitCost) || 0);
+      const movement = await inventoryService.stockIn({ itemId: inForm.itemId, quantity: qtyBase, unitCost: Number(inForm.unitCost) || 0, supplier: supplierName, staffName: recordedBy, date: inForm.date, notes: inForm.notes });
+      if (inForm.supplierId && qtyBase > 0) {
+        const totalCost = qtyBase * (Number(inForm.unitCost) || 0);
         if (totalCost > 0) {
           const item = items.find(i => i.id === inForm.itemId);
           try {
-            await supplierTransactionsService.create({ supplier_id: inForm.supplierId, transaction_date: inForm.date, transaction_type: 'purchase', amount: totalCost, description: `Stock in: ${item?.name || 'item'} × ${inForm.quantity}`, linked_stock_movement_id: movement?.id || null });
+            await supplierTransactionsService.create({ supplier_id: inForm.supplierId, transaction_date: inForm.date, transaction_type: 'purchase', amount: totalCost, description: `Stock in: ${item?.name || 'item'} × ${qtyBase.toLocaleString()} ${item?.unit || ''}`.trim(), linked_stock_movement_id: movement?.id || null });
           } catch { /* non-blocking */ }
         }
       }
@@ -2711,7 +3270,10 @@ const Inventory = ({ onLowStockChange }) => {
     if (!outForm.itemId || !outForm.quantity || !outForm.date) return setAlert({ type: "error", msg: "Item, quantity, and date are required." });
     setSaving(true);
     try {
-      await inventoryService.stockOut({ itemId: outForm.itemId, quantity: Number(outForm.quantity), issuedTo: outForm.issuedTo, staffName: outForm.staffName, reference: outForm.reference, date: outForm.date, notes: outForm.notes });
+      // Base unit (kg) storage; convert tonnes→kg for kg items (decimals preserved).
+      const outItem = items.find(i => i.id === outForm.itemId);
+      const qtyBase = (outItem?.unit === 'kg' && outForm.unit === 'tonnes') ? Number(outForm.quantity) * 1000 : Number(outForm.quantity);
+      await inventoryService.stockOut({ itemId: outForm.itemId, quantity: qtyBase, issuedTo: outForm.issuedTo, staffName: recordedBy, reference: outForm.reference, date: outForm.date, notes: outForm.notes });
       await load();
       if (tab === "movements") await loadMovements();
       setOutForm(emptyOut);
@@ -2785,6 +3347,15 @@ const Inventory = ({ onLowStockChange }) => {
   const totalValue = items.reduce((s, i) => s + Number(i.current_stock) * Number(i.unit_cost || 0), 0);
   const TABS = [{ id: "registry", label: "Stock Registry" }, { id: "stockin", label: "Stock In" }, { id: "stockout", label: "Stock Out" }, { id: "movements", label: "Movement Log" }, { id: "report", label: "Report" }];
 
+  // Unit-toggle helpers: the kg/tonnes selector only applies to items stored in
+  // kg (dust, chippings). For bags/litres items the native unit is shown as a
+  // static label. When tonnes is chosen, preview the kg value that will be stored.
+  const inItemSel  = items.find(i => i.id === inForm.itemId);
+  const outItemSel = items.find(i => i.id === outForm.itemId);
+  const inIsKg  = inItemSel?.unit === 'kg';
+  const outIsKg = outItemSel?.unit === 'kg';
+  const kgPreview = (qty) => (qty !== '' && !isNaN(Number(qty))) ? `= ${(Number(qty) * 1000).toLocaleString()} kg` : '';
+
   return (
     <div>
       {confirmDelete && <ConfirmModal msg={`Remove "${confirmDelete.name}" from inventory registry? All movement history for this item will also be deleted.`} onConfirm={handleDeleteItem} onCancel={() => setConfirmDelete(null)} />}
@@ -2794,7 +3365,7 @@ const Inventory = ({ onLowStockChange }) => {
           <div style={styles.pageTitle}>Inventory Management</div>
           <div style={styles.pageSubtitle}>Raw materials, consumables, and stock movements</div>
         </div>
-        <button style={styles.btn("primary")} onClick={() => { setShowItemForm(true); setEditItem(null); setItemForm(emptyItem); setTab("registry"); }}>+ Add Item</button>
+        {tab === "registry" && <button style={styles.btn("primary")} onClick={() => { setShowItemForm(true); setEditItem(null); setItemForm(emptyItem); setTab("registry"); }}>+ Add Item</button>}
       </div>
 
       {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
@@ -2937,7 +3508,20 @@ const Inventory = ({ onLowStockChange }) => {
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Quantity Received *</label>
-              <input style={styles.input} type="number" placeholder="e.g. 100" value={inForm.quantity} onChange={e => setInForm({ ...inForm, quantity: e.target.value })} />
+              <div style={{ display: "flex", gap: "6px" }}>
+                <input style={{ ...styles.input, flex: 1 }} type="number" placeholder="e.g. 100" value={inForm.quantity} onChange={e => setInForm({ ...inForm, quantity: e.target.value })} />
+                {inIsKg ? (
+                  <select style={{ ...styles.input, width: "100px" }} value={inForm.unit} onChange={e => setInForm({ ...inForm, unit: e.target.value })}>
+                    <option value="kg">kg</option>
+                    <option value="tonnes">tonnes</option>
+                  </select>
+                ) : (
+                  <span style={{ ...styles.input, width: "100px", display: "flex", alignItems: "center", color: theme.textMuted, background: "transparent" }}>{inItemSel?.unit || "—"}</span>
+                )}
+              </div>
+              {inIsKg && inForm.unit === "tonnes" && inForm.quantity !== "" && (
+                <div style={{ fontSize: "11px", color: theme.accent, marginTop: "4px", fontWeight: "600" }}>{kgPreview(inForm.quantity)} will be stored</div>
+              )}
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Unit Cost at Purchase (₦)</label>
@@ -2962,11 +3546,8 @@ const Inventory = ({ onLowStockChange }) => {
               )}
             </div>
             <div style={styles.formGroup}>
-              <label style={styles.label}>Received By</label>
-              <select style={styles.input} value={inForm.staffName} onChange={e => setInForm({ ...inForm, staffName: e.target.value })}>
-                <option value="">— Select staff —</option>
-                {staff.map(s => <option key={s.id} value={s.full_name}>{s.full_name}</option>)}
-              </select>
+              <label style={styles.label}>Recorded By</label>
+              <div style={{ ...styles.input, background: "transparent", color: theme.textMuted, display: "flex", alignItems: "center" }}>{recordedBy || "—"}</div>
             </div>
             <div style={{ ...styles.formGroup, gridColumn: "span 2" }}>
               <label style={styles.label}>Notes</label>
@@ -2998,7 +3579,20 @@ const Inventory = ({ onLowStockChange }) => {
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Quantity Issued *</label>
-              <input style={styles.input} type="number" placeholder="e.g. 20" value={outForm.quantity} onChange={e => setOutForm({ ...outForm, quantity: e.target.value })} />
+              <div style={{ display: "flex", gap: "6px" }}>
+                <input style={{ ...styles.input, flex: 1 }} type="number" placeholder="e.g. 20" value={outForm.quantity} onChange={e => setOutForm({ ...outForm, quantity: e.target.value })} />
+                {outIsKg ? (
+                  <select style={{ ...styles.input, width: "100px" }} value={outForm.unit} onChange={e => setOutForm({ ...outForm, unit: e.target.value })}>
+                    <option value="kg">kg</option>
+                    <option value="tonnes">tonnes</option>
+                  </select>
+                ) : (
+                  <span style={{ ...styles.input, width: "100px", display: "flex", alignItems: "center", color: theme.textMuted, background: "transparent" }}>{outItemSel?.unit || "—"}</span>
+                )}
+              </div>
+              {outIsKg && outForm.unit === "tonnes" && outForm.quantity !== "" && (
+                <div style={{ fontSize: "11px", color: theme.accent, marginTop: "4px", fontWeight: "600" }}>{kgPreview(outForm.quantity)} will be stored</div>
+              )}
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Issued To</label>
@@ -3007,11 +3601,8 @@ const Inventory = ({ onLowStockChange }) => {
               </select>
             </div>
             <div style={styles.formGroup}>
-              <label style={styles.label}>Issued By</label>
-              <select style={styles.input} value={outForm.staffName} onChange={e => setOutForm({ ...outForm, staffName: e.target.value })}>
-                <option value="">— Select staff —</option>
-                {staff.map(s => <option key={s.id} value={s.full_name}>{s.full_name}</option>)}
-              </select>
+              <label style={styles.label}>Recorded By</label>
+              <div style={{ ...styles.input, background: "transparent", color: theme.textMuted, display: "flex", alignItems: "center" }}>{recordedBy || "—"}</div>
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Reference / Job No.</label>
@@ -3086,11 +3677,8 @@ const Inventory = ({ onLowStockChange }) => {
                   </div>
                 )}
                 <div style={styles.formGroup}>
-                  <label style={styles.label}>Staff / Received By</label>
-                  <select style={styles.input} value={movEditForm.staffName} onChange={e => setMovEditForm({ ...movEditForm, staffName: e.target.value })}>
-                    <option value="">— Select —</option>
-                    {staff.map(s => <option key={s.id} value={s.full_name}>{s.full_name}</option>)}
-                  </select>
+                  <label style={styles.label}>Recorded By (original)</label>
+                  <div style={{ ...styles.input, background: "transparent", color: theme.textMuted, display: "flex", alignItems: "center" }}>{movEditForm.staffName || "—"}</div>
                 </div>
                 <div style={{ ...styles.formGroup, gridColumn: "span 3" }}>
                   <label style={styles.label}>Notes</label>
@@ -3149,12 +3737,12 @@ const Inventory = ({ onLowStockChange }) => {
                         <td style={styles.td}>
                           {isAuto ? (
                             <span style={{ fontSize: "10px", color: theme.textMuted, fontStyle: "italic" }}>Auto — edit via Production Log</span>
-                          ) : (
+                          ) : canWriteMovement ? (
                             <div style={{ display: "flex", gap: "4px" }}>
                               <button style={{ ...styles.btn("secondary"), padding: "3px 8px", fontSize: "11px" }} onClick={() => startEditMovement(m)}>Edit</button>
                               <button style={{ ...styles.btn("danger"), padding: "3px 8px", fontSize: "11px" }} onClick={() => setMovConfirmDelete(m)}>Delete</button>
                             </div>
-                          )}
+                          ) : null}
                         </td>
                       </tr>
                     );
@@ -3217,12 +3805,20 @@ const LPOApprovals = () => {
   const [alert, setAlert] = useState(null);
   const [selected, setSelected] = useState(null);
   const [note, setNote] = useState("");
+  const [docUrls, setDocUrls] = useState({});
   const today = new Date().toISOString().split("T")[0];
   const due = new Date(Date.now() + 30 * 86400000).toISOString().split("T")[0];
 
   const load = async () => {
     setLoading(true);
-    try { setLpos(await lpoService.getAll()); }
+    try {
+      const rows = await lpoService.getAll();
+      setLpos(rows);
+      const entries = await Promise.all(rows.filter(l => l.document_url).map(async l => {
+        try { return [l.id, await lpoService.getSignedUrl(l.document_url)]; } catch { return [l.id, null]; }
+      }));
+      setDocUrls(Object.fromEntries(entries));
+    }
     catch (e) { setAlert({ type: "error", msg: "Could not load LPO queue: " + e.message }); }
     finally { setLoading(false); }
   };
@@ -3235,15 +3831,27 @@ const LPOApprovals = () => {
     try {
       await lpoService.decide(lpo.id, decision, note.trim() || null);
       if (decision === "approved") {
-        await ordersService.updateStatus(lpo.order.id, "in_progress");
-        // Auto-create invoice if none exists
+        // 1) Ensure the invoice exists FIRST — a billing failure must not leave the
+        //    order in_progress-but-uninvoiced.
         const existing = await invoicesService.getByOrder(lpo.order.id);
         if (existing.length === 0) {
           const total = (lpo.order.order_items || []).reduce((s, i) => s + i.quantity * i.unit_price, 0);
-          const count = lpos.length;
-          const year = new Date().getFullYear();
-          await invoicesService.create({ order_id: lpo.order.id, invoice_number: `APC-LPO-${year}-${String(count + 1).padStart(3, "0")}`, total_amount: total, issued_date: today, due_date: due });
+          let invNum = await invoicesService.getNextNumber();
+          try {
+            await invoicesService.create({ order_id: lpo.order.id, invoice_number: invNum, total_amount: total, issued_date: today, due_date: due });
+          } catch (createErr) {
+            if (createErr.code === '23505') {
+              invNum = await invoicesService.getNextNumber();
+              await invoicesService.create({ order_id: lpo.order.id, invoice_number: invNum, total_amount: total, issued_date: today, due_date: due });
+            } else {
+              setAlert({ type: "error", msg: `LPO approved, but invoice creation failed (${createErr.message}). The order was NOT moved to processing — generate the invoice manually from Orders, then it will proceed.` });
+              await load();
+              return; // finally{} still clears saving
+            }
+          }
         }
+        // 2) Only after the invoice is confirmed, advance the order + delivery register.
+        await ordersService.updateStatus(lpo.order.id, "in_progress");
         await pendingDeliveryService.addFromOrder(lpo.order);
         setAlert({ type: "success", msg: `LPO approved — ${lpo.order?.customer?.name} added to Pending Delivery Register.` });
       } else {
@@ -3288,8 +3896,8 @@ const LPOApprovals = () => {
                         <span key={i} style={styles.badge(theme.blue)}>{it.quantity?.toLocaleString()} {it.block_type}</span>
                       ))}
                       <span style={{ color: theme.accent, fontWeight: "700" }}>{naira(total)}</span>
-                      {lpo.document_url && (
-                        <a href={lpo.document_url} target="_blank" rel="noreferrer" style={{ ...styles.btn("primary"), fontSize: "11px", padding: "3px 10px", textDecoration: "none", display: "inline-block" }}>📄 View LPO Document</a>
+                      {lpo.document_url && docUrls[lpo.id] && (
+                        <a href={docUrls[lpo.id]} target="_blank" rel="noreferrer" style={{ ...styles.btn("primary"), fontSize: "11px", padding: "3px 10px", textDecoration: "none", display: "inline-block" }}>📄 View LPO Document</a>
                       )}
                     </div>
                   </div>
@@ -3674,7 +4282,7 @@ const DailySchedule = () => {
                 <span style={styles.badge(statusColor(s.status))}>{s.status?.replace(/_/g, " ")}</span>
                 {s.status === "draft" && <button style={{ ...styles.btn("primary"), padding: "4px 12px", fontSize: "11px" }} onClick={e => { e.stopPropagation(); handleSubmit(s.id); }}>Submit for Approval</button>}
                 {['ico_approved','store_notified','in_progress','completed'].includes(s.status) && (
-                  <button data-board-allow style={{ ...styles.btn("secondary"), padding: "4px 12px", fontSize: "11px" }} onClick={e => { e.stopPropagation(); printSchedulePDF(s); }}>Print PDF</button>
+                  <button data-board-allow data-ico-allow style={{ ...styles.btn("secondary"), padding: "4px 12px", fontSize: "11px" }} onClick={e => { e.stopPropagation(); printSchedulePDF(s); }}>Print PDF</button>
                 )}
               </div>
             </div>
@@ -3882,7 +4490,7 @@ const ScheduleApprovals = () => {
 };
 
 // ── BATCHES ────────────────────────────────────────────────────
-const Batches = () => {
+const Batches = ({ userProfile }) => {
   const [batches, setBatches] = useState([]);
   const [productions, setProductions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -3893,8 +4501,22 @@ const Batches = () => {
   const [editTarget, setEditTarget] = useState(null);
   const [editForm, setEditForm] = useState({});
   const [deleting, setDeleting] = useState(null);
+  const [dmgTarget, setDmgTarget] = useState(null);
+  const [dmgForm, setDmgForm] = useState({ qty: '', date: '', notes: '' });
+  const [dmgSaving, setDmgSaving] = useState(false);
+  const [products, setProducts] = useState([]);
+  const [productsLoadFailed, setProductsLoadFailed] = useState(false);
+  const [curingId, setCuringId] = useState(null);
   const today = new Date().toISOString().split("T")[0];
-  const emptyForm = { blockType: "9 Inch 3 Hole Block", dateCured: today, qtyAccepted: "", createdBy: "", notes: "", linkedProds: [] };
+  // Mirrors the live batches RLS policies exactly (single source, so buttons
+  // can't drift out of sync with the DB the way Log Damage did):
+  //   batches_insert / batches_update → md, production_manager, assistant_production_manager, store_officer
+  //   batches_delete → md only
+  const BATCH_WRITE_ROLES = ['md', 'production_manager', 'assistant_production_manager', 'store_officer'];
+  const BATCH_DELETE_ROLES = ['md'];
+  const canWriteBatch = hasRole(userProfile, ...BATCH_WRITE_ROLES);
+  const canDeleteBatch = BATCH_DELETE_ROLES.includes(userProfile?.role);
+  const emptyForm = { productId: "", blockType: "", dateCured: today, qtyAccepted: "", createdBy: "", notes: "", linkedProds: [] };
   const [form, setForm] = useState(emptyForm);
 
   const load = async () => {
@@ -3905,22 +4527,50 @@ const Batches = () => {
       setProductions(p);
     } catch (e) { setAlert({ type: "error", msg: "Could not load batches: " + e.message }); }
     finally { setLoading(false); }
+    // Products power the block-type dropdown and the curing standard per batch.
+    // Loaded separately and non-blocking: a failure here must not break the
+    // batch list or the New Batch flow, which work without it (degraded).
+    productsService.getActive()
+      .then(p => { setProducts(p); setProductsLoadFailed(false); })
+      .catch(e => { console.error("Could not load products for batch curing/dropdown:", e); setProductsLoadFailed(true); });
   };
 
   useEffect(() => { load(); }, []);
 
+  // Only block products belong in a batch; curing standards are read per batch
+  // from the product FK.
+  const blockProducts = products.filter(p => p.category === "Blocks");
+  const productById = Object.fromEntries(products.map(p => [p.id, p]));
+
   const toggleProdLink = (id) => setForm(f => ({ ...f, linkedProds: f.linkedProds.includes(id) ? f.linkedProds.filter(p => p !== id) : [...f.linkedProds, id] }));
 
   const handleCreate = async () => {
-    if (!form.qtyAccepted || !form.dateCured) return setAlert({ type: "error", msg: "Quantity accepted and cure date are required." });
+    // Normal mode requires a product selection (product_id); the degraded
+    // fallback (products failed to load) requires a block_type instead.
+    if (!productsLoadFailed && !form.productId) return setAlert({ type: "error", msg: "Please select a block type." });
+    if (productsLoadFailed && !form.blockType) return setAlert({ type: "error", msg: "Please select a block type." });
+    if (!form.qtyAccepted || !form.dateCured) return setAlert({ type: "error", msg: "Quantity accepted and batch date are required." });
     setSaving(true);
     try {
-      const batchNum = await batchesService.getNextNumber();
-      const batch = await batchesService.create({
-        batch_number: batchNum, block_type: form.blockType, date_cured: form.dateCured,
-        qty_accepted: parseInt(form.qtyAccepted), qty_remaining: parseInt(form.qtyAccepted),
-        status: "active", notes: form.notes || null, created_by: form.createdBy || null,
-      }, form.linkedProds);
+      let batchNum = await batchesService.getNextNumber();
+      try {
+        await batchesService.create({
+          batch_number: batchNum, product_id: form.productId || null, block_type: form.blockType, date_cured: form.dateCured,
+          qty_accepted: parseInt(form.qtyAccepted), qty_remaining: parseInt(form.qtyAccepted),
+          status: "active", notes: form.notes || null, created_by: form.createdBy || null,
+        }, form.linkedProds);
+      } catch (createErr) {
+        if (createErr.code === '23505') {
+          batchNum = await batchesService.getNextNumber();
+          await batchesService.create({
+            batch_number: batchNum, product_id: form.productId || null, block_type: form.blockType, date_cured: form.dateCured,
+            qty_accepted: parseInt(form.qtyAccepted), qty_remaining: parseInt(form.qtyAccepted),
+            status: "active", notes: form.notes || null, created_by: form.createdBy || null,
+          }, form.linkedProds);
+        } else {
+          throw createErr;
+        }
+      }
       // Increase finished goods stock
       try { await finishedGoodsService.increase(form.blockType, parseInt(form.qtyAccepted)); } catch {}
       await load();
@@ -3979,6 +4629,58 @@ const Batches = () => {
     finally { setDeleting(null); }
   };
 
+  const openDmgModal = (b) => {
+    setDmgTarget(b);
+    setDmgForm({ qty: '', date: today, notes: '' });
+  };
+
+  const handleLogDamage = async () => {
+    const qty = parseInt(dmgForm.qty);
+    if (!qty || qty <= 0) return setAlert({ type: "error", msg: "Quantity damaged must be a positive number." });
+    if (!dmgForm.date) return setAlert({ type: "error", msg: "Date is required." });
+    setDmgSaving(true);
+    try {
+      await productionService.logDamage({
+        date: dmgForm.date,
+        block_type: dmgTarget.block_type,
+        stage: "curing",
+        quantity_damaged: qty,
+        batch_id: dmgTarget.id,
+        notes: dmgForm.notes || null,
+        recorded_by: userProfile?.id || null,
+      });
+      await batchesService.reduceStock(dmgTarget.id, qty);
+      try { await finishedGoodsService.decrease(dmgTarget.block_type, qty); } catch {}
+      await load();
+      setDmgTarget(null);
+      setAlert({ type: "success", msg: `${qty} damaged block(s) logged against ${dmgTarget.batch_number}.` });
+    } catch (e) { setAlert({ type: "error", msg: "Failed to log damage: " + e.message }); }
+    finally { setDmgSaving(false); }
+  };
+
+  const handleMarkCured = async (b) => {
+    setCuringId(b.id);
+    try {
+      await batchesService.markCured(b.id, userProfile?.id || null);
+      await load();
+      setAlert({ type: "success", msg: `Batch ${b.batch_number} marked as cured.` });
+    } catch (e) { setAlert({ type: "error", msg: "Failed to mark cured: " + e.message }); }
+    finally { setCuringId(null); }
+  };
+
+  // Advisory curing state for a batch row. Returns null when curing doesn't
+  // apply (no product FK on historical rows, bought-in stock, or a product
+  // with no finalized curing standard) — the row then shows "N/A" and no action.
+  const curingInfo = (b) => {
+    const prod = b.product_id ? productById[b.product_id] : null;
+    if (!prod || prod.is_own_production !== true || prod.min_cure_days == null) return null;
+    if (b.cured_verified) return { state: "cured" };
+    if (!b.date_cured) return { state: "curing", ready: false, daysRemaining: null };
+    const ageDays = Math.floor((new Date(today) - new Date(b.date_cured)) / 86400000);
+    const daysRemaining = prod.min_cure_days - ageDays;
+    return { state: "curing", ready: daysRemaining <= 0, daysRemaining };
+  };
+
   const filteredProds = productions.filter(p => p.block_type === form.blockType);
   const totalInYard = batches.filter(b => b.status === "active").reduce((s, b) => s + Number(b.qty_remaining || 0), 0);
 
@@ -3986,7 +4688,7 @@ const Batches = () => {
     <div>
       <div style={styles.header}>
         <div><div style={styles.pageTitle}>Batch Management</div><div style={styles.pageSubtitle}>Finished goods batches after curing — link to production logs</div></div>
-        <button style={styles.btn("primary")} onClick={() => setShowForm(!showForm)}>+ Create Batch</button>
+        {canWriteBatch && <button style={styles.btn("primary")} onClick={() => setShowForm(!showForm)}>+ Create Batch</button>}
       </div>
       {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
 
@@ -3997,7 +4699,7 @@ const Batches = () => {
             <div style={{ fontWeight: "700", fontSize: "15px", marginBottom: "18px" }}>Edit Batch — {editTarget.batch_number}</div>
             <div style={styles.grid(2)}>
               <div style={styles.formGroup}><label style={styles.label}>Block Type</label><ProductSelect value={editForm.blockType} onChange={(name) => setEditForm(f => ({ ...f, blockType: name }))} style={styles.input} /></div>
-              <div style={styles.formGroup}><label style={styles.label}>Date Cured *</label><input style={styles.input} type="date" value={editForm.dateCured} onChange={e => setEditForm(f => ({ ...f, dateCured: e.target.value }))} /></div>
+              <div style={styles.formGroup}><label style={styles.label}>Batch Date *</label><input style={styles.input} type="date" value={editForm.dateCured} onChange={e => setEditForm(f => ({ ...f, dateCured: e.target.value }))} /></div>
               <div style={styles.formGroup}><label style={styles.label}>Qty Accepted *</label><input style={styles.input} type="number" value={editForm.qtyAccepted} onChange={e => setEditForm(f => ({ ...f, qtyAccepted: e.target.value }))} /></div>
               <div style={styles.formGroup}><label style={styles.label}>Created By</label><input style={styles.input} value={editForm.createdBy} onChange={e => setEditForm(f => ({ ...f, createdBy: e.target.value }))} /></div>
               <div style={{ ...styles.formGroup, gridColumn: "span 2" }}><label style={styles.label}>Notes</label><input style={styles.input} value={editForm.notes} onChange={e => setEditForm(f => ({ ...f, notes: e.target.value }))} /></div>
@@ -4015,6 +4717,37 @@ const Batches = () => {
         </div>
       )}
 
+      {/* Damage modal */}
+      {dmgTarget && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+          <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: "12px", padding: "24px", width: "100%", maxWidth: "460px" }}>
+            <div style={{ fontWeight: "700", fontSize: "15px", marginBottom: "4px" }}>Log Curing/Yard Damage</div>
+            <div style={{ fontSize: "12px", color: theme.textMuted, marginBottom: "18px" }}>Batch {dmgTarget.batch_number} · {dmgTarget.block_type} · {Number(dmgTarget.qty_remaining).toLocaleString()} remaining</div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Quantity Damaged *</label>
+              <input style={styles.input} type="number" min="1" placeholder="e.g. 30" value={dmgForm.qty} onChange={e => setDmgForm(f => ({ ...f, qty: e.target.value }))} />
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Date *</label>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <input style={styles.input} type="date" value={dmgForm.date} onChange={e => setDmgForm(f => ({ ...f, date: e.target.value }))} />
+                {dmgForm.date && dmgForm.date < today && (
+                  <span style={{ fontSize: "10px", padding: "1px 6px", borderRadius: "4px", background: "#f59e0b22", color: "#f59e0b", border: "1px solid #f59e0b44", fontWeight: "700", whiteSpace: "nowrap" }}>Historical</span>
+                )}
+              </div>
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Notes (optional)</label>
+              <input style={styles.input} placeholder="e.g. cracks found during picking" value={dmgForm.notes} onChange={e => setDmgForm(f => ({ ...f, notes: e.target.value }))} />
+            </div>
+            <div style={styles.row}>
+              <button style={styles.btn("danger")} onClick={handleLogDamage} disabled={dmgSaving}>{dmgSaving ? "Logging…" : "Log Damage"}</button>
+              <button style={styles.btn("secondary")} onClick={() => setDmgTarget(null)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div style={styles.grid(3)}>
         <StatCard label="Active Batches" value={batches.filter(b => b.status === "active").length} sub="With stock remaining" accent={theme.green} />
         <StatCard label="Blocks In Yard" value={fmt(totalInYard)} sub="Across all active batches" accent={theme.accent} />
@@ -4025,8 +4758,31 @@ const Batches = () => {
         <div style={{ ...styles.card, marginBottom: "20px", borderColor: theme.accent + "44" }}>
           <div style={styles.sectionTitle}>Create New Batch</div>
           <div style={styles.grid(3)}>
-            <div style={styles.formGroup}><label style={styles.label}>Block Type</label><ProductSelect value={form.blockType} onChange={(name) => setForm({ ...form, blockType: name, linkedProds: [] })} style={styles.input} /></div>
-            <div style={styles.formGroup}><label style={styles.label}>Date Cured *</label><input style={styles.input} type="date" value={form.dateCured} onChange={e => setForm({ ...form, dateCured: e.target.value })} /></div>
+            {productsLoadFailed ? (
+              // Degraded: products couldn't load (network hiccup) — fall back to
+              // the original free picker so batch creation still works. product_id
+              // stays unset for these; block_type is still recorded.
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Block Type *</label>
+                <ProductSelect value={form.blockType} onChange={(name) => setForm({ ...form, blockType: name, productId: "", linkedProds: [] })} style={styles.input} />
+              </div>
+            ) : (
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Block Type *</label>
+                <select style={styles.input} value={form.productId} onChange={e => {
+                  const p = blockProducts.find(pr => pr.id === e.target.value);
+                  setForm({ ...form, productId: e.target.value, blockType: p ? p.name : "", linkedProds: [] });
+                }}>
+                  <option value="">— Select block —</option>
+                  {blockProducts.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </div>
+            )}
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Batch Date *</label>
+              <input style={styles.input} type="date" value={form.dateCured} onChange={e => setForm({ ...form, dateCured: e.target.value })} />
+              <div style={{ fontSize: "11px", color: theme.textMuted, marginTop: "4px" }}>Date this batch was logged / cast</div>
+            </div>
             <div style={styles.formGroup}><label style={styles.label}>Qty Accepted (Good Blocks) *</label><input style={styles.input} type="number" placeholder="e.g. 2500" value={form.qtyAccepted} onChange={e => setForm({ ...form, qtyAccepted: e.target.value })} /></div>
             <div style={styles.formGroup}><label style={styles.label}>Created By</label><input style={styles.input} placeholder="Store Officer name" value={form.createdBy} onChange={e => setForm({ ...form, createdBy: e.target.value })} /></div>
             <div style={{ ...styles.formGroup, gridColumn: "span 2" }}><label style={styles.label}>Notes</label><input style={styles.input} placeholder="Optional" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></div>
@@ -4061,6 +4817,7 @@ const Batches = () => {
           const delivered = b.qty_accepted - b.qty_remaining;
           const pct = b.qty_accepted > 0 ? Math.round((delivered / b.qty_accepted) * 100) : 0;
           const isOpen = expandedId === b.id;
+          const ci = curingInfo(b);
           return (
             <div key={b.id} style={{ borderRadius: "8px", border: `1px solid ${b.status === "exhausted" ? theme.border : theme.accent + "44"}`, marginBottom: "10px", overflow: "hidden" }}>
               <div style={{ padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }} onClick={() => setExpandedId(isOpen ? null : b.id)}>
@@ -4068,7 +4825,15 @@ const Batches = () => {
                   <strong style={{ fontSize: "14px" }}>{b.batch_number}</strong>
                   <span style={{ ...styles.badge(theme.blue), marginLeft: "8px" }}>{b.block_type}</span>
                   <span style={styles.badge(b.status === "active" ? theme.green : theme.textMuted)}>{b.status}</span>
-                  <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "3px" }}>Cured: {b.date_cured} · Created by: {b.created_by || "—"}</div>
+                  {ci === null
+                    ? <span style={styles.badge(theme.textMuted)}>N/A</span>
+                    : ci.state === "cured"
+                      ? <span style={styles.badge(theme.green)}>✓ Cured</span>
+                      : <span style={styles.badge(theme.accent)}>Curing</span>}
+                  <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "3px" }}>Batch date: {b.date_cured} · Created by: {b.created_by || "—"}</div>
+                  {ci && ci.state === "curing" && !ci.ready && ci.daysRemaining != null && (
+                    <div style={{ fontSize: "11px", color: theme.accent, marginTop: "3px" }}>Curing — ready in {ci.daysRemaining} day{ci.daysRemaining === 1 ? "" : "s"}</div>
+                  )}
                 </div>
                 <div style={{ textAlign: "right", display: "flex", gap: "8px", alignItems: "center" }}>
                   <div>
@@ -4076,8 +4841,14 @@ const Batches = () => {
                     <div style={{ fontSize: "13px" }}>Remaining: <strong style={{ color: b.status === "active" ? theme.green : theme.textMuted }}>{Number(b.qty_remaining).toLocaleString()}</strong></div>
                   </div>
                   <div style={{ display: "flex", gap: "6px" }} onClick={e => e.stopPropagation()}>
-                    <button style={{ ...styles.btn("secondary"), padding: "5px 12px", fontSize: "12px" }} onClick={() => startEdit(b)}>Edit</button>
-                    <button style={{ ...styles.btn("danger"), padding: "5px 12px", fontSize: "12px" }} onClick={() => handleDelete(b)} disabled={deleting === b.id}>{deleting === b.id ? "…" : "Delete"}</button>
+                    {canWriteBatch && ci && ci.state === "curing" && ci.ready && (
+                      <button style={{ ...styles.btn("primary"), padding: "5px 12px", fontSize: "12px", background: theme.green, color: "#000" }} onClick={() => handleMarkCured(b)} disabled={curingId === b.id}>{curingId === b.id ? "…" : "Mark Cured"}</button>
+                    )}
+                    {canWriteBatch && b.status === "active" && (
+                      <button style={{ ...styles.btn("danger"), padding: "5px 12px", fontSize: "12px" }} onClick={() => openDmgModal(b)}>Log Damage</button>
+                    )}
+                    {canWriteBatch && <button style={{ ...styles.btn("secondary"), padding: "5px 12px", fontSize: "12px" }} onClick={() => startEdit(b)}>Edit</button>}
+                    {canDeleteBatch && <button style={{ ...styles.btn("danger"), padding: "5px 12px", fontSize: "12px" }} onClick={() => handleDelete(b)} disabled={deleting === b.id}>{deleting === b.id ? "…" : "Delete"}</button>}
                   </div>
                 </div>
               </div>
@@ -4833,6 +5604,8 @@ const ReceivablesTab = () => {
 
   for (const order of receivables) {
     for (const inv of order.invoices || []) {
+      // Drafts (quotations) and cancelled invoices are not receivables.
+      if (inv.status === 'draft' || inv.status === 'cancelled') continue;
       const invoiced = Number(inv.total_amount || 0);
       const paid = (inv.payments || []).filter(p => p.status === 'confirmed').reduce((s, p) => s + Number(p.amount_paid || 0), 0);
       const outstanding = invoiced - paid;
@@ -5069,7 +5842,7 @@ const SEED_ACCOUNTS = [
   { bank_name: 'TAJ Bank PLC', account_name: 'Abuja Precast Concrete LTD (Operations)', account_number: '0001733191', account_type: 'expense', current_balance: 0 },
 ];
 
-const BankAccountsTab = () => {
+const BankAccountsTab = ({ userProfile }) => {
   const [accounts, setAccounts] = useState([]);
   const [selected, setSelected] = useState(null);
   const [transactions, setTransactions] = useState([]);
@@ -5105,12 +5878,34 @@ const BankAccountsTab = () => {
   const [creatingPayment, setCreatingPayment] = useState(false);
   const [err, setErr] = useState('');
   const [ok, setOk] = useState('');
+  const [reconUnverified, setReconUnverified] = useState(false);
+  const [reconWarnAcked, setReconWarnAcked] = useState(false);
+  const [paymentRequests, setPaymentRequests] = useState([]);
+  const [suggestedTxs, setSuggestedTxs] = useState([]);
+  const [suggestModal, setSuggestModal] = useState(null);
+  const [prSearch, setPrSearch] = useState('');
+  const [rejectModal, setRejectModal] = useState(null);
+  const [rejectReason, setRejectReason] = useState('');
+  const [actioningId, setActioningId] = useState(null);
+
+  const canConfirm = hasRole(userProfile, 'md', 'accountant');
+
+  // Helpers for payment request reference matching
+  const findPRCandidate = (tx) => {
+    if (!tx.debit || !paymentRequests.length) return null;
+    const txNum = extractPRReference(tx.description);
+    if (txNum === null) return null;
+    const pr = paymentRequests.find(p => extractPRReference(p.reference) === txNum);
+    if (!pr) return null;
+    return { pr, amtMatch: Math.abs(Number(pr.amount) - tx.debit) < 0.01 };
+  };
 
   useEffect(() => {
     // Supporting data — fail silently so they don't block the accounts tab
     expenseCategoriesService.getActive().then(setExpCategories).catch(() => {});
     accountingService.getOpenInvoices().then(setAllInvoices).catch(() => {});
     customersService.getAll().then(setAllCustomers).catch(() => {});
+    paymentRequestsService.listDisbursed().then(setPaymentRequests).catch(() => {});
     // Core accounts load
     bankAccountsService.getAll()
       .then(async (existing) => {
@@ -5143,7 +5938,12 @@ const BankAccountsTab = () => {
       .then(setTransactions).catch(e => setErr(e?.message || 'An error occurred')).finally(() => setTxLoading(false));
   }, [selected?.id, txFrom, txTo]);
 
-  const openImport = (acct) => { setImportAcct(acct.id); setImportFile(null); setImportStep('upload'); setErr(''); setOk(''); };
+  useEffect(() => {
+    if (!selected) { setSuggestedTxs([]); return; }
+    bankTransactionsService.getSuggested(selected.id).then(setSuggestedTxs).catch(() => {});
+  }, [selected?.id]);
+
+  const openImport = (acct) => { setImportAcct(acct.id); setImportFile(null); setImportStep('upload'); setErr(''); setOk(''); setReconUnverified(false); setReconWarnAcked(false); };
   const closeImport = () => setImportStep(null);
 
   const handleFileSelect = async (file) => {
@@ -5161,8 +5961,54 @@ const BankAccountsTab = () => {
   };
 
   const buildPreview = async () => {
+    setReconUnverified(false);
+    setReconWarnAcked(false);
     const txs = mapRowsToTransactions(importRows, colMap);
     if (txs.length === 0) { setErr('No valid transactions found. Check column mapping.'); return; }
+
+    // ── Whole-file reconciliation gate ────────────────────────────────────────
+    // Prefer the bank's own TRANS SUMMARY totals (TAJ); fall back to summing
+    // parsed rows when no summary block is present (e.g. Moniepoint CSV).
+    const summary = extractStatementSummary(importRows, colMap);
+    const { openingBalance, totalCredit, totalDebit, closingBalance } = summary;
+    let chkCredits, chkDebits, chkClosing;
+    if (totalCredit !== null && totalDebit !== null && closingBalance !== null) {
+      // Primary path: bank-stated totals from TRANS SUMMARY
+      chkCredits = totalCredit;
+      chkDebits  = totalDebit;
+      chkClosing = closingBalance;
+    } else {
+      // Fallback: sum every parsed row; use the available running balance as closing.
+      // Check both ends — statements may be ordered ascending or descending by date.
+      const b0 = txs[0]?.balance ?? 0;
+      const bn = txs[txs.length - 1]?.balance ?? 0;
+      if (b0 > 0 || bn > 0) {
+        chkCredits = txs.reduce((s, t) => s + (t.credit || 0), 0);
+        chkDebits  = txs.reduce((s, t) => s + (t.debit  || 0), 0);
+        // Pick whichever end is arithmetically closer to the expected result
+        if (openingBalance !== null) {
+          const exp = openingBalance + chkCredits - chkDebits;
+          chkClosing = Math.abs(exp - b0) <= Math.abs(exp - bn) ? b0 : bn;
+        } else {
+          chkClosing = b0 > 0 ? b0 : bn;
+        }
+      }
+    }
+    if (openingBalance !== null && chkCredits !== undefined && chkClosing !== undefined) {
+      const expected = openingBalance + chkCredits - chkDebits;
+      if (Math.abs(expected - chkClosing) > 1) {
+        const fmtN = n => `₦${parseFloat(Math.abs(n).toFixed(2)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        setErr(
+          `Statement does not reconcile — Opening ${fmtN(openingBalance)} + Credits ${fmtN(chkCredits)} − Debits ${fmtN(chkDebits)} = ${fmtN(expected)}, ` +
+          `but stated closing balance is ${fmtN(chkClosing)} (difference: ${fmtN(expected - chkClosing)}). Import rejected.`
+        );
+        return;
+      }
+    } else {
+      setReconUnverified(true);
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     const withDups = await bankTransactionsService.checkDuplicates(importAcct, txs).catch(() => txs.map(t => ({ ...t, isDuplicate: false })));
     const acct = accounts.find(a => a.id === importAcct);
     let payments = [], expenses2 = [], invoices2 = allInvoices, customers2 = allCustomers;
@@ -5178,7 +6024,7 @@ const BankAccountsTab = () => {
       withDups.filter(t => !t.isDuplicate),
       payments, expenses2,
       acct?.account_type || 'both',
-      { invoices: invoices2, customers: customers2 }
+      { invoices: invoices2, customers: customers2, paymentRequests }
     );
     setPreview(matched);
     setImportStep('preview');
@@ -5296,10 +6142,15 @@ const BankAccountsTab = () => {
           const prevPaid = (inv.payments || []).filter(p => p.status === 'confirmed').reduce((s, p) => s + Number(p.amount_paid), 0);
           const totalNow = prevPaid + amount;
           if (totalNow >= Number(inv.total_amount)) {
-            try { await invoicesService.update(inv.id, { payment_status: 'paid' }); } catch {}
-          } else {
-            try { await invoicesService.update(inv.id, { payment_status: 'partially_paid' }); } catch {}
+            // Mark fully-paid via the real `status` column (there is no
+            // `payment_status` column — the old write silently failed). Let a
+            // genuine failure surface rather than swallowing it.
+            await invoicesService.update(inv.id, { status: 'paid' });
           }
+          // Partial payment: leave the invoice as 'issued'. There is no
+          // 'partially_paid' value in the invoices_status_check constraint, so
+          // writing one would fail; the outstanding balance is derived from
+          // (total_amount − confirmed payments) instead.
           accountingService.getOpenInvoices().then(setAllInvoices).catch(() => {});
         }
         await bankTransactionsService.updateMatch(tx.id, 'matched', 'payment', payment.id, `Invoice: ${inv?.invoice_number || ''}`);
@@ -5352,6 +6203,47 @@ const BankAccountsTab = () => {
       setTransactions(t => t.map(tx => tx.id === matchModal.id ? { ...tx, match_status: matchType === 'other' ? 'manual' : 'matched', matched_to_type: matchType, notes: matchNotes } : tx));
       setMatchModal(null);
     } catch (e) { setErr(e?.message || 'An error occurred'); }
+  };
+
+  const handleSuggestPR = async (tx, prId) => {
+    setActioningId(tx.id);
+    try {
+      await bankTransactionsService.suggestMatch(tx.id, 'payment_request', prId);
+      const pr = paymentRequests.find(p => p.id === prId);
+      const updated = { ...tx, match_status: 'suggested', matched_to_type: 'payment_request', matched_to_id: prId };
+      setTransactions(ts => ts.map(t => t.id === tx.id ? updated : t));
+      setSuggestedTxs(ss => [...ss.filter(s => s.id !== tx.id), updated]);
+      setSuggestModal(null);
+      setPrSearch('');
+      setOk(`Suggested match: ${pr?.reference || 'payment request'}`);
+    } catch (e) { setErr(e?.message || 'An error occurred'); }
+    finally { setActioningId(null); }
+  };
+
+  const handleConfirmMatch = async (tx) => {
+    setActioningId(tx.id);
+    try {
+      await bankTransactionsService.confirmMatch(tx.id, 'confirm', null);
+      setTransactions(ts => ts.map(t => t.id === tx.id ? { ...t, match_status: 'matched' } : t));
+      setSuggestedTxs(ss => ss.filter(s => s.id !== tx.id));
+      setOk(`Match confirmed`);
+    } catch (e) { setErr(e?.message || 'An error occurred'); }
+    finally { setActioningId(null); }
+  };
+
+  const handleRejectMatch = async () => {
+    if (!rejectModal) return;
+    if (!rejectReason.trim()) { setErr('Reason is required to reject a match'); return; }
+    setActioningId(rejectModal.id);
+    try {
+      await bankTransactionsService.confirmMatch(rejectModal.id, 'reject', rejectReason.trim());
+      setTransactions(ts => ts.map(t => t.id === rejectModal.id ? { ...t, match_status: 'unmatched', matched_to_type: null, matched_to_id: null } : t));
+      setSuggestedTxs(ss => ss.filter(s => s.id !== rejectModal.id));
+      setRejectModal(null);
+      setRejectReason('');
+      setOk(`Match rejected`);
+    } catch (e) { setErr(e?.message || 'An error occurred'); }
+    finally { setActioningId(null); }
   };
 
   const filtered = transactions.filter(t => {
@@ -5433,6 +6325,16 @@ const BankAccountsTab = () => {
 
             {importStep === 'preview' && (
               <div>
+                {reconUnverified && (
+                  <div style={{ background: '#d9770622', border: '1px solid #d9770644', borderRadius: '8px', padding: '12px 14px', marginBottom: '14px', fontSize: '13px', color: '#d97706' }}>
+                    <div style={{ fontWeight: '600', marginBottom: '4px' }}>Could not verify this statement reconciles</div>
+                    <div style={{ marginBottom: '10px' }}>Opening balance or transaction totals were not found in the expected format — review this statement manually before importing.</div>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                      <input type="checkbox" checked={reconWarnAcked} onChange={e => setReconWarnAcked(e.target.checked)} />
+                      I have reviewed this statement manually and confirm I want to proceed
+                    </label>
+                  </div>
+                )}
                 <div style={{ ...styles.grid(3), marginBottom: '16px' }}>
                   <div style={styles.statCard(theme.blue)}><div style={styles.statLabel}>Total</div><div style={{ ...styles.statValue, fontSize: '18px' }}>{preview.length}</div></div>
                   <div style={styles.statCard(theme.green)}><div style={styles.statLabel}>Auto-Matched</div><div style={{ ...styles.statValue, fontSize: '18px', color: theme.green }}>{preview.filter(t => t.autoMatch).length}</div></div>
@@ -5462,7 +6364,7 @@ const BankAccountsTab = () => {
                 </div>
                 <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
                   <button style={styles.btn('secondary')} onClick={() => setImportStep('mapping')}>← Back</button>
-                  <button style={{ ...styles.btn('primary'), marginLeft: 'auto' }} onClick={confirmImport} disabled={importing}>{importing ? 'Importing…' : `✓ Import ${preview.length} Transactions`}</button>
+                  <button style={{ ...styles.btn('primary'), marginLeft: 'auto' }} onClick={confirmImport} disabled={importing || (reconUnverified && !reconWarnAcked)}>{importing ? 'Importing…' : `✓ Import ${preview.length} Transactions`}</button>
                 </div>
               </div>
             )}
@@ -5492,6 +6394,74 @@ const BankAccountsTab = () => {
             <div style={{ display: 'flex', gap: '8px' }}>
               <button style={styles.btn('secondary')} onClick={() => setMatchModal(null)}>Cancel</button>
               <button style={styles.btn('primary')} onClick={saveMatch}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reject Match Modal */}
+      {rejectModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1002, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '10px', padding: '20px', width: '380px' }}>
+            <div style={{ fontWeight: '700', marginBottom: '10px' }}>Reject Suggested Match</div>
+            <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '14px' }}>{rejectModal.description} · {naira(rejectModal.debit)}</div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Reason (required)</label>
+              <input style={styles.input} value={rejectReason} onChange={e => setRejectReason(e.target.value)} placeholder="Why is this match incorrect?" autoFocus />
+            </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button style={styles.btn('secondary')} onClick={() => { setRejectModal(null); setRejectReason(''); }}>Cancel</button>
+              <button style={{ ...styles.btn('primary'), background: theme.red }} onClick={handleRejectMatch}
+                disabled={!rejectReason.trim() || actioningId === rejectModal?.id}>
+                {actioningId === rejectModal?.id ? 'Rejecting…' : 'Reject Match'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Link to Payment Request Modal */}
+      {suggestModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1002, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '10px', padding: '20px', width: '460px', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ fontWeight: '700', marginBottom: '4px' }}>Link to Payment Request</div>
+            <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '12px' }}>{suggestModal.description} · {naira(suggestModal.debit)} · {suggestModal.transaction_date}</div>
+            <input style={{ ...styles.input, marginBottom: '10px' }} placeholder="Search reference, payee, or purpose…"
+              value={prSearch} onChange={e => setPrSearch(e.target.value)} autoFocus />
+            <div style={{ overflowY: 'auto', flex: 1 }}>
+              {(() => {
+                const s = prSearch.toLowerCase();
+                const visible = paymentRequests.filter(pr =>
+                  !s || (pr.reference || '').toLowerCase().includes(s) ||
+                  (pr.payee_name || '').toLowerCase().includes(s) ||
+                  (pr.purpose || '').toLowerCase().includes(s) ||
+                  (pr.supplier?.company_name || '').toLowerCase().includes(s)
+                );
+                if (!visible.length) return <div style={{ textAlign: 'center', color: theme.textMuted, padding: '20px', fontSize: '12px' }}>No disbursed / closed payment requests found</div>;
+                return visible.map(pr => {
+                  const amtMatch = Math.abs(Number(pr.amount) - suggestModal.debit) < 0.01;
+                  return (
+                    <div key={pr.id}
+                      style={{ padding: '8px 10px', borderRadius: '6px', cursor: 'pointer', marginBottom: '4px',
+                        border: `1px solid ${amtMatch ? theme.green + '55' : theme.border}`,
+                        background: amtMatch ? theme.green + '11' : 'transparent' }}
+                      onClick={() => handleSuggestPR(suggestModal, pr.id)}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontWeight: '600', fontSize: '13px' }}>{pr.reference}</span>
+                        <span style={{ fontSize: '11px', color: amtMatch ? theme.green : '#d97706' }}>
+                          {naira(Number(pr.amount))}{amtMatch ? ' ✓' : ' (amt differs)'}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '2px' }}>
+                        {pr.payee_name || pr.supplier?.company_name || '—'}{pr.purpose ? ` · ${pr.purpose}` : ''}
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+            <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: `1px solid ${theme.border}` }}>
+              <button style={styles.btn('secondary')} onClick={() => { setSuggestModal(null); setPrSearch(''); }}>Cancel</button>
             </div>
           </div>
         </div>
@@ -5815,6 +6785,58 @@ const BankAccountsTab = () => {
               <input style={{ ...styles.input, width: '180px' }} placeholder="Search description / amount…" value={txSearch} onChange={e => setTxSearch(e.target.value)} />
             </div>
           </div>
+          {/* Suggested Matches Queue — independent of date filter, always visible */}
+          {suggestedTxs.length > 0 && (
+            <div style={{ ...styles.card, marginBottom: '16px', borderLeft: `3px solid ${theme.accent}` }}>
+              <div style={{ fontWeight: '600', fontSize: '13px', marginBottom: '10px' }}>
+                {suggestedTxs.length} Pending Suggested Match{suggestedTxs.length !== 1 ? 'es' : ''} — awaiting review
+              </div>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ ...styles.table, fontSize: '12px' }}>
+                  <thead>
+                    <tr>{['Date','Description','Debit','Suggested Match','Actions'].map(h => <th key={h} style={{ ...styles.th, fontSize: '11px' }}>{h}</th>)}</tr>
+                  </thead>
+                  <tbody>
+                    {suggestedTxs.map(stx => {
+                      const pr = paymentRequests.find(p => p.id === stx.matched_to_id);
+                      return (
+                        <tr key={stx.id}>
+                          <td style={{ ...styles.td, whiteSpace: 'nowrap' }}>{stx.transaction_date}</td>
+                          <td style={{ ...styles.td, maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={stx.description}>{stx.description}</td>
+                          <td style={{ ...styles.td, textAlign: 'right', color: theme.red, fontWeight: '600' }}>{stx.debit > 0 ? naira(stx.debit) : ''}</td>
+                          <td style={styles.td}>
+                            {pr ? (
+                              <div>
+                                <div style={{ fontWeight: '600' }}>{pr.reference}</div>
+                                <div style={{ fontSize: '10px', color: theme.textMuted }}>{pr.payee_name || pr.supplier?.company_name || pr.purpose || ''} · {naira(Number(pr.amount))}</div>
+                              </div>
+                            ) : stx.matched_to_type ? (
+                              <span style={{ color: theme.textMuted, fontSize: '11px' }}>{stx.matched_to_type}</span>
+                            ) : '—'}
+                          </td>
+                          <td style={{ ...styles.td, whiteSpace: 'nowrap' }}>
+                            {canConfirm ? (
+                              <div style={{ display: 'flex', gap: '4px' }}>
+                                <button style={{ ...styles.btn('primary'), padding: '2px 8px', fontSize: '11px', background: theme.green }}
+                                  onClick={() => handleConfirmMatch(stx)} disabled={actioningId === stx.id}>
+                                  {actioningId === stx.id ? '…' : '✓ Confirm'}
+                                </button>
+                                <button style={{ ...styles.btn('secondary'), padding: '2px 8px', fontSize: '11px' }}
+                                  onClick={() => { setRejectModal(stx); setRejectReason(''); }} disabled={actioningId === stx.id}>
+                                  ✕ Reject
+                                </button>
+                              </div>
+                            ) : <span style={{ fontSize: '11px', color: theme.textMuted }}>Awaiting accountant/MD review</span>}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
           {txLoading ? <Spinner /> : (
             <div style={styles.card}>
               <table style={styles.table}>
@@ -5828,6 +6850,7 @@ const BankAccountsTab = () => {
                     ? <tr><td colSpan="7" style={{ ...styles.td, textAlign: 'center', color: theme.textMuted, padding: '30px' }}>No transactions. Import a statement to get started.</td></tr>
                     : filtered.map(tx => {
                       const isUnmatched = tx.match_status === 'unmatched' || !tx.match_status;
+                      const isSuggested = tx.match_status === 'suggested';
                       const suggestedCat = (isUnmatched && tx.debit > 0) ? detectCategory(tx.description, tx.debit) : null;
                       const suggestedCustomer = (isUnmatched && tx.credit > 0) ? (() => {
                         const extracted = extractCustomerFromDesc(tx.description);
@@ -5842,6 +6865,7 @@ const BankAccountsTab = () => {
                           return false;
                         }) || null;
                       })() : null;
+                      const prCandidate = (isUnmatched && tx.debit > 0) ? findPRCandidate(tx) : null;
                       return (
                         <tr key={tx.id}>
                           <td style={{ ...styles.td, whiteSpace: 'nowrap' }}>{tx.transaction_date}</td>
@@ -5850,11 +6874,21 @@ const BankAccountsTab = () => {
                           <td style={{ ...styles.td, textAlign: 'right', color: theme.green, fontWeight: '600' }}>{tx.credit > 0 ? naira(tx.credit) : ''}</td>
                           <td style={{ ...styles.td, textAlign: 'right' }}>{tx.balance > 0 ? naira(tx.balance) : ''}</td>
                           <td style={styles.td}>
-                            <span style={styles.badge(tx.match_status === 'matched' ? theme.green : tx.match_status === 'manual' ? theme.blue : '#f5a623')}>
+                            <span style={styles.badge(tx.match_status === 'matched' ? theme.green : tx.match_status === 'manual' ? theme.blue : isSuggested ? theme.accent : '#f5a623')}>
                               {tx.match_status || 'unmatched'}
                             </span>
-                            {tx.matched_to_type && <div style={{ fontSize: '10px', color: theme.textMuted, marginTop: '2px' }}>{tx.matched_to_type}</div>}
-                            {isUnmatched && suggestedCat && (
+                            {isSuggested && tx.matched_to_type === 'payment_request' && tx.matched_to_id && (() => {
+                              const pr = paymentRequests.find(p => p.id === tx.matched_to_id);
+                              return pr ? <div style={{ fontSize: '10px', color: theme.accent, marginTop: '2px' }}>{pr.reference}</div> : null;
+                            })()}
+                            {!isSuggested && tx.matched_to_type && <div style={{ fontSize: '10px', color: theme.textMuted, marginTop: '2px' }}>{tx.matched_to_type}</div>}
+                            {isUnmatched && prCandidate?.amtMatch && (
+                              <div style={{ fontSize: '10px', color: theme.green, marginTop: '3px', fontStyle: 'italic' }}>PR: {prCandidate.pr.reference}</div>
+                            )}
+                            {isUnmatched && prCandidate && !prCandidate.amtMatch && (
+                              <div style={{ fontSize: '10px', color: '#d97706', marginTop: '3px' }}>⚠ PR ref found, amt mismatch ({naira(prCandidate.pr.amount)})</div>
+                            )}
+                            {isUnmatched && !prCandidate && suggestedCat && (
                               <div style={{ fontSize: '10px', color: theme.accent, marginTop: '3px', fontStyle: 'italic' }}>Suggested: {suggestedCat}</div>
                             )}
                             {isUnmatched && suggestedCustomer && (
@@ -5876,6 +6910,17 @@ const BankAccountsTab = () => {
                                     setCreatePaymentModal(tx);
                                   }}>+ Payment</button>
                               )}
+                              {isUnmatched && tx.debit > 0 && prCandidate?.amtMatch && (
+                                <button style={{ ...styles.btn('primary'), padding: '2px 7px', fontSize: '11px', background: theme.green }}
+                                  onClick={() => handleSuggestPR(tx, prCandidate.pr.id)}
+                                  disabled={actioningId === tx.id}>
+                                  {actioningId === tx.id ? '…' : `Suggest: ${prCandidate.pr.reference}`}
+                                </button>
+                              )}
+                              {isUnmatched && tx.debit > 0 && (
+                                <button style={{ ...styles.btn('secondary'), padding: '2px 7px', fontSize: '11px' }}
+                                  onClick={() => { setSuggestModal(tx); setPrSearch(''); }}>Link to PR</button>
+                              )}
                               {isUnmatched && tx.debit > 0 && (
                                 <button style={{ ...styles.btn('primary'), padding: '2px 7px', fontSize: '11px' }}
                                   onClick={() => {
@@ -5884,6 +6929,18 @@ const BankAccountsTab = () => {
                                     setCreateExpForm({ category_id: cat?.id || '', description: tx.description, notes: '' });
                                     setCreateExpModal(tx);
                                   }}>+ Expense</button>
+                              )}
+                              {isSuggested && canConfirm && (
+                                <>
+                                  <button style={{ ...styles.btn('primary'), padding: '2px 7px', fontSize: '11px', background: theme.green }}
+                                    onClick={() => handleConfirmMatch(tx)} disabled={actioningId === tx.id}>
+                                    {actioningId === tx.id ? '…' : '✓ Confirm'}
+                                  </button>
+                                  <button style={{ ...styles.btn('secondary'), padding: '2px 7px', fontSize: '11px' }}
+                                    onClick={() => { setRejectModal(tx); setRejectReason(''); }} disabled={actioningId === tx.id}>
+                                    ✕ Reject
+                                  </button>
+                                </>
                               )}
                             </div>
                           </td>
@@ -6120,16 +7177,27 @@ const ReceiptsTab = () => {
   const [uploadForm, setUploadForm] = useState({ receipt_date: today, vendor_name: '', amount: '', tax_category: '', notes: '', expense_id: '' });
   const [uploading, setUploading] = useState(false);
   const [viewUrl, setViewUrl] = useState(null);
+  const [viewIsPdf, setViewIsPdf] = useState(false);
+  const [signedMap, setSignedMap] = useState({});
   const [missingCount, setMissingCount] = useState(0);
   const [showMissing, setShowMissing] = useState(false);
   const [exportLoading, setExportLoading] = useState(false);
   const [err, setErr] = useState('');
   const [ok, setOk] = useState('');
 
+  const resolveSignedUrls = async (rows) => {
+    const entries = await Promise.all((rows || []).map(async r => {
+      try { return [r.id, await receiptsService.getSignedUrl(r.file_url)]; }
+      catch { return [r.id, null]; }
+    }));
+    setSignedMap(m => ({ ...m, ...Object.fromEntries(entries) }));
+  };
+
   const loadReceipts = () => {
     setLoading(true);
     receiptsService.getAll(rfrom || null, rto || null, rsearch || null)
-      .then(setReceipts).catch(e => setErr(e?.message || 'An error occurred')).finally(() => setLoading(false));
+      .then(rows => { setReceipts(rows); resolveSignedUrls(rows); })
+      .catch(e => setErr(e?.message || 'An error occurred')).finally(() => setLoading(false));
   };
 
   useEffect(() => {
@@ -6145,6 +7213,7 @@ const ReceiptsTab = () => {
     try {
       const rec = await receiptsService.upload(uploadFile, uploadForm);
       setReceipts(r => [rec, ...r]);
+      resolveSignedUrls([rec]);
       setUploadFile(null);
       setUploadForm({ receipt_date: today, vendor_name: '', amount: '', tax_category: '', notes: '', expense_id: '' });
       setOk(`Receipt ${rec.receipt_number} uploaded`);
@@ -6171,8 +7240,9 @@ const ReceiptsTab = () => {
 
       await Promise.all(receipts.map(async (r) => {
         try {
-          const res = await fetch(r.file_url);
-          if (res.ok) {
+          const signed = signedMap[r.id] || await receiptsService.getSignedUrl(r.file_url);
+          const res = signed ? await fetch(signed) : null;
+          if (res?.ok) {
             const blob = await res.blob();
             folder.file(r.file_name || `${r.receipt_number}.file`, blob);
           }
@@ -6203,7 +7273,7 @@ const ReceiptsTab = () => {
       {viewUrl && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
           onClick={() => setViewUrl(null)}>
-          {viewUrl.endsWith('.pdf') || viewUrl.includes('/pdf')
+          {viewIsPdf
             ? <iframe src={viewUrl} style={{ width: '80vw', height: '80vh', border: 'none' }} onClick={e => e.stopPropagation()} />
             : <img src={viewUrl} style={{ maxWidth: '90vw', maxHeight: '90vh', objectFit: 'contain' }} />}
         </div>
@@ -6269,9 +7339,9 @@ const ReceiptsTab = () => {
                 : receipts.map(r => (
                   <div key={r.id} style={{ ...styles.card, padding: '12px', position: 'relative' }}>
                     <div style={{ height: '100px', background: theme.surface, borderRadius: '6px', marginBottom: '8px', overflow: 'hidden', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                      onClick={() => setViewUrl(r.file_url)}>
+                      onClick={() => { setViewIsPdf(r.receipt_type !== 'photo'); setViewUrl(signedMap[r.id]); }}>
                       {r.receipt_type === 'photo'
-                        ? <img src={r.file_url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => e.target.style.display = 'none'} />
+                        ? <img src={signedMap[r.id]} style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => e.target.style.display = 'none'} />
                         : <div style={{ fontSize: '32px', textAlign: 'center' }}>📄</div>}
                     </div>
                     <div style={{ fontSize: '11px', fontWeight: '700', color: theme.accent }}>{r.receipt_number}</div>
@@ -6279,7 +7349,7 @@ const ReceiptsTab = () => {
                     <div style={{ fontSize: '11px', color: theme.green, fontWeight: '600' }}>{naira(r.amount)}</div>
                     <div style={{ fontSize: '10px', color: theme.textMuted }}>{r.receipt_date}</div>
                     <div style={{ display: 'flex', gap: '4px', marginTop: '8px' }}>
-                      <a href={r.file_url} target="_blank" rel="noreferrer" style={{ ...styles.btn('secondary'), padding: '3px 8px', fontSize: '10px', textDecoration: 'none', display: 'inline-block' }}>↓</a>
+                      <a href={signedMap[r.id] || undefined} target="_blank" rel="noreferrer" style={{ ...styles.btn('secondary'), padding: '3px 8px', fontSize: '10px', textDecoration: 'none', display: 'inline-block' }}>↓</a>
                       <button style={{ ...styles.btn('danger'), padding: '3px 8px', fontSize: '10px' }} onClick={() => handleDelete(r)}>✕</button>
                     </div>
                   </div>
@@ -6295,7 +7365,7 @@ const ReceiptsTab = () => {
 
 const Accounting = ({ userProfile }) => {
   const [tab, setTab] = useState('bookkeeping');
-  const isFinanceAdmin = userProfile?.role === 'md' || userProfile?.role === 'accountant';
+  const isFinanceAdmin = hasRole(userProfile, 'md', 'accountant');
   const TABS = [
     { id: 'bookkeeping', label: 'Daily Bookkeeping' },
     { id: 'pl', label: 'P&L Statement' },
@@ -6318,7 +7388,7 @@ const Accounting = ({ userProfile }) => {
       </div>
       <div style={{ display: 'flex', gap: '2px', marginBottom: '24px', borderBottom: `1px solid ${theme.border}`, flexWrap: 'wrap' }}>
         {TABS.map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)} style={{
+          <button key={t.id} data-ico-allow data-board-allow onClick={() => setTab(t.id)} style={{
             padding: '9px 16px', fontSize: '13px', fontWeight: tab === t.id ? '600' : '400',
             color: tab === t.id ? theme.accent : theme.textMuted,
             background: 'transparent', border: 'none', cursor: 'pointer',
@@ -6332,7 +7402,7 @@ const Accounting = ({ userProfile }) => {
       {tab === 'cost' && <CostTabErrorBoundary><CostTab /></CostTabErrorBoundary>}
       {tab === 'receivables' && <ReceivablesTab />}
       {tab === 'management' && <ManagementTab />}
-      {tab === 'bank' && <BankAccountsTab />}
+      {tab === 'bank' && <BankAccountsTab userProfile={userProfile} />}
       {tab === 'reconciliation' && <ReconciliationTab />}
       {tab === 'receipts' && <ReceiptsTab />}
       {tab === 'opening_balances' && <OpeningBalances userProfile={userProfile} />}
@@ -6403,7 +7473,7 @@ const MyProfile = ({ userProfile }) => {
 
   useEffect(() => {
     if (userProfile?.staff_id) {
-      supabase.from('staff').select('*').eq('id', userProfile.staff_id).single().then(({ data }) => setStaffRecord(data));
+      supabase.from('staff_public').select('id, full_name, role, staff_type, profile_photo_url').eq('id', userProfile.staff_id).single().then(({ data }) => setStaffRecord(data));
     }
     loadDocs();
   }, [userProfile]);
@@ -6411,7 +7481,19 @@ const MyProfile = ({ userProfile }) => {
   const loadDocs = async () => {
     if (!userProfile?.id) return;
     const { data } = await supabase.from('staff_documents').select('*').eq('user_id', userProfile.id).order('uploaded_at', { ascending: false });
-    setDocuments(data || []);
+    const docs = data || [];
+    await Promise.all(docs.map(async (doc) => {
+      const path = doc.file_url?.startsWith('http')
+        ? doc.file_url.match(/staff-documents\/(.+)$/)?.[1]
+        : doc.file_url;
+      if (path) {
+        const { data: sd } = await supabase.storage.from('staff-documents').createSignedUrl(path, 3600);
+        doc.displayUrl = sd?.signedUrl || null;
+      } else {
+        doc.displayUrl = null;
+      }
+    }));
+    setDocuments(docs);
   };
 
   const handleUpload = async (e) => {
@@ -6421,14 +7503,13 @@ const MyProfile = ({ userProfile }) => {
     try {
       const ext = file.name.split('.').pop();
       const path = `${userProfile.id}/${Date.now()}.${ext}`;
-      const { error: upErr } = await supabase.storage.from('staff-documents').upload(path, file);
+      const { data: storageData, error: upErr } = await supabase.storage.from('staff-documents').upload(path, file);
       if (upErr) throw upErr;
-      const { data: { publicUrl } } = supabase.storage.from('staff-documents').getPublicUrl(path);
       await supabase.from('staff_documents').insert({
         user_id: userProfile.id,
         staff_id: userProfile.staff_id || null,
         file_name: file.name,
-        file_url: publicUrl,
+        file_url: storageData.path,
         file_size: file.size,
         document_type: ext.toLowerCase() === 'pdf' ? 'pdf' : ['jpg','jpeg','png'].includes(ext.toLowerCase()) ? 'image' : 'other',
       });
@@ -6444,7 +7525,9 @@ const MyProfile = ({ userProfile }) => {
 
   const handleDeleteDoc = async (doc) => {
     try {
-      const pathPart = doc.file_url.split('/staff-documents/')[1];
+      const pathPart = doc.file_url?.startsWith('http')
+        ? doc.file_url.split('/staff-documents/')[1]
+        : doc.file_url;
       if (pathPart) await supabase.storage.from('staff-documents').remove([pathPart]);
       await supabase.from('staff_documents').delete().eq('id', doc.id);
       setDocAlert({ type: 'success', msg: 'Document deleted.' });
@@ -6537,7 +7620,7 @@ const MyProfile = ({ userProfile }) => {
                 <tbody>
                   {documents.map(doc => (
                     <tr key={doc.id}>
-                      <td style={styles.td}><a href={doc.file_url} target="_blank" rel="noreferrer" style={{ color: theme.blue, textDecoration: 'none', fontWeight: '600' }}>{doc.file_name}</a></td>
+                      <td style={styles.td}><a href={doc.displayUrl || '#'} target="_blank" rel="noreferrer" style={{ color: theme.blue, textDecoration: 'none', fontWeight: '600' }}>{doc.file_name}</a></td>
                       <td style={styles.td}><span style={styles.badge(theme.blue)}>{doc.document_type}</span></td>
                       <td style={styles.td}>{doc.file_size ? fmtBytes(doc.file_size) : '—'}</td>
                       <td style={styles.td}>{doc.uploaded_at ? new Date(doc.uploaded_at).toLocaleDateString('en-GB') : '—'}</td>
@@ -6575,21 +7658,3044 @@ const MyProfile = ({ userProfile }) => {
   );
 };
 
+// ── ADVANCES ──────────────────────────────────────────────────
+const AdvancesPage = ({ userProfile }) => {
+  const [advances, setAdvances] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [alert, setAlert] = useState(null);
+  const [actionSaving, setActionSaving] = useState(false);
+  const [staffList, setStaffList] = useState([]);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ staff_id: '', amount: '', reason: '', installments: '1' });
+  const [saving, setSaving] = useState(false);
+  const [rejectTarget, setRejectTarget] = useState(null);
+  const [rejectReason, setRejectReason] = useState('');
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [adv, staff] = await Promise.all([
+        advancesService.list(),
+        staffService.getPublicActive(),
+      ]);
+      setAdvances(adv);
+      setStaffList(staff);
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const handleCreate = async () => {
+    if (!form.staff_id || !form.amount || !form.reason)
+      return setAlert({ type: 'error', msg: 'Staff, amount, and reason are required.' });
+    setSaving(true); setAlert(null);
+    try {
+      await advancesService.create({
+        staff_id: form.staff_id,
+        amount: Number(form.amount),
+        reason: form.reason,
+        installments: Number(form.installments) || 1,
+        requested_by: userProfile?.full_name || 'Admin',
+      });
+      setForm({ staff_id: '', amount: '', reason: '', installments: '1' });
+      setShowForm(false);
+      setAlert({ type: 'success', msg: 'Advance request recorded.' });
+      load();
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setSaving(false); }
+  };
+
+  const handleAction = async (id, action, reason = null) => {
+    setActionSaving(true); setAlert(null);
+    try {
+      await advancesService.advance(id, action, reason);
+      setRejectTarget(null); setRejectReason('');
+      await load();
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setActionSaving(false); }
+  };
+
+  const role = userProfile?.role;
+  const canRecord = hasRole(userProfile, 'hr_officer', 'accountant', 'md');
+  const advStatusColor = s =>
+    s === 'disbursed' ? theme.green :
+    s === 'md_approved' ? theme.blue :
+    s === 'ico_approved' ? theme.accent :
+    s === 'settled' ? theme.textMuted :
+    (s === 'rejected' || s === 'cancelled') ? theme.red :
+    theme.textMuted;
+
+  return (
+    <div>
+      {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
+      <div style={styles.header}>
+        <div>
+          <div style={styles.pageTitle}>Salary Advances</div>
+          <div style={styles.pageSubtitle}>Track and approve staff advance requests</div>
+        </div>
+        {canRecord && (
+          <button style={styles.btn('primary')} onClick={() => setShowForm(v => !v)}>
+            {showForm ? '✕ Cancel' : '+ New Request'}
+          </button>
+        )}
+      </div>
+
+      {showForm && (
+        <div style={{ ...styles.card, marginBottom: '20px' }}>
+          <div style={styles.sectionTitle}>New Advance Request</div>
+          <div style={styles.grid(2)}>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Staff Member</label>
+              <select style={styles.input} value={form.staff_id} onChange={e => setForm(f => ({ ...f, staff_id: e.target.value }))}>
+                <option value="">Select staff…</option>
+                {staffList.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
+              </select>
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Amount (₦)</label>
+              <input style={styles.input} type="number" placeholder="0" value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} />
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Installments</label>
+              <input style={styles.input} type="number" min="1" placeholder="1" value={form.installments} onChange={e => setForm(f => ({ ...f, installments: e.target.value }))} />
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Reason</label>
+              <input style={styles.input} placeholder="Reason for advance…" value={form.reason} onChange={e => setForm(f => ({ ...f, reason: e.target.value }))} />
+            </div>
+          </div>
+          <button style={styles.btn('primary')} onClick={handleCreate} disabled={saving}>{saving ? 'Saving…' : 'Submit Request'}</button>
+        </div>
+      )}
+
+      {rejectTarget && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ ...styles.card, width: '420px' }}>
+            <div style={{ ...styles.sectionTitle, marginBottom: '12px' }}>
+              {rejectTarget.action === 'reject' ? 'Reject' : 'Cancel'} Advance — Reason Required
+            </div>
+            <textarea
+              style={{ ...styles.input, height: '80px', resize: 'vertical' }}
+              placeholder="Enter reason…"
+              value={rejectReason}
+              onChange={e => setRejectReason(e.target.value)}
+            />
+            <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+              <button
+                style={styles.btn('danger')}
+                disabled={!rejectReason.trim() || actionSaving}
+                onClick={() => handleAction(rejectTarget.id, rejectTarget.action, rejectReason.trim())}
+              >{actionSaving ? 'Saving…' : rejectTarget.action === 'reject' ? 'Reject' : 'Cancel Advance'}</button>
+              <button style={styles.btn('secondary')} onClick={() => { setRejectTarget(null); setRejectReason(''); }}>Back</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div style={styles.card}>
+        {loading ? <Spinner /> : advances.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '30px', color: theme.textMuted }}>No advance requests yet.</div>
+        ) : (
+          <table style={styles.table}>
+            <thead>
+              <tr>
+                {['Staff','Amount','Installments','Outstanding','Reason','Requested By','Status','Actions'].map(h => (
+                  <th key={h} style={styles.th}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {advances.map(adv => {
+                const status = adv.status;
+                const actions = [];
+                if (status === 'requested' && role === 'ico')
+                  actions.push(<button key="ico" style={{ ...styles.btn('primary'), padding: '4px 10px', fontSize: '11px' }} onClick={() => handleAction(adv.id, 'ico_approve')} disabled={actionSaving}>✓ ICO Approve</button>);
+                if (status === 'ico_approved' && role === 'md')
+                  actions.push(<button key="md" style={{ ...styles.btn('primary'), padding: '4px 10px', fontSize: '11px' }} onClick={() => handleAction(adv.id, 'md_approve')} disabled={actionSaving}>✓ MD Approve</button>);
+                if (status === 'md_approved' && ['accountant', 'md'].includes(role))
+                  actions.push(<button key="disburse" style={{ ...styles.btn('primary'), padding: '4px 10px', fontSize: '11px', background: theme.green, color: '#000' }} onClick={() => handleAction(adv.id, 'disburse')} disabled={actionSaving}>↑ Disburse</button>);
+                if (['requested','ico_approved','md_approved'].includes(status) && ['ico','md'].includes(role))
+                  actions.push(<button key="reject" style={{ ...styles.btn('danger'), padding: '4px 10px', fontSize: '11px' }} onClick={() => setRejectTarget({ id: adv.id, action: 'reject' })}>✕ Reject</button>);
+                if (status === 'requested' && ['hr_officer','accountant','md'].includes(role))
+                  actions.push(<button key="cancel" style={{ ...styles.btn('secondary'), padding: '4px 10px', fontSize: '11px' }} onClick={() => setRejectTarget({ id: adv.id, action: 'cancel' })}>✕ Cancel</button>);
+                return (
+                  <tr key={adv.id}>
+                    <td style={styles.td}><strong>{adv.staff?.full_name || '—'}</strong></td>
+                    <td style={styles.td}><strong style={{ color: theme.accent }}>{naira(adv.amount)}</strong></td>
+                    <td style={styles.td}>{adv.installments || 1}</td>
+                    <td style={styles.td}>{(adv.outstanding_balance || 0) > 0 ? <strong style={{ color: theme.red }}>{naira(adv.outstanding_balance)}</strong> : <span style={{ color: theme.textMuted }}>—</span>}</td>
+                    <td style={styles.td}>{adv.reason || '—'}</td>
+                    <td style={styles.td}>{adv.requested_by || '—'}</td>
+                    <td style={styles.td}><span style={styles.badge(advStatusColor(status))}>{status}</span></td>
+                    <td style={styles.td}><div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>{actions.length ? actions : <span style={{ color: theme.textMuted, fontSize: '11px' }}>—</span>}</div></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// One attached receipt row: name/date/uploader/note + a View link that fetches
+// a signed URL on click. A signing failure marks just this row, not the list.
+const PaymentRequestAttachmentRow = ({ att }) => {
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const fileName = (att.file_path || '').split('/').pop() || 'receipt';
+  const openFile = async () => {
+    setBusy(true); setFailed(false);
+    try {
+      const url = await paymentRequestsService.getAttachmentSignedUrl(att.file_path);
+      if (url) window.open(url, '_blank', 'noopener');
+      else setFailed(true);
+    } catch (e) { console.error('attachment signed URL failed', e); setFailed(true); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start', padding: '8px 0', borderBottom: `1px solid ${theme.border}44` }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: '13px', color: theme.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{fileName}</div>
+        <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '2px' }}>
+          {att.uploader_name || 'Unknown'}{att.created_at ? ` · ${new Date(att.created_at).toLocaleDateString('en-GB')}` : ''}
+        </div>
+        {att.note && <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '2px', fontStyle: 'italic' }}>{att.note}</div>}
+        {failed && <div style={{ fontSize: '11px', color: theme.red, marginTop: '2px' }}>Couldn&rsquo;t load file.</div>}
+      </div>
+      <button style={{ ...styles.btn('secondary'), padding: '4px 10px', fontSize: '11px', flexShrink: 0 }} onClick={openFile} disabled={busy}>{busy ? '…' : 'View'}</button>
+    </div>
+  );
+};
+
+// ── PAYMENT REQUESTS ──────────────────────────────────────────
+const PaymentRequestsPage = ({ userProfile }) => {
+  const role = userProfile?.role;
+  const userId = userProfile?.id;
+  const isInitiator = ['production_manager', 'logistics_manager', 'bdm', 'hr_officer'].includes(role);
+  const canReviewVendors = ['md', 'ico', 'accountant'].includes(role);
+
+  const [requests, setRequests] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [alert, setAlert] = useState(null);
+  const [actionSaving, setActionSaving] = useState(false);
+
+  const [showForm, setShowForm] = useState(false);
+  const [editTarget, setEditTarget] = useState(null);
+  const [form, setForm] = useState({ amount: '', purpose: '', expense_category_id: '', disbursement_method: 'bank_transfer', order_item_id: '', _order_id: '', category_other_note: '', payeeMode: 'existing', supplier_id: '', payee_name: '', payee_bank_name: '', payee_account_number: '', payee_account_name: '', saveAsVendor: false });
+  const [saving, setSaving] = useState(false);
+  const [activeSuppliers, setActiveSuppliers] = useState([]);
+  const [pendingVendors, setPendingVendors] = useState([]);
+  const [vendorSaving, setVendorSaving] = useState(null);
+
+  const [recallTarget, setRecallTarget] = useState(null);
+  const [recallReason, setRecallReason] = useState('');
+  const [overrideCloseTarget, setOverrideCloseTarget] = useState(null);
+  const [overrideCloseReason, setOverrideCloseReason] = useState('');
+  const [disburseTarget, setDisburseTarget] = useState(null);
+  const [disburseAccountId, setDisburseAccountId] = useState('');
+  const [bankAccounts, setBankAccounts] = useState([]);
+  const [detailReq, setDetailReq] = useState(null);
+  const [copiedField, setCopiedField] = useState(null);
+  const [showHistory, setShowHistory] = useState(false);
+  const [attachFile, setAttachFile] = useState(null);
+  const [attachNote, setAttachNote] = useState('');
+  const [attachSaving, setAttachSaving] = useState(false);
+  const [attachAlert, setAttachAlert] = useState(null);
+  const [attachments, setAttachments] = useState([]);
+  const [attachLoading, setAttachLoading] = useState(false);
+  const [attachError, setAttachError] = useState(false);
+  const [dupConfirm, setDupConfirm] = useState(false);
+
+  const emptyBackfillForm = { requested_by: '', amount: '', purpose: '', transaction_date: '', note: '', expense_category_id: '', disbursement_method: 'bank_transfer', bank_account_id: '', payeeMode: 'existing', supplier_id: '', payee_name: '', payee_bank_name: '', payee_account_number: '', payee_account_name: '' };
+  const [showBackfill, setShowBackfill] = useState(false);
+  const [backfillForm, setBackfillForm] = useState(emptyBackfillForm);
+  const [backfillSaving, setBackfillSaving] = useState(false);
+  const [queryTarget, setQueryTarget] = useState(null);
+  const [queryReason, setQueryReason] = useState('');
+  const [allUsers, setAllUsers] = useState([]);
+  const [showQueried, setShowQueried] = useState(false);
+  const [statusFilter, setStatusFilter] = useState('all');
+
+  const canBackfill = isInitiator || role === 'md';
+  const canQuery = ['ico', 'accountant'].includes(role);
+
+  const [resaleItems, setResaleItems] = useState([]);
+  const [resaleOrderMap, setResaleOrderMap] = useState({});
+  const [resaleItemsLoading, setResaleItemsLoading] = useState(false);
+
+  const loadResaleItems = async () => {
+    setResaleItemsLoading(true);
+    try {
+      const { data: items } = await supabase
+        .from('order_items')
+        .select('id, order_id, block_type, quantity, unit_price, cost_basis')
+        .eq('source_type', 'resale')
+        .order('created_at', { ascending: false })
+        .limit(100);
+      const rows = items || [];
+      setResaleItems(rows);
+      const orderIds = [...new Set(rows.map(r => r.order_id).filter(Boolean))];
+      if (orderIds.length) {
+        const { data: orders } = await supabase
+          .from('orders')
+          .select('id, created_at, customer:customer_id(name)')
+          .in('id', orderIds);
+        setResaleOrderMap(Object.fromEntries((orders || []).map(o => [o.id, o])));
+      } else {
+        setResaleOrderMap({});
+      }
+    } catch { /* non-fatal — link section stays hidden */ }
+    finally { setResaleItemsLoading(false); }
+  };
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [reqs, cats] = await Promise.all([
+        isInitiator ? paymentRequestsService.listMine(userId) : paymentRequestsService.list(),
+        expenseCategoriesService.getActive(),
+      ]);
+      setRequests(reqs);
+      setCategories(cats);
+      if (isInitiator || role === 'md') paymentRequestsService.getActiveSuppliers().then(setActiveSuppliers).catch(() => {});
+      if (canReviewVendors) paymentRequestsService.getPendingVendors().then(setPendingVendors).catch(() => {});
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); }, []);
+  useEffect(() => { bankAccountsService.getAll().then(setBankAccounts).catch(() => {}); }, []);
+  useEffect(() => {
+    supabase.from('user_profiles_directory').select('id, full_name, role').order('full_name')
+      .then(({ data }) => setAllUsers(data || [])).catch(() => {});
+  }, []);
+
+  const catMap = Object.fromEntries(categories.map(c => [c.id, c.name]));
+  const tradingPurchasesId = categories.find(c => c.name === 'Trading Purchases')?.id;
+  const othersCategoryId = categories.find(c => c.name === 'Others')?.id;
+  const isTradingPurchases = !!(form.expense_category_id && form.expense_category_id === tradingPurchasesId);
+
+  const resaleItemsByOrder = resaleItems.reduce((acc, item) => {
+    if (!acc[item.order_id]) acc[item.order_id] = [];
+    acc[item.order_id].push(item);
+    return acc;
+  }, {});
+
+  const emptyForm = { amount: '', purpose: '', expense_category_id: '', disbursement_method: 'bank_transfer', order_item_id: '', _order_id: '', category_other_note: '', payeeMode: 'existing', supplier_id: '', payee_name: '', payee_bank_name: '', payee_account_number: '', payee_account_name: '', saveAsVendor: false };
+
+  const openEdit = async (req) => {
+    const payeeMode = req.supplier_id ? 'existing' : 'new';
+    let _order_id = '';
+    if (req.order_item_id && req.expense_category_id === tradingPurchasesId) {
+      try {
+        const { data } = await supabase.from('order_items').select('order_id').eq('id', req.order_item_id).single();
+        _order_id = data?.order_id || '';
+      } catch {}
+      loadResaleItems();
+    }
+    setForm({
+      amount: String(req.amount || ''),
+      purpose: req.purpose || '',
+      expense_category_id: req.expense_category_id || '',
+      disbursement_method: req.disbursement_method || 'bank_transfer',
+      category_other_note: req.category_other_note || '',
+      order_item_id: req.order_item_id || '',
+      _order_id,
+      payeeMode,
+      supplier_id: req.supplier_id || '',
+      payee_name: req.payee_name || '',
+      payee_bank_name: req.payee_bank_name || '',
+      payee_account_number: req.payee_account_number || '',
+      payee_account_name: req.payee_account_name || '',
+      saveAsVendor: false,
+    });
+    setEditTarget(req);
+    setShowForm(true);
+  };
+
+  const handleCreate = async () => {
+    if (!form.amount || !form.purpose)
+      return setAlert({ type: 'error', msg: 'Amount and purpose are required.' });
+    if (othersCategoryId && form.expense_category_id === othersCategoryId && !form.category_other_note.trim())
+      return setAlert({ type: 'error', msg: '"Others" category requires a description — please fill in the note.' });
+    if (form.payeeMode === 'existing' && !form.supplier_id)
+      return setAlert({ type: 'error', msg: 'Select an existing vendor, or switch to New Payee.' });
+    if (form.payeeMode === 'new' && !form.payee_name.trim())
+      return setAlert({ type: 'error', msg: 'Payee name is required.' });
+    setSaving(true); setAlert(null);
+    try {
+      let supplierId = form.payeeMode === 'existing' ? form.supplier_id : null;
+      if (form.payeeMode === 'new' && form.saveAsVendor) {
+        const result = await paymentRequestsService.createSupplierFromPaymentRequest({
+          company_name: form.payee_name.trim(),
+          bank_name: form.payee_bank_name.trim() || null,
+          bank_account_number: form.payee_account_number.trim() || null,
+          bank_account_name: form.payee_account_name.trim() || null,
+          contact_person: null,
+          phone: null,
+        });
+        supplierId = typeof result === 'string' ? result : (result?.id || null);
+      }
+      const usePayeeFields = form.payeeMode === 'new' && !supplierId;
+      const fields = {
+        amount: Number(form.amount),
+        purpose: form.purpose.trim(),
+        expense_category_id: form.expense_category_id || null,
+        disbursement_method: form.disbursement_method || 'bank_transfer',
+        category_other_note: form.category_other_note.trim() || null,
+        supplier_id: supplierId,
+        payee_name: usePayeeFields ? form.payee_name.trim() : null,
+        payee_bank_name: usePayeeFields ? (form.payee_bank_name.trim() || null) : null,
+        payee_account_number: usePayeeFields ? (form.payee_account_number.trim() || null) : null,
+        payee_account_name: usePayeeFields ? (form.payee_account_name.trim() || null) : null,
+        order_item_id: form.order_item_id || null,
+      };
+      if (editTarget) {
+        await paymentRequestsService.update(editTarget.id, fields);
+        setShowForm(false);
+        setEditTarget(null);
+        setForm(emptyForm);
+        setAlert({ type: 'success', msg: `Request ${editTarget.reference} updated.` });
+      } else {
+        let req;
+        try {
+          req = await paymentRequestsService.create(fields);
+        } catch (createErr) {
+          if (createErr.code === '23505') {
+            req = await paymentRequestsService.create(fields);
+          } else {
+            throw createErr;
+          }
+        }
+        setShowForm(false);
+        setForm(emptyForm);
+        setAlert({ type: 'success', msg: `Request submitted — Reference: ${req.reference}` });
+      }
+      load();
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setSaving(false); }
+  };
+
+  const handleAction = async (id, action, reason = null) => {
+    setActionSaving(true); setAlert(null);
+    try {
+      await paymentRequestsService.advance(id, action, reason);
+      setRecallTarget(null); setRecallReason('');
+      setOverrideCloseTarget(null); setOverrideCloseReason('');
+      setQueryTarget(null); setQueryReason('');
+      await load();
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setActionSaving(false); }
+  };
+
+  const handleBackfill = async () => {
+    if (!backfillForm.requested_by) return setAlert({ type: 'error', msg: 'Select who this payment was for.' });
+    if (!backfillForm.amount || !backfillForm.purpose.trim()) return setAlert({ type: 'error', msg: 'Amount and purpose are required.' });
+    if (!backfillForm.transaction_date) return setAlert({ type: 'error', msg: 'Transaction date is required.' });
+    if (!backfillForm.note.trim()) return setAlert({ type: 'error', msg: 'Historical note is required.' });
+    if (backfillForm.payeeMode === 'existing' && !backfillForm.supplier_id)
+      return setAlert({ type: 'error', msg: 'Select an existing vendor, or switch to New Payee.' });
+    if (backfillForm.payeeMode === 'new' && !backfillForm.payee_name.trim())
+      return setAlert({ type: 'error', msg: 'Payee name is required.' });
+    setBackfillSaving(true); setAlert(null);
+    try {
+      const usePayeeFields = backfillForm.payeeMode === 'new';
+      await paymentRequestsService.backfill({
+        requested_by: backfillForm.requested_by,
+        amount: Number(backfillForm.amount),
+        purpose: backfillForm.purpose.trim(),
+        transaction_date: backfillForm.transaction_date,
+        note: backfillForm.note.trim(),
+        expense_category_id: backfillForm.expense_category_id || null,
+        disbursement_method: backfillForm.disbursement_method || 'bank_transfer',
+        bank_account_id: backfillForm.disbursement_method === 'bank_transfer' ? (backfillForm.bank_account_id || null) : null,
+        supplier_id: backfillForm.payeeMode === 'existing' ? (backfillForm.supplier_id || null) : null,
+        payee_name: usePayeeFields ? backfillForm.payee_name.trim() : null,
+        payee_bank_name: usePayeeFields ? (backfillForm.payee_bank_name.trim() || null) : null,
+        payee_account_number: usePayeeFields ? (backfillForm.payee_account_number.trim() || null) : null,
+        payee_account_name: usePayeeFields ? (backfillForm.payee_account_name.trim() || null) : null,
+      });
+      setShowBackfill(false);
+      setBackfillForm(emptyBackfillForm);
+      setAlert({ type: 'success', msg: 'Historical entry recorded.' });
+      await load();
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setBackfillSaving(false); }
+  };
+
+  const handleDisburse = async () => {
+    if (!disburseAccountId) return;
+    setActionSaving(true); setAlert(null);
+    try {
+      await paymentRequestsService.advance(disburseTarget.id, 'mark_disbursed', null, disburseAccountId);
+      setDisburseTarget(null); setDisburseAccountId('');
+      await load();
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setActionSaving(false); }
+  };
+
+  // Read-back of attachments for the open request. Never leaves a silent blank:
+  // failure sets a visible error state (the write-only-blank pattern was the bug).
+  const reloadAttachments = async (reqId) => {
+    if (!reqId) { setAttachments([]); setAttachError(false); return; }
+    setAttachLoading(true); setAttachError(false);
+    try {
+      setAttachments(await paymentRequestsService.listAttachments(reqId));
+    } catch (e) {
+      console.error('Failed to load payment-request attachments:', e);
+      setAttachError(true);
+    } finally {
+      setAttachLoading(false);
+    }
+  };
+
+  // Fetch attachments whenever a request detail is opened.
+  useEffect(() => { reloadAttachments(detailReq?.id); setDupConfirm(false); }, [detailReq?.id]);
+
+  const handleUploadAttachment = async (req, force = false) => {
+    if (!attachFile) return setAttachAlert({ type: 'error', msg: 'Select a file first.' });
+    // Non-blocking duplicate guard: if receipts already exist, make the user
+    // consciously confirm rather than blindly re-upload (the root-cause bug).
+    if (!force && attachments.length > 0) { setDupConfirm(true); return; }
+    setDupConfirm(false);
+    setAttachSaving(true); setAttachAlert(null);
+    try {
+      await paymentRequestsService.uploadAttachment(req.id, attachFile, userId, attachNote.trim() || null);
+      setAttachFile(null);
+      setAttachNote('');
+      setAttachAlert({ type: 'success', msg: 'Receipt uploaded successfully.' });
+      await reloadAttachments(req.id); // re-render list immediately so it's visibly confirmed
+    } catch (e) { setAttachAlert({ type: 'error', msg: e.message }); }
+    finally { setAttachSaving(false); }
+  };
+
+  const statusColor = s => ({
+    draft:        theme.textMuted,
+    ico_approved: theme.accent,
+    md_approved:  theme.blue,
+    funded:       theme.green,
+    disbursed:    theme.green,
+    closed:       '#a78bfa',
+    recalled:     theme.red,
+    cancelled:    theme.red,
+    queried:      '#f59e0b',
+  }[s] || theme.textMuted);
+
+  const sm = { padding: '4px 10px', fontSize: '11px' };
+  const rowActions = (req) => {
+    const { id, status, disbursement_method } = req;
+    const btns = [];
+    if (role === 'ico' && status === 'draft') {
+      btns.push(<button key="approve" style={{ ...styles.btn('primary'), ...sm }} onClick={() => handleAction(id, 'ico_approve')} disabled={actionSaving}>✓ Approve</button>);
+      btns.push(<button key="recall" style={{ ...styles.btn('danger'), ...sm }} onClick={() => setRecallTarget({ id })}>↩ Recall</button>);
+    } else if (role === 'md') {
+      if (status === 'ico_approved') {
+        btns.push(<button key="approve" style={{ ...styles.btn('primary'), ...sm }} onClick={() => handleAction(id, 'md_approve')} disabled={actionSaving}>✓ Approve</button>);
+        btns.push(<button key="recall" style={{ ...styles.btn('danger'), ...sm }} onClick={() => setRecallTarget({ id })}>↩ Recall</button>);
+      }
+      if (status === 'funded') {
+        btns.push(<button key="recall" style={{ ...styles.btn('danger'), ...sm }} onClick={() => setRecallTarget({ id })}>↩ Recall</button>);
+      }
+    } else if (role === 'accountant') {
+      if (status === 'md_approved') {
+        btns.push(<button key="fund" style={{ ...styles.btn('primary'), ...sm, background: theme.green, color: '#000' }} onClick={() => handleAction(id, 'mark_funded')} disabled={actionSaving}>↑ Mark Funded</button>);
+      }
+      if (status === 'funded') {
+        btns.push(<button key="disburse" style={{ ...styles.btn('primary'), ...sm }} onClick={() => disbursement_method === 'cash' ? handleAction(id, 'mark_disbursed') : setDisburseTarget({ id })} disabled={actionSaving}>✓ Mark Disbursed</button>);
+      }
+      if (status === 'disbursed') {
+        btns.push(<button key="close" style={{ ...styles.btn('primary'), ...sm, background: '#a78bfa', color: '#000' }} onClick={() => handleAction(id, 'close')} disabled={actionSaving}>✓ Close</button>);
+        btns.push(<button key="override-close" style={{ ...styles.btn('secondary'), ...sm }} onClick={() => setOverrideCloseTarget({ id })}>Override Close</button>);
+      }
+    }
+    if (role === 'md' && status === 'disbursed') {
+      btns.push(<button key="close" style={{ ...styles.btn('primary'), ...sm, background: '#a78bfa', color: '#000' }} onClick={() => handleAction(id, 'close')} disabled={actionSaving}>✓ Close</button>);
+      btns.push(<button key="override-close" style={{ ...styles.btn('secondary'), ...sm }} onClick={() => setOverrideCloseTarget({ id })}>Override Close</button>);
+    }
+    if (canQuery && status === 'disbursed' && req.transaction_date) {
+      btns.push(<button key="query" style={{ ...styles.btn('secondary'), ...sm }} onClick={() => setQueryTarget({ id })}>⚑ Query</button>);
+    }
+    if (status === 'queried') {
+      if (req.requested_by === userId || role === 'md') {
+        btns.push(<button key="edit-queried" style={{ ...styles.btn('secondary'), ...sm }} onClick={() => openEdit(req)}>✏ Edit</button>);
+        btns.push(<button key="resolve" style={{ ...styles.btn('primary'), ...sm, background: theme.green, color: '#000' }} onClick={() => handleAction(id, 'resolve_query')} disabled={actionSaving}>✓ Resolve</button>);
+      }
+    }
+    return btns;
+  };
+
+  const actionQueue = isInitiator
+    ? requests
+    : role === 'ico'
+    ? requests.filter(r => r.status === 'draft')
+    : role === 'md'
+    ? requests.filter(r => ['ico_approved', 'funded', 'disbursed'].includes(r.status))
+    : role === 'accountant'
+    ? requests.filter(r => ['md_approved', 'funded', 'disbursed'].includes(r.status))
+    : requests;
+  const queriedRequests = requests.filter(r => r.status === 'queried' &&
+    (['ico', 'accountant', 'md'].includes(role) || r.requested_by === userId));
+  const baseQueue = showQueried ? queriedRequests : ((!isInitiator && showHistory) ? requests : actionQueue);
+  // Status filter takes precedence over the Action Queue / All / Queried toggle when active
+  const queue = statusFilter !== 'all' ? requests.filter(r => r.status === statusFilter) : baseQueue;
+
+  const ALL_STATUSES = ['draft', 'ico_approved', 'md_approved', 'funded', 'disbursed', 'closed', 'queried'];
+  const fundedRequests = requests.filter(r => r.status === 'funded');
+  const outstandingTotal = fundedRequests.reduce((s, r) => s + Number(r.amount || 0), 0);
+
+  return (
+    <div>
+      {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
+
+      <div style={styles.header}>
+        <div>
+          <div style={styles.pageTitle}>Payment Requests</div>
+          <div style={styles.pageSubtitle}>
+            {isInitiator ? 'Submit and track your payment requests' : 'Review and process payment requests'}
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          {!isInitiator && (
+            <div style={{ display: 'flex', gap: '4px' }}>
+              {[['Action Queue', 'queue'], ['All Requests', 'all'], ...((canQuery || role === 'md') ? [['Queried', 'queried']] : [])].map(([label, val]) => {
+                const active = val === 'queried' ? showQueried : (!showQueried && showHistory === (val === 'all'));
+                return (
+                  <button key={label}
+                    style={{ ...styles.btn(active ? 'primary' : 'secondary'), padding: '7px 14px', fontSize: '12px' }}
+                    onClick={() => {
+                      if (val === 'queried') { setShowQueried(true); setShowHistory(false); }
+                      else { setShowQueried(false); setShowHistory(val === 'all'); }
+                    }}>
+                    {label}
+                    {val === 'queried' && queriedRequests.length > 0 && (
+                      <span style={{ marginLeft: '5px', background: '#f59e0b', color: '#000', borderRadius: '10px', padding: '1px 5px', fontSize: '10px', fontWeight: '700' }}>{queriedRequests.length}</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {canBackfill && (
+            <button style={styles.btn(showBackfill ? 'secondary' : 'secondary')} onClick={() => { setShowBackfill(v => !v); setBackfillForm(emptyBackfillForm); setShowForm(false); setEditTarget(null); }}>
+              {showBackfill ? '✕ Cancel Backfill' : '+ Backfill Entry'}
+            </button>
+          )}
+          {isInitiator && (
+            <button style={styles.btn(showForm ? 'secondary' : 'primary')} onClick={() => { setShowForm(v => !v); setEditTarget(null); setForm(emptyForm); setShowBackfill(false); }}>
+              {showForm ? '✕ Cancel' : '+ New Request'}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {fundedRequests.length > 0 && (
+        <div style={{ ...styles.statCard(theme.green), marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '32px', flexWrap: 'wrap' }}>
+          <div>
+            <div style={styles.statLabel}>Outstanding Disbursement</div>
+            <div style={{ ...styles.statValue, color: theme.green }}>{naira(outstandingTotal)}</div>
+            <div style={styles.statSub}>
+              {fundedRequests.length} request{fundedRequests.length !== 1 ? 's' : ''} funded but not yet disbursed
+              {isInitiator && ' (your requests)'}
+            </div>
+          </div>
+          <div style={{ fontSize: '12px', color: theme.textMuted, maxWidth: '320px' }}>
+            Funding has been set aside for {isInitiator ? 'these requests' : 'these requests across all initiators'} — pending final disbursement by the accountant.
+          </div>
+        </div>
+      )}
+
+      {showForm && (isInitiator || editTarget) && (
+        <div style={{ ...styles.card, marginBottom: '20px' }}>
+          <div style={styles.sectionTitle}>
+            {editTarget ? `Edit Request — ${editTarget.reference}` : 'New Payment Request'}
+          </div>
+          <div style={styles.grid(2)}>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Amount (₦) *</label>
+              <input style={styles.input} type="number" min="1" placeholder="0"
+                value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} />
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Disbursement Method</label>
+              <select style={styles.input} value={form.disbursement_method}
+                onChange={e => setForm(f => ({ ...f, disbursement_method: e.target.value }))}>
+                <option value="bank_transfer">Bank Transfer</option>
+                <option value="cash">Cash</option>
+              </select>
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Purpose *</label>
+              <input style={styles.input} placeholder="Brief description of the payment purpose…"
+                value={form.purpose} onChange={e => setForm(f => ({ ...f, purpose: e.target.value }))} />
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Expense Category (optional)</label>
+              <select style={styles.input} value={form.expense_category_id}
+                onChange={e => {
+                  const val = e.target.value;
+                  setForm(f => ({ ...f, expense_category_id: val, order_item_id: '', _order_id: '' }));
+                  if (role === 'bdm' && tradingPurchasesId && val === tradingPurchasesId) loadResaleItems();
+                }}>
+                <option value="">— None —</option>
+                {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+          </div>
+          {othersCategoryId && form.expense_category_id === othersCategoryId && (
+            <div style={{ marginTop: '4px', marginBottom: '4px' }}>
+              <label style={styles.label}>Please describe (required) <span style={{ fontWeight: 400, color: theme.textMuted }}>— what are these "Others" expenses?</span></label>
+              <input style={styles.input} placeholder="e.g. Stationery, miscellaneous office supplies…"
+                value={form.category_other_note}
+                onChange={e => setForm(f => ({ ...f, category_other_note: e.target.value }))} />
+            </div>
+          )}
+          {role === 'bdm' && isTradingPurchases && (
+            <div style={{ padding: '12px', marginTop: '4px', marginBottom: '4px', background: theme.surface, borderRadius: '8px', border: `1px solid ${theme.blue}33` }}>
+              <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                Link to Order Item (optional)
+              </div>
+              {resaleItemsLoading ? (
+                <div style={{ fontSize: '12px', color: theme.textMuted }}>Loading resale orders…</div>
+              ) : Object.keys(resaleOrderMap).length === 0 ? (
+                <div style={{ fontSize: '12px', color: theme.textMuted }}>No resale-type order items found.</div>
+              ) : (
+                <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                  <div style={styles.formGroup}>
+                    <label style={styles.label}>Order</label>
+                    <select style={{ ...styles.input, minWidth: '220px' }} value={form._order_id}
+                      onChange={e => setForm(f => ({ ...f, _order_id: e.target.value, order_item_id: '' }))}>
+                      <option value="">— None —</option>
+                      {Object.entries(resaleOrderMap).map(([id, o]) => (
+                        <option key={id} value={id}>
+                          {o.customer?.name || '—'} · {o.created_at ? new Date(o.created_at).toLocaleDateString('en-GB') : '—'}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  {form._order_id && (
+                    <div style={styles.formGroup}>
+                      <label style={styles.label}>Order Item</label>
+                      <select style={{ ...styles.input, minWidth: '260px' }} value={form.order_item_id}
+                        onChange={e => setForm(f => ({ ...f, order_item_id: e.target.value }))}>
+                        <option value="">— Select item —</option>
+                        {(resaleItemsByOrder[form._order_id] || []).map(item => (
+                          <option key={item.id} value={item.id}>
+                            {item.block_type} × {fmt(item.quantity)}{item.cost_basis != null ? ` · cost ${naira(item.cost_basis)}` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+          <div style={{ marginTop: '16px', padding: '14px', background: theme.surface, borderRadius: '8px', border: `1px solid ${theme.border}` }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <div style={{ fontSize: '12px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Payee *</div>
+              <div style={{ display: 'flex', gap: '4px' }}>
+                {['existing', 'new'].map(m => (
+                  <button key={m} type="button"
+                    style={{ ...styles.btn(form.payeeMode === m ? 'primary' : 'secondary'), padding: '5px 12px', fontSize: '12px' }}
+                    onClick={() => setForm(f => ({ ...f, payeeMode: m, supplier_id: '', payee_name: '', payee_bank_name: '', payee_account_number: '', payee_account_name: '', saveAsVendor: false }))}>
+                    {m === 'existing' ? 'Existing Vendor' : 'New Payee'}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {form.payeeMode === 'existing' ? (
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Vendor</label>
+                <select style={styles.input} value={form.supplier_id}
+                  onChange={e => setForm(f => ({ ...f, supplier_id: e.target.value }))}>
+                  <option value="">— Select vendor —</option>
+                  {activeSuppliers.map(s => <option key={s.id} value={s.id}>{s.company_name}</option>)}
+                </select>
+                {activeSuppliers.length === 0 && (
+                  <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '4px' }}>No active vendors on record — switch to New Payee.</div>
+                )}
+              </div>
+            ) : (
+              <div>
+                <div style={styles.grid(2)}>
+                  <div style={styles.formGroup}>
+                    <label style={styles.label}>Payee name *</label>
+                    <input style={styles.input} placeholder="Person or business name"
+                      value={form.payee_name} onChange={e => setForm(f => ({ ...f, payee_name: e.target.value }))} />
+                  </div>
+                  <div style={styles.formGroup}>
+                    <label style={styles.label}>Bank name</label>
+                    <input style={styles.input} placeholder="e.g. First Bank"
+                      value={form.payee_bank_name} onChange={e => setForm(f => ({ ...f, payee_bank_name: e.target.value }))} />
+                  </div>
+                  <div style={styles.formGroup}>
+                    <label style={styles.label}>Account number</label>
+                    <input style={styles.input} placeholder="10-digit account number"
+                      value={form.payee_account_number} onChange={e => setForm(f => ({ ...f, payee_account_number: e.target.value }))} />
+                  </div>
+                  <div style={styles.formGroup}>
+                    <label style={styles.label}>Account name</label>
+                    <input style={styles.input} placeholder="Name on account"
+                      value={form.payee_account_name} onChange={e => setForm(f => ({ ...f, payee_account_name: e.target.value }))} />
+                  </div>
+                </div>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', marginTop: '4px', color: theme.text }}>
+                  <input type="checkbox" checked={form.saveAsVendor}
+                    onChange={e => setForm(f => ({ ...f, saveAsVendor: e.target.checked }))} />
+                  Save as vendor for next time
+                  {form.saveAsVendor && <span style={{ fontSize: '11px', color: theme.textMuted }}>(will appear in Pending Vendors for verification)</span>}
+                </label>
+              </div>
+            )}
+          </div>
+          <button style={{ ...styles.btn('primary'), marginTop: '12px' }} onClick={handleCreate} disabled={saving}>
+            {saving ? (editTarget ? 'Saving…' : 'Submitting…') : (editTarget ? 'Save Changes' : 'Submit Request')}
+          </button>
+        </div>
+      )}
+
+      {showBackfill && canBackfill && (
+        <div style={{ ...styles.card, marginBottom: '20px', border: `1px solid #f59e0b` }}>
+          <div style={styles.sectionTitle}>Backfill Historical Entry <span style={{ fontSize: '12px', fontWeight: 400, color: '#f59e0b' }}>— lands directly in Disbursed</span></div>
+          <div style={styles.grid(2)}>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>On behalf of (who was paid) *</label>
+              <select style={styles.input} value={backfillForm.requested_by}
+                onChange={e => setBackfillForm(f => ({ ...f, requested_by: e.target.value }))}>
+                <option value="">— Select staff member —</option>
+                {allUsers.map(u => <option key={u.id} value={u.id}>{u.full_name}{u.role ? ` (${u.role})` : ''}</option>)}
+              </select>
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Transaction Date *</label>
+              <input style={styles.input} type="date" max={new Date().toISOString().split('T')[0]}
+                value={backfillForm.transaction_date}
+                onChange={e => setBackfillForm(f => ({ ...f, transaction_date: e.target.value }))} />
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Amount (₦) *</label>
+              <input style={styles.input} type="number" min="1" placeholder="0"
+                value={backfillForm.amount}
+                onChange={e => setBackfillForm(f => ({ ...f, amount: e.target.value }))} />
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Purpose *</label>
+              <input style={styles.input} placeholder="Brief description of the payment purpose…"
+                value={backfillForm.purpose}
+                onChange={e => setBackfillForm(f => ({ ...f, purpose: e.target.value }))} />
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Expense Category (optional)</label>
+              <select style={styles.input} value={backfillForm.expense_category_id}
+                onChange={e => setBackfillForm(f => ({ ...f, expense_category_id: e.target.value }))}>
+                <option value="">— None —</option>
+                {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Disbursement Method</label>
+              <select style={styles.input} value={backfillForm.disbursement_method}
+                onChange={e => setBackfillForm(f => ({ ...f, disbursement_method: e.target.value }))}>
+                <option value="bank_transfer">Bank Transfer</option>
+                <option value="cash">Cash</option>
+              </select>
+            </div>
+            {backfillForm.disbursement_method === 'bank_transfer' && (
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Source Bank Account</label>
+                <select style={styles.input} value={backfillForm.bank_account_id}
+                  onChange={e => setBackfillForm(f => ({ ...f, bank_account_id: e.target.value }))}>
+                  <option value="">— Select account —</option>
+                  {bankAccounts.map(a => <option key={a.id} value={a.id}>{a.bank_name} — {a.account_number}</option>)}
+                </select>
+              </div>
+            )}
+          </div>
+          <div style={{ marginTop: '12px' }}>
+            <label style={styles.label}>Historical Note * <span style={{ fontWeight: 400, color: theme.textMuted }}>— e.g. "WhatsApp approval, 2026-07-04"</span></label>
+            <textarea style={{ ...styles.input, height: '64px', resize: 'vertical' }}
+              placeholder="Describe how this disbursement was originally authorised…"
+              value={backfillForm.note}
+              onChange={e => setBackfillForm(f => ({ ...f, note: e.target.value }))} />
+          </div>
+          <div style={{ marginTop: '14px', padding: '14px', background: theme.surface, borderRadius: '8px', border: `1px solid ${theme.border}` }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <div style={{ fontSize: '12px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Payee *</div>
+              <div style={{ display: 'flex', gap: '4px' }}>
+                {['existing', 'new'].map(m => (
+                  <button key={m} type="button"
+                    style={{ ...styles.btn(backfillForm.payeeMode === m ? 'primary' : 'secondary'), padding: '5px 12px', fontSize: '12px' }}
+                    onClick={() => setBackfillForm(f => ({ ...f, payeeMode: m, supplier_id: '', payee_name: '', payee_bank_name: '', payee_account_number: '', payee_account_name: '' }))}>
+                    {m === 'existing' ? 'Existing Vendor' : 'New Payee'}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {backfillForm.payeeMode === 'existing' ? (
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Vendor</label>
+                <select style={styles.input} value={backfillForm.supplier_id}
+                  onChange={e => setBackfillForm(f => ({ ...f, supplier_id: e.target.value }))}>
+                  <option value="">— Select vendor —</option>
+                  {activeSuppliers.map(s => <option key={s.id} value={s.id}>{s.company_name}</option>)}
+                </select>
+                {activeSuppliers.length === 0 && (
+                  <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '4px' }}>No active vendors — switch to New Payee.</div>
+                )}
+              </div>
+            ) : (
+              <div style={styles.grid(2)}>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Payee name *</label>
+                  <input style={styles.input} placeholder="Person or business name"
+                    value={backfillForm.payee_name}
+                    onChange={e => setBackfillForm(f => ({ ...f, payee_name: e.target.value }))} />
+                </div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Bank name</label>
+                  <input style={styles.input} placeholder="e.g. First Bank"
+                    value={backfillForm.payee_bank_name}
+                    onChange={e => setBackfillForm(f => ({ ...f, payee_bank_name: e.target.value }))} />
+                </div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Account number</label>
+                  <input style={styles.input} placeholder="10-digit account number"
+                    value={backfillForm.payee_account_number}
+                    onChange={e => setBackfillForm(f => ({ ...f, payee_account_number: e.target.value }))} />
+                </div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Account name</label>
+                  <input style={styles.input} placeholder="Name on account"
+                    value={backfillForm.payee_account_name}
+                    onChange={e => setBackfillForm(f => ({ ...f, payee_account_name: e.target.value }))} />
+                </div>
+              </div>
+            )}
+          </div>
+          <button style={{ ...styles.btn('primary'), marginTop: '14px', background: '#f59e0b', color: '#000' }} onClick={handleBackfill} disabled={backfillSaving}>
+            {backfillSaving ? 'Recording…' : 'Record Historical Entry'}
+          </button>
+        </div>
+      )}
+
+      {recallTarget && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ ...styles.card, width: '420px' }}>
+            <div style={{ ...styles.sectionTitle, marginBottom: '12px' }}>Recall Request — Reason Required</div>
+            <textarea
+              style={{ ...styles.input, height: '80px', resize: 'vertical' }}
+              placeholder="Enter reason for recall…"
+              value={recallReason}
+              onChange={e => setRecallReason(e.target.value)}
+            />
+            <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+              <button style={styles.btn('danger')} disabled={!recallReason.trim() || actionSaving}
+                onClick={() => handleAction(recallTarget.id, 'recall', recallReason.trim())}>
+                {actionSaving ? 'Saving…' : 'Confirm Recall'}
+              </button>
+              <button style={styles.btn('secondary')} onClick={() => { setRecallTarget(null); setRecallReason(''); }}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {overrideCloseTarget && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ ...styles.card, width: '420px' }}>
+            <div style={{ ...styles.sectionTitle, marginBottom: '12px' }}>Override Close — Reason Required</div>
+            <textarea
+              style={{ ...styles.input, height: '80px', resize: 'vertical' }}
+              placeholder="Enter reason for override close…"
+              value={overrideCloseReason}
+              onChange={e => setOverrideCloseReason(e.target.value)}
+            />
+            <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+              <button style={{ ...styles.btn('primary'), background: '#a78bfa', color: '#000' }} disabled={!overrideCloseReason.trim() || actionSaving}
+                onClick={() => handleAction(overrideCloseTarget.id, 'override_close', overrideCloseReason.trim())}>
+                {actionSaving ? 'Saving…' : 'Confirm Override Close'}
+              </button>
+              <button style={styles.btn('secondary')} onClick={() => { setOverrideCloseTarget(null); setOverrideCloseReason(''); }}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {disburseTarget && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ ...styles.card, width: '420px' }}>
+            <div style={{ ...styles.sectionTitle, marginBottom: '12px' }}>Mark Disbursed — Select Source Account</div>
+            <select style={styles.input} value={disburseAccountId} onChange={e => setDisburseAccountId(e.target.value)}>
+              <option value="">— Select source bank account —</option>
+              {bankAccounts.map(a => <option key={a.id} value={a.id}>{a.bank_name} — {a.account_number}</option>)}
+            </select>
+            <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+              <button style={styles.btn('primary')} disabled={!disburseAccountId || actionSaving} onClick={handleDisburse}>
+                {actionSaving ? 'Saving…' : 'Confirm Disbursement'}
+              </button>
+              <button style={styles.btn('secondary')} onClick={() => { setDisburseTarget(null); setDisburseAccountId(''); }}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {queryTarget && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ ...styles.card, width: '420px' }}>
+            <div style={{ ...styles.sectionTitle, marginBottom: '12px' }}>Query Entry — Reason Required</div>
+            <textarea
+              style={{ ...styles.input, height: '80px', resize: 'vertical' }}
+              placeholder="Describe what needs to be corrected…"
+              value={queryReason}
+              onChange={e => setQueryReason(e.target.value)}
+            />
+            <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+              <button style={{ ...styles.btn('danger') }} disabled={!queryReason.trim() || actionSaving}
+                onClick={() => handleAction(queryTarget.id, 'query', queryReason.trim())}>
+                {actionSaving ? 'Saving…' : 'Submit Query'}
+              </button>
+              <button style={styles.btn('secondary')} onClick={() => { setQueryTarget(null); setQueryReason(''); }}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {detailReq && (() => {
+        const req = detailReq;
+        const bankName = req.supplier_id ? req.supplier?.bank_name : req.payee_bank_name;
+        const acctNum  = req.supplier_id ? req.supplier?.bank_account_number : req.payee_account_number;
+        const acctName = req.supplier_id ? req.supplier?.bank_account_name : req.payee_account_name;
+        const payeeName = req.supplier?.company_name || req.payee_name;
+        const copyAcct = async () => {
+          if (!acctNum) return;
+          try { await navigator.clipboard.writeText(acctNum); setCopiedField('acct'); setTimeout(() => setCopiedField(null), 2000); } catch {}
+        };
+        const cat = categories.find(c => c.id === req.expense_category_id);
+        const closureMechanism = cat?.closure_mechanism;
+        const CLOSURE_LABELS = { stock_movements: 'Stock records', vehicle_maintenance: 'Vehicle Maintenance records', vehicle_fuel_log: 'Vehicle Fuel records', truck_loading_log: 'Loading records', external_haulage_log: 'Haulage records' };
+        const canUploadEvidence = closureMechanism === 'receipt' && (isInitiator || ['md', 'accountant'].includes(role));
+        const closureLabel = closureMechanism && closureMechanism !== 'receipt' ? CLOSURE_LABELS[closureMechanism] : null;
+        const DL = ({ label, value, mono }) => value ? (
+          <div style={{ marginBottom: '12px' }}>
+            <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '3px' }}>{label}</div>
+            <div style={{ fontSize: '13px', color: theme.text, fontFamily: mono ? 'monospace' : undefined }}>{value}</div>
+          </div>
+        ) : null;
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+            <div style={{ ...styles.card, width: '500px', maxWidth: '94vw', maxHeight: '90vh', overflowY: 'auto' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '18px' }}>
+                <div>
+                  <div style={{ fontFamily: 'monospace', fontSize: '13px', fontWeight: '700', color: theme.accent }}>{req.reference}</div>
+                  <div style={{ fontSize: '20px', fontWeight: '700', color: theme.text, marginTop: '2px' }}>{naira(req.amount)}</div>
+                </div>
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                  <span style={styles.badge(statusColor(req.status))}>{req.status}</span>
+                  <button style={{ ...styles.btn('secondary'), padding: '5px 10px' }} onClick={() => { setDetailReq(null); setAttachFile(null); setAttachNote(''); setAttachAlert(null); }}>✕</button>
+                </div>
+              </div>
+              <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: '16px' }}>
+                <DL label="Purpose" value={req.purpose} />
+                <DL label="Category" value={req.expense_category_id ? catMap[req.expense_category_id] : null} />
+                {req.category_other_note && <DL label="Category note" value={req.category_other_note} />}
+                <DL label="Disbursement method" value={req.disbursement_method === 'bank_transfer' ? 'Bank Transfer' : req.disbursement_method === 'cash' ? 'Cash' : req.disbursement_method} />
+                {req.transaction_date && <DL label="Transaction Date (Historical)" value={new Date(req.transaction_date).toLocaleDateString('en-GB')} />}
+              </div>
+              <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: '16px', marginTop: '4px' }}>
+                <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '12px' }}>Payee / Bank Details</div>
+                <DL label="Payee" value={payeeName} />
+                <DL label="Bank" value={bankName} />
+                {acctNum ? (
+                  <div style={{ marginBottom: '12px' }}>
+                    <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '3px' }}>Account Number</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <span style={{ fontFamily: 'monospace', fontSize: '15px', fontWeight: '600', color: theme.text, letterSpacing: '0.05em' }}>{acctNum}</span>
+                      <button
+                        style={{ ...styles.btn(copiedField === 'acct' ? 'primary' : 'secondary'), padding: '3px 10px', fontSize: '11px' }}
+                        onClick={copyAcct}>
+                        {copiedField === 'acct' ? '✓ Copied' : 'Copy'}
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+                <DL label="Account Name" value={acctName} />
+                {!payeeName && !bankName && !acctNum && !acctName && (
+                  <div style={{ fontSize: '13px', color: theme.textMuted }}>No payee details recorded.</div>
+                )}
+              </div>
+              {!isInitiator && req.requester?.full_name && (
+                <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: '16px', marginTop: '4px' }}>
+                  <DL label="Requested by" value={req.requester.full_name} />
+                  <DL label="Date" value={req.created_at ? new Date(req.created_at).toLocaleDateString('en-GB') : null} />
+                </div>
+              )}
+              {(canUploadEvidence || attachments.length > 0) && (
+                <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: '16px', marginTop: '4px' }}>
+                  <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '10px' }}>
+                    Receipts{!attachLoading && !attachError ? ` (${attachments.length})` : ''}
+                  </div>
+                  {attachLoading ? (
+                    <div style={{ fontSize: '13px', color: theme.textMuted }}>Loading receipts…</div>
+                  ) : attachError ? (
+                    <div style={{ fontSize: '13px', color: theme.red }}>
+                      Couldn&rsquo;t load receipts.
+                      <button style={{ ...styles.btn('secondary'), padding: '2px 8px', fontSize: '11px', marginLeft: '8px' }} onClick={() => reloadAttachments(req.id)}>Retry</button>
+                    </div>
+                  ) : attachments.length === 0 ? (
+                    <div style={{ fontSize: '13px', color: theme.textMuted }}>No receipts attached yet</div>
+                  ) : (
+                    attachments.map(a => <PaymentRequestAttachmentRow key={a.id} att={a} />)
+                  )}
+                </div>
+              )}
+              {(canUploadEvidence || closureLabel) && (
+                <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: '16px', marginTop: '4px' }}>
+                  <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '12px' }}>Closure Evidence</div>
+                  {closureLabel && (
+                    <div style={{ fontSize: '13px', color: theme.textMuted }}>Evidence is recorded in {closureLabel}.</div>
+                  )}
+                  {canUploadEvidence && (
+                    <div>
+                      {attachAlert && (
+                        <div style={{ ...styles.alert(attachAlert.type), marginBottom: '10px' }}>
+                          <span>{attachAlert.msg}</span>
+                          <span style={{ cursor: 'pointer' }} onClick={() => setAttachAlert(null)}>✕</span>
+                        </div>
+                      )}
+                      <div style={styles.formGroup}>
+                        <label style={styles.label}>Receipt / Supporting Document</label>
+                        <input type="file" style={{ ...styles.input, padding: '6px' }}
+                          onChange={e => setAttachFile(e.target.files?.[0] || null)} />
+                      </div>
+                      <div style={styles.formGroup}>
+                        <label style={styles.label}>Note (optional)</label>
+                        <input style={styles.input} placeholder="e.g. Official receipt for delivery…"
+                          value={attachNote} onChange={e => setAttachNote(e.target.value)} />
+                      </div>
+                      {dupConfirm ? (
+                        <div style={{ padding: '10px 12px', borderRadius: '8px', background: theme.accent + '18', border: `1px solid ${theme.accent}55` }}>
+                          <div style={{ fontSize: '12px', color: theme.text, marginBottom: '8px' }}>
+                            This request already has {attachments.length} receipt{attachments.length === 1 ? '' : 's'} attached (listed above). Upload another anyway?
+                          </div>
+                          <div style={{ display: 'flex', gap: '8px' }}>
+                            <button style={{ ...styles.btn('primary'), background: '#a78bfa', color: '#000', padding: '6px 12px', fontSize: '12px' }}
+                              disabled={attachSaving} onClick={() => handleUploadAttachment(req, true)}>
+                              {attachSaving ? 'Uploading…' : 'Upload anyway'}
+                            </button>
+                            <button style={{ ...styles.btn('secondary'), padding: '6px 12px', fontSize: '12px' }}
+                              disabled={attachSaving} onClick={() => setDupConfirm(false)}>Cancel</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button style={{ ...styles.btn('primary'), background: '#a78bfa', color: '#000' }}
+                          disabled={!attachFile || attachSaving}
+                          onClick={() => handleUploadAttachment(req)}>
+                          {attachSaving ? 'Uploading…' : 'Upload Receipt'}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
+      <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap' }}>
+        <span style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginRight: '4px' }}>Filter:</span>
+        {['all', ...ALL_STATUSES].map(s => (
+          <button key={s}
+            style={{ ...styles.btn(statusFilter === s ? 'primary' : 'secondary'), padding: '5px 11px', fontSize: '11px', fontWeight: '600' }}
+            onClick={() => setStatusFilter(s)}>
+            {s === 'all' ? 'All' : s.replace(/_/g, ' ')}
+            {s !== 'all' && requests.filter(r => r.status === s).length > 0 && (
+              <span style={{ marginLeft: '5px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px', padding: '0 5px', fontSize: '10px' }}>
+                {requests.filter(r => r.status === s).length}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      <div style={styles.card}>
+        {loading ? <Spinner /> : queue.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '30px', color: theme.textMuted }}>
+            {statusFilter !== 'all' ? `No ${statusFilter.replace(/_/g, ' ')} requests.` : isInitiator ? 'No payment requests yet.' : showHistory ? 'No payment requests found.' : 'No requests pending in this queue.'}
+          </div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={styles.table}>
+              <thead>
+                <tr>
+                  {['Reference', 'Amount', 'Purpose', 'Category', 'Method', 'Payee',
+                    ...(!isInitiator ? ['Requested By'] : []),
+                    'Status', 'Date', 'Actions'].map(h => (
+                    <th key={h} style={styles.th}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {queue.map(req => {
+                  const actions = rowActions(req);
+                  return (
+                    <tr key={req.id}>
+                      <td style={styles.td}><strong style={{ fontFamily: 'monospace', fontSize: '12px' }}>{req.reference}</strong></td>
+                      <td style={styles.td}><strong style={{ color: theme.accent }}>{naira(req.amount)}</strong></td>
+                      <td style={styles.td}>{req.purpose || '—'}</td>
+                      <td style={styles.td}>{req.expense_category_id ? (catMap[req.expense_category_id] || '—') : <span style={{ color: theme.textMuted }}>—</span>}</td>
+                      <td style={styles.td}>{req.disbursement_method === 'bank_transfer' ? 'Bank Transfer' : 'Cash'}</td>
+                      <td style={styles.td}>{req.supplier?.company_name || req.payee_name || <span style={{ color: theme.textMuted }}>—</span>}</td>
+                      {!isInitiator && <td style={styles.td}>{req.requester?.full_name || '—'}</td>}
+                      <td style={styles.td}>
+                        <span style={styles.badge(statusColor(req.status))}>{req.status}</span>
+                        {req.transaction_date && <span style={{ ...styles.badge('#f59e0b'), marginLeft: '4px', fontSize: '10px', color: '#000' }}>Historical</span>}
+                      </td>
+                      <td style={styles.td}>{req.transaction_date ? new Date(req.transaction_date).toLocaleDateString('en-GB') : req.created_at ? new Date(req.created_at).toLocaleDateString('en-GB') : '—'}</td>
+                      <td style={styles.td}>
+                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                          <button style={{ ...styles.btn('secondary'), ...sm }} onClick={() => setDetailReq(req)}>View</button>
+                          {isInitiator && req.status === 'draft' && (
+                            <button style={{ ...styles.btn('secondary'), ...sm }} onClick={() => openEdit(req)}>✏ Edit</button>
+                          )}
+                          {actions}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {canReviewVendors && (
+        <div style={{ ...styles.card, marginTop: '20px' }}>
+          <div style={styles.sectionTitle}>
+            Pending Vendors
+            {pendingVendors.length > 0 && <span style={{ fontSize: '12px', fontWeight: 400, color: theme.textMuted, marginLeft: '8px' }}>({pendingVendors.length})</span>}
+          </div>
+          {pendingVendors.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '20px', color: theme.textMuted, fontSize: '13px' }}>No vendors pending verification.</div>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={styles.table}>
+                <thead>
+                  <tr>
+                    {['Company', 'Bank', 'Account No.', 'Account Name', 'Submitted', 'Action'].map(h => (
+                      <th key={h} style={styles.th}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {pendingVendors.map(v => (
+                    <tr key={v.id}>
+                      <td style={styles.td}><strong>{v.company_name}</strong></td>
+                      <td style={styles.td}>{v.bank_name || '—'}</td>
+                      <td style={styles.td}><span style={{ fontFamily: 'monospace', fontSize: '12px' }}>{v.bank_account_number || '—'}</span></td>
+                      <td style={styles.td}>{v.bank_account_name || '—'}</td>
+                      <td style={styles.td}>{v.created_at ? new Date(v.created_at).toLocaleDateString('en-GB') : '—'}</td>
+                      <td style={styles.td}>
+                        <button
+                          style={{ ...styles.btn('primary'), ...sm, background: theme.green, color: '#000' }}
+                          disabled={vendorSaving === v.id}
+                          onClick={async () => {
+                            setVendorSaving(v.id);
+                            try {
+                              await paymentRequestsService.approveVendor(v.id);
+                              setPendingVendors(pv => pv.filter(p => p.id !== v.id));
+                              setAlert({ type: 'success', msg: `${v.company_name} approved as active vendor.` });
+                            } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+                            finally { setVendorSaving(null); }
+                          }}>
+                          {vendorSaving === v.id ? '…' : '✓ Approve'}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ── LEAVE ─────────────────────────────────────────────────────
+const LEAVE_TYPES = ['annual','sick','unpaid','compassionate','maternity'];
+
+const DISC_TYPES = [
+  { id: 'formal_query',        label: 'Formal Query' },
+  { id: 'verbal_warning_log',  label: 'Verbal Warning (Log)' },
+  { id: 'written_warning',     label: 'Written Warning' },
+];
+
+const DISC_SANCTIONS = [
+  { id: 'none',           label: 'No further action' },
+  { id: 'verbal_warning', label: 'Verbal warning' },
+  { id: 'written_warning',label: 'Written warning' },
+  { id: 'final_warning',  label: 'Final written warning' },
+  { id: 'termination',    label: 'Termination' },
+];
+const calcLeaveDays = (start, end) => {
+  if (!start || !end) return '';
+  const diff = Math.round((new Date(end) - new Date(start)) / 86400000) + 1;
+  return diff > 0 ? String(diff) : '';
+};
+
+const LeavePage = ({ userProfile }) => {
+  const [requests, setRequests] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [alert, setAlert] = useState(null);
+  const [actionSaving, setActionSaving] = useState(false);
+  const [staffList, setStaffList] = useState([]);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ staff_id: '', leave_type: 'annual', is_paid: true, start_date: '', end_date: '', days: '', reason: '' });
+  const [saving, setSaving] = useState(false);
+  const [modalTarget, setModalTarget] = useState(null);
+  const [modalReason, setModalReason] = useState('');
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [reqs, staff] = await Promise.all([
+        leaveService.list(),
+        staffService.getPublicActive(),
+      ]);
+      setRequests(reqs);
+      setStaffList(staff);
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const setFormField = (field, value) => {
+    setForm(f => {
+      const next = { ...f, [field]: value };
+      if (field === 'start_date' || field === 'end_date') {
+        const auto = calcLeaveDays(next.start_date, next.end_date);
+        if (auto) next.days = auto;
+      }
+      return next;
+    });
+  };
+
+  const handleCreate = async () => {
+    if (!form.staff_id || !form.leave_type || !form.start_date || !form.end_date || !form.days)
+      return setAlert({ type: 'error', msg: 'Staff, type, dates, and days are required.' });
+    setSaving(true); setAlert(null);
+    try {
+      await leaveService.create({
+        staff_id: form.staff_id,
+        leave_type: form.leave_type,
+        is_paid: form.is_paid,
+        start_date: form.start_date,
+        end_date: form.end_date,
+        days: Number(form.days),
+        reason: form.reason,
+        requested_by: userProfile?.full_name || 'Admin',
+      });
+      setForm({ staff_id: '', leave_type: 'annual', is_paid: true, start_date: '', end_date: '', days: '', reason: '' });
+      setShowForm(false);
+      setAlert({ type: 'success', msg: 'Leave request recorded.' });
+      load();
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setSaving(false); }
+  };
+
+  const handleAction = async (id, action, reason = null) => {
+    setActionSaving(true); setAlert(null);
+    try {
+      await leaveService.advance(id, action, reason);
+      setModalTarget(null); setModalReason('');
+      await load();
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setActionSaving(false); }
+  };
+
+  const role = userProfile?.role;
+  const canRecord = hasRole(userProfile, 'hr_officer', 'md');
+  const leaveStatusColor = s =>
+    s === 'md_approved' ? theme.green :
+    s === 'ico_approved' ? theme.blue :
+    (s === 'rejected' || s === 'cancelled') ? theme.red :
+    theme.textMuted;
+
+  return (
+    <div>
+      {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
+      <div style={styles.header}>
+        <div>
+          <div style={styles.pageTitle}>Leave Requests</div>
+          <div style={styles.pageSubtitle}>Record and approve staff leave</div>
+        </div>
+        {canRecord && (
+          <button style={styles.btn('primary')} onClick={() => setShowForm(v => !v)}>
+            {showForm ? '✕ Cancel' : '+ New Request'}
+          </button>
+        )}
+      </div>
+
+      {showForm && (
+        <div style={{ ...styles.card, marginBottom: '20px' }}>
+          <div style={styles.sectionTitle}>New Leave Request</div>
+          <div style={styles.grid(3)}>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Staff Member</label>
+              <select style={styles.input} value={form.staff_id} onChange={e => setFormField('staff_id', e.target.value)}>
+                <option value="">Select staff…</option>
+                {staffList.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
+              </select>
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Leave Type</label>
+              <select style={styles.input} value={form.leave_type} onChange={e => setFormField('leave_type', e.target.value)}>
+                {LEAVE_TYPES.map(t => <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>)}
+              </select>
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Paid Leave?</label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', paddingTop: '10px' }}>
+                <input type="checkbox" id="is_paid" checked={form.is_paid} onChange={e => setFormField('is_paid', e.target.checked)} style={{ width: '16px', height: '16px', accentColor: theme.accent }} />
+                <label htmlFor="is_paid" style={{ ...styles.label, marginBottom: 0, cursor: 'pointer' }}>Yes — paid leave</label>
+              </div>
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Start Date</label>
+              <input type="date" style={styles.input} value={form.start_date} onChange={e => setFormField('start_date', e.target.value)} />
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>End Date</label>
+              <input type="date" style={styles.input} value={form.end_date} onChange={e => setFormField('end_date', e.target.value)} />
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Days</label>
+              <input type="number" min="1" style={styles.input} value={form.days} onChange={e => setFormField('days', e.target.value)} placeholder="Auto-filled from dates" />
+            </div>
+          </div>
+          <div style={styles.formGroup}>
+            <label style={styles.label}>Reason</label>
+            <input style={styles.input} placeholder="Reason for leave…" value={form.reason} onChange={e => setFormField('reason', e.target.value)} />
+          </div>
+          <button style={styles.btn('primary')} onClick={handleCreate} disabled={saving}>{saving ? 'Saving…' : 'Submit Request'}</button>
+        </div>
+      )}
+
+      {modalTarget && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ ...styles.card, width: '420px' }}>
+            <div style={{ ...styles.sectionTitle, marginBottom: '12px' }}>
+              {modalTarget.action === 'reject' ? 'Reject' : 'Cancel'} Leave — Reason Required
+            </div>
+            <textarea
+              style={{ ...styles.input, height: '80px', resize: 'vertical' }}
+              placeholder="Enter reason…"
+              value={modalReason}
+              onChange={e => setModalReason(e.target.value)}
+            />
+            <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+              <button
+                style={styles.btn('danger')}
+                disabled={!modalReason.trim() || actionSaving}
+                onClick={() => handleAction(modalTarget.id, modalTarget.action, modalReason.trim())}
+              >{actionSaving ? 'Saving…' : modalTarget.action === 'reject' ? 'Reject' : 'Cancel Leave'}</button>
+              <button style={styles.btn('secondary')} onClick={() => { setModalTarget(null); setModalReason(''); }}>Back</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div style={styles.card}>
+        {loading ? <Spinner /> : requests.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '30px', color: theme.textMuted }}>No leave requests yet.</div>
+        ) : (
+          <table style={styles.table}>
+            <thead>
+              <tr>
+                {['Staff','Type','Paid?','Start','End','Days','Reason','Status','Actions'].map(h => (
+                  <th key={h} style={styles.th}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {requests.map(req => {
+                const status = req.status;
+                const actions = [];
+                if (status === 'requested' && role === 'ico')
+                  actions.push(<button key="ico" style={{ ...styles.btn('primary'), padding: '4px 10px', fontSize: '11px' }} onClick={() => handleAction(req.id, 'ico_approve')} disabled={actionSaving}>✓ ICO Approve</button>);
+                if (status === 'ico_approved' && role === 'md')
+                  actions.push(<button key="md" style={{ ...styles.btn('primary'), padding: '4px 10px', fontSize: '11px' }} onClick={() => handleAction(req.id, 'md_approve')} disabled={actionSaving}>✓ MD Approve</button>);
+                if (['requested','ico_approved'].includes(status) && ['ico','md'].includes(role))
+                  actions.push(<button key="reject" style={{ ...styles.btn('danger'), padding: '4px 10px', fontSize: '11px' }} onClick={() => setModalTarget({ id: req.id, action: 'reject' })}>✕ Reject</button>);
+                if (['requested','ico_approved','md_approved'].includes(status) && ['hr_officer','md'].includes(role))
+                  actions.push(<button key="cancel" style={{ ...styles.btn('secondary'), padding: '4px 10px', fontSize: '11px' }} onClick={() => setModalTarget({ id: req.id, action: 'cancel' })}>✕ Cancel</button>);
+                return (
+                  <tr key={req.id}>
+                    <td style={styles.td}><strong>{req.staff?.full_name || '—'}</strong></td>
+                    <td style={styles.td}><span style={styles.badge(theme.accent)}>{req.leave_type}</span></td>
+                    <td style={styles.td}>{req.is_paid ? <span style={{ color: theme.green, fontWeight: '600' }}>Yes</span> : <span style={{ color: theme.textMuted }}>No</span>}</td>
+                    <td style={styles.td}>{req.start_date || '—'}</td>
+                    <td style={styles.td}>{req.end_date || '—'}</td>
+                    <td style={styles.td}><strong>{req.days ?? '—'}</strong></td>
+                    <td style={styles.td}>{req.reason || '—'}</td>
+                    <td style={styles.td}><span style={styles.badge(leaveStatusColor(status))}>{status}</span></td>
+                    <td style={styles.td}><div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>{actions.length ? actions : <span style={{ color: theme.textMuted, fontSize: '11px' }}>—</span>}</div></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ── MY HR (SELF-SERVICE) ──────────────────────────────────────
+const MyHRPage = ({ userProfile }) => {
+  const currentYear = new Date().getFullYear();
+  const [myStaff, setMyStaff] = useState(null);
+  const [staffLoading, setStaffLoading] = useState(true);
+  const [alert, setAlert] = useState(null);
+  const [advances, setAdvances] = useState([]);
+  const [leaves, setLeaves] = useState([]);
+  const [listLoading, setListLoading] = useState(true);
+  const [myBalance, setMyBalance] = useState([]);
+  const [policyActive, setPolicyActive] = useState(false);
+  const [balanceLoading, setBalanceLoading] = useState(true);
+  const [showAdvForm, setShowAdvForm] = useState(false);
+  const [advForm, setAdvForm] = useState({ amount: '', reason: '', installments: '1' });
+  const [advSaving, setAdvSaving] = useState(false);
+  const [showLeaveForm, setShowLeaveForm] = useState(false);
+  const [leaveForm, setLeaveForm] = useState({ leave_type: 'annual', is_paid: true, start_date: '', end_date: '', days: '', reason: '' });
+  const [leaveSaving, setLeaveSaving] = useState(false);
+  const [cardLoading, setCardLoading] = useState(false);
+  const [bizCardLoading, setBizCardLoading] = useState(false);
+  const [myCases, setMyCases]           = useState([]);
+  const [casesLoading, setCasesLoading] = useState(true);
+  const [respondTarget, setRespondTarget] = useState(null);
+  const [respondText, setRespondText]   = useState('');
+  const [respondSaving, setRespondSaving] = useState(false);
+  const [ackSaving, setAckSaving]       = useState(null);
+  const [myAttendance, setMyAttendance] = useState([]);
+  const [attLoading, setAttLoading]     = useState(true);
+  const [attFlagTarget, setAttFlagTarget] = useState(null);
+  const [attFlagText, setAttFlagText]   = useState('');
+  const [attFlagSaving, setAttFlagSaving] = useState(false);
+  const [pinMyValue, setPinMyValue]     = useState('');
+  const [pinMyMsg, setPinMyMsg]         = useState(null);
+  const [pinMySaving, setPinMySaving]   = useState(false);
+
+  const loadAll = async () => {
+    setStaffLoading(true); setListLoading(true); setBalanceLoading(true); setCasesLoading(true); setAttLoading(true);
+    let staff = null;
+    try {
+      staff = await meService.getMyStaff();
+      setMyStaff(staff);
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setStaffLoading(false); }
+    try {
+      if (staff?.id) {
+        const [adv, leave] = await Promise.all([advancesService.listMine(staff.id), leaveService.listMine(staff.id)]);
+        setAdvances(adv); setLeaves(leave);
+      } else {
+        setAdvances([]); setLeaves([]);
+      }
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setListLoading(false); }
+    try {
+      const balPromises = [leaveBalanceService.getPolicySettings()];
+      if (staff?.id) balPromises.push(leaveBalanceService.getMyBalance(staff.id, currentYear));
+      const [pol, bal] = await Promise.all(balPromises);
+      setPolicyActive(pol?.active === true);
+      setMyBalance(bal || []);
+    } catch (_) { /* leave balance not critical — fail silently */ }
+    finally { setBalanceLoading(false); }
+    try {
+      const cases = await disciplinaryService.getMine();
+      setMyCases(cases);
+    } catch (_) { /* fail silently — self-service view may not exist for all deployments */ }
+    finally { setCasesLoading(false); }
+    try {
+      if (staff?.id) {
+        const to   = new Date().toISOString().slice(0, 10);
+        const from = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+        const att  = await kioskService.getMyAttendance(staff.id, from, to);
+        setMyAttendance(att);
+      } else {
+        setMyAttendance([]);
+      }
+    } catch (_) { /* fail silently */ }
+    finally { setAttLoading(false); }
+  };
+
+  useEffect(() => { loadAll(); }, []);
+
+  const setLeaveField = (field, value) => {
+    setLeaveForm(f => {
+      const next = { ...f, [field]: value };
+      if (field === 'start_date' || field === 'end_date') {
+        const auto = calcLeaveDays(next.start_date, next.end_date);
+        if (auto) next.days = auto;
+      }
+      return next;
+    });
+  };
+
+  const handleCreateAdvance = async () => {
+    if (!advForm.amount || !advForm.reason)
+      return setAlert({ type: 'error', msg: 'Amount and reason are required.' });
+    setAdvSaving(true); setAlert(null);
+    try {
+      await advancesService.create({ staff_id: myStaff.id, amount: Number(advForm.amount), reason: advForm.reason, installments: Number(advForm.installments) || 1, requested_by: userProfile?.full_name || 'Admin' });
+      setAdvForm({ amount: '', reason: '', installments: '1' });
+      setShowAdvForm(false);
+      setAlert({ type: 'success', msg: 'Advance request submitted.' });
+      advancesService.listMine(myStaff.id).then(setAdvances).catch(() => {});
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setAdvSaving(false); }
+  };
+
+  const handleCreateLeave = async () => {
+    if (!leaveForm.start_date || !leaveForm.end_date || !leaveForm.days)
+      return setAlert({ type: 'error', msg: 'Dates and days are required.' });
+    setLeaveSaving(true); setAlert(null);
+    try {
+      await leaveService.create({ staff_id: myStaff.id, leave_type: leaveForm.leave_type, is_paid: leaveForm.is_paid, start_date: leaveForm.start_date, end_date: leaveForm.end_date, days: Number(leaveForm.days), reason: leaveForm.reason, requested_by: userProfile?.full_name || 'Admin' });
+      setLeaveForm({ leave_type: 'annual', is_paid: true, start_date: '', end_date: '', days: '', reason: '' });
+      setShowLeaveForm(false);
+      setAlert({ type: 'success', msg: 'Leave request submitted.' });
+      leaveService.listMine(myStaff.id).then(setLeaves).catch(() => {});
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setLeaveSaving(false); }
+  };
+
+  const handleDownloadIDCard = async () => {
+    setCardLoading(true); setAlert(null);
+    try {
+      let photoUrl = null;
+      if (myStaff?.photo_path) photoUrl = await photoService.getSignedUrl(myStaff.photo_path);
+      await generateIDCardPDF(myStaff, photoUrl);
+    } catch (e) { setAlert({ type: 'error', msg: 'ID card error: ' + e.message }); }
+    finally { setCardLoading(false); }
+  };
+
+  const handleDownloadBizCard = async () => {
+    setBizCardLoading(true); setAlert(null);
+    try { await generateBusinessCardPDF(myStaff); }
+    catch (e) { setAlert({ type: 'error', msg: 'Business card error: ' + e.message }); }
+    finally { setBizCardLoading(false); }
+  };
+
+  const handleSubmitFlagResponse = async (attendanceId) => {
+    if (!attFlagText.trim()) return;
+    setAttFlagSaving(true); setAlert(null);
+    try {
+      await kioskService.submitFlagResponse(attendanceId, attFlagText.trim());
+      setAttFlagTarget(null); setAttFlagText('');
+      setMyAttendance(prev => prev.map(r => r.id === attendanceId ? { ...r, flag_response: attFlagText.trim() } : r));
+      setAlert({ type: 'success', msg: 'Response submitted.' });
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setAttFlagSaving(false); }
+  };
+
+  const handleSetMyPin = async () => {
+    if (pinMyValue.length < 4) return;
+    setPinMySaving(true); setPinMyMsg(null);
+    try {
+      const { error } = await supabase.rpc('set_my_kiosk_pin', { p_pin: pinMyValue });
+      if (error) throw error;
+      setPinMyMsg({ type: 'success', msg: 'Kiosk PIN set successfully.' });
+      setPinMyValue('');
+    } catch (e) {
+      setPinMyMsg({ type: 'error', msg: e.message });
+    } finally {
+      setPinMySaving(false);
+    }
+  };
+
+  const advStatusColor = s => s === 'disbursed' ? theme.green : s === 'md_approved' ? theme.blue : s === 'ico_approved' ? theme.accent : s === 'settled' ? theme.textMuted : (s === 'rejected' || s === 'cancelled') ? theme.red : theme.textMuted;
+  const leaveStatusColor = s => s === 'md_approved' ? theme.green : s === 'ico_approved' ? theme.blue : (s === 'rejected' || s === 'cancelled') ? theme.red : theme.textMuted;
+
+  return (
+    <div>
+      {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
+      <div style={styles.header}>
+        <div><div style={styles.pageTitle}>My HR</div><div style={styles.pageSubtitle}>Your leave and advance requests</div></div>
+      </div>
+
+      {!staffLoading && myStaff && (
+        <div style={{ ...styles.card, marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+          <div>
+            <div style={{ fontSize: '18px', fontWeight: '700' }}>{myStaff.full_name}</div>
+            <div style={{ fontSize: '13px', color: theme.textMuted, marginTop: '4px' }}>{myStaff.job_title || myStaff.role || '—'} · {myStaff.employee_number || '—'}</div>
+          </div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button style={{ ...styles.btn('secondary'), fontSize: '12px' }} onClick={handleDownloadIDCard} disabled={cardLoading}>{cardLoading ? 'Generating…' : '↓ ID Card'}</button>
+            <button style={{ ...styles.btn('secondary'), fontSize: '12px' }} onClick={handleDownloadBizCard} disabled={bizCardLoading}>{bizCardLoading ? 'Generating…' : '↓ Business Card'}</button>
+          </div>
+        </div>
+      )}
+      {!staffLoading && !myStaff && (
+        <div style={{ ...styles.card, marginBottom: '20px', color: theme.textMuted, fontSize: '13px' }}>
+          No staff profile is linked to this account.
+        </div>
+      )}
+
+      <div style={{ ...styles.card, marginBottom: '20px' }}>
+        <div style={styles.sectionTitle}>My Leave Balance ({currentYear})</div>
+        {balanceLoading ? <div style={{ color: theme.textMuted, fontSize: '13px' }}>Loading…</div>
+          : (!policyActive || myBalance.length === 0) ? (
+          <div style={{ color: theme.textMuted, fontSize: '13px' }}>Leave balances not yet activated.</div>
+        ) : (
+          <div style={{ display: 'flex', gap: '28px', flexWrap: 'wrap' }}>
+            {myBalance.filter(b => b.leave_type === 'annual' || b.leave_type === 'sick').map(b => {
+              const bal = b.balance;
+              return (
+                <div key={b.leave_type}>
+                  <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{b.leave_type.charAt(0).toUpperCase() + b.leave_type.slice(1)}</div>
+                  <div style={{ fontSize: '26px', fontWeight: '700', color: bal < 0 ? theme.red : theme.green, marginTop: '4px' }}>{bal}{bal < 0 ? ' ⚠' : ''}</div>
+                  <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '2px' }}>{b.used_days} used / {b.entitled_days} entitled</div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+        <div style={styles.sectionTitle}>My Advances</div>
+        <button style={{ ...styles.btn(showAdvForm ? 'secondary' : 'primary'), fontSize: '12px' }} onClick={() => setShowAdvForm(v => !v)} disabled={!myStaff}>{showAdvForm ? '✕ Cancel' : '+ Request Advance'}</button>
+      </div>
+      {showAdvForm && (
+        <div style={{ ...styles.card, marginBottom: '16px' }}>
+          <div style={styles.grid(3)}>
+            <div style={styles.formGroup}><label style={styles.label}>Amount (₦)</label><input style={styles.input} type="number" placeholder="0" value={advForm.amount} onChange={e => setAdvForm(f => ({ ...f, amount: e.target.value }))} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Installments</label><input style={styles.input} type="number" min="1" placeholder="1" value={advForm.installments} onChange={e => setAdvForm(f => ({ ...f, installments: e.target.value }))} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Reason</label><input style={styles.input} placeholder="Reason…" value={advForm.reason} onChange={e => setAdvForm(f => ({ ...f, reason: e.target.value }))} /></div>
+          </div>
+          <button style={styles.btn('primary')} onClick={handleCreateAdvance} disabled={advSaving}>{advSaving ? 'Submitting…' : 'Submit'}</button>
+        </div>
+      )}
+      <div style={{ ...styles.card, marginBottom: '24px' }}>
+        {listLoading ? <Spinner /> : advances.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '20px', color: theme.textMuted }}>No advance requests yet.</div>
+        ) : (
+          <table style={styles.table}>
+            <thead><tr>{['Amount','Installments','Outstanding','Reason','Status'].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
+            <tbody>{advances.map(adv => (
+              <tr key={adv.id}>
+                <td style={styles.td}><strong style={{ color: theme.accent }}>{naira(adv.amount)}</strong></td>
+                <td style={styles.td}>{adv.installments || 1}</td>
+                <td style={styles.td}>{(adv.outstanding_balance || 0) > 0 ? <strong style={{ color: theme.red }}>{naira(adv.outstanding_balance)}</strong> : <span style={{ color: theme.textMuted }}>—</span>}</td>
+                <td style={styles.td}>{adv.reason || '—'}</td>
+                <td style={styles.td}><span style={styles.badge(advStatusColor(adv.status))}>{adv.status}</span></td>
+              </tr>
+            ))}</tbody>
+          </table>
+        )}
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+        <div style={styles.sectionTitle}>My Leave</div>
+        <button style={{ ...styles.btn(showLeaveForm ? 'secondary' : 'primary'), fontSize: '12px' }} onClick={() => setShowLeaveForm(v => !v)} disabled={!myStaff}>{showLeaveForm ? '✕ Cancel' : '+ Request Leave'}</button>
+      </div>
+      {showLeaveForm && (
+        <div style={{ ...styles.card, marginBottom: '16px' }}>
+          <div style={styles.grid(3)}>
+            <div style={styles.formGroup}><label style={styles.label}>Leave Type</label><select style={styles.input} value={leaveForm.leave_type} onChange={e => setLeaveField('leave_type', e.target.value)}>{LEAVE_TYPES.map(t => <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>)}</select></div>
+            <div style={styles.formGroup}><label style={styles.label}>Start Date</label><input type="date" style={styles.input} value={leaveForm.start_date} onChange={e => setLeaveField('start_date', e.target.value)} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>End Date</label><input type="date" style={styles.input} value={leaveForm.end_date} onChange={e => setLeaveField('end_date', e.target.value)} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Days</label><input type="number" min="1" style={styles.input} value={leaveForm.days} onChange={e => setLeaveField('days', e.target.value)} placeholder="Auto-filled" /></div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Paid Leave?</label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', paddingTop: '10px' }}>
+                <input type="checkbox" checked={leaveForm.is_paid} onChange={e => setLeaveField('is_paid', e.target.checked)} style={{ width: '16px', height: '16px', accentColor: theme.accent }} />
+                <span style={{ fontSize: '13px', color: theme.text }}>Yes — paid</span>
+              </div>
+            </div>
+            <div style={styles.formGroup}><label style={styles.label}>Reason</label><input style={styles.input} placeholder="Reason…" value={leaveForm.reason} onChange={e => setLeaveField('reason', e.target.value)} /></div>
+          </div>
+          <button style={styles.btn('primary')} onClick={handleCreateLeave} disabled={leaveSaving}>{leaveSaving ? 'Submitting…' : 'Submit'}</button>
+        </div>
+      )}
+      <div style={styles.card}>
+        {listLoading ? <Spinner /> : leaves.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '20px', color: theme.textMuted }}>No leave requests yet.</div>
+        ) : (
+          <table style={styles.table}>
+            <thead><tr>{['Type','Paid?','Start','End','Days','Reason','Status'].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
+            <tbody>{leaves.map(req => (
+              <tr key={req.id}>
+                <td style={styles.td}><span style={styles.badge(theme.accent)}>{req.leave_type}</span></td>
+                <td style={styles.td}>{req.is_paid ? <span style={{ color: theme.green, fontWeight: '600' }}>Yes</span> : <span style={{ color: theme.textMuted }}>No</span>}</td>
+                <td style={styles.td}>{req.start_date || '—'}</td>
+                <td style={styles.td}>{req.end_date || '—'}</td>
+                <td style={styles.td}><strong>{req.days ?? '—'}</strong></td>
+                <td style={styles.td}>{req.reason || '—'}</td>
+                <td style={styles.td}><span style={styles.badge(leaveStatusColor(req.status))}>{req.status}</span></td>
+              </tr>
+            ))}</tbody>
+          </table>
+        )}
+      </div>
+
+      <div style={{ marginTop: '28px' }}>
+        <div style={styles.sectionTitle}>Queries &amp; Warnings</div>
+        {casesLoading ? <Spinner /> : myCases.length === 0 ? (
+          <div style={{ ...styles.card, color: theme.textMuted, fontSize: '13px', textAlign: 'center', padding: '20px' }}>
+            No queries or warnings on record.
+          </div>
+        ) : myCases.map(c => {
+          const canRespond = c.type === 'formal_query' && c.status === 'issued';
+          const needsAck   = !c.acknowledged_at;
+          const discStatusColor = s =>
+            s === 'closed' ? theme.textMuted : s === 'reviewed' ? theme.blue :
+            s === 'responded' ? theme.green : theme.accent;
+          return (
+            <div key={c.id} style={{ ...styles.card, marginBottom: '12px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
+                <div>
+                  <div style={{ fontWeight: '600', fontSize: '14px', color: theme.text }}>{c.title}</div>
+                  <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '2px' }}>
+                    {DISC_TYPES.find(t => t.id === c.type)?.label || c.type} · {c.incident_date || '—'}
+                    {c.response_deadline ? ` · Respond by ${c.response_deadline}` : ''}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                  <span style={styles.badge(discStatusColor(c.status))}>{c.status}</span>
+                  {needsAck && (
+                    <button
+                      style={{ ...styles.btn('secondary'), fontSize: '11px', padding: '4px 10px' }}
+                      disabled={ackSaving === c.id}
+                      onClick={async () => {
+                        setAckSaving(c.id); setAlert(null);
+                        try {
+                          await disciplinaryService.advance(c.id, 'acknowledge', null, null);
+                          setMyCases(prev => prev.map(x => x.id === c.id ? { ...x, acknowledged_at: new Date().toISOString() } : x));
+                        } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+                        finally { setAckSaving(null); }
+                      }}>
+                      {ackSaving === c.id ? 'Acknowledging…' : 'Acknowledge'}
+                    </button>
+                  )}
+                </div>
+              </div>
+              {c.allegation && (
+                <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '8px' }}>
+                  <strong style={{ color: theme.text }}>Allegation:</strong> {c.allegation}
+                </div>
+              )}
+              {c.sanction && c.sanction !== 'none' && (
+                <div style={{ fontSize: '12px', color: theme.red, marginTop: '4px' }}>
+                  <strong>Outcome:</strong> {DISC_SANCTIONS.find(s => s.id === c.sanction)?.label || c.sanction}
+                </div>
+              )}
+              {canRespond && respondTarget !== c.id && (
+                <button
+                  style={{ ...styles.btn('primary'), fontSize: '12px', marginTop: '10px' }}
+                  onClick={() => { setRespondTarget(c.id); setRespondText(''); }}>
+                  Submit Response
+                </button>
+              )}
+              {respondTarget === c.id && (
+                <div style={{ marginTop: '10px' }}>
+                  <textarea
+                    style={{ ...styles.input, height: '80px', resize: 'vertical', marginBottom: '8px' }}
+                    placeholder="Your response to this query…"
+                    value={respondText}
+                    onChange={e => setRespondText(e.target.value)} />
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button
+                      style={{ ...styles.btn('primary'), fontSize: '12px' }}
+                      disabled={respondSaving || !respondText.trim()}
+                      onClick={async () => {
+                        setRespondSaving(true); setAlert(null);
+                        try {
+                          await disciplinaryService.advance(c.id, 'respond', respondText, null);
+                          setRespondTarget(null); setRespondText('');
+                          const updated = await disciplinaryService.getMine();
+                          setMyCases(updated);
+                        } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+                        finally { setRespondSaving(false); }
+                      }}>
+                      {respondSaving ? 'Submitting…' : 'Submit'}
+                    </button>
+                    <button style={{ ...styles.btn('secondary'), fontSize: '12px' }}
+                      onClick={() => { setRespondTarget(null); setRespondText(''); }}>Cancel</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{ marginTop: '28px' }}>
+        <div style={styles.sectionTitle}>My Attendance (Last 30 Days)</div>
+        {attLoading ? <Spinner /> : myAttendance.length === 0 ? (
+          <div style={{ ...styles.card, color: theme.textMuted, fontSize: '13px', textAlign: 'center', padding: '20px' }}>
+            No attendance records in the last 30 days.
+          </div>
+        ) : (
+          <div style={{ ...styles.card, overflowX: 'auto' }}>
+            <table style={styles.table}>
+              <thead><tr>{['Date','Present','Hours','Flag'].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
+              <tbody>{myAttendance.map(row => (
+                <tr key={row.id}>
+                  <td style={styles.td}>{row.date}</td>
+                  <td style={styles.td}>{row.present ? <span style={{ color: theme.green, fontWeight: 600 }}>Yes</span> : <span style={{ color: theme.red }}>No</span>}</td>
+                  <td style={styles.td}>{row.hours_worked ?? '—'}</td>
+                  <td style={styles.td}>
+                    {row.flagged && !row.flag_response && attFlagTarget !== row.id && (
+                      <div>
+                        <span style={styles.badge(theme.red)}>Flagged</span>
+                        {row.flag_reason && <div style={{ fontSize: '11px', color: theme.textMuted, margin: '3px 0' }}>{row.flag_reason}</div>}
+                        <button style={{ ...styles.btn('secondary'), fontSize: '11px', padding: '3px 8px', marginTop: '4px' }}
+                          onClick={() => { setAttFlagTarget(row.id); setAttFlagText(''); }}>
+                          Respond
+                        </button>
+                      </div>
+                    )}
+                    {row.flagged && attFlagTarget === row.id && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <textarea
+                          style={{ ...styles.input, height: '60px', resize: 'vertical', fontSize: '12px' }}
+                          placeholder="Explain this flag…"
+                          value={attFlagText}
+                          onChange={e => setAttFlagText(e.target.value)} />
+                        <div style={{ display: 'flex', gap: '6px' }}>
+                          <button style={{ ...styles.btn('primary'), fontSize: '11px', padding: '4px 10px' }}
+                            disabled={attFlagSaving || !attFlagText.trim()}
+                            onClick={() => handleSubmitFlagResponse(row.id)}>
+                            {attFlagSaving ? '…' : 'Submit'}
+                          </button>
+                          <button style={{ ...styles.btn('secondary'), fontSize: '11px', padding: '4px 10px' }}
+                            onClick={() => { setAttFlagTarget(null); setAttFlagText(''); }}>
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {row.flagged && row.flag_response && (
+                      <span style={{ fontSize: '11px', color: theme.green }}>Responded</span>
+                    )}
+                    {!row.flagged && <span style={{ color: theme.textMuted, fontSize: '12px' }}>—</span>}
+                  </td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div style={{ ...styles.card, marginTop: '28px' }}>
+        <div style={styles.sectionTitle}>Kiosk PIN</div>
+        <div style={{ fontSize: '13px', color: theme.textMuted, marginBottom: '14px' }}>
+          Set or reset your attendance kiosk PIN. Use this 4–6 digit PIN to clock in/out at the kiosk when your barcode is not available.
+        </div>
+        {pinMyMsg && <Alert msg={pinMyMsg.msg} type={pinMyMsg.type} onClose={() => setPinMyMsg(null)} />}
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end', maxWidth: '340px' }}>
+          <div style={{ ...styles.formGroup, flex: 1, marginBottom: 0 }}>
+            <label style={styles.label}>New PIN (4–6 digits)</label>
+            <input
+              type="password"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              maxLength={6}
+              style={styles.input}
+              placeholder="Enter 4–6 digit PIN"
+              value={pinMyValue}
+              onChange={e => setPinMyValue(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              onKeyDown={e => { if (e.key === 'Enter' && pinMyValue.length >= 4) handleSetMyPin(); }}
+            />
+          </div>
+          <button
+            style={{ ...styles.btn('primary'), flexShrink: 0 }}
+            disabled={pinMySaving || pinMyValue.length < 4}
+            onClick={handleSetMyPin}
+          >
+            {pinMySaving ? 'Saving…' : 'Set PIN'}
+          </button>
+        </div>
+        <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '8px' }}>
+          PIN is hashed server-side. It cannot be retrieved once set.
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ── ATTENDANCE FLAGS PAGE ─────────────────────────────────────
+const AttendanceFlagsPage = ({ userProfile }) => {
+  const [rows, setRows]           = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [alert, setAlert]         = useState(null);
+  const [resolving, setResolving] = useState(null);
+  const [forms, setForms]         = useState({});
+
+  const load = async () => {
+    setLoading(true);
+    try { setRows(await kioskService.getFlagged()); }
+    catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const setField = (id, field, value) =>
+    setForms(f => ({ ...f, [id]: { ...f[id], [field]: value } }));
+
+  const handleResolve = async (id) => {
+    const form = forms[id] || {};
+    setResolving(id); setAlert(null);
+    try {
+      await kioskService.resolveFlag(id, form.hours_worked, form.present);
+      setAlert({ type: 'success', msg: 'Flag resolved.' });
+      load();
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setResolving(null); }
+  };
+
+  return (
+    <div>
+      {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
+      <div style={styles.header}>
+        <div>
+          <div style={styles.pageTitle}>Attendance Flags</div>
+          <div style={styles.pageSubtitle}>Flagged attendance records requiring HR review (last 60 days)</div>
+        </div>
+        <button style={styles.btn('secondary')} onClick={load} disabled={loading}>Refresh</button>
+      </div>
+      {loading ? <Spinner /> : rows.length === 0 ? (
+        <div style={{ ...styles.card, color: theme.textMuted, textAlign: 'center', padding: '40px' }}>
+          No flagged records.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          {rows.map(row => {
+            const form = forms[row.id] || {};
+            return (
+              <div key={row.id} style={styles.card}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
+                  <div>
+                    <div style={{ fontWeight: '600', fontSize: '14px' }}>{row.staff?.full_name || '—'}</div>
+                    <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '2px' }}>
+                      {row.staff?.employee_number || ''} · {row.date}
+                    </div>
+                  </div>
+                  <span style={styles.badge(theme.red)}>Flagged</span>
+                </div>
+                {row.flag_reason && (
+                  <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '8px' }}>
+                    <strong style={{ color: theme.text }}>Reason:</strong> {row.flag_reason}
+                  </div>
+                )}
+                {row.flag_response && (
+                  <div style={{ fontSize: '12px', color: theme.green, marginTop: '4px' }}>
+                    <strong style={{ color: theme.text }}>Employee:</strong> {row.flag_response}
+                  </div>
+                )}
+                <div style={{ marginTop: '12px', display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                  <div style={styles.formGroup}>
+                    <label style={styles.label}>Hours Worked</label>
+                    <input type="number" step="0.5" min="0" max="24"
+                      style={{ ...styles.input, width: '100px' }}
+                      placeholder="e.g. 8"
+                      value={form.hours_worked ?? ''}
+                      onChange={e => setField(row.id, 'hours_worked', e.target.value)} />
+                  </div>
+                  <div style={styles.formGroup}>
+                    <label style={styles.label}>Present?</label>
+                    <select style={{ ...styles.input, width: '90px' }}
+                      value={form.present === undefined ? '' : String(form.present)}
+                      onChange={e => setField(row.id, 'present', e.target.value === '' ? undefined : e.target.value === 'true')}>
+                      <option value="">—</option>
+                      <option value="true">Yes</option>
+                      <option value="false">No</option>
+                    </select>
+                  </div>
+                  <button style={styles.btn('primary')}
+                    disabled={resolving === row.id}
+                    onClick={() => handleResolve(row.id)}>
+                    {resolving === row.id ? 'Resolving…' : 'Resolve Flag'}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ── DISCIPLINARY ──────────────────────────────────────────────
+const DisciplinaryPage = ({ userProfile }) => {
+  const role = userProfile?.role;
+  // NOTE: issue_disciplinary_case / advance_disciplinary enforce the actor via
+  // get_user_role() — the PRIMARY role only, NOT granted roles. So these gates
+  // must check the primary role, otherwise a user *granted* hr_officer would
+  // see Issue/Review buttons that the RPC rejects on click. (To make
+  // disciplinary truly multi-role, those RPCs would need has_any_role — a DB
+  // change, out of scope here.)
+  const canIssue  = role === 'md' || role === 'hr_officer';
+  const canReview = role === 'md' || role === 'hr_officer';
+  const canClose  = role === 'md';
+
+  const [cases, setCases]         = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [alert, setAlert]         = useState(null);
+  const [staffList, setStaffList] = useState([]);
+  const [showForm, setShowForm]   = useState(false);
+  const [form, setForm]           = useState({ staff_id: '', type: 'formal_query', title: '', allegation: '', incident_date: '', response_deadline: '' });
+  const [saving, setSaving]       = useState(false);
+  const [expandedId, setExpandedId] = useState(null);
+  const [audit, setAudit]         = useState({});
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [reviewTarget, setReviewTarget] = useState(null);
+  const [reviewNotes, setReviewNotes]   = useState('');
+  const [reviewSaving, setReviewSaving] = useState(false);
+  const [closeTarget, setCloseTarget]   = useState(null);
+  const [closeSanction, setCloseSanction] = useState('none');
+  const [closeSaving, setCloseSaving]   = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [c, s] = await Promise.all([disciplinaryService.listAll(), staffService.getPublicActive()]);
+      setCases(c); setStaffList(s);
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const toggleExpand = async (caseId) => {
+    if (expandedId === caseId) { setExpandedId(null); return; }
+    setExpandedId(caseId);
+    if (!audit[caseId]) {
+      setAuditLoading(true);
+      try {
+        const rows = await disciplinaryService.getAudit(caseId);
+        setAudit(a => ({ ...a, [caseId]: rows }));
+      } catch (_) {}
+      finally { setAuditLoading(false); }
+    }
+  };
+
+  const refreshAudit = async (caseId) => {
+    try {
+      const rows = await disciplinaryService.getAudit(caseId);
+      setAudit(a => ({ ...a, [caseId]: rows }));
+    } catch (_) {}
+  };
+
+  const handleIssue = async () => {
+    if (!form.staff_id || !form.title || !form.allegation || !form.incident_date)
+      return setAlert({ type: 'error', msg: 'Staff, title, allegation, and incident date are required.' });
+    setSaving(true); setAlert(null);
+    try {
+      await disciplinaryService.issue({
+        staff_id: form.staff_id, type: form.type, title: form.title,
+        allegation: form.allegation, incident_date: form.incident_date,
+        response_deadline: form.type === 'formal_query' ? (form.response_deadline || null) : null,
+      });
+      setForm({ staff_id: '', type: 'formal_query', title: '', allegation: '', incident_date: '', response_deadline: '' });
+      setShowForm(false);
+      setAlert({ type: 'success', msg: 'Case issued.' });
+      load();
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setSaving(false); }
+  };
+
+  const handleReview = async (caseId) => {
+    setReviewSaving(true); setAlert(null);
+    try {
+      await disciplinaryService.advance(caseId, 'review', reviewNotes || null, null);
+      setReviewTarget(null); setReviewNotes('');
+      await load(); await refreshAudit(caseId);
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setReviewSaving(false); }
+  };
+
+  const handleClose = async (caseId) => {
+    setCloseSaving(true); setAlert(null);
+    try {
+      await disciplinaryService.advance(caseId, 'close', null, closeSanction);
+      setCloseTarget(null); setCloseSanction('none');
+      await load(); await refreshAudit(caseId);
+    } catch (e) { setAlert({ type: 'error', msg: e.message }); }
+    finally { setCloseSaving(false); }
+  };
+
+  const statusColor = s =>
+    s === 'closed'    ? theme.textMuted :
+    s === 'reviewed'  ? theme.blue :
+    s === 'responded' ? theme.green :
+    s === 'issued'    ? theme.accent : theme.textMuted;
+
+  return (
+    <div>
+      {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
+      <div style={styles.header}>
+        <div>
+          <div style={styles.pageTitle}>Disciplinary</div>
+          <div style={styles.pageSubtitle}>Manage formal queries and warnings</div>
+        </div>
+        {canIssue && (
+          <button style={styles.btn('primary')} onClick={() => setShowForm(v => !v)}>
+            {showForm ? '✕ Cancel' : '+ Issue Case'}
+          </button>
+        )}
+      </div>
+
+      {showForm && (
+        <div style={{ ...styles.card, marginBottom: '20px' }}>
+          <div style={styles.sectionTitle}>Issue New Case</div>
+          <div style={styles.grid(2)}>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Staff Member</label>
+              <select style={styles.input} value={form.staff_id} onChange={e => setForm(f => ({ ...f, staff_id: e.target.value }))}>
+                <option value="">Select staff…</option>
+                {staffList.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
+              </select>
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Case Type</label>
+              <select style={styles.input} value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))}>
+                {DISC_TYPES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+              </select>
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Title</label>
+              <input style={styles.input} placeholder="Brief title of the case…" value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} />
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Incident Date</label>
+              <input type="date" style={styles.input} value={form.incident_date} onChange={e => setForm(f => ({ ...f, incident_date: e.target.value }))} />
+            </div>
+            {form.type === 'formal_query' && (
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Response Deadline</label>
+                <input type="date" style={styles.input} value={form.response_deadline} onChange={e => setForm(f => ({ ...f, response_deadline: e.target.value }))} />
+              </div>
+            )}
+            <div style={{ ...styles.formGroup, gridColumn: '1 / -1' }}>
+              <label style={styles.label}>Allegation / Details</label>
+              <textarea style={{ ...styles.input, height: '80px', resize: 'vertical' }}
+                placeholder="Describe the incident or allegation in full…"
+                value={form.allegation} onChange={e => setForm(f => ({ ...f, allegation: e.target.value }))} />
+            </div>
+          </div>
+          <button style={styles.btn('primary')} onClick={handleIssue} disabled={saving}>{saving ? 'Issuing…' : 'Issue Case'}</button>
+        </div>
+      )}
+
+      <div style={styles.card}>
+        {loading ? <Spinner /> : cases.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '20px', color: theme.textMuted }}>No cases on record.</div>
+        ) : cases.map(c => (
+          <div key={c.id} style={{ borderBottom: `1px solid ${theme.border}`, paddingBottom: '16px', marginBottom: '16px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
+              <div>
+                <div style={{ fontWeight: '600', fontSize: '14px', color: theme.text }}>{c.title}</div>
+                <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '2px' }}>
+                  {c.staff?.full_name || '—'} · {DISC_TYPES.find(t => t.id === c.type)?.label || c.type} · {c.incident_date || '—'}
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+                <span style={styles.badge(statusColor(c.status))}>{c.status}</span>
+                {canReview && (c.status === 'issued' || c.status === 'responded') && reviewTarget !== c.id && closeTarget !== c.id && (
+                  <button style={{ ...styles.btn('secondary'), fontSize: '11px', padding: '4px 10px' }}
+                    onClick={() => { setReviewTarget(c.id); setCloseTarget(null); setReviewNotes(''); }}>Review</button>
+                )}
+                {canClose && c.status === 'reviewed' && closeTarget !== c.id && reviewTarget !== c.id && (
+                  <button style={{ ...styles.btn('primary'), fontSize: '11px', padding: '4px 10px' }}
+                    onClick={() => { setCloseTarget(c.id); setCloseSanction('none'); setReviewTarget(null); }}>Close</button>
+                )}
+                <button style={{ ...styles.btn('secondary'), fontSize: '11px', padding: '4px 10px' }}
+                  onClick={() => toggleExpand(c.id)}>{expandedId === c.id ? '▲ Hide' : '▼ Details'}</button>
+              </div>
+            </div>
+
+            {reviewTarget === c.id && (
+              <div style={{ marginTop: '12px', padding: '12px', background: theme.surface, borderRadius: '8px', border: `1px solid ${theme.border}` }}>
+                <label style={styles.label}>Review Notes</label>
+                <textarea style={{ ...styles.input, height: '64px', resize: 'vertical', marginBottom: '8px' }}
+                  placeholder="Notes on the review (optional)…" value={reviewNotes} onChange={e => setReviewNotes(e.target.value)} />
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button style={{ ...styles.btn('primary'), fontSize: '12px' }} onClick={() => handleReview(c.id)} disabled={reviewSaving}>
+                    {reviewSaving ? 'Saving…' : 'Confirm Review'}
+                  </button>
+                  <button style={{ ...styles.btn('secondary'), fontSize: '12px' }} onClick={() => { setReviewTarget(null); setReviewNotes(''); }}>Cancel</button>
+                </div>
+              </div>
+            )}
+
+            {closeTarget === c.id && (
+              <div style={{ marginTop: '12px', padding: '12px', background: theme.surface, borderRadius: '8px', border: `1px solid ${theme.border}` }}>
+                <label style={styles.label}>Outcome / Sanction</label>
+                <select style={{ ...styles.input, marginBottom: '4px' }} value={closeSanction} onChange={e => setCloseSanction(e.target.value)}>
+                  {DISC_SANCTIONS.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+                </select>
+                <div style={{ fontSize: '11px', color: theme.textMuted, marginBottom: '8px' }}>
+                  Records the outcome only — does not change employment status or payroll.
+                </div>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button style={{ ...styles.btn('primary'), fontSize: '12px' }} onClick={() => handleClose(c.id)} disabled={closeSaving}>
+                    {closeSaving ? 'Closing…' : 'Close Case'}
+                  </button>
+                  <button style={{ ...styles.btn('secondary'), fontSize: '12px' }} onClick={() => setCloseTarget(null)}>Cancel</button>
+                </div>
+              </div>
+            )}
+
+            {expandedId === c.id && (
+              <div style={{ marginTop: '12px' }}>
+                <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '8px' }}>
+                  <strong style={{ color: theme.text }}>Allegation:</strong> {c.allegation || '—'}
+                </div>
+                {c.response_deadline && (
+                  <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '8px' }}>
+                    <strong style={{ color: theme.text }}>Response deadline:</strong> {c.response_deadline}
+                  </div>
+                )}
+                {c.employee_response && (
+                  <div style={{ fontSize: '12px', padding: '8px 10px', background: theme.surface, borderRadius: '6px', border: `1px solid ${theme.border}`, marginBottom: '8px' }}>
+                    <strong style={{ color: theme.green }}>Employee response:</strong>
+                    <div style={{ marginTop: '4px', color: theme.textMuted }}>{c.employee_response}</div>
+                  </div>
+                )}
+                {c.sanction && c.sanction !== 'none' && (
+                  <div style={{ fontSize: '12px', marginBottom: '8px' }}>
+                    <strong style={{ color: theme.text }}>Outcome:</strong>{' '}
+                    <span style={{ color: theme.red }}>{DISC_SANCTIONS.find(s => s.id === c.sanction)?.label || c.sanction}</span>
+                  </div>
+                )}
+                <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textDim, textTransform: 'uppercase', letterSpacing: '0.06em', margin: '8px 0 4px' }}>Audit Trail</div>
+                {auditLoading && !audit[c.id] ? <Spinner /> : (audit[c.id] || []).length === 0 ? (
+                  <div style={{ fontSize: '12px', color: theme.textMuted }}>No audit entries yet.</div>
+                ) : (audit[c.id] || []).map((entry, i) => (
+                  <div key={i} style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '4px' }}>
+                    <span style={{ color: theme.text, fontWeight: '600' }}>{entry.action}</span>
+                    {entry.actor_role ? ` — ${entry.actor_role}` : ''}
+                    {entry.note ? `: "${entry.note}"` : ''}
+                    <span style={{ marginLeft: '8px', fontSize: '11px', color: theme.textDim }}>
+                      {entry.created_at ? new Date(entry.created_at).toLocaleDateString() : ''}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// ── TRUCK LOADING ─────────────────────────────────────────────
+const TruckLoadingPage = ({ userProfile }) => {
+  const role = userProfile?.role;
+  const canLog         = hasRole(userProfile, 'production_manager', 'assistant_production_manager', 'logistics_manager', 'md');
+  const canManageRates = hasRole(userProfile, 'logistics_manager', 'md');
+  const canDelete      = hasRole(userProfile, 'md', 'production_manager', 'assistant_production_manager', 'logistics_manager');
+
+  const defaultTab = canLog ? 'log' : 'rates';
+  const [tab, setTab] = useState(defaultTab);
+
+  // Shared data
+  const [vehicles, setVehicles]     = useState([]);
+  const [assignments, setAssignments] = useState([]);
+  const [products, setProducts]     = useState([]);
+
+  // Log tab
+  const [logs, setLogs]               = useState([]);
+  const [entriesLoading, setEntriesLoading] = useState(false);
+  const [showLogForm, setShowLogForm] = useState(false);
+  const [logForm, setLogForm]         = useState({ vehicle_id: '', product_id: '', date: '', quantity_loaded: '', waybill_id: '' });
+  const [selectedLoaders, setSelectedLoaders] = useState([]);
+  const [logSaving, setLogSaving]     = useState(false);
+  const [logAlert, setLogAlert]       = useState(null);
+  const [isBackfill, setIsBackfill]   = useState(false);
+  const [waybillsForLog, setWaybillsForLog] = useState([]);
+  // Date-range filter (mirrors Labour → Payroll). Defaults to the current
+  // Sat–Sat week. includeNull keeps undated legacy rows visible by default.
+  const [rangeFrom, setRangeFrom]     = useState(() => shiftDays(getLastSaturday(), -6));
+  const [rangeTo, setRangeTo]         = useState(() => getLastSaturday());
+  const [includeNull, setIncludeNull] = useState(true);
+  const [undatedCount, setUndatedCount] = useState(0);
+
+  // Log tab — edit
+  const [editingLogId, setEditingLogId]   = useState(null);
+  const [editLogForm, setEditLogForm]     = useState({ vehicle_id: '', product_id: '', date: '', quantity_loaded: '' });
+  const [editLogLoaders, setEditLogLoaders] = useState([]);
+  const [editLogSaving, setEditLogSaving] = useState(false);
+
+  // Rates tab
+  const [rates, setRates]             = useState([]);
+  const [ratesLoaded, setRatesLoaded] = useState(false);
+  const [editingRate, setEditingRate] = useState(null);
+  const [rateForm, setRateForm]       = useState({});
+  const [rateSaving, setRateSaving]   = useState(false);
+  const [rateAlert, setRateAlert]     = useState(null);
+
+  // Log tab — delete
+  const [deleteTarget, setDeleteTarget]   = useState(null);
+  const [deleteSaving, setDeleteSaving]   = useState(false);
+
+  const loadLogs = async () => {
+    setEntriesLoading(true);
+    try {
+      const [data, undated] = await Promise.all([
+        truckLoadingService.getLogs({ from: rangeFrom, to: rangeTo, includeNull }),
+        truckLoadingService.getUndatedCount(),
+      ]);
+      setLogs(data);
+      setUndatedCount(undated);
+      loadWaybillsForLog(data);
+    }
+    catch (e) { setLogAlert({ type: 'error', msg: e.message }); }
+    finally { setEntriesLoading(false); }
+  };
+
+  const shiftRange = (weeks) => {
+    setRangeFrom(shiftWeek(rangeFrom, weeks));
+    setRangeTo(shiftWeek(rangeTo, weeks));
+  };
+
+  const loadRates = async () => {
+    try { setRates(await truckLoadingService.getRates()); setRatesLoaded(true); }
+    catch (e) { setRateAlert({ type: 'error', msg: e.message }); }
+  };
+
+  useEffect(() => {
+    Promise.all([
+      vehiclesService.getAll(),
+      truckLoadingService.getAssignments(),
+      productsService.getActive(),
+    ]).then(([v, a, p]) => { setVehicles(v); setAssignments(a); setProducts(p); })
+      .catch(() => {});
+  }, []);
+
+  // Load (and reload) the log list whenever the range or null-toggle changes.
+  useEffect(() => {
+    if (canLog) loadLogs();
+  }, [rangeFrom, rangeTo, includeNull]);
+
+  useEffect(() => {
+    if (tab === 'rates' && !ratesLoaded) loadRates();
+  }, [tab]);
+
+  const loadWaybillsForLog = async (currentLogs) => {
+    try {
+      const wbs = await waybillsService.getAll();
+      const usedIds = new Set((currentLogs || logs).map(l => l.waybill_id).filter(Boolean));
+      setWaybillsForLog(wbs.filter(w => !usedIds.has(w.id)));
+    } catch { /* non-blocking */ }
+  };
+
+  const handleLogSubmit = async () => {
+    if (!logForm.vehicle_id || !logForm.product_id || !logForm.date || !logForm.quantity_loaded) {
+      setLogAlert({ type: 'error', msg: 'All log fields are required.' });
+      return;
+    }
+    setLogSaving(true); setLogAlert(null);
+    try {
+      const result = await truckLoadingService.createLog(
+        { vehicle_id: logForm.vehicle_id, product_id: logForm.product_id, date: logForm.date, quantity_loaded: Number(logForm.quantity_loaded), waybill_id: logForm.waybill_id || null },
+        selectedLoaders,
+      );
+      setLogForm({ vehicle_id: '', product_id: '', date: '', quantity_loaded: '', waybill_id: '' });
+      setSelectedLoaders([]);
+      setShowLogForm(false);
+      setIsBackfill(false);
+      setLogAlert({ type: 'success', msg: `Trip #${result.trip_number_for_day ?? '?'} logged — Rate: ${naira(result.computed_rate_used)}, Total: ${naira(result.total_amount)}` });
+      await loadLogs();
+    } catch (e) {
+      if (e.code === '23505') setLogAlert({ type: 'error', msg: 'A log entry for this waybill already exists.' });
+      else setLogAlert({ type: 'error', msg: e.message });
+    }
+    finally { setLogSaving(false); }
+  };
+
+  const handleEditLogSave = async () => {
+    setEditLogSaving(true); setLogAlert(null);
+    try {
+      await truckLoadingService.updateLog(editingLogId, editLogForm);
+      await truckLoadingService.syncLoaders(editingLogId, editLogLoaders);
+      setEditingLogId(null);
+      setLogAlert({ type: 'success', msg: 'Entry updated.' });
+      await loadLogs();
+    } catch (e) {
+      // Content-lock guard (truck_loading_content_guard) raises a clean,
+      // actionable message; surface it as-is instead of a raw error. Covers the
+      // race where the linked payroll gets approved between page load and save.
+      setLogAlert({ type: 'error', msg: e?.message || 'Could not update the load entry.' });
+    }
+    finally { setEditLogSaving(false); }
+  };
+
+  const handleRateSave = async () => {
+    setRateSaving(true); setRateAlert(null);
+    try {
+      await truckLoadingService.updateRate(editingRate, {
+        base_rate: Number(rateForm.base_rate),
+        trip_threshold: rateForm.trip_threshold !== '' ? Number(rateForm.trip_threshold) : null,
+        incentive_rate: rateForm.incentive_rate !== '' ? Number(rateForm.incentive_rate) : null,
+      });
+      setEditingRate(null);
+      setRateAlert({ type: 'success', msg: 'Rate updated.' });
+      await loadRates();
+    } catch (e) { setRateAlert({ type: 'error', msg: e.message }); }
+    finally { setRateSaving(false); }
+  };
+
+  const handleDeleteLog = async (id) => {
+    setDeleteSaving(true);
+    try {
+      await truckLoadingService.deleteLog(id);
+      setDeleteTarget(null);
+      setLogAlert({ type: 'success', msg: 'Entry deleted.' });
+      await loadLogs();
+    } catch (e) { setLogAlert({ type: 'error', msg: e.message }); setDeleteTarget(null); }
+    finally { setDeleteSaving(false); }
+  };
+
+  const tabBtn = (id, label) => (
+    <button
+      onClick={() => setTab(id)}
+      style={{ padding: '8px 16px', fontSize: '13px', fontWeight: tab === id ? '700' : '500', cursor: 'pointer', border: 'none', borderBottom: tab === id ? `2px solid ${theme.accent}` : '2px solid transparent', background: 'transparent', color: tab === id ? theme.accent : theme.textMuted, transition: 'all 0.15s' }}
+    >{label}</button>
+  );
+
+  return (
+    <div>
+      <div style={styles.header}>
+        <div>
+          <div style={styles.pageTitle}>Truck Loading</div>
+          <div style={styles.pageSubtitle}>Log entries and loading rates</div>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div style={{ display: 'flex', gap: '4px', borderBottom: `1px solid ${theme.border}`, marginBottom: '20px' }}>
+        {canLog && tabBtn('log', 'Log Entry')}
+        {canManageRates && tabBtn('rates', 'Rates')}
+      </div>
+
+      {/* ── Log Entry ── */}
+      {tab === 'log' && (
+        <div>
+          {logAlert && <Alert msg={logAlert.msg} type={logAlert.type} onClose={() => setLogAlert(null)} />}
+          <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '14px' }}>
+            Loading payroll (weekly scoping, ICO/MD approval, payment schedules) is prepared in <strong style={{ color: theme.textMuted }}>Labour → Payroll → Loading Payroll</strong>.
+          </div>
+          <div style={{ marginBottom: '16px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            <button style={styles.btn('primary')} onClick={() => { setShowLogForm(f => !f); setLogAlert(null); setIsBackfill(false); setLogForm({ vehicle_id: '', product_id: '', date: '', quantity_loaded: '', waybill_id: '' }); setSelectedLoaders([]); }}>
+              {showLogForm ? '✕ Cancel' : '+ New Log Entry'}
+            </button>
+            {!showLogForm && (
+              <button style={styles.btn('secondary')} onClick={() => { setShowLogForm(true); setIsBackfill(true); loadWaybillsForLog(logs); }}>
+                Backfill Historical Entry
+              </button>
+            )}
+          </div>
+
+          {showLogForm && (
+            <div style={{ ...styles.card, marginBottom: '20px' }}>
+              {isBackfill && (
+                <div style={{ background: '#f59e0b22', border: '1px solid #f59e0b44', borderRadius: '6px', padding: '8px 12px', marginBottom: '14px', fontSize: '12px', color: '#f59e0b' }}>
+                  Backfill mode — pick a past date and link to an existing waybill. The Historical badge will appear automatically.
+                </div>
+              )}
+              <div style={styles.sectionTitle}>{isBackfill ? 'Backfill Log Entry' : 'New Log Entry'}</div>
+              <div style={styles.grid(2)}>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Product</label>
+                  <select style={styles.input} value={logForm.product_id} onChange={e => setLogForm(f => ({ ...f, product_id: e.target.value }))}>
+                    <option value="">Select product…</option>
+                    {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                </div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Vehicle</label>
+                  <select style={styles.input} value={logForm.vehicle_id} onChange={e => {
+                    const crew = assignments.filter(a => a.vehicle_id === e.target.value).map(a => a.labour_id);
+                    setSelectedLoaders(crew);
+                    setLogForm(f => ({ ...f, vehicle_id: e.target.value }));
+                  }}>
+                    <option value="">Select vehicle…</option>
+                    {vehicles.map(v => <option key={v.id} value={v.id}>{v.vehicle_number}{v.vehicle_name ? ` — ${v.vehicle_name}` : ''}</option>)}
+                  </select>
+                </div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Date</label>
+                  <input type="date" style={styles.input} value={logForm.date} onChange={e => setLogForm(f => ({ ...f, date: e.target.value }))} />
+                </div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Quantity Loaded</label>
+                  <input type="number" style={styles.input} placeholder="e.g. 120" min="1" value={logForm.quantity_loaded} onChange={e => setLogForm(f => ({ ...f, quantity_loaded: e.target.value }))} />
+                </div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Link to Waybill {isBackfill ? '' : '(optional)'}</label>
+                  <select style={styles.input} value={logForm.waybill_id} onChange={e => {
+                    const wb = waybillsForLog.find(w => w.id === e.target.value);
+                    setLogForm(f => ({
+                      ...f,
+                      waybill_id: e.target.value,
+                      ...(wb ? { date: wb.waybill_date, quantity_loaded: String(wb.quantity_loaded || f.quantity_loaded), vehicle_id: wb.vehicle_id || f.vehicle_id } : {}),
+                    }));
+                  }}>
+                    <option value="">— {isBackfill ? 'Select waybill' : 'None (standalone load)'} —</option>
+                    {waybillsForLog.map(w => <option key={w.id} value={w.id}>{w.waybill_number} · {w.waybill_date} · {w.block_type}</option>)}
+                  </select>
+                  {!isBackfill && waybillsForLog.length === 0 && <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '4px' }}>No unlinked waybills found. <button style={{ background: 'none', border: 'none', color: theme.blue, cursor: 'pointer', fontSize: '11px', padding: 0 }} onClick={() => loadWaybillsForLog(logs)}>Refresh</button></div>}
+                </div>
+              </div>
+              {assignments.length > 0 && (
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Loaders (optional)</label>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                    {assignments.map(a => {
+                      const sel = selectedLoaders.includes(a.labour_id);
+                      return (
+                        <button key={a.labour_id}
+                          style={{ ...styles.btn(sel ? 'primary' : 'secondary'), fontSize: '12px', padding: '4px 10px' }}
+                          onClick={() => setSelectedLoaders(l => sel ? l.filter(x => x !== a.labour_id) : [...l, a.labour_id])}>
+                          {a.worker?.full_name || '—'}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              <button style={styles.btn('primary')} onClick={handleLogSubmit} disabled={logSaving}>
+                {logSaving ? 'Saving…' : 'Save Log Entry'}
+              </button>
+            </div>
+          )}
+
+          {editingLogId && (
+            <div style={{ ...styles.card, marginBottom: '16px', border: `1px solid ${theme.accent}44` }}>
+              <div style={styles.sectionTitle}>Edit Log Entry</div>
+              <div style={styles.grid(2)}>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Product</label>
+                  <select style={styles.input} value={editLogForm.product_id} onChange={e => setEditLogForm(f => ({ ...f, product_id: e.target.value }))}>
+                    {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                </div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Vehicle</label>
+                  <select style={styles.input} value={editLogForm.vehicle_id} onChange={e => setEditLogForm(f => ({ ...f, vehicle_id: e.target.value }))}>
+                    <option value="">— Select vehicle —</option>
+                    {vehicles.map(v => <option key={v.id} value={v.id}>{v.vehicle_number}{v.vehicle_name ? ` — ${v.vehicle_name}` : ''}</option>)}
+                  </select>
+                </div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Date</label>
+                  <input type="date" style={styles.input} value={editLogForm.date} onChange={e => setEditLogForm(f => ({ ...f, date: e.target.value }))} />
+                </div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Quantity Loaded</label>
+                  <input type="number" style={styles.input} value={editLogForm.quantity_loaded} onChange={e => setEditLogForm(f => ({ ...f, quantity_loaded: e.target.value }))} />
+                </div>
+              </div>
+              {assignments.length > 0 && (
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Loaders</label>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                    {assignments.map(a => {
+                      const sel = editLogLoaders.includes(a.labour_id);
+                      return (
+                        <button key={a.labour_id}
+                          style={{ ...styles.btn(sel ? 'primary' : 'secondary'), fontSize: '12px', padding: '4px 10px' }}
+                          onClick={() => setEditLogLoaders(l => sel ? l.filter(x => x !== a.labour_id) : [...l, a.labour_id])}>
+                          {a.worker?.full_name || '—'}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              <div style={styles.row}>
+                <button style={styles.btn('primary')} onClick={handleEditLogSave} disabled={editLogSaving}>{editLogSaving ? 'Saving…' : 'Save'}</button>
+                <button style={styles.btn('secondary')} onClick={() => setEditingLogId(null)}>Cancel</button>
+              </div>
+            </div>
+          )}
+
+          {deleteTarget && (
+            <div style={{ ...styles.card, marginBottom: '12px', border: `1px solid ${theme.red}` }}>
+              <div style={{ fontSize: '13px', marginBottom: '10px' }}>Delete this log entry? This cannot be undone.</div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button style={{ ...styles.btn('danger'), fontSize: '12px' }} onClick={() => handleDeleteLog(deleteTarget)} disabled={deleteSaving}>
+                  {deleteSaving ? 'Deleting…' : 'Confirm Delete'}
+                </button>
+                <button style={{ ...styles.btn('secondary'), fontSize: '12px' }} onClick={() => setDeleteTarget(null)}>Cancel</button>
+              </div>
+            </div>
+          )}
+
+          {/* Date range filter (mirrors Labour → Payroll) */}
+          <div style={{ display: 'flex', marginBottom: '14px', gap: '12px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            <div>
+              <label style={styles.label}>From</label>
+              <input type="date" style={{ ...styles.input, width: '148px' }} value={rangeFrom} onChange={e => setRangeFrom(e.target.value)} />
+            </div>
+            <div>
+              <label style={styles.label}>To</label>
+              <input type="date" style={{ ...styles.input, width: '148px' }} value={rangeTo} onChange={e => setRangeTo(e.target.value)} />
+            </div>
+            <div style={{ display: 'flex', gap: '4px', paddingBottom: '1px' }}>
+              <button style={{ ...styles.btn('secondary'), padding: '6px 10px' }} onClick={() => shiftRange(-1)}>‹</button>
+              <button style={{ ...styles.btn('secondary'), padding: '6px 10px' }} onClick={() => shiftRange(1)}>›</button>
+            </div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: theme.textMuted, cursor: 'pointer', paddingBottom: '6px' }}>
+              <input type="checkbox" checked={includeNull} onChange={e => setIncludeNull(e.target.checked)} />
+              Include entries with no date ({undatedCount})
+            </label>
+          </div>
+          {rangeFrom && rangeTo && rangeFrom > rangeTo && (
+            <div style={{ fontSize: '12px', color: theme.accent, marginBottom: '10px' }}>“From” is after “To” — showing only undated entries (if included). Swap the dates to see a range.</div>
+          )}
+
+          <div style={styles.card}>
+            {entriesLoading ? <Spinner /> : logs.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '20px', color: theme.textMuted }}>
+                No log entries in this range.
+                {!includeNull && undatedCount > 0 && <> Tick <em>“Include entries with no date ({undatedCount})”</em> above to show undated records.</>}
+              </div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={styles.table}>
+                  <thead>
+                    <tr>
+                      <th style={styles.th}>Date</th>
+                      <th style={styles.th}>Product</th>
+                      <th style={styles.th}>Vehicle</th>
+                      <th style={styles.th}>Trip #</th>
+                      <th style={styles.th}>Qty Loaded</th>
+                      <th style={styles.th}>Rate Used</th>
+                      <th style={styles.th}>Total</th>
+                      <th style={styles.th}>Loaders</th>
+                      {canDelete && <th style={styles.th}></th>}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {logs.map(log => {
+                      const isHistorical = log.date && log.created_at && log.date < log.created_at.split('T')[0];
+                      const isPaid = log.payment_status === 'paid';
+                      // Content lock mirrors the DB guard (truck_loading_content_guard):
+                      // unlinked logs are always editable; a linked log is editable only
+                      // while its payroll is still 'draft'. Missing linked payroll →
+                      // treat as editable (nothing is actively locking it).
+                      const payrollStatus = log.payroll?.status;
+                      const payrollEditable = !log.payroll_id || !payrollStatus || payrollStatus === 'draft';
+                      const logLoaderIds = (log.loaders || []).map(l => l.labour_id);
+                      const logLoaderNames = logLoaderIds.map(lid => {
+                        const a = assignments.find(a => a.labour_id === lid);
+                        return a?.worker?.full_name || lid;
+                      });
+                      return (
+                        <tr key={log.id}>
+                          <td style={styles.td}>
+                            {log.date || <span style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '4px', background: theme.red + '22', color: theme.red, border: `1px solid ${theme.red}44`, fontWeight: '700' }}>no date</span>}
+                            {isHistorical && <span style={{ marginLeft: '6px', fontSize: '10px', padding: '1px 6px', borderRadius: '4px', background: '#f59e0b22', color: '#f59e0b', border: '1px solid #f59e0b44', fontWeight: '700' }}>Historical</span>}
+                          </td>
+                          <td style={styles.td}>{log.product?.name || '—'}</td>
+                          <td style={styles.td}>{log.vehicle?.vehicle_number || '—'}</td>
+                          <td style={styles.td}>{log.trip_number_for_day ?? '—'}</td>
+                          <td style={styles.td}>{fmt(log.quantity_loaded)}</td>
+                          <td style={styles.td}>{log.computed_rate_used != null ? naira(log.computed_rate_used) : '—'}</td>
+                          <td style={styles.td}>{log.total_amount != null ? naira(log.total_amount) : '—'}</td>
+                          <td style={styles.td}>
+                            {logLoaderNames.length > 0
+                              ? <span style={{ fontSize: '11px', color: theme.textMuted }}>{logLoaderNames.join(', ')}</span>
+                              : <span style={{ fontSize: '11px', color: theme.textDim }}>—</span>}
+                          </td>
+                          {canDelete && (
+                            <td style={styles.td}>
+                              <div style={{ display: 'flex', gap: '6px' }}>
+                                {payrollEditable ? (
+                                  <button style={{ ...styles.btn('secondary'), fontSize: '11px', padding: '3px 10px' }} onClick={() => {
+                                    setEditingLogId(log.id);
+                                    setEditLogForm({ vehicle_id: log.vehicle_id || '', product_id: log.product_id || '', date: log.date || '', quantity_loaded: String(log.quantity_loaded || '') });
+                                    setEditLogLoaders(logLoaderIds);
+                                    setShowLogForm(false);
+                                  }}>Edit</button>
+                                ) : (
+                                  <span title="Locked: linked to an approved/paid payroll" style={{ fontSize: '11px', color: theme.textMuted, padding: '3px 6px' }}>{isPaid ? 'Paid' : 'Locked'}</span>
+                                )}
+                                <button style={{ ...styles.btn('danger'), fontSize: '11px', padding: '3px 10px' }} onClick={() => setDeleteTarget(log.id)} disabled={!payrollEditable}>Delete</button>
+                              </div>
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Rates ── */}
+      {tab === 'rates' && (
+        <div>
+          {rateAlert && <Alert msg={rateAlert.msg} type={rateAlert.type} onClose={() => setRateAlert(null)} />}
+          <div style={styles.card}>
+            {!ratesLoaded ? <Spinner /> : rates.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '20px', color: theme.textMuted }}>No rates configured.</div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={styles.table}>
+                  <thead>
+                    <tr>
+                      <th style={styles.th}>Product</th>
+                      <th style={styles.th}>Base Rate / Trip</th>
+                      <th style={styles.th}>Trip Threshold</th>
+                      <th style={styles.th}>Incentive Rate</th>
+                      {canManageRates && <th style={styles.th}></th>}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rates.map(r => (
+                      <tr key={r.id}>
+                        <td style={styles.td}>{r.product?.name || '—'}</td>
+                        {editingRate === r.id ? (
+                          <>
+                            <td style={styles.td}><input type="number" style={{ ...styles.input, width: '110px' }} value={rateForm.base_rate ?? ''} onChange={e => setRateForm(f => ({ ...f, base_rate: e.target.value }))} /></td>
+                            <td style={styles.td}><input type="number" style={{ ...styles.input, width: '80px' }} value={rateForm.trip_threshold ?? ''} onChange={e => setRateForm(f => ({ ...f, trip_threshold: e.target.value }))} /></td>
+                            <td style={styles.td}><input type="number" style={{ ...styles.input, width: '110px' }} value={rateForm.incentive_rate ?? ''} onChange={e => setRateForm(f => ({ ...f, incentive_rate: e.target.value }))} /></td>
+                            <td style={styles.td}>
+                              <div style={{ display: 'flex', gap: '6px' }}>
+                                <button style={{ ...styles.btn('primary'), fontSize: '11px', padding: '4px 10px' }} onClick={handleRateSave} disabled={rateSaving}>{rateSaving ? '…' : 'Save'}</button>
+                                <button style={{ ...styles.btn('secondary'), fontSize: '11px', padding: '4px 10px' }} onClick={() => setEditingRate(null)}>Cancel</button>
+                              </div>
+                            </td>
+                          </>
+                        ) : (
+                          <>
+                            <td style={styles.td}>{naira(r.base_rate)}</td>
+                            <td style={styles.td}>{r.trip_threshold ?? '—'}</td>
+                            <td style={styles.td}>{r.incentive_rate != null ? naira(r.incentive_rate) : '—'}</td>
+                            {canManageRates && (
+                              <td style={styles.td}>
+                                <button style={{ ...styles.btn('secondary'), fontSize: '11px', padding: '4px 10px' }}
+                                  onClick={() => { setEditingRate(r.id); setRateForm({ base_rate: r.base_rate ?? '', trip_threshold: r.trip_threshold ?? '', incentive_rate: r.incentive_rate ?? '' }); }}>
+                                  Edit
+                                </button>
+                              </td>
+                            )}
+                          </>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+    </div>
+  );
+};
+
+// ── TRADING MARGIN REPORT ─────────────────────────────────────
+const TradingMarginReport = () => {
+  const [rows, setRows]       = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError]     = useState(null);
+
+  useEffect(() => {
+    supabase.rpc('get_order_trading_margin')
+      .then(({ data, error: e }) => {
+        if (e) throw e;
+        const normalized = (data || []).map(r => {
+          const sale     = Number(r.resale_sale_amount)     || 0;
+          const purchase = Number(r.purchase_cost)          || 0;
+          const fuel     = Number(r.attributed_fuel_cost)   || 0;
+          const loading  = Number(r.attributed_loading_cost)|| 0;
+          const haulage  = Number(r.attributed_haulage_cost)|| 0;
+          const landed   = purchase + fuel + loading + haulage;
+          return { ...r, sale_amount: sale, purchase_cost: purchase, gross_margin: sale - purchase, fuel_cost: fuel, loading_cost: loading, haulage_cost: haulage, landed_cost: landed, true_margin: sale - landed };
+        });
+        setRows(normalized);
+      })
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const totals = rows.reduce((acc, r) => ({
+    sale:          acc.sale          + (r.sale_amount   || 0),
+    purchase:      acc.purchase      + (r.purchase_cost || 0),
+    grossMargin:   acc.grossMargin   + (r.gross_margin  || 0),
+    fuel:          acc.fuel          + (r.fuel_cost     || 0),
+    loading:       acc.loading       + (r.loading_cost  || 0),
+    haulage:       acc.haulage       + (r.haulage_cost  || 0),
+    landed:        acc.landed        + (r.landed_cost   || 0),
+    trueMargin:    acc.trueMargin    + (r.true_margin   || 0),
+  }), { sale: 0, purchase: 0, grossMargin: 0, fuel: 0, loading: 0, haulage: 0, landed: 0, trueMargin: 0 });
+
+  const pct = (num, den) => den > 0 ? ((num / den) * 100).toFixed(1) + '%' : '—';
+  const mc  = v => v > 0 ? theme.green : v < 0 ? theme.red : theme.textMuted;
+
+  const SummaryCard = ({ label, value, sub, color }) => (
+    <div style={{ flex: 1, minWidth: '160px', background: theme.card, border: `1px solid ${theme.border}`, borderRadius: '10px', padding: '16px 18px' }}>
+      <div style={{ fontSize: '10px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '6px' }}>{label}</div>
+      <div style={{ fontSize: '19px', fontWeight: '700', color }}>{value}</div>
+      {sub && <div style={{ fontSize: '11px', color, opacity: 0.75, marginTop: '2px' }}>{sub} of sales</div>}
+    </div>
+  );
+
+  const thD = { ...styles.th, color: '#f59e0b' };
+  const tdD = (v) => ({ ...styles.td, color: v > 0 ? '#f59e0b' : theme.textMuted });
+
+  return (
+    <div>
+      <div style={styles.header}>
+        <div>
+          <div style={styles.pageTitle}>Trading Margin Report</div>
+          <div style={styles.pageSubtitle}>Per-order gross margin vs. true margin after delivery costs</div>
+        </div>
+      </div>
+
+      {!loading && !error && rows.length > 0 && (
+        <div style={{ display: 'flex', gap: '12px', marginBottom: '20px', flexWrap: 'wrap' }}>
+          <SummaryCard label="Total Sale Value"   value={naira(totals.sale)}        color={theme.text} />
+          <SummaryCard label="Gross Margin"        value={naira(totals.grossMargin)} sub={pct(totals.grossMargin, totals.sale)} color={mc(totals.grossMargin)} />
+          <SummaryCard label="Total Delivery Costs" value={naira(totals.fuel + totals.loading + totals.haulage)} sub={pct(totals.fuel + totals.loading + totals.haulage, totals.sale)} color="#f59e0b" />
+          <SummaryCard label="True Margin"         value={naira(totals.trueMargin)}  sub={pct(totals.trueMargin, totals.sale)}  color={mc(totals.trueMargin)} />
+        </div>
+      )}
+
+      <div style={styles.card}>
+        {loading ? <Spinner /> : error ? (
+          <div style={{ color: theme.red, padding: '20px', fontSize: '13px' }}>{error}</div>
+        ) : rows.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '30px', color: theme.textMuted }}>No orders with resale line items found.</div>
+        ) : (
+          <>
+            <div style={{ fontSize: '11px', color: theme.textMuted, marginBottom: '14px' }}>
+              <span style={{ color: theme.green }}>■</span> Gross margin (before delivery) &nbsp;
+              <span style={{ color: '#f59e0b' }}>■</span> Delivery cost drag (fuel · loading · haulage) &nbsp;
+              <span style={{ color: theme.green }}>■</span>/<span style={{ color: theme.red }}>■</span> True margin (after delivery)
+            </div>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={styles.table}>
+                <thead>
+                  <tr>
+                    <th style={styles.th}>Reference</th>
+                    <th style={styles.th}>Customer</th>
+                    <th style={styles.th}>Date</th>
+                    <th style={styles.th}>Sale Amount</th>
+                    <th style={styles.th}>Purchase Cost</th>
+                    <th style={{ ...styles.th, color: theme.green }}>Gross Margin</th>
+                    <th style={thD}>Fuel Cost</th>
+                    <th style={thD}>Loading Cost</th>
+                    <th style={thD}>Haulage Cost</th>
+                    <th style={styles.th}>Landed Cost</th>
+                    <th style={{ ...styles.th, color: theme.green }}>True Margin</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r, i) => {
+                    const drag = (r.gross_margin || 0) - (r.true_margin || 0);
+                    return (
+                      <tr key={r.order_id || i}>
+                        <td style={styles.td}><strong style={{ fontFamily: 'monospace', fontSize: '12px' }}>{r.invoice_number || (r.order_id ? r.order_id.slice(0, 8) + ' (not invoiced)' : '—')}</strong></td>
+                        <td style={styles.td}>{r.customer_name || '—'}</td>
+                        <td style={styles.td}>{r.order_date ? new Date(r.order_date).toLocaleDateString('en-GB') : '—'}</td>
+                        <td style={styles.td}><strong>{naira(r.sale_amount)}</strong></td>
+                        <td style={styles.td}>{naira(r.purchase_cost)}</td>
+                        <td style={styles.td}>
+                          <div style={{ fontWeight: '700', color: mc(r.gross_margin) }}>{naira(r.gross_margin)}</div>
+                          <div style={{ fontSize: '11px', color: theme.textMuted }}>{pct(r.gross_margin, r.sale_amount)}</div>
+                        </td>
+                        <td style={tdD(r.fuel_cost)}>{naira(r.fuel_cost || 0)}</td>
+                        <td style={tdD(r.loading_cost)}>{naira(r.loading_cost || 0)}</td>
+                        <td style={tdD(r.haulage_cost)}>{naira(r.haulage_cost || 0)}</td>
+                        <td style={styles.td}>{naira(r.landed_cost)}</td>
+                        <td style={styles.td}>
+                          <div style={{ fontWeight: '700', color: mc(r.true_margin) }}>{naira(r.true_margin)}</div>
+                          <div style={{ fontSize: '11px', color: theme.textMuted }}>{pct(r.true_margin, r.sale_amount)}</div>
+                          {drag > 0 && (
+                            <div style={{ fontSize: '10px', color: '#f59e0b', marginTop: '2px' }}>▼ {naira(drag)} delivery drag</div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr style={{ background: theme.surface, fontWeight: '600' }}>
+                    <td colSpan={3} style={{ ...styles.td, fontWeight: '700', color: theme.textMuted }}>Totals ({rows.length} orders)</td>
+                    <td style={styles.td}><strong>{naira(totals.sale)}</strong></td>
+                    <td style={styles.td}>{naira(totals.purchase)}</td>
+                    <td style={styles.td}>
+                      <div style={{ fontWeight: '700', color: mc(totals.grossMargin) }}>{naira(totals.grossMargin)}</div>
+                      <div style={{ fontSize: '11px', color: theme.textMuted }}>{pct(totals.grossMargin, totals.sale)}</div>
+                    </td>
+                    <td style={{ ...styles.td, color: '#f59e0b', fontWeight: '700' }}>{naira(totals.fuel)}</td>
+                    <td style={{ ...styles.td, color: '#f59e0b', fontWeight: '700' }}>{naira(totals.loading)}</td>
+                    <td style={{ ...styles.td, color: '#f59e0b', fontWeight: '700' }}>{naira(totals.haulage)}</td>
+                    <td style={{ ...styles.td, fontWeight: '700' }}>{naira(totals.landed)}</td>
+                    <td style={styles.td}>
+                      <div style={{ fontWeight: '700', color: mc(totals.trueMargin) }}>{naira(totals.trueMargin)}</div>
+                      <div style={{ fontSize: '11px', color: theme.textMuted }}>{pct(totals.trueMargin, totals.sale)}</div>
+                      {totals.grossMargin > totals.trueMargin && (
+                        <div style={{ fontSize: '10px', color: '#f59e0b', marginTop: '2px' }}>▼ {naira(totals.grossMargin - totals.trueMargin)} total delivery drag</div>
+                      )}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
+
 // ── NAV ───────────────────────────────────────────────────────
 const navItems = [
   { section: "Overview", items: [{ id: "dashboard", label: "Dashboard", icon: "dashboard" }] },
-  { section: "Operations", items: [
+  { section: "Production", items: [
     { id: "production", label: "Production", icon: "production" },
     { id: "inventory", label: "Inventory", icon: "inventory" },
     { id: "batches", label: "Batches", icon: "batches" },
+    { id: "maintenance", label: "Maintenance", icon: "maintenance" },
+  ]},
+  { section: "Logistics", items: [
     { id: "waybills", label: "Waybills", icon: "waybill" },
     { id: "vehicles", label: "Vehicles", icon: "truck" },
-    { id: "staff", label: "Staff", icon: "staff" },
-    { id: "labour", label: "Labour", icon: "staff" },
-  ]},
-  { section: "Deliveries", items: [
+    { id: "truck_loading", label: "Truck Loading", icon: "truck" },
     { id: "pending_register", label: "Pending Deliveries", icon: "pending" },
     { id: "daily_schedule", label: "Daily Schedule", icon: "schedule" },
+  ]},
+  { section: "HR & Workforce", items: [
+    { id: "staff", label: "Staff", icon: "staff" },
+    { id: "labour", label: "Labour", icon: "staff" },
+    { id: "disciplinary", label: "Disciplinary", icon: "staff" },
+    { id: "attendance_kiosk", label: "Attendance Kiosk", icon: "staff" },
+    { id: "attendance_flags", label: "Attendance Flags", icon: "staff" },
+    { id: "leave", label: "Leave Requests", icon: "staff" },
+    { id: "advances", label: "Salary Advances", icon: "orders" },
   ]},
   { section: "Sales", items: [{ id: "customers", label: "Customers", icon: "staff" }, { id: "orders", label: "Orders & Invoicing", icon: "orders" }] },
   { section: "Approvals", items: [
@@ -6599,8 +10705,12 @@ const navItems = [
   { section: "Analytics", items: [
     { id: "reports", label: "Reports", icon: "reports" },
     { id: "kpi_dashboard", label: "KPI Dashboard", icon: "reports" },
+    { id: "trading_margin", label: "Trading Margin", icon: "orders" },
   ]},
-  { section: "Finance", items: [{ id: "accounting", label: "Accounting", icon: "orders" }] },
+  { section: "Finance", items: [
+    { id: "accounting", label: "Accounting", icon: "orders" },
+    { id: "payment_requests", label: "Payment Requests", icon: "orders" },
+  ]},
   { section: "Settings", items: [
     { id: "products", label: "Products", icon: "products" },
     { id: "suppliers", label: "Suppliers", icon: "supplier" },
@@ -6608,9 +10718,150 @@ const navItems = [
     { id: "user_management", label: "User Management", icon: "staff" },
   ]},
   { section: "Account", items: [
+    { id: "messages", label: "Messages", icon: "staff" },
+    { id: "my_hr", label: "My HR", icon: "staff" },
     { id: "my_profile", label: "My Profile", icon: "staff" },
   ]},
 ];
+
+// ── ROLE GRANTS (MD-only) ─────────────────────────────────────
+// Temporary additional roles: grant/revoke, with a separation-of-duties
+// warning (advisory — MD may accept and proceed). MD is never grantable.
+const RoleGrantsManager = ({ users }) => {
+  const [grants, setGrants]   = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [gErr, setGErr]       = useState('');
+  const [gOk, setGOk]         = useState('');
+  const [form, setForm]       = useState({ user_id: '', role: '', reason: '', expires_at: '' });
+  const [conflict, setConflict] = useState(null);   // warning string awaiting confirmation
+  const [busy, setBusy]       = useState(false);
+  const [revoking, setRevoking] = useState(null);
+
+  const grantableRoles = APP_ROLES.filter(r => r.id !== 'md');
+  const userName = (id) => users.find(u => u.id === id)?.full_name || users.find(u => u.id === id)?.email || 'Unknown';
+  const userPrimary = (id) => { const u = users.find(u => u.id === id); return u ? (APP_ROLES.find(r => r.id === u.role)?.label || u.role) : '—'; };
+  const roleLabel = (id) => APP_ROLES.find(r => r.id === id)?.label || id;
+
+  const load = async () => {
+    setLoading(true);
+    try { setGrants(await authService.listActiveGrants()); }
+    catch (e) { setGErr(e?.message || 'Could not load grants'); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+
+  // Grant: check conflict first; if the DB flags one, require explicit confirm.
+  const submitGrant = async (bypassConflict = false) => {
+    setGErr(''); setGOk('');
+    if (!form.user_id || !form.role) { setGErr('Pick a user and a role.'); return; }
+    if (form.role === 'md') { setGErr('MD cannot be granted.'); return; }
+    setBusy(true);
+    try {
+      if (!bypassConflict) {
+        const warning = await authService.checkRoleConflict(form.user_id, form.role);
+        if (warning) { setConflict(warning); setBusy(false); return; }
+      }
+      const expiresIso = form.expires_at ? new Date(form.expires_at + 'T23:59:59').toISOString() : null;
+      await authService.grantRole(form.user_id, form.role, form.reason.trim() || null, expiresIso);
+      setConflict(null);
+      setForm({ user_id: '', role: '', reason: '', expires_at: '' });
+      setGOk('Role granted.');
+      setTimeout(() => setGOk(''), 3000);
+      await load();
+    } catch (e) { setGErr(e?.message || 'Grant failed.'); setConflict(null); }
+    finally { setBusy(false); }
+  };
+
+  const revoke = async (g) => {
+    setRevoking(g.id);
+    try { await authService.revokeRole(g.user_id, g.role); await load(); }
+    catch (e) { setGErr(e?.message || 'Revoke failed.'); }
+    finally { setRevoking(null); }
+  };
+
+  const fmtD = (d) => d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+  const expiringSoon = (d) => d && new Date(d) < new Date(Date.now() + 14 * 86400000);
+
+  return (
+    <div style={{ ...styles.card, marginTop: '20px' }}>
+      <div style={{ fontWeight: '700', fontSize: '15px', marginBottom: '4px' }}>Role Grants — temporary additional roles</div>
+      <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '16px' }}>
+        Grant a user extra roles beyond their primary one (e.g. cover HR or accounting while short-staffed). MD cannot be granted. Grants default to 90 days if no expiry is set.
+      </div>
+      {gErr && <Alert msg={gErr} onClose={() => setGErr('')} />}
+      {gOk  && <Alert msg={gOk} type="success" onClose={() => setGOk('')} />}
+
+      {/* Grant form */}
+      <div style={{ ...styles.grid(4), marginBottom: '10px' }}>
+        <div style={styles.formGroup}>
+          <label style={styles.label}>User</label>
+          <select style={styles.input} value={form.user_id} onChange={e => { setForm(f => ({ ...f, user_id: e.target.value })); setConflict(null); }}>
+            <option value="">— Select user —</option>
+            {[...users].sort((a,b)=>(a.full_name||'').localeCompare(b.full_name||'')).map(u => <option key={u.id} value={u.id}>{u.full_name || u.email} ({roleLabel(u.role)})</option>)}
+          </select>
+        </div>
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Role to grant</label>
+          <select style={styles.input} value={form.role} onChange={e => { setForm(f => ({ ...f, role: e.target.value })); setConflict(null); }}>
+            <option value="">— Select role —</option>
+            {grantableRoles.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}
+          </select>
+        </div>
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Expiry (optional)</label>
+          <input type="date" style={styles.input} value={form.expires_at} onChange={e => setForm(f => ({ ...f, expires_at: e.target.value }))} />
+        </div>
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Reason (optional)</label>
+          <input style={styles.input} placeholder="e.g. covering HR leave" value={form.reason} onChange={e => setForm(f => ({ ...f, reason: e.target.value }))} />
+        </div>
+      </div>
+
+      {conflict ? (
+        <div style={{ padding: '12px 14px', borderRadius: '8px', background: theme.red + '18', border: `1px solid ${theme.red}55`, marginBottom: '12px' }}>
+          <div style={{ fontSize: '13px', color: theme.text, fontWeight: '600', marginBottom: '6px' }}>⚠ Separation-of-duties warning</div>
+          <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '10px' }}>{conflict}</div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button style={styles.btn('danger')} disabled={busy} onClick={() => submitGrant(true)}>{busy ? 'Granting…' : 'Grant anyway'}</button>
+            <button style={styles.btn('secondary')} disabled={busy} onClick={() => setConflict(null)}>Cancel</button>
+          </div>
+        </div>
+      ) : (
+        <button style={styles.btn('primary')} disabled={busy} onClick={() => submitGrant(false)}>{busy ? 'Checking…' : '+ Grant Role'}</button>
+      )}
+
+      {/* Active grants */}
+      <div style={{ fontWeight: '700', fontSize: '13px', margin: '20px 0 8px' }}>Active grants ({grants.length})</div>
+      {loading ? <Spinner /> : grants.length === 0 ? (
+        <div style={{ fontSize: '13px', color: theme.textMuted, padding: '8px 0' }}>No active role grants.</div>
+      ) : (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={styles.table}>
+            <thead><tr>{['User', 'Primary Role', 'Granted Role', 'Granted By', 'Granted', 'Expires', ''].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
+            <tbody>
+              {grants.map(g => (
+                <tr key={g.id}>
+                  <td style={styles.td}>{userName(g.user_id)}</td>
+                  <td style={styles.td}><span style={{ fontSize: '12px', color: theme.textMuted }}>{userPrimary(g.user_id)}</span></td>
+                  <td style={styles.td}><span style={styles.badge(theme.accent)}>{roleLabel(g.role)}</span></td>
+                  <td style={styles.td}>{g.granted_by_name || '—'}</td>
+                  <td style={styles.td}>{fmtD(g.granted_at)}</td>
+                  <td style={styles.td}>
+                    {fmtD(g.expires_at)}
+                    {expiringSoon(g.expires_at) && <span style={{ marginLeft: '6px', fontSize: '10px', padding: '1px 6px', borderRadius: '4px', background: '#f59e0b22', color: '#f59e0b', border: '1px solid #f59e0b44', fontWeight: '700' }}>expiring soon</span>}
+                  </td>
+                  <td style={styles.td}>
+                    <button style={{ ...styles.btn('danger'), padding: '4px 10px', fontSize: '11px' }} disabled={revoking === g.id} onClick={() => revoke(g)}>{revoking === g.id ? '…' : 'Revoke'}</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+};
 
 // ── USER MANAGEMENT ───────────────────────────────────────────
 const UserManagement = ({ userProfile }) => {
@@ -6894,6 +11145,8 @@ const UserManagement = ({ userProfile }) => {
           </table>
         </div>
       )}
+
+      {isMD && <RoleGrantsManager users={users} />}
     </div>
   );
 };
@@ -6906,6 +11159,7 @@ export default function App() {
   const [lowStockCount, setLowStockCount] = useState(0);
   const [lpoCount, setLpoCount] = useState(0);
   const [scheduleCount, setScheduleCount] = useState(0);
+  const [unreadMsgCount, setUnreadMsgCount] = useState(0);
   const [showChangePwd, setShowChangePwd] = useState(false);
   const [sessionWarning, setSessionWarning] = useState(false); // 15-min expiry warning
   const [sessionMinutes, setSessionMinutes] = useState(15);
@@ -6964,22 +11218,37 @@ export default function App() {
     try { await supabase.auth.refreshSession(); setSessionWarning(false); } catch { /* ignore */ }
   };
 
+  // Attach the user's effective roles (primary + active grants) from the DB.
+  // Falls back to [primary role] on null/empty/error so a hiccup degrades to
+  // single-role behaviour rather than locking the user out.
+  const attachEffectiveRoles = async (profile) => {
+    if (!profile) return profile;
+    try {
+      const { data, error } = await supabase.rpc('my_effective_roles');
+      if (error) throw error;
+      const roles = Array.isArray(data) && data.length ? data : [profile.role];
+      return { ...profile, effectiveRoles: roles };
+    } catch {
+      return { ...profile, effectiveRoles: profile.role ? [profile.role] : [] };
+    }
+  };
+
   const loadProfile = async (user) => {
     try {
       const profile = await authService.getProfile(user.id);
-      setUserProfile(profile);
+      setUserProfile(await attachEffectiveRoles(profile));
       supabase.from('user_profiles').update({ last_login: new Date().toISOString() }).eq('id', user.id).then(() => {}).catch(() => {});
     } catch {
       // Auto-create profile on first login
       try {
         const namePart = user.email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
         const profile = await authService.upsertProfile(user.id, user.email, namePart, 'staff');
-        setUserProfile(profile);
-      } catch { setUserProfile({ id: user.id, email: user.email, full_name: user.email, role: 'staff', is_active: true }); }
+        setUserProfile(await attachEffectiveRoles(profile));
+      } catch { setUserProfile({ id: user.id, email: user.email, full_name: user.email, role: 'staff', is_active: true, effectiveRoles: ['staff'] }); }
     }
   };
 
-  const handleLogin = (profile) => { setUserProfile(profile); };
+  const handleLogin = async (profile) => { setUserProfile(await attachEffectiveRoles(profile)); };
   const handleLogout = async () => { await authService.signOut(); setSession(null); setUserProfile(null); setActive('dashboard'); };
 
   // Load approval badge counts (must be before any conditional returns)
@@ -6987,6 +11256,16 @@ export default function App() {
     lpoService.getPending().then(l => setLpoCount(l.length)).catch(() => {});
     schedulesService.getSubmitted().then(s => setScheduleCount(s.length)).catch(() => {});
   }, [active]);
+
+  // Poll unread message count for the nav badge (30s interval; skip while on Messages page)
+  useEffect(() => {
+    if (!userProfile || active === 'messages') return;
+    messagesService.getTotalUnread(userProfile.id).then(setUnreadMsgCount).catch(() => {});
+    const interval = setInterval(() => {
+      messagesService.getTotalUnread(userProfile.id).then(setUnreadMsgCount).catch(() => {});
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [active, userProfile]);
 
   if (session === undefined) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#0f1117' }}>
@@ -7000,21 +11279,39 @@ export default function App() {
   const isICO   = role === 'ico';
   const isMD    = role === 'md';
 
-  const allowedPages = ROLE_PAGES[role] || ['dashboard'];
-  const canSee = (pageId) => pageId === 'my_profile' || allowedPages === 'all' || allowedPages.includes(pageId);
+  // Multi-role: navigable pages are the UNION across all effective roles.
+  // 'md' → 'all' is preserved (md can't be a granted role, so only a primary
+  // md yields 'all').
+  const effRoles = effectiveRolesOf(userProfile).length ? effectiveRolesOf(userProfile) : ['staff'];
+  const allowedPages = effRoles.some(r => ROLE_PAGES[r] === 'all')
+    ? 'all'
+    : [...new Set(effRoles.flatMap(r => ROLE_PAGES[r] || ['dashboard']))];
+  // Pages unlocked specifically by a granted (non-primary) role — used to relax
+  // the ICO/board read-only mask on exactly those pages, not everywhere.
+  const grantedRoles = effRoles.filter(r => r !== role);
+  const grantedPages = new Set(grantedRoles.flatMap(r => (ROLE_PAGES[r] && ROLE_PAGES[r] !== 'all') ? ROLE_PAGES[r] : []));
+  const canSee = (pageId) => {
+    if (pageId === 'my_profile') return true;
+    if (pageId === 'my_hr') return !!userProfile?.staff_id;
+    return allowedPages === 'all' || allowedPages.includes(pageId);
+  };
   const visibleNav = navItems
     .map(s => ({ ...s, items: s.items.filter(it => canSee(it.id)) }))
     .filter(s => s.items.length > 0);
-  const safePage = canSee(active) ? active : 'dashboard';
+  const safePage = canSee(active) ? active : (visibleNav[0]?.items[0]?.id || 'dashboard');
+  // The read-only mask still applies to a primary board/ICO viewer, but is
+  // relaxed on any page a granted role unlocks (so a granted write role works).
+  const boardMasked = isBoard && !BOARD_EXEMPT_PAGES.includes(safePage) && !grantedPages.has(safePage);
+  const icoMasked   = isICO   && !ICO_EXEMPT_PAGES.includes(safePage)   && !grantedPages.has(safePage);
 
   const pages = {
     dashboard: isBoard ? <BoardDashboard userProfile={userProfile} /> : <Dashboard onNavigate={setActive} userProfile={userProfile} />,
-    production: <Production />,
-    inventory: <Inventory onLowStockChange={setLowStockCount} />,
-    batches: <Batches />,
+    production: <Production userProfile={userProfile} />,
+    inventory: <Inventory onLowStockChange={setLowStockCount} userProfile={userProfile} />,
+    batches: <Batches userProfile={userProfile} />,
     waybills: <Waybills userProfile={userProfile} />,
     vehicles: <VehicleRegistry />,
-    staff: <Staff />,
+    staff: <Staff userProfile={userProfile} />,
     customers: <Customers userProfile={userProfile} />,
     orders: <Orders onNavigate={setActive} userProfile={userProfile} />,
     pending_register: <PendingDeliveryRegister />,
@@ -7023,12 +11320,23 @@ export default function App() {
     schedule_approvals: <ScheduleApprovals />,
     reports: <Reports userProfile={userProfile} />,
     kpi_dashboard: <KPIDashboard />,
+    trading_margin: <TradingMarginReport />,
     products: <Products />,
     suppliers: <SupplierRegistry />,
     accounting: <Accounting userProfile={userProfile} />,
     data_import: <DataImport />,
     user_management: <UserManagement userProfile={userProfile} />,
     labour: <Labour userProfile={userProfile} />,
+    maintenance: <Maintenance userProfile={userProfile} />,
+    truck_loading: <TruckLoadingPage userProfile={userProfile} />,
+    advances: <AdvancesPage userProfile={userProfile} />,
+    payment_requests: <PaymentRequestsPage userProfile={userProfile} />,
+    leave: <LeavePage userProfile={userProfile} />,
+    disciplinary: <DisciplinaryPage userProfile={userProfile} />,
+    attendance_kiosk: <AttendanceKiosk userProfile={userProfile} />,
+    attendance_flags: <AttendanceFlagsPage userProfile={userProfile} />,
+    messages: <Messages userProfile={userProfile} onUnreadChange={setUnreadMsgCount} />,
+    my_hr: <MyHRPage userProfile={userProfile} />,
     my_profile: <MyProfile userProfile={userProfile} />,
   };
 
@@ -7036,6 +11344,7 @@ export default function App() {
     if (id === "inventory" && lowStockCount > 0) return lowStockCount;
     if (id === "lpo_approvals" && lpoCount > 0) return lpoCount;
     if (id === "schedule_approvals" && scheduleCount > 0) return scheduleCount;
+    if (id === "messages" && unreadMsgCount > 0) return unreadMsgCount;
     return 0;
   };
 
@@ -7094,7 +11403,17 @@ export default function App() {
         </div>
       </div>
       {showChangePwd && <ChangePasswordModal onClose={() => setShowChangePwd(false)} />}
-      <main style={{ ...styles.main, ...(isMobile ? { marginLeft: 0, padding: '16px 14px', paddingTop: '58px' } : {}) }} {...(isBoard ? { 'data-board-view': 'true' } : {})} {...(isICO && safePage !== 'labour' && safePage !== 'schedule_approvals' ? { 'data-ico-view': 'true' } : {})}>
+      <MessagesBell
+        unreadMsgCount={unreadMsgCount}
+        onNavigate={(page) => { setActive(page); if (isMobile) setSidebarOpen(false); }}
+        isMobile={isMobile}
+      />
+      <NotificationBell
+        userProfile={userProfile}
+        onNavigate={(page) => { setActive(page); if (isMobile) setSidebarOpen(false); }}
+        isMobile={isMobile}
+      />
+      <main style={{ ...styles.main, ...(isMobile ? { marginLeft: 0, padding: '16px 14px', paddingTop: '58px' } : {}) }} {...(boardMasked ? { 'data-board-view': 'true' } : {})} {...(icoMasked ? { 'data-ico-view': 'true' } : {})}>
         {/* Mobile hamburger */}
         {isMobile && (
           <button data-board-allow data-ico-allow onClick={() => setSidebarOpen(s => !s)} style={{ position: 'fixed', top: '12px', left: '12px', zIndex: 250, background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '8px', padding: '8px 12px', cursor: 'pointer', fontSize: '18px', color: theme.text, lineHeight: 1, boxShadow: '0 2px 8px rgba(0,0,0,0.3)' }}>☰</button>
@@ -7120,12 +11439,12 @@ export default function App() {
             [data-ico-view] button:not([data-ico-allow]) { display: none !important; }
           `}</style>
         )}
-        {isBoard && active !== 'dashboard' && (
+        {boardMasked && (
           <div style={{ background: theme.accent+'22', border: `1px solid ${theme.accent}44`, borderRadius: '8px', padding: '8px 16px', margin: '0 0 16px', fontSize: '12px', color: theme.accent, fontWeight: '600' }}>
             👁 View Only Mode — Board Member access
           </div>
         )}
-        {isICO && active !== 'dashboard' && active !== 'schedule_approvals' && active !== 'labour' && (
+        {icoMasked && (
           <div style={{ background: theme.blue+'22', border: `1px solid ${theme.blue}44`, borderRadius: '8px', padding: '8px 16px', margin: '0 0 16px', fontSize: '12px', color: theme.blue, fontWeight: '600' }}>
             🔒 Read-Only Mode — Internal Control Officer. Approvals available in Schedule Approvals and Labour modules.
           </div>
