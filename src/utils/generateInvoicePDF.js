@@ -53,12 +53,6 @@ export async function generateInvoicePDF(invoiceData, customer) {
 
   doc.setDrawColor(180); doc.setLineWidth(0.5); doc.line(ml, 30, mr, 30);
 
-  // Proforma disclaimer — a quotation is not a demand for payment.
-  if (isProforma) {
-    doc.setFontSize(8.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(200, 50, 50);
-    doc.text('This is a proforma invoice and is not a demand for payment.', W / 2, 34.5, { align: 'center' });
-  }
-
   // ── BILL TO ───────────────────────────────────────────────────
   let leftY = 37;
   doc.setFontSize(8); doc.setFont('helvetica', 'bold'); doc.setTextColor(140);
