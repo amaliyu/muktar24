@@ -158,7 +158,7 @@ const ROLE_PAGES = {
 // interact (its landing page + self-service + the modules it approves in).
 // SINGLE SOURCE for both the mask and the read-only banner. Add new fully-
 // interactive pages here, in ONE place — the old inline &&-chains are how
-// my_hr got missed (see BACKEND_AUDIT_PRE5.md, Category 4).
+// my_hr got missed (see the private audit report, kept outside the repo, Category 4).
 // NOTE: read-only pages where only export/nav buttons should work
 // (accounting, reports, kpi_dashboard, daily_schedule) are NOT listed here —
 // those buttons carry per-element data-ico-allow / data-board-allow instead,

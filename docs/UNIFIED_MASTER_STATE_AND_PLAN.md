@@ -356,7 +356,7 @@ This was the major build item of the session.
 
 ### ✅ SESSION 12 (2026-07-02) — BACKEND AUDIT (pre-#5) + AUDIT CODE FIXES
 **PRs merged: #39 (audit report + anon-view REVOKE), #40 (My HR scoping filters, Cat-3), #41 (role-exemption gaps, Cat-4). Audit stream CLOSED.**
-- Executed the five-category backend audit (see §3 scope). Report: `docs/BACKEND_AUDIT_PRE5.md`.
+- Executed the five-category backend audit (see §3 scope). Report: private audit report (kept outside the repo).
 - **1 confirmed unauthenticated exposure fixed on discovery:** `order_items_delivery` (postgres-owned view, bypassed RLS) was anon-selectable — REVOKEd (also `disciplinary_self`); recorded in migration `audit_s12_revoke_anon_order_items_delivery`.
 - **DB fixes applied** (migration `audit_s12_disposition_db_fixes`): `staff_leave_balances` `'hr'`→`'hr_officer'`; `weekly_payroll_audit` read restricted to management; anon EXECUTE revoked across 15 SECURITY DEFINER funcs (now zero). **LPO approval MD-only** now DB-enforced via `trg_guard_lpo_md_decision` (migration `audit_s12_lpo_md_only_decision_guard`).
 - **Code fixes:** Cat-3 My HR scoping (PR #40 — `advancesService.listMine`/`leaveService.listMine`/`getMyAttendance(staffId,…)`); Cat-4 role-exemption gaps (PR #41 — shared `ICO_EXEMPT_PAGES`/`BOARD_EXEMPT_PAGES` constants + 8 button/exemption fixes).
@@ -595,7 +595,7 @@ A long, multi-workstream session. All items below tested and merged unless noted
 | 2 | Payroll client cutover | ✅ COMPLETE |
 | 3 | RLS for remaining tables | ✅ baseline complete; **2 deeper leaks (staff-PII, invoices/payments) found & CLOSED in Session 6** |
 | 4 | HR modules | ✅ **CLOSED** — 4a ✅ (S3/S4), 4b ✅ incl. B-1/B-2 (S7/S8), 4c ✅ (S10, PR #32), 4d ✅ cards (S5) + attendance kiosk (S11, PRs #34/#35). Remaining HR-adjacent deferrals are standalone line items in §4, not under this stream |
-| 4.5 | **Full backend audit (pre-#5)** | ✅ **CLOSED (S12)** — executed, report `docs/BACKEND_AUDIT_PRE5.md`; all fixes applied (PRs #39/#40/#41 merged + DB migrations). See audit scope below. |
+| 4.5 | **Full backend audit (pre-#5)** | ✅ **CLOSED (S12)** — executed, report private audit report (kept outside the repo); all fixes applied (PRs #39/#40/#41 merged + DB migrations). See audit scope below. |
 | 5 | **Payment-request (EXPENDITURE) + ingestion engine** | **5a/5b/5c ✅ live (S17).** 5d (revenue matching) + 5e (treasury funding) queued per §8. **5c ingestion engine is deliberately LAST in the current queue (below) — parked behind the backfill/costing work.** |
 | 6 | **Phase 6 — Operational Excellence (6A–6E)** | **DESIGN LOCKED (S22, §9). BUILD STARTED (S23):** 6A maintenance/downtime ✅ (PR #92/#93), 6B curing sign-off ✅ advisory (PR #94/#95/#96). 6C spares, 6D fleet, 6E role-KPI dashboard/reminders NOT started. |
 

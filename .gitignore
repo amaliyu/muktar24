@@ -32,3 +32,13 @@ coverage
 
 # Local MCP config (contains secrets)
 .mcp.json
+
+# Card-generator dev artifacts (real-looking test name/email/phone,
+# regenerate locally with cardGenerator.js if needed — not committed)
+card-test.html
+card-biz-front.png
+card-biz-back.png
+card-id-front.png
+card-id-back.png
+cards-all.png
+screenshot-cards.mjs
