@@ -10916,7 +10916,7 @@ const UserManagement = ({ userProfile }) => {
 
   const handleCreate = async (e) => {
     e.preventDefault();
-    if (form.password.length < 6) { setErr('Password must be at least 6 characters'); return; }
+    if (form.password.length < 8) { setErr('Password must be at least 8 characters'); return; }
     if (emailDuplicate) { setErr(`This email is already in use by ${emailDuplicate.full_name}.`); return; }
     if (duplicateUser) { setErr(`${selectedStaff?.full_name} already has a system account.`); return; }
     setCreating(true); setErr('');
