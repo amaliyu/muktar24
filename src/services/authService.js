@@ -1,30 +1,30 @@
-import { createClient } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 
 export const authService = {
   /**
-   * Create a pre-confirmed user. Email confirmation is disabled in Supabase
-   * settings, so signUp() lets staff log in immediately. A separate client
-   * with persistSession:false is used so the MD's own session is untouched.
+   * Create a user via the admin-create-user Edge Function. Requires the
+   * caller to already be the active MD (enforced server-side with the
+   * service-role key) — the client never self-registers the new account or
+   * writes role/is_active directly.
    */
   async createUser(email, password, fullName, role, staffId = null) {
-    const tmpClient = createClient(
-      import.meta.env.VITE_SUPABASE_URL,
-      import.meta.env.VITE_SUPABASE_ANON_KEY,
-      { auth: { persistSession: false, autoRefreshToken: false } }
-    )
-    const { data, error } = await tmpClient.auth.signUp({ email, password })
-    if (error) throw error
-    const userId = data.user?.id
-    if (!userId) throw new Error('User creation failed — no user ID returned.')
-    // Upsert profile; the DB trigger may have already created a row
-    const { data: profile, error: profErr } = await supabase
-      .from('user_profiles')
-      .upsert({ id: userId, email, full_name: fullName, role, is_active: true, ...(staffId ? { staff_id: staffId } : {}) })
-      .select()
-      .single()
-    if (profErr) throw profErr
-    return profile
+    const { data, error } = await supabase.functions.invoke('admin-create-user', {
+      body: { email, password, full_name: fullName, role, staff_id: staffId },
+    })
+    if (error) {
+      // FunctionsHttpError carries the actual response on .context — read it
+      // for the real message (validation error, 403, etc.) instead of a
+      // generic "Edge Function returned a non-2xx status code."
+      let message = error.message
+      if (error.context && typeof error.context.json === 'function') {
+        try {
+          const body = await error.context.json()
+          if (body?.error) message = body.error
+        } catch { /* fall back to error.message */ }
+      }
+      throw new Error(message)
+    }
+    return data
   },
 
   /**
