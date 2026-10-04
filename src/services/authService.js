@@ -73,21 +73,6 @@ export const authService = {
   },
 
   /**
-   * Create or update a user profile row.
-   * Pass an existing `id` to update; omit it to insert (the DB will reject
-   * inserts without a valid auth.users reference).
-   */
-  async upsertProfile(id, email, fullName, role) {
-    const { data, error } = await supabase
-      .from('user_profiles')
-      .upsert({ id, email, full_name: fullName, role })
-      .select()
-      .single()
-    if (error) throw error
-    return data
-  },
-
-  /**
    * List every user profile ordered by full name, with their role display name.
    */
   async listUsers() {

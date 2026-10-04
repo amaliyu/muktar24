@@ -2,6 +2,7 @@ import { useState, useEffect, Component } from "react";
 import { supabase } from './lib/supabase';
 import { authService } from './services/authService';
 import { hasRole, effectiveRolesOf } from './lib/roles';
+import { checkProfileAccess } from './lib/profileAccess';
 import LoginScreen from './components/LoginScreen';
 import BoardDashboard from './components/BoardDashboard';
 import FinancialStatements from './components/FinancialStatements';
@@ -11153,6 +11154,8 @@ const UserManagement = ({ userProfile }) => {
 export default function App() {
   const [session, setSession] = useState(undefined); // undefined = loading
   const [userProfile, setUserProfile] = useState(null);
+  const [authMessage, setAuthMessage] = useState(''); // shown on LoginScreen after a forced sign-out
+  const [profileLoadError, setProfileLoadError] = useState(false); // transient fetch failure, not a missing/inactive verdict
   const [active, setActive] = useState("dashboard");
   const [lowStockCount, setLowStockCount] = useState(0);
   const [lpoCount, setLpoCount] = useState(0);
@@ -11176,6 +11179,20 @@ export default function App() {
     });
     return () => subscription.unsubscribe();
   }, []);
+
+  // Re-check is_active when the tab regains focus, so a session left open
+  // in another tab gets kicked promptly rather than waiting for the next
+  // page reload. Only runs while a session+profile are already loaded.
+  useEffect(() => {
+    if (!session) return;
+    const recheck = () => { if (document.visibilityState === 'visible') loadProfile(session.user); };
+    window.addEventListener('focus', recheck);
+    document.addEventListener('visibilitychange', recheck);
+    return () => {
+      window.removeEventListener('focus', recheck);
+      document.removeEventListener('visibilitychange', recheck);
+    };
+  }, [session]);
 
   // ── Session expiry monitor ────────────────────────────────
   useEffect(() => {
@@ -11232,17 +11249,33 @@ export default function App() {
   };
 
   const loadProfile = async (user) => {
+    setProfileLoadError(false);
     try {
       const profile = await authService.getProfile(user.id);
+      const access = checkProfileAccess(profile);
+      if (!access.ok) {
+        // Only 'inactive' can reach here — getProfile() throws (caught below,
+        // PGRST116) rather than returning null for a missing row.
+        await authService.signOut();
+        setSession(null);
+        setUserProfile(null);
+        setAuthMessage('This account has been deactivated. Contact the MD.');
+        return;
+      }
       setUserProfile(await attachEffectiveRoles(profile));
       supabase.from('user_profiles').update({ last_login: new Date().toISOString() }).eq('id', user.id).then(() => {}).catch(() => {});
-    } catch {
-      // Auto-create profile on first login
-      try {
-        const namePart = user.email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-        const profile = await authService.upsertProfile(user.id, user.email, namePart, 'staff');
-        setUserProfile(await attachEffectiveRoles(profile));
-      } catch { setUserProfile({ id: user.id, email: user.email, full_name: user.email, role: 'staff', is_active: true, effectiveRoles: ['staff'] }); }
+    } catch (err) {
+      if (err?.code === 'PGRST116') {
+        // No profile row at all — do not auto-create one.
+        await authService.signOut();
+        setSession(null);
+        setUserProfile(null);
+        setAuthMessage('No profile is set up for this account. Contact the MD.');
+        return;
+      }
+      // Transient error (network, etc.) — do not sign the user out or
+      // fabricate a profile; let them retry.
+      setProfileLoadError(true);
     }
   };
 
@@ -11270,7 +11303,26 @@ export default function App() {
       <div style={{ color: '#e8eaf0', fontSize: '14px' }}>Loading…</div>
     </div>
   );
-  if (!session) return <LoginScreen onLogin={handleLogin} />;
+  if (!session) return <LoginScreen onLogin={handleLogin} initialError={authMessage} />;
+
+  if (!userProfile) {
+    if (profileLoadError) return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#0f1117', gap: '14px', padding: '24px', textAlign: 'center' }}>
+        <div style={{ color: '#e8eaf0', fontSize: '14px' }}>Couldn't load your profile. Try again.</div>
+        <button
+          onClick={() => loadProfile(session.user)}
+          style={{ background: '#f5a623', color: '#1a0e00', border: 'none', borderRadius: '8px', padding: '10px 20px', fontWeight: '700', fontSize: '13px', cursor: 'pointer', fontFamily: 'inherit' }}
+        >
+          Retry
+        </button>
+      </div>
+    );
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#0f1117' }}>
+        <div style={{ color: '#e8eaf0', fontSize: '14px' }}>Loading…</div>
+      </div>
+    );
+  }
 
   const role = userProfile?.role || 'staff';
   const isBoard = role === 'board_member';

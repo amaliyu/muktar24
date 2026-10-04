@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { authService } from '../services/authService'
 import { supabase } from '../lib/supabase'
+import { checkProfileAccess } from '../lib/profileAccess'
 
 const theme = {
   bg: '#0f1117',
@@ -15,11 +16,11 @@ const theme = {
   textMuted: '#7c839e',
 }
 
-export default function LoginScreen({ onLogin }) {
+export default function LoginScreen({ onLogin, initialError }) {
   const [email, setEmail]         = useState('')
   const [password, setPassword]   = useState('')
   const [loading, setLoading]     = useState(false)
-  const [error, setError]         = useState('')
+  const [error, setError]         = useState(initialError || '')
   const [showReset, setShowReset] = useState(false)
   const [resetEmail, setResetEmail] = useState('')
   const [resetMsg, setResetMsg]   = useState('')
@@ -49,28 +50,27 @@ export default function LoginScreen({ onLogin }) {
       const data = await authService.signIn(email.trim(), password)
       const userId = data.user.id
 
-      // Load profile from user_profiles
-      let { data: profile, error: profileErr } = await supabase
+      // Load profile from user_profiles. PGRST116 = no row found (.single()
+      // with zero matches) — that's a real "missing" decision, not an error
+      // to throw. Any other error is transient (network, etc.) and should
+      // surface as a normal login failure, not a profile-access verdict.
+      const { data: profile, error: profileErr } = await supabase
         .from('user_profiles')
         .select('*')
         .eq('id', userId)
         .single()
 
-      if (profileErr || !profile) {
-        // Profile doesn't exist — create one
-        const { data: newProfile, error: upsertErr } = await supabase
-          .from('user_profiles')
-          .upsert({
-            id:        userId,
-            email:     data.user.email,
-            full_name: data.user.email.split('@')[0],
-            role:      'viewer',
-            is_active: true,
-          })
-          .select()
-          .single()
-        if (upsertErr) throw upsertErr
-        profile = newProfile
+      if (profileErr && profileErr.code !== 'PGRST116') throw profileErr
+
+      const access = checkProfileAccess(profile)
+      if (!access.ok) {
+        await supabase.auth.signOut()
+        setError(
+          access.reason === 'inactive'
+            ? 'This account has been deactivated. Contact the MD.'
+            : 'No profile is set up for this account. Contact the MD.'
+        )
+        return
       }
 
       onLogin(profile)
