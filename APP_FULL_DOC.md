@@ -559,7 +559,7 @@ CREATE POLICY "prod_targets_write" ON production_targets
 
 ### B. Seed `assistant_production_manager` role (deployment safety)
 
-The role exists in the app but is missing from the SQL seed files. Run this once, and also add it manually to `supabase/add_all_roles.sql` and `supabase/MASTER_DEPLOYMENT.sql`:
+The role exists in the app but is missing from the SQL seed files. Run this once. `supabase/add_all_roles.sql` and `supabase/MASTER_DEPLOYMENT.sql` are historical references now archived at `supabase/archive/` (do not run them — see `supabase/archive/README.md`); new schema changes go in `supabase/migrations/` only, so add this seed there instead if it needs to be repeatable:
 
 ```sql
 INSERT INTO app_roles (id, display_name, description, is_system_role)
