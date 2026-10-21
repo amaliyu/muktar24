@@ -41,7 +41,7 @@ export async function generateInventoryReportPDF(items, movements, { from, to } 
     doc.text(`⚠ ${lowStock.length} ITEM${lowStock.length > 1 ? 'S' : ''} BELOW REORDER LEVEL`, ml, curY);
     curY += 4;
     doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(150, 50, 50);
-    doc.text(lowStock.map(i => i.name).join(', '), ml, curY, { maxWidth: W - 28 });
+    doc.text(lowStock.map(i => i.site?.name ? `${i.name} @ ${i.site.name}` : i.name).join(', '), ml, curY, { maxWidth: W - 28 });
     curY += 8;
     doc.setDrawColor(200, 60, 60); doc.setLineWidth(0.3); doc.line(ml, curY, mr, curY);
     curY += 5;
@@ -49,17 +49,20 @@ export async function generateInventoryReportPDF(items, movements, { from, to } 
 
   // ── STOCK LEVELS TABLE ────────────────────────────────────────
   const N = (n) => `N${Math.round(Number(n) || 0).toLocaleString()}`;
-  const totalValue = items.reduce((s, i) => s + (Number(i.current_stock) * Number(i.unit_cost || 0)), 0);
+  // APCL stock value: client-owned material (owner='client') is tracked but not valued.
+  const apclValue = (i) => i.owner === 'client' ? 0 : Number(i.current_stock) * Number(i.unit_cost || 0);
+  const totalValue = items.reduce((s, i) => s + apclValue(i), 0);
 
   doc.setFontSize(9); doc.setFont('helvetica', 'bold'); doc.setTextColor(40);
   doc.text('CURRENT STOCK LEVELS', ml, curY);
   curY += 4;
 
   const itemRows = items.map(i => {
-    const value = Number(i.current_stock) * Number(i.unit_cost || 0);
+    const value = apclValue(i);
     const isLow = Number(i.current_stock) <= Number(i.reorder_level);
+    const label = `${i.name}${i.site?.name ? ` @ ${i.site.name}` : ''}${i.owner === 'client' ? ' (client-owned)' : ''}`;
     return [
-      { content: i.name, styles: { fontStyle: isLow ? 'bold' : 'normal', textColor: isLow ? [200, 60, 60] : [30, 30, 30] } },
+      { content: label, styles: { fontStyle: isLow ? 'bold' : 'normal', textColor: isLow ? [200, 60, 60] : [30, 30, 30] } },
       i.unit,
       { content: Number(i.current_stock).toLocaleString(), styles: { halign: 'right', textColor: isLow ? [200, 60, 60] : [30, 30, 30] } },
       { content: Number(i.reorder_level).toLocaleString(), styles: { halign: 'right' } },
@@ -70,7 +73,7 @@ export async function generateInventoryReportPDF(items, movements, { from, to } 
   });
 
   itemRows.push([
-    { content: 'TOTAL STOCK VALUE', colSpan: 5, styles: { halign: 'right', fontStyle: 'bold', textColor: [40, 40, 40] } },
+    { content: 'TOTAL APCL STOCK VALUE (excl. client-owned)', colSpan: 5, styles: { halign: 'right', fontStyle: 'bold', textColor: [40, 40, 40] } },
     { content: N(totalValue), styles: { halign: 'right', fontStyle: 'bold', textColor: [180, 100, 0] } },
     '',
   ]);

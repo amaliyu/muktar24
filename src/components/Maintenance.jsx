@@ -472,6 +472,9 @@ function DowntimeTab({ assets, activeStaff, staffById, userProfile, canWrite }) 
 
       await maintenanceService.insertDowntime({
         asset_id: assetId,
+        // The asset's own site (Phase 7A). Null for site-less assets (vehicles);
+        // the DB trigger then falls back to Dutse.
+        site_id: assetById[assetId]?.site_id || null,
         start_time: new Date(startTime).toISOString(),
         reason_category: reason,
         reason_detail: detail.trim() || null,
@@ -531,7 +534,7 @@ function DowntimeTab({ assets, activeStaff, staffById, userProfile, canWrite }) 
               <select style={styles.input} value={assetId} onChange={e => { setAssetId(e.target.value); setStaffId('') }}>
                 <option value="">Select an asset…</option>
                 {assets.map(a => (
-                  <option key={a.id} value={a.id}>{assetLabel(a)} — {a.status}</option>
+                  <option key={a.id} value={a.id}>{assetLabel(a)}{a.site?.name ? ` · ${a.site.name}` : ''} — {a.status}</option>
                 ))}
               </select>
             </div>
@@ -580,6 +583,7 @@ function DowntimeTab({ assets, activeStaff, staffById, userProfile, canWrite }) 
               <thead>
                 <tr>
                   <th style={styles.th}>Asset</th>
+                  <th style={styles.th}>Site</th>
                   <th style={styles.th}>Reason</th>
                   <th style={styles.th}>Started</th>
                   <th style={styles.th}>Open for</th>
@@ -592,6 +596,7 @@ function DowntimeTab({ assets, activeStaff, staffById, userProfile, canWrite }) 
                 {open.map(d => (
                   <tr key={d.id}>
                     <td style={styles.td}>{assetById[d.asset_id] ? assetLabel(assetById[d.asset_id]) : '—'}</td>
+                    <td style={styles.td}>{d.site?.name || '—'}</td>
                     <td style={styles.td}>
                       <span style={styles.badge(theme.accent)}>{reasonLabel(d.reason_category)}</span>
                       {d.reason_detail && <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '4px', whiteSpace: 'pre-wrap' }}>{d.reason_detail}</div>}
@@ -625,6 +630,7 @@ function DowntimeTab({ assets, activeStaff, staffById, userProfile, canWrite }) 
               <thead>
                 <tr>
                   <th style={styles.th}>Asset</th>
+                  <th style={styles.th}>Site</th>
                   <th style={styles.th}>Reason</th>
                   <th style={styles.th}>Started</th>
                   <th style={styles.th}>Ended</th>
@@ -636,6 +642,7 @@ function DowntimeTab({ assets, activeStaff, staffById, userProfile, canWrite }) 
                 {resolved.map(d => (
                   <tr key={d.id}>
                     <td style={styles.td}>{assetById[d.asset_id] ? assetLabel(assetById[d.asset_id]) : '—'}</td>
+                    <td style={styles.td}>{d.site?.name || '—'}</td>
                     <td style={styles.td}>
                       <span style={styles.badge(theme.textMuted)}>{reasonLabel(d.reason_category)}</span>
                       {d.reason_detail && <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '4px', whiteSpace: 'pre-wrap' }}>{d.reason_detail}</div>}

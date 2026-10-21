@@ -137,12 +137,21 @@ export const rosterService = {
     return data || []
   },
 
-  async getByDate(date) {
-    const { data } = await supabase
+  // One roster per site per day (daily_roster_site_date_key). With a siteId this
+  // returns that site's roster or null; without one it returns EVERY site's
+  // roster for the date as an array (maybeSingle would error with 2+ sites).
+  async getByDate(date, siteId = null) {
+    let q = supabase
       .from('daily_roster')
       .select('*, entries:daily_roster_entries(*, worker:labour_id(full_name, labour_number), role:role_id(role_name))')
       .eq('roster_date', date)
-      .maybeSingle()
+    if (siteId) {
+      const { data, error } = await q.eq('site_id', siteId).maybeSingle()
+      if (error) throw error
+      return data
+    }
+    const { data, error } = await q.order('created_at')
+    if (error) throw error
     return data
   },
 

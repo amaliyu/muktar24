@@ -237,6 +237,9 @@ export const balanceSheetService = {
       const { data } = await supabase
         .from('inventory_items')
         .select('name, current_stock, unit_cost')
+        // Client-owned (e.g. Bilaad-supplied) material is tracked but is NOT APCL
+        // stock — keep it out of the balance-sheet inventory value.
+        .eq('owner', 'apcl')
       result.inventoryItems = data || []
     } catch (_) { /* non-fatal */ }
 

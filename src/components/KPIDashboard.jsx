@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
+import SitePicker from './SitePicker'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 
@@ -174,6 +175,7 @@ export default function KPIDashboard() {
   const [tab, setTab]         = useState('overview')
   const [preset, setPreset]   = useState('month')
   const [range, setRange]     = useState(getRange('month'))
+  const [siteId, setSiteId]   = useState('')   // '' = All sites
   const [loading, setLoading] = useState(false)
   const [data, setData]       = useState({})
   const [targets, setTargets] = useState(() => {
@@ -195,6 +197,10 @@ export default function KPIDashboard() {
     try {
       const { from, to } = range
       const { from: pFrom, to: pTo } = prevPeriod(from, to)
+      // Site filter (Phase 7A) — only the tables that carry site_id are scoped:
+      // production_log, damage_log, expenses. Sales, cash, deliveries and staff
+      // stay company-wide.
+      const bySite = q => siteId ? q.eq('site_id', siteId) : q
 
       const [
         prodCurr, prodPrev, dmgLog,
@@ -206,10 +212,10 @@ export default function KPIDashboard() {
         monthlyProd, monthlyRev,
       ] = await Promise.allSettled([
         // Production current + prev
-        supabase.from('production_log').select('date,block_type,quantity_produced,cement_bags,diesel_litres,granite_dust_kg').gte('date', from).lte('date', to),
-        supabase.from('production_log').select('quantity_produced,cement_bags,diesel_litres,granite_dust_kg').gte('date', pFrom).lte('date', pTo),
+        bySite(supabase.from('production_log').select('date,block_type,quantity_produced,cement_bags,diesel_litres,granite_dust_kg').gte('date', from).lte('date', to)),
+        bySite(supabase.from('production_log').select('quantity_produced,cement_bags,diesel_litres,granite_dust_kg').gte('date', pFrom).lte('date', pTo)),
         // Damage log
-        supabase.from('damage_log').select('date,block_type,stage,quantity_damaged').gte('date', from).lte('date', to),
+        bySite(supabase.from('damage_log').select('date,block_type,stage,quantity_damaged').gte('date', from).lte('date', to)),
         // Payments current + prev
         supabase.from('payments').select('amount_paid,payment_date,invoice_id,invoice:invoice_id(order:order_id(customer:customer_id(id,name)))').eq('status','confirmed').gte('payment_date', from).lte('payment_date', to),
         supabase.from('payments').select('amount_paid').eq('status','confirmed').gte('payment_date', pFrom).lte('payment_date', pTo),
@@ -228,11 +234,11 @@ export default function KPIDashboard() {
         // Staff — staff_public is readable by all authenticated roles
         supabase.from('staff_public').select('id,role,staff_type,is_active'),
         // Expenses
-        supabase.from('expenses').select('amount,expense_date,status,category:category_id(name,parent_category),vendor').eq('status','approved').gte('expense_date', from).lte('expense_date', to),
+        bySite(supabase.from('expenses').select('amount,expense_date,status,category:category_id(name,parent_category),vendor').eq('status','approved').gte('expense_date', from).lte('expense_date', to)),
         // Bank accounts
         supabase.from('bank_accounts').select('account_name,current_balance'),
         // Monthly production (last 12 months)
-        supabase.from('production_log').select('date,quantity_produced').gte('date', new Date(new Date().setFullYear(new Date().getFullYear() - 1)).toISOString().split('T')[0]),
+        bySite(supabase.from('production_log').select('date,quantity_produced').gte('date', new Date(new Date().setFullYear(new Date().getFullYear() - 1)).toISOString().split('T')[0])),
         // Monthly revenue (last 12 months)
         supabase.from('payments').select('amount_paid,payment_date').eq('status','confirmed').gte('payment_date', new Date(new Date().setFullYear(new Date().getFullYear() - 1)).toISOString().split('T')[0]),
       ])
@@ -259,7 +265,7 @@ export default function KPIDashboard() {
         range, pRange: { from: pFrom, to: pTo },
       })
     } finally { setLoading(false) }
-  }, [range])
+  }, [range, siteId])
 
   useEffect(() => { load() }, [load])
 
@@ -475,6 +481,9 @@ export default function KPIDashboard() {
           {PRESETS.map(([p, l]) => (
             <button key={p} data-ico-allow data-board-allow style={s.tab(preset === p)} onClick={() => applyPreset(p)}>{l}</button>
           ))}
+          <div style={{ width: '200px' }} title="Site filter scopes production, damage and expense KPIs; sales, cash, deliveries and staff stay company-wide">
+            <SitePicker allowAll value={siteId} onChange={setSiteId} style={{ ...s.input, width: '100%' }} />
+          </div>
           {preset === 'custom' && (
             <>
               <input type="date" style={s.input} value={range.from} onChange={e => setRange(r => ({ ...r, from: e.target.value }))} />

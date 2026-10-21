@@ -43,6 +43,8 @@ import SupplierRegistry from './components/SupplierRegistry'
 import { suppliersService, supplierTransactionsService } from './services/suppliers'
 import Labour, { getLastSaturday, shiftWeek, shiftDays } from './components/Labour'
 import Maintenance from './components/Maintenance'
+import SitePicker, { useSites } from './components/SitePicker'
+import { sitesService, DUTSE_SITE_ID, isFactorySite, siteName } from './services/sites'
 import Messages from './components/Messages'
 import { messagesService } from './services/messages'
 import NotificationBell from './components/NotificationBell'
@@ -473,7 +475,14 @@ const Dashboard = ({ onNavigate, userProfile }) => {
           const [labourLoadLogs, labourPayroll, labourRoster] = await Promise.all([
             supabase.from('truck_loading_log').select('quantity_loaded, date, loaders:truck_loading_loaders(labour_id)').gte('date', weekStart).lte('date', todayIso).then(r => r.data || []).catch(() => []),
             supabase.from('weekly_labour_payroll').select('id', { count: 'exact', head: true }).in('status', ['draft', 'ico_approved', 'md_approved']).then(r => r.count || 0).catch(() => 0),
-            supabase.from('daily_roster').select('entries:daily_roster_entries(id)').eq('roster_date', todayIso).maybeSingle().then(r => r.data?.entries?.length || 0).catch(() => 0),
+            // One roster per SITE per day now, so sum every site's roster for today.
+            // A failed query shows "—" (null), never a false 0.
+            supabase.from('daily_roster').select('entries:daily_roster_entries(id)').eq('roster_date', todayIso)
+              .then(r => {
+                if (r.error) { console.error("Roster headcount query failed:", r.error); return null; }
+                return (r.data || []).reduce((s, x) => s + (x.entries?.length || 0), 0);
+              })
+              .catch(e => { console.error("Roster headcount query failed:", e); return null; }),
           ]);
           const blocksLoadedWeek = labourLoadLogs.reduce((s, r) => s + (r.quantity_loaded || 0), 0);
           const activeLoaderSet = new Set(labourLoadLogs.filter(r => r.date === todayIso).flatMap(r => (r.loaders || []).map(l => l.labour_id)));
@@ -540,7 +549,7 @@ const Dashboard = ({ onNavigate, userProfile }) => {
     <div key="pendingPayroll" style={{ cursor: 'pointer' }} onClick={() => onNavigate('labour')}>
       <StatCard label="Pending Payroll" value={stats.pendingPayroll} sub="Payrolls awaiting approval" accent={theme.accent} />
     </div>,
-    <StatCard key="rosterHeadcount" label="Roster Headcount Today" value={stats.rosterHeadcountToday} sub="Workers on today's roster" accent={theme.green} />,
+    <StatCard key="rosterHeadcount" label="Roster Headcount Today" value={stats.rosterHeadcountToday ?? "—"} sub={stats.rosterHeadcountToday == null ? "Could not load today's rosters" : "Workers on today's rosters · all sites"} accent={theme.green} />,
   ] : [];
 
   const showLpo      = can('md', 'ico', 'bdm') && stats.lpoQueue > 0;
@@ -736,8 +745,49 @@ const Production = ({ userProfile }) => {
   const [targets, setTargets] = useState([]);
   const [targetForm, setTargetForm] = useState({ date: new Date().toISOString().split('T')[0], blockType: "9 Inch 3 Hole Block", quantity: "" });
   const [savingTarget, setSavingTarget] = useState(false);
-  const emptyForm = { date: "", blockType: "9 Inch 3 Hole Block", produced: "", cement: "", granite: "", chippings: "", diesel: "", dmgProd: "0", dmgStack: "0" };
+  const emptyForm = { date: "", siteId: DUTSE_SITE_ID, assetId: "", blockType: "9 Inch 3 Hole Block", produced: "", cement: "", granite: "", chippings: "", diesel: "", dmgProd: "0", dmgStack: "0" };
   const [form, setForm] = useState(emptyForm);
+  const { sites } = useSites();
+  const [siteFilter, setSiteFilter] = useState("");
+  const [machines, setMachines] = useState([]);
+  const [machinesError, setMachinesError] = useState(null);
+  const [stockWarning, setStockWarning] = useState(null);
+
+  // Machines at the form's site. Auto-pick when the site has exactly one.
+  useEffect(() => {
+    if (!showForm) return;
+    let alive = true;
+    setMachinesError(null);
+    sitesService.getMachines(form.siteId || DUTSE_SITE_ID)
+      .then(ms => {
+        if (!alive) return;
+        setMachines(ms);
+        if (ms.length === 1) setForm(f => (f.assetId ? f : { ...f, assetId: ms[0].id }));
+      })
+      .catch(e => { console.error("Could not load machines:", e); if (alive) { setMachines([]); setMachinesError(e.message || "unknown error"); } });
+    return () => { alive = false; };
+  }, [showForm, form.siteId]);
+
+  // Run the site-scoped stock deduction; never blocks the production save, but
+  // every miss or failure is shown (no silent catch).
+  const deductStock = async (entryData, reference) => {
+    const where = siteName(entryData.site_id, sites);
+    try {
+      const { missing } = await inventoryService.autoDeductProduction({
+        siteId: entryData.site_id,
+        cementBags: entryData.cement_bags,
+        graniteDustKg: entryData.granite_dust_kg,
+        chippingsKg: entryData.chippings_kg,
+        dieselLitres: entryData.diesel_litres,
+        date: entryData.date,
+        reference,
+      });
+      setStockWarning(missing.length ? missing.map(m => `No ${m} stock item set up for ${where} — not deducted`) : null);
+    } catch (e) {
+      console.error("Production stock deduction failed:", e);
+      setStockWarning([`Stock deduction failed for ${where}: ${e.message}. Production was saved; check stock manually.`]);
+    }
+  };
 
   const load = async () => {
     setLoading(true);
@@ -792,6 +842,7 @@ const Production = ({ userProfile }) => {
     setEditTarget(record);
     setForm({
       date: record.date, blockType: record.block_type,
+      siteId: record.site_id || DUTSE_SITE_ID, assetId: record.asset_id || "",
       produced: String(record.quantity_produced || ""),
       cement: String(record.cement_bags || ""),
       granite: String(record.granite_dust_kg || ""),
@@ -809,17 +860,22 @@ const Production = ({ userProfile }) => {
     // already exists. Fail open — a check error must never block a valid save.
     if (!editTarget && !skipDupCheck) {
       try {
-        const dup = records.find(r => r.date === form.date && r.block_type === form.blockType);
+        const dup = records.find(r => r.date === form.date && r.block_type === form.blockType && r.site_id === (form.siteId || DUTSE_SITE_ID));
         if (dup) { setDupWarning(dup); return; }
       } catch (e) { console.error("Duplicate-entry check failed, proceeding:", e); }
     }
     setSaving(true);
     setAlert(null);
+    setStockWarning(null);
     try {
       const dmgProd = parseInt(form.dmgProd) || 0;
       const dmgStack = parseInt(form.dmgStack) || 0;
+      const siteId = form.siteId || DUTSE_SITE_ID;
       const entryData = {
         date: form.date, block_type: form.blockType,
+        site_id: siteId,
+        // null lets the DB trigger pick the site's active machine
+        asset_id: form.assetId || null,
         quantity_produced: parseInt(form.produced) || 0,
         cement_bags: parseFloat(form.cement) || 0,
         granite_dust_kg: parseFloat(form.granite) || 0,
@@ -829,38 +885,29 @@ const Production = ({ userProfile }) => {
       if (editTarget) {
         await productionService.update(editTarget.id, entryData, userProfile?.id);
         await productionService.clearDamages(editTarget.id);
-        if (dmgProd > 0) await productionService.logDamage({ date: form.date, block_type: form.blockType, stage: "production", quantity_damaged: dmgProd, production_log_id: editTarget.id });
-        if (dmgStack > 0) await productionService.logDamage({ date: form.date, block_type: form.blockType, stage: "stacking", quantity_damaged: dmgStack, production_log_id: editTarget.id });
+        if (dmgProd > 0) await productionService.logDamage({ date: form.date, block_type: form.blockType, stage: "production", quantity_damaged: dmgProd, production_log_id: editTarget.id, site_id: siteId });
+        if (dmgStack > 0) await productionService.logDamage({ date: form.date, block_type: form.blockType, stage: "stacking", quantity_damaged: dmgStack, production_log_id: editTarget.id, site_id: siteId });
+        // Reverse-then-apply (Rule 10.7): undo the old movements by reference,
+        // then deduct the new quantities at the (possibly changed) site.
+        const ref = `PROD-${editTarget.id.slice(0, 8)}`;
+        let reversed = true;
         try {
-          const ref = `PROD-${editTarget.id.slice(0, 8)}`;
           await inventoryService.reverseProductionMovements(ref);
-          await inventoryService.autoDeductProduction({
-            cementBags: entryData.cement_bags,
-            graniteDustKg: entryData.granite_dust_kg,
-            chippingsKg: entryData.chippings_kg,
-            dieselLitres: entryData.diesel_litres,
-            date: entryData.date,
-            reference: ref,
-          });
-        } catch { /* don't block save if inventory tables missing */ }
+        } catch (e) {
+          reversed = false;
+          console.error("Reversing old production movements failed:", e);
+          setStockWarning([`Could not reverse the old stock deduction (${e.message}). Stock was not re-deducted; check stock manually.`]);
+        }
+        if (reversed) await deductStock(entryData, ref);
         await load();
         setAlert({ type: "success", msg: "Production entry updated and movement log adjusted." });
       } else {
         const entry = await productionService.create(entryData);
-        if (dmgProd > 0) await productionService.logDamage({ date: form.date, block_type: form.blockType, stage: "production", quantity_damaged: dmgProd, production_log_id: entry.id });
-        if (dmgStack > 0) await productionService.logDamage({ date: form.date, block_type: form.blockType, stage: "stacking", quantity_damaged: dmgStack, production_log_id: entry.id });
-        try {
-          await inventoryService.autoDeductProduction({
-            cementBags: entryData.cement_bags,
-            graniteDustKg: entryData.granite_dust_kg,
-            chippingsKg: entryData.chippings_kg,
-            dieselLitres: entryData.diesel_litres,
-            date: entryData.date,
-            reference: `PROD-${entry.id.slice(0, 8)}`,
-          });
-        } catch { /* inventory tables may not exist yet — don't block production save */ }
+        if (dmgProd > 0) await productionService.logDamage({ date: form.date, block_type: form.blockType, stage: "production", quantity_damaged: dmgProd, production_log_id: entry.id, site_id: siteId });
+        if (dmgStack > 0) await productionService.logDamage({ date: form.date, block_type: form.blockType, stage: "stacking", quantity_damaged: dmgStack, production_log_id: entry.id, site_id: siteId });
+        await deductStock(entryData, `PROD-${entry.id.slice(0, 8)}`);
         setRecords(prev => [{ ...entry, damaged: { production: dmgProd, stacking: dmgStack } }, ...prev]);
-        setAlert({ type: "success", msg: "Production entry saved and inventory updated!" });
+        setAlert({ type: "success", msg: `Production entry saved at ${siteName(siteId, sites)}.` });
       }
       setForm(emptyForm);
       setShowForm(false);
@@ -886,10 +933,12 @@ const Production = ({ userProfile }) => {
     }
   };
 
-  const totalProduced = records.reduce((s, r) => s + (r.quantity_produced || 0), 0);
-  const totalCement = records.reduce((s, r) => s + (r.cement_bags || 0), 0);
-  const totalDiesel = records.reduce((s, r) => s + (r.diesel_litres || 0), 0);
-  const totalDamages = records.reduce((s, r) => s + (r.damaged?.production || 0) + (r.damaged?.stacking || 0), 0);
+  const shown = siteFilter ? records.filter(r => r.site_id === siteFilter) : records;
+  const totalProduced = shown.reduce((s, r) => s + (r.quantity_produced || 0), 0);
+  const totalCement = shown.reduce((s, r) => s + (r.cement_bags || 0), 0);
+  const totalDiesel = shown.reduce((s, r) => s + (r.diesel_litres || 0), 0);
+  const totalDamages = shown.reduce((s, r) => s + (r.damaged?.production || 0) + (r.damaged?.stacking || 0), 0);
+  const scopeLabel = siteFilter ? siteName(siteFilter, sites) : "All sites";
 
   return (
     <div>
@@ -913,7 +962,7 @@ const Production = ({ userProfile }) => {
           <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: "12px", padding: "28px 32px", maxWidth: "440px", width: "90%" }}>
             <div style={{ fontWeight: "700", fontSize: "15px", marginBottom: "10px", color: theme.text }}>Possible duplicate entry</div>
             <div style={{ fontSize: "13px", color: theme.textMuted, marginBottom: "24px", lineHeight: "1.5" }}>
-              An entry for <strong style={{ color: theme.text }}>{dupWarning.date}</strong> — <strong style={{ color: theme.text }}>{dupWarning.block_type}</strong> already exists ({fmt(dupWarning.quantity_produced)} produced). Do you want to edit that entry instead, or continue creating a new one?
+              An entry for <strong style={{ color: theme.text }}>{dupWarning.date}</strong> — <strong style={{ color: theme.text }}>{dupWarning.block_type}</strong> at <strong style={{ color: theme.text }}>{siteName(dupWarning.site_id, sites)}</strong> already exists ({fmt(dupWarning.quantity_produced)} produced). Do you want to edit that entry instead, or continue creating a new one?
             </div>
             <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
               <button style={styles.btn("secondary")} onClick={() => { const m = dupWarning; setDupWarning(null); startEdit(m); }}>Edit existing</button>
@@ -934,6 +983,15 @@ const Production = ({ userProfile }) => {
       </div>
 
       {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
+      {stockWarning && (
+        <div style={{ padding: "10px 14px", borderRadius: "8px", marginBottom: "16px", background: theme.accent + "18", border: `1px solid ${theme.accent}55`, color: theme.accent, fontSize: "13px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px" }}>
+          <div>
+            <div style={{ fontWeight: "700", marginBottom: "4px" }}>Stock warning</div>
+            {stockWarning.map(w => <div key={w}>{w}</div>)}
+          </div>
+          <button onClick={() => setStockWarning(null)} style={{ background: "none", border: "none", color: theme.accent, cursor: "pointer", fontSize: "16px" }} aria-label="Dismiss stock warning">×</button>
+        </div>
+      )}
 
       {showTargetForm && (
         <div style={{ ...styles.card, marginBottom: "20px", borderColor: theme.blue + "44" }}>
@@ -979,6 +1037,19 @@ const Production = ({ userProfile }) => {
         <div style={{ ...styles.card, marginBottom: "24px", borderColor: theme.accent + "44" }}>
           <div style={styles.sectionTitle}>{editTarget ? "Edit Production Entry" : "New Production Entry"}</div>
           <div style={styles.grid(3)}>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Site</label>
+              <SitePicker value={form.siteId} onChange={v => setForm({ ...form, siteId: v, assetId: "" })} style={styles.input} />
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Machine</label>
+              <select style={styles.input} value={form.assetId} onChange={e => setForm({ ...form, assetId: e.target.value })}>
+                <option value="">{machines.length ? "— Select machine —" : "No active machine at this site"}</option>
+                {machines.map(m => <option key={m.id} value={m.id}>{m.code ? `${m.code} — ` : ""}{m.name}</option>)}
+                {form.assetId && !machines.some(m => m.id === form.assetId) && <option value={form.assetId}>Current machine (not active at this site)</option>}
+              </select>
+              {machinesError && <div style={{ fontSize: "11px", color: theme.red, marginTop: "4px" }}>Could not load machines ({machinesError}).</div>}
+            </div>
             {[
               { label: "Date", key: "date", type: "date" },
             ].map(f => (
@@ -1014,23 +1085,26 @@ const Production = ({ userProfile }) => {
       )}
 
       <div style={styles.grid(4)}>
-        <StatCard label="Total Produced" value={fmt(totalProduced)} sub={`${records.length} entries`} accent={theme.accent} />
-        <StatCard label="Cement Used" value={`${fmt(totalCement)} bags`} sub="All records" accent={theme.blue} />
-        <StatCard label="Diesel Used" value={`${fmt(totalDiesel)} L`} sub="All records" accent={theme.accentDim} />
-        <StatCard label="Total Damages" value={fmt(totalDamages)} sub="Production + stacking" accent={theme.red} />
+        <StatCard label="Total Produced" value={fmt(totalProduced)} sub={`${shown.length} entries · ${scopeLabel}`} accent={theme.accent} />
+        <StatCard label="Cement Used" value={`${fmt(totalCement)} bags`} sub={scopeLabel} accent={theme.blue} />
+        <StatCard label="Diesel Used" value={`${fmt(totalDiesel)} L`} sub={scopeLabel} accent={theme.accentDim} />
+        <StatCard label="Total Damages" value={fmt(totalDamages)} sub={`Production + stacking · ${scopeLabel}`} accent={theme.red} />
       </div>
 
       <div style={styles.card}>
-        <div style={styles.sectionTitle}>Production Records</div>
-        {loading ? <Spinner /> : records.length === 0 ? (
-          <div style={{ textAlign: "center", padding: "40px", color: theme.textMuted, fontSize: "13px" }}>No records yet. Log today's production to get started.</div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap", marginBottom: "14px" }}>
+          <div style={{ ...styles.sectionTitle, marginBottom: 0 }}>Production Records</div>
+          <div style={{ width: "220px" }}><SitePicker allowAll value={siteFilter} onChange={setSiteFilter} style={styles.input} /></div>
+        </div>
+        {loading ? <Spinner /> : shown.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "40px", color: theme.textMuted, fontSize: "13px" }}>{records.length === 0 ? "No records yet. Log today's production to get started." : `No production records for ${scopeLabel}.`}</div>
         ) : (
           <table style={styles.table}>
             <thead>
-              <tr>{["Date", "Block Type", "Produced", "Cement (bags)", "Granite (kg)", "Chippings (kg)", "Diesel (L)", "Dmg Production", "Dmg Stacking", "Net Output", ""].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
+              <tr>{["Date", "Site", "Block Type", "Produced", "Cement (bags)", "Granite (kg)", "Chippings (kg)", "Diesel (L)", "Dmg Production", "Dmg Stacking", "Net Output", ""].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
             </thead>
             <tbody>
-              {records.map((p) => {
+              {shown.map((p) => {
                 const net = (p.quantity_produced || 0) - (p.damaged?.production || 0) - (p.damaged?.stacking || 0);
                 return (
                   <tr key={p.id}>
@@ -1041,6 +1115,10 @@ const Production = ({ userProfile }) => {
                           (edited {fmtRelativeTime(p.updated_at)})
                         </div>
                       )}
+                    </td>
+                    <td style={styles.td}>
+                      {siteName(p.site_id, sites)}
+                      {p.machine?.code && <div style={{ fontSize: "10px", color: theme.textMuted, marginTop: "2px" }}>{p.machine.code}</div>}
                     </td>
                     <td style={styles.td}><span style={styles.badge(theme.blue)}>{p.block_type}</span></td>
                     <td style={styles.td}>{fmt(p.quantity_produced)}</td>
@@ -1999,6 +2077,9 @@ const Waybills = ({ userProfile }) => {
   const [vehicles, setVehicles] = useState([]);
   const [activeBatches, setActiveBatches] = useState([]);
   const [batchMap, setBatchMap] = useState({});
+  const [batchSiteMap, setBatchSiteMap] = useState({});
+  const [batchLoadError, setBatchLoadError] = useState(null);
+  const { sites: wbSites } = useSites();
   const [activeOrders, setActiveOrders] = useState([]);
   const [scheduleItems, setScheduleItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -2041,15 +2122,24 @@ const Waybills = ({ userProfile }) => {
     }
     if (isDriverRole) { setLoading(false); return; } // drivers don't need orders/batches/schedules
     try {
+      setBatchLoadError(null);
       const [orders, activeBatches, allBatches, approvedScheds] = await Promise.all([
         ordersService.getForDelivery().catch(() => []),
-        batchesService.getActive().catch(() => []),
+        // Dutse (factory) batches only — a client-site batch must never be
+        // loadable here, or it would decrease Dutse yard stock. The error is
+        // surfaced, not swallowed: an empty picker must not hide a failed load.
+        batchesService.getActive({ siteId: DUTSE_SITE_ID }).catch(e => {
+          console.error("Could not load batches for waybill picker:", e);
+          setBatchLoadError(e.message || "unknown error");
+          return [];
+        }),
         batchesService.getAll().catch(() => []),
         schedulesService.getApproved().catch(() => []),
       ]);
       setActiveOrders(orders.filter(o => ["invoiced", "in_progress", "lpo_approved"].includes(o.status)));
-      setActiveBatches(activeBatches);
+      setActiveBatches(batchesService.factoryBatchesOnly(activeBatches));
       setBatchMap(Object.fromEntries(allBatches.map(b => [b.id, b.batch_number])));
+      setBatchSiteMap(Object.fromEntries(allBatches.map(b => [b.id, b.site_id])));
       const today = new Date().toISOString().split("T")[0];
       const items = approvedScheds.filter(s => s.schedule_date === today).flatMap(s => (s.items || []).map(it => ({ ...it, scheduleDate: s.schedule_date, scheduleId: s.id })));
       setScheduleItems(items);
@@ -2341,12 +2431,23 @@ const Waybills = ({ userProfile }) => {
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Batch Number</label>
-              <select style={styles.input} value={form.batchId} onChange={e => setForm({ ...form, batchId: e.target.value })}>
-                <option value="">— Select batch (optional) —</option>
-                {activeBatches.filter(b => !form.blockType || b.block_type === form.blockType).map(b => (
-                  <option key={b.id} value={b.id}>{b.batch_number} — {b.block_type} ({Number(b.qty_remaining).toLocaleString()} remaining)</option>
-                ))}
-              </select>
+              {form.batchId && batchSiteMap[form.batchId] && !isFactorySite(batchSiteMap[form.batchId], wbSites) ? (
+                // Should never happen (waybills only offer Dutse batches), but an
+                // existing waybill on a client-site batch is shown, not hidden.
+                <>
+                  <div style={{ ...styles.input, color: theme.textMuted }}>{batchMap[form.batchId] || form.batchId} — {siteName(batchSiteMap[form.batchId], wbSites)}</div>
+                  <div style={{ fontSize: "11px", color: theme.red, marginTop: "4px" }}>This waybill references a client-site batch, which should not be on a Dutse waybill. Batch is read-only here; tell the MD.</div>
+                </>
+              ) : (
+                <select style={styles.input} value={form.batchId} onChange={e => setForm({ ...form, batchId: e.target.value })}>
+                  <option value="">— Select batch (optional) —</option>
+                  {activeBatches.filter(b => !form.blockType || b.block_type === form.blockType).map(b => (
+                    <option key={b.id} value={b.id}>{b.batch_number} — {b.block_type} ({Number(b.qty_remaining).toLocaleString()} remaining)</option>
+                  ))}
+                  {form.batchId && !activeBatches.some(b => b.id === form.batchId) && <option value={form.batchId}>{batchMap[form.batchId] || "Current batch"} (not active)</option>}
+                </select>
+              )}
+              {batchLoadError && <div style={{ fontSize: "11px", color: theme.red, marginTop: "4px" }}>Could not load batches ({batchLoadError}).</div>}
             </div>
             {scheduleItems.length > 0 && (
               <div style={styles.formGroup}>
@@ -3146,7 +3247,8 @@ const Inventory = ({ onLowStockChange, userProfile }) => {
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [editItem, setEditItem] = useState(null);
   const [showItemForm, setShowItemForm] = useState(false);
-  const [movFilter, setMovFilter] = useState({ from: "", to: "", itemId: "" });
+  const [movFilter, setMovFilter] = useState({ from: "", to: "", itemId: "", siteId: "" });
+  const [itemSiteFilter, setItemSiteFilter] = useState("");
   const [reportDates, setReportDates] = useState({ from: "", to: "" });
   const [reportLoading, setReportLoading] = useState(false);
   const [movEditTarget, setMovEditTarget] = useState(null);
@@ -3154,7 +3256,7 @@ const Inventory = ({ onLowStockChange, userProfile }) => {
   const [movConfirmDelete, setMovConfirmDelete] = useState(null);
 
   const today = new Date().toISOString().split("T")[0];
-  const emptyItem = { name: "", unit: "bags", current_stock: "", reorder_level: "", unit_cost: "", supplier: "", date_added: today };
+  const emptyItem = { name: "", unit: "bags", current_stock: "", reorder_level: "", unit_cost: "", supplier: "", date_added: today, site_id: DUTSE_SITE_ID, owner: "apcl", material: "" };
   const emptyIn  = { itemId: "", quantity: "", unit: "kg", unitCost: "", supplierId: "", supplier: "", date: today, notes: "" };
   const emptyOut = { itemId: "", quantity: "", unit: "kg", issuedTo: "Production", reference: "", date: today, notes: "" };
 
@@ -3180,6 +3282,7 @@ const Inventory = ({ onLowStockChange, userProfile }) => {
     try {
       const m = await inventoryService.getMovements({
         itemId: movFilter.itemId || null,
+        siteId: movFilter.siteId || null,
         from: movFilter.from || null,
         to: movFilter.to || null,
       });
@@ -3193,9 +3296,10 @@ const Inventory = ({ onLowStockChange, userProfile }) => {
   useEffect(() => { if (tab === "movements") loadMovements(); }, [tab, movFilter]);
 
   const lowStockItems = items.filter(i => Number(i.current_stock) <= Number(i.reorder_level));
+  const { sites } = useSites();
 
   const startEditItem = (item) => {
-    setItemForm({ name: item.name, unit: item.unit, current_stock: String(item.current_stock), reorder_level: String(item.reorder_level), unit_cost: String(item.unit_cost || ""), supplier: item.supplier || "", date_added: item.date_added || item.created_at?.split("T")[0] || today });
+    setItemForm({ name: item.name, unit: item.unit, current_stock: String(item.current_stock), reorder_level: String(item.reorder_level), unit_cost: String(item.unit_cost || ""), supplier: item.supplier || "", date_added: item.date_added || item.created_at?.split("T")[0] || today, site_id: item.site_id || DUTSE_SITE_ID, owner: item.owner || "apcl", material: item.material || "" });
     setEditItem(item);
     setShowItemForm(true);
   };
@@ -3204,7 +3308,7 @@ const Inventory = ({ onLowStockChange, userProfile }) => {
     if (!itemForm.name || !itemForm.unit) return setAlert({ type: "error", msg: "Item name and unit are required." });
     setSaving(true);
     try {
-      const payload = { name: itemForm.name, unit: itemForm.unit, current_stock: Number(itemForm.current_stock) || 0, reorder_level: Number(itemForm.reorder_level) || 0, unit_cost: Number(itemForm.unit_cost) || 0, supplier: itemForm.supplier || null, date_added: itemForm.date_added || today };
+      const payload = { name: itemForm.name, unit: itemForm.unit, current_stock: Number(itemForm.current_stock) || 0, reorder_level: Number(itemForm.reorder_level) || 0, unit_cost: Number(itemForm.unit_cost) || 0, supplier: itemForm.supplier || null, date_added: itemForm.date_added || today, site_id: itemForm.site_id || DUTSE_SITE_ID, owner: itemForm.owner || "apcl", material: itemForm.material || null };
       if (editItem) {
         await inventoryService.updateItem(editItem.id, payload);
       } else {
@@ -3216,7 +3320,12 @@ const Inventory = ({ onLowStockChange, userProfile }) => {
       setEditItem(null);
       setAlert({ type: "success", msg: editItem ? "Item updated." : "Item added to registry." });
     } catch (e) {
-      setAlert({ type: "error", msg: "Failed to save item. " + e.message });
+      // uq_inventory_site_material: one item per (site, material)
+      if (e.code === "23505" && itemForm.material) {
+        setAlert({ type: "error", msg: `This site already has a ${itemForm.material} item.` });
+      } else {
+        setAlert({ type: "error", msg: "Failed to save item. " + e.message });
+      }
     } finally {
       setSaving(false);
     }
@@ -3343,7 +3452,13 @@ const Inventory = ({ onLowStockChange, userProfile }) => {
     }
   };
 
-  const totalValue = items.reduce((s, i) => s + Number(i.current_stock) * Number(i.unit_cost || 0), 0);
+  // APCL stock value only — client-owned material is tracked but is not APCL's.
+  const itemValue = (i) => i.owner === "client" ? 0 : Number(i.current_stock) * Number(i.unit_cost || 0);
+  const shownItems = itemSiteFilter ? items.filter(i => i.site_id === itemSiteFilter) : items;
+  const shownLow = shownItems.filter(i => Number(i.current_stock) <= Number(i.reorder_level));
+  const totalValue = shownItems.reduce((s, i) => s + itemValue(i), 0);
+  const itemSiteLabel = (i) => i.site?.name || siteName(i.site_id, sites);
+  const itemOptionLabel = (i) => `${i.name} · ${itemSiteLabel(i)}${i.owner === "client" ? " (client-owned)" : ""} (${i.unit}) — ${Number(i.current_stock).toLocaleString()} on hand`;
   const TABS = [{ id: "registry", label: "Stock Registry" }, { id: "stockin", label: "Stock In" }, { id: "stockout", label: "Stock Out" }, { id: "movements", label: "Movement Log" }, { id: "report", label: "Report" }];
 
   // Unit-toggle helpers: the kg/tonnes selector only applies to items stored in
@@ -3377,6 +3492,7 @@ const Inventory = ({ onLowStockChange, userProfile }) => {
             {lowStockItems.map(i => (
               <div key={i.id} style={{ background: "rgba(240,107,107,0.12)", border: `1px solid ${theme.red}55`, borderRadius: "6px", padding: "5px 10px", fontSize: "12px" }}>
                 <strong style={{ color: theme.red }}>{i.name}</strong>
+                <span style={{ color: theme.text, marginLeft: "6px" }}>@ {itemSiteLabel(i)}</span>
                 <span style={{ color: theme.textMuted, marginLeft: "6px" }}>{Number(i.current_stock).toLocaleString()} {i.unit} left (min: {Number(i.reorder_level).toLocaleString()})</span>
               </div>
             ))}
@@ -3386,10 +3502,10 @@ const Inventory = ({ onLowStockChange, userProfile }) => {
 
       {/* Summary stats */}
       <div style={styles.grid(4)}>
-        <StatCard label="Total Items" value={items.length} sub="In registry" accent={theme.blue} />
-        <StatCard label="Low Stock" value={lowStockItems.length} sub="Below reorder level" accent={lowStockItems.length > 0 ? theme.red : theme.green} />
-        <StatCard label="Total Stock Value" value={`₦${Math.round(totalValue).toLocaleString()}`} sub="At current unit cost" accent={theme.accent} />
-        <StatCard label="Adequately Stocked" value={items.length - lowStockItems.length} sub="Above reorder level" accent={theme.green} />
+        <StatCard label="Total Items" value={shownItems.length} sub={itemSiteFilter ? siteName(itemSiteFilter, sites) : "In registry · all sites"} accent={theme.blue} />
+        <StatCard label="Low Stock" value={shownLow.length} sub="Below reorder level" accent={shownLow.length > 0 ? theme.red : theme.green} />
+        <StatCard label="APCL Stock Value" value={`₦${Math.round(totalValue).toLocaleString()}`} sub="At current unit cost · excludes client-owned" accent={theme.accent} />
+        <StatCard label="Adequately Stocked" value={shownItems.length - shownLow.length} sub="Above reorder level" accent={theme.green} />
       </div>
 
       {/* Tabs */}
@@ -3408,6 +3524,27 @@ const Inventory = ({ onLowStockChange, userProfile }) => {
             <div style={{ ...styles.card, marginBottom: "20px", borderColor: theme.accent + "44" }}>
               <div style={styles.sectionTitle}>{editItem ? `Edit — ${editItem.name}` : "Add New Inventory Item"}</div>
               <div style={styles.grid(3)}>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Site *</label>
+                  <SitePicker value={itemForm.site_id} onChange={v => setItemForm({ ...itemForm, site_id: v })} style={styles.input} />
+                </div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Owner *</label>
+                  <select style={styles.input} value={itemForm.owner} onChange={e => setItemForm({ ...itemForm, owner: e.target.value })}>
+                    <option value="apcl">APCL</option>
+                    <option value="client">Client-owned</option>
+                  </select>
+                </div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Production Material</label>
+                  <select style={styles.input} value={itemForm.material} onChange={e => setItemForm({ ...itemForm, material: e.target.value })}>
+                    <option value="">None (not auto-deducted)</option>
+                    <option value="cement">Cement</option>
+                    <option value="dust">Dust</option>
+                    <option value="chippings">Chippings</option>
+                    <option value="diesel">Diesel</option>
+                  </select>
+                </div>
                 <div style={styles.formGroup}>
                   <label style={styles.label}>Item Name *</label>
                   <input style={styles.input} placeholder="e.g. Cement, Diesel…" value={itemForm.name} onChange={e => setItemForm({ ...itemForm, name: e.target.value })} />
@@ -3447,29 +3584,35 @@ const Inventory = ({ onLowStockChange, userProfile }) => {
           )}
 
           <div style={styles.card}>
-            <div style={styles.sectionTitle}>Inventory Registry ({items.length} items)</div>
-            {loading ? <Spinner /> : items.length === 0 ? (
-              <div style={{ textAlign: "center", padding: "40px", color: theme.textMuted, fontSize: "13px" }}>No items registered yet. Add your first inventory item.</div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap", marginBottom: "14px" }}>
+              <div style={{ ...styles.sectionTitle, marginBottom: 0 }}>Inventory Registry ({shownItems.length} items)</div>
+              <div style={{ width: "220px" }}><SitePicker allowAll value={itemSiteFilter} onChange={setItemSiteFilter} style={styles.input} /></div>
+            </div>
+            {loading ? <Spinner /> : shownItems.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "40px", color: theme.textMuted, fontSize: "13px" }}>{items.length === 0 ? "No items registered yet. Add your first inventory item." : "No items at this site."}</div>
             ) : (
               <table style={styles.table}>
                 <thead>
-                  <tr>{["Item", "Unit", "On Hand", "Reorder Level", "Unit Cost", "Stock Value", "Supplier", "Date Added", "Last Updated", ""].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
+                  <tr>{["Item", "Site", "Material", "Unit", "On Hand", "Reorder Level", "Unit Cost", "Stock Value", "Supplier", "Date Added", "Last Updated", ""].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
                 </thead>
                 <tbody>
-                  {items.map(item => {
+                  {shownItems.map(item => {
                     const isLow = Number(item.current_stock) <= Number(item.reorder_level);
-                    const value = Number(item.current_stock) * Number(item.unit_cost || 0);
+                    const value = itemValue(item);
                     return (
                       <tr key={item.id} style={{ background: isLow ? "rgba(240,107,107,0.05)" : "transparent" }}>
                         <td style={styles.td}>
                           <strong style={{ color: isLow ? theme.red : theme.text }}>{item.name}</strong>
                           {isLow && <span style={{ ...styles.badge(theme.red), marginLeft: "6px", fontSize: "10px" }}>LOW</span>}
+                          {item.owner === "client" && <span style={{ ...styles.badge(theme.blue), marginLeft: "6px", fontSize: "10px" }}>Client-owned</span>}
                         </td>
+                        <td style={styles.td}>{itemSiteLabel(item)}</td>
+                        <td style={styles.td}>{item.material || "—"}</td>
                         <td style={styles.td}>{item.unit}</td>
                         <td style={styles.td}><strong style={{ color: isLow ? theme.red : theme.accent }}>{Number(item.current_stock).toLocaleString()}</strong></td>
                         <td style={styles.td}>{Number(item.reorder_level).toLocaleString()}</td>
                         <td style={styles.td}>₦{Number(item.unit_cost || 0).toLocaleString()}</td>
-                        <td style={styles.td}><strong style={{ color: theme.accent }}>₦{Math.round(value).toLocaleString()}</strong></td>
+                        <td style={styles.td}>{item.owner === "client" ? <span style={{ color: theme.textMuted }}>Client's stock</span> : <strong style={{ color: theme.accent }}>₦{Math.round(value).toLocaleString()}</strong>}</td>
                         <td style={styles.td}>{item.supplier || "—"}</td>
                         <td style={styles.td}>{item.date_added || item.created_at?.split("T")[0] || "—"}</td>
                         <td style={styles.td}>{item.updated_at ? item.updated_at.split("T")[0] : "—"}</td>
@@ -3498,7 +3641,7 @@ const Inventory = ({ onLowStockChange, userProfile }) => {
               <label style={styles.label}>Item *</label>
               <select style={styles.input} value={inForm.itemId} onChange={e => setInForm({ ...inForm, itemId: e.target.value })}>
                 <option value="">— Select item —</option>
-                {items.map(i => <option key={i.id} value={i.id}>{i.name} ({i.unit}) — {Number(i.current_stock).toLocaleString()} on hand</option>)}
+                {items.map(i => <option key={i.id} value={i.id}>{itemOptionLabel(i)}</option>)}
               </select>
             </div>
             <div style={styles.formGroup}>
@@ -3569,7 +3712,7 @@ const Inventory = ({ onLowStockChange, userProfile }) => {
               <label style={styles.label}>Item *</label>
               <select style={styles.input} value={outForm.itemId} onChange={e => setOutForm({ ...outForm, itemId: e.target.value })}>
                 <option value="">— Select item —</option>
-                {items.map(i => <option key={i.id} value={i.id}>{i.name} ({i.unit}) — {Number(i.current_stock).toLocaleString()} on hand</option>)}
+                {items.map(i => <option key={i.id} value={i.id}>{itemOptionLabel(i)}</option>)}
               </select>
             </div>
             <div style={styles.formGroup}>
@@ -3628,8 +3771,12 @@ const Inventory = ({ onLowStockChange, userProfile }) => {
                 <label style={styles.label}>Filter by Item</label>
                 <select style={{ ...styles.input, width: "220px" }} value={movFilter.itemId} onChange={e => setMovFilter({ ...movFilter, itemId: e.target.value })}>
                   <option value="">All items</option>
-                  {items.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
+                  {items.map(i => <option key={i.id} value={i.id}>{i.name} · {itemSiteLabel(i)}</option>)}
                 </select>
+              </div>
+              <div>
+                <label style={styles.label}>Site</label>
+                <SitePicker allowAll value={movFilter.siteId} onChange={v => setMovFilter({ ...movFilter, siteId: v })} style={{ ...styles.input, width: "200px" }} />
               </div>
               <div>
                 <label style={styles.label}>From</label>
@@ -3639,8 +3786,8 @@ const Inventory = ({ onLowStockChange, userProfile }) => {
                 <label style={styles.label}>To</label>
                 <input style={{ ...styles.input, width: "140px" }} type="date" value={movFilter.to} onChange={e => setMovFilter({ ...movFilter, to: e.target.value })} />
               </div>
-              {(movFilter.itemId || movFilter.from || movFilter.to) && (
-                <button style={styles.btn("secondary")} onClick={() => setMovFilter({ from: "", to: "", itemId: "" })}>Clear Filters</button>
+              {(movFilter.itemId || movFilter.siteId || movFilter.from || movFilter.to) && (
+                <button style={styles.btn("secondary")} onClick={() => setMovFilter({ from: "", to: "", itemId: "", siteId: "" })}>Clear Filters</button>
               )}
             </div>
           </div>
@@ -3712,7 +3859,7 @@ const Inventory = ({ onLowStockChange, userProfile }) => {
             ) : (
               <table style={styles.table}>
                 <thead>
-                  <tr>{["Date", "Type", "Item", "Qty", "Unit", "Unit Cost", "Total Cost", "From / To", "Staff", "Notes", ""].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
+                  <tr>{["Date", "Type", "Item", "Site", "Qty", "Unit", "Unit Cost", "Total Cost", "From / To", "Staff", "Notes", ""].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
                 </thead>
                 <tbody>
                   {movements.map(m => {
@@ -3726,6 +3873,7 @@ const Inventory = ({ onLowStockChange, userProfile }) => {
                           </span>
                         </td>
                         <td style={styles.td}><strong>{m.item?.name || "—"}</strong></td>
+                        <td style={styles.td}>{m.site?.name || siteName(m.site_id, sites)}</td>
                         <td style={styles.td}><strong style={{ color: m.movement_type === "in" ? theme.green : theme.red }}>{m.movement_type === "in" ? "+" : "-"}{Number(m.quantity).toLocaleString()}</strong></td>
                         <td style={styles.td}>{m.item?.unit || "—"}</td>
                         <td style={styles.td}>{m.unit_cost ? `₦${Number(m.unit_cost).toLocaleString()}` : "—"}</td>
@@ -4515,8 +4663,10 @@ const Batches = ({ userProfile }) => {
   const BATCH_DELETE_ROLES = ['md'];
   const canWriteBatch = hasRole(userProfile, ...BATCH_WRITE_ROLES);
   const canDeleteBatch = BATCH_DELETE_ROLES.includes(userProfile?.role);
-  const emptyForm = { productId: "", blockType: "", dateCured: today, qtyAccepted: "", createdBy: "", notes: "", linkedProds: [] };
+  const emptyForm = { siteId: DUTSE_SITE_ID, productId: "", blockType: "", dateCured: today, qtyAccepted: "", createdBy: "", notes: "", linkedProds: [] };
   const [form, setForm] = useState(emptyForm);
+  const { sites } = useSites();
+  const [siteFilter, setSiteFilter] = useState("");
 
   const load = async () => {
     setLoading(true);
@@ -4551,31 +4701,27 @@ const Batches = ({ userProfile }) => {
     if (!form.qtyAccepted || !form.dateCured) return setAlert({ type: "error", msg: "Quantity accepted and batch date are required." });
     setSaving(true);
     try {
-      let batchNum = await batchesService.getNextNumber();
-      try {
-        await batchesService.create({
-          batch_number: batchNum, product_id: form.productId || null, block_type: form.blockType, date_cured: form.dateCured,
+      const siteId = form.siteId || DUTSE_SITE_ID;
+      // Adds to Dutse yard stock only for a factory batch (Phase 7A).
+      const { batchNumber, yardUpdated, yardError } = await batchesService.createBatch({
+        batch: {
+          site_id: siteId, product_id: form.productId || null, block_type: form.blockType, date_cured: form.dateCured,
           qty_accepted: parseInt(form.qtyAccepted), qty_remaining: parseInt(form.qtyAccepted),
           status: "active", notes: form.notes || null, created_by: form.createdBy || null,
-        }, form.linkedProds);
-      } catch (createErr) {
-        if (createErr.code === '23505') {
-          batchNum = await batchesService.getNextNumber();
-          await batchesService.create({
-            batch_number: batchNum, product_id: form.productId || null, block_type: form.blockType, date_cured: form.dateCured,
-            qty_accepted: parseInt(form.qtyAccepted), qty_remaining: parseInt(form.qtyAccepted),
-            status: "active", notes: form.notes || null, created_by: form.createdBy || null,
-          }, form.linkedProds);
-        } else {
-          throw createErr;
-        }
-      }
-      // Increase finished goods stock
-      try { await finishedGoodsService.increase(form.blockType, parseInt(form.qtyAccepted)); } catch {}
+        },
+        productionLogIds: form.linkedProds,
+        sites,
+      });
       await load();
       setShowForm(false);
       setForm(emptyForm);
-      setAlert({ type: "success", msg: `Batch ${batchNum} created. Finished goods stock updated.` });
+      if (yardError) {
+        setAlert({ type: "error", msg: `Batch ${batchNumber} created, but Dutse yard stock could not be updated (${yardError.message}). Adjust finished goods manually.` });
+      } else if (yardUpdated) {
+        setAlert({ type: "success", msg: `Batch ${batchNumber} created. Finished goods stock updated.` });
+      } else {
+        setAlert({ type: "success", msg: `Batch ${batchNumber} recorded at ${siteName(siteId, sites)}. Not added to Dutse yard stock.` });
+      }
     } catch (e) { setAlert({ type: "error", msg: "Failed to create batch: " + e.message }); }
     finally { setSaving(false); }
   };
@@ -4604,10 +4750,9 @@ const Batches = ({ userProfile }) => {
         notes: editForm.notes || null,
       });
       if (diff !== 0) {
-        try {
-          if (diff > 0) await finishedGoodsService.increase(editForm.blockType, diff);
-          else await finishedGoodsService.decrease(editForm.blockType, Math.abs(diff));
-        } catch {}
+        // Yard stock only moves for a factory batch; a client-site batch is skipped.
+        try { await batchesService.adjustYardStock(editTarget.site_id, sites, editForm.blockType, diff); }
+        catch (e) { console.error("Finished goods (yard) adjustment failed on batch edit:", e); }
       }
       await load();
       setEditTarget(null);
@@ -4620,7 +4765,8 @@ const Batches = ({ userProfile }) => {
     if (!window.confirm(`Delete batch ${b.batch_number}? This cannot be undone.`)) return;
     setDeleting(b.id);
     try {
-      try { await finishedGoodsService.decrease(b.block_type, Number(b.qty_remaining)); } catch {}
+      try { await batchesService.adjustYardStock(b.site_id, sites, b.block_type, -Number(b.qty_remaining)); }
+      catch (e) { console.error("Finished goods (yard) adjustment failed on batch delete:", e); }
       await batchesService.delete(b.id);
       await load();
       setAlert({ type: "success", msg: `Batch ${b.batch_number} deleted.` });
@@ -4645,11 +4791,13 @@ const Batches = ({ userProfile }) => {
         stage: "curing",
         quantity_damaged: qty,
         batch_id: dmgTarget.id,
+        site_id: dmgTarget.site_id || DUTSE_SITE_ID,
         notes: dmgForm.notes || null,
         recorded_by: userProfile?.id || null,
       });
       await batchesService.reduceStock(dmgTarget.id, qty);
-      try { await finishedGoodsService.decrease(dmgTarget.block_type, qty); } catch {}
+      try { await batchesService.adjustYardStock(dmgTarget.site_id, sites, dmgTarget.block_type, -qty); }
+      catch (e) { console.error("Finished goods (yard) adjustment failed on batch damage:", e); }
       await load();
       setDmgTarget(null);
       setAlert({ type: "success", msg: `${qty} damaged block(s) logged against ${dmgTarget.batch_number}.` });
@@ -4680,8 +4828,11 @@ const Batches = ({ userProfile }) => {
     return { state: "curing", ready: daysRemaining <= 0, daysRemaining };
   };
 
-  const filteredProds = productions.filter(p => p.block_type === form.blockType);
-  const totalInYard = batches.filter(b => b.status === "active").reduce((s, b) => s + Number(b.qty_remaining || 0), 0);
+  // Only production from the batch's own site can be linked to it.
+  const filteredProds = productions.filter(p => p.block_type === form.blockType && p.site_id === (form.siteId || DUTSE_SITE_ID));
+  const shownBatches = siteFilter ? batches.filter(b => b.site_id === siteFilter) : batches;
+  const scopeLabel = siteFilter ? siteName(siteFilter, sites) : "All sites";
+  const totalInYard = shownBatches.filter(b => b.status === "active").reduce((s, b) => s + Number(b.qty_remaining || 0), 0);
 
   return (
     <div>
@@ -4695,7 +4846,8 @@ const Batches = ({ userProfile }) => {
       {editTarget && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
           <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: "12px", padding: "24px", width: "100%", maxWidth: "540px" }}>
-            <div style={{ fontWeight: "700", fontSize: "15px", marginBottom: "18px" }}>Edit Batch — {editTarget.batch_number}</div>
+            <div style={{ fontWeight: "700", fontSize: "15px", marginBottom: "4px" }}>Edit Batch — {editTarget.batch_number}</div>
+            <div style={{ fontSize: "12px", color: theme.textMuted, marginBottom: "18px" }}>Site: {siteName(editTarget.site_id, sites)}{isFactorySite(editTarget.site_id, sites) ? "" : " · not in Dutse yard stock"}</div>
             <div style={styles.grid(2)}>
               <div style={styles.formGroup}><label style={styles.label}>Block Type</label><ProductSelect value={editForm.blockType} onChange={(name) => setEditForm(f => ({ ...f, blockType: name }))} style={styles.input} /></div>
               <div style={styles.formGroup}><label style={styles.label}>Batch Date *</label><input style={styles.input} type="date" value={editForm.dateCured} onChange={e => setEditForm(f => ({ ...f, dateCured: e.target.value }))} /></div>
@@ -4705,7 +4857,7 @@ const Batches = ({ userProfile }) => {
             </div>
             {parseInt(editForm.qtyAccepted) !== editTarget.qty_accepted && (
               <div style={{ padding: "8px 12px", background: theme.accent + "22", border: `1px solid ${theme.accent}44`, borderRadius: "6px", fontSize: "11px", color: theme.accent, marginBottom: "12px" }}>
-                Qty changing by {parseInt(editForm.qtyAccepted) - editTarget.qty_accepted > 0 ? "+" : ""}{parseInt(editForm.qtyAccepted) - editTarget.qty_accepted} — finished goods stock will be adjusted automatically.
+                Qty changing by {parseInt(editForm.qtyAccepted) - editTarget.qty_accepted > 0 ? "+" : ""}{parseInt(editForm.qtyAccepted) - editTarget.qty_accepted} — {isFactorySite(editTarget.site_id, sites) ? "finished goods stock will be adjusted automatically." : "client-site batch, Dutse yard stock is not changed."}
               </div>
             )}
             <div style={styles.row}>
@@ -4748,15 +4900,20 @@ const Batches = ({ userProfile }) => {
       )}
 
       <div style={styles.grid(3)}>
-        <StatCard label="Active Batches" value={batches.filter(b => b.status === "active").length} sub="With stock remaining" accent={theme.green} />
-        <StatCard label="Blocks In Yard" value={fmt(totalInYard)} sub="Across all active batches" accent={theme.accent} />
-        <StatCard label="Exhausted Batches" value={batches.filter(b => b.status === "exhausted").length} sub="Fully delivered" accent={theme.textMuted} />
+        <StatCard label="Active Batches" value={shownBatches.filter(b => b.status === "active").length} sub={`With stock remaining · ${scopeLabel}`} accent={theme.green} />
+        <StatCard label="Blocks Remaining" value={fmt(totalInYard)} sub={`Across active batches · ${scopeLabel}`} accent={theme.accent} />
+        <StatCard label="Exhausted Batches" value={shownBatches.filter(b => b.status === "exhausted").length} sub={`Fully delivered · ${scopeLabel}`} accent={theme.textMuted} />
       </div>
 
       {showForm && (
         <div style={{ ...styles.card, marginBottom: "20px", borderColor: theme.accent + "44" }}>
           <div style={styles.sectionTitle}>Create New Batch</div>
           <div style={styles.grid(3)}>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Site *</label>
+              <SitePicker value={form.siteId} onChange={v => setForm({ ...form, siteId: v, linkedProds: [] })} style={styles.input} />
+              {!isFactorySite(form.siteId || DUTSE_SITE_ID, sites) && <div style={{ fontSize: "11px", color: theme.accent, marginTop: "4px" }}>Client site — will not be added to Dutse yard stock.</div>}
+            </div>
             {productsLoadFailed ? (
               // Degraded: products couldn't load (network hiccup) — fall back to
               // the original free picker so batch creation still works. product_id
@@ -4802,17 +4959,20 @@ const Batches = ({ userProfile }) => {
             </div>
           )}
           <div style={styles.row}>
-            <button style={styles.btn("primary")} onClick={handleCreate} disabled={saving}>{saving ? "Creating…" : "Create Batch & Update Stock"}</button>
+            <button style={styles.btn("primary")} onClick={handleCreate} disabled={saving}>{saving ? "Creating…" : isFactorySite(form.siteId || DUTSE_SITE_ID, sites) ? "Create Batch & Update Stock" : "Create Batch"}</button>
             <button style={styles.btn("secondary")} onClick={() => { setShowForm(false); setForm(emptyForm); }}>Cancel</button>
           </div>
         </div>
       )}
 
       <div style={styles.card}>
-        <div style={styles.sectionTitle}>All Batches ({batches.length})</div>
-        {loading ? <Spinner /> : batches.length === 0 ? (
-          <div style={{ textAlign: "center", padding: "40px", color: theme.textMuted }}>No batches created yet.</div>
-        ) : batches.map(b => {
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap", marginBottom: "14px" }}>
+          <div style={{ ...styles.sectionTitle, marginBottom: 0 }}>{siteFilter ? `Batches at ${scopeLabel}` : "All Batches"} ({shownBatches.length})</div>
+          <div style={{ width: "220px" }}><SitePicker allowAll value={siteFilter} onChange={setSiteFilter} style={styles.input} /></div>
+        </div>
+        {loading ? <Spinner /> : shownBatches.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "40px", color: theme.textMuted }}>{batches.length === 0 ? "No batches created yet." : `No batches at ${scopeLabel}.`}</div>
+        ) : shownBatches.map(b => {
           const delivered = b.qty_accepted - b.qty_remaining;
           const pct = b.qty_accepted > 0 ? Math.round((delivered / b.qty_accepted) * 100) : 0;
           const isOpen = expandedId === b.id;
@@ -4829,7 +4989,7 @@ const Batches = ({ userProfile }) => {
                     : ci.state === "cured"
                       ? <span style={styles.badge(theme.green)}>✓ Cured</span>
                       : <span style={styles.badge(theme.accent)}>Curing</span>}
-                  <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "3px" }}>Batch date: {b.date_cured} · Created by: {b.created_by || "—"}</div>
+                  <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "3px" }}>Site: <span style={{ color: theme.text }}>{siteName(b.site_id, sites)}</span> · Batch date: {b.date_cured} · Created by: {b.created_by || "—"}</div>
                   {ci && ci.state === "curing" && !ci.ready && ci.daysRemaining != null && (
                     <div style={{ fontSize: "11px", color: theme.accent, marginTop: "3px" }}>Curing — ready in {ci.daysRemaining} day{ci.daysRemaining === 1 ? "" : "s"}</div>
                   )}
@@ -7918,6 +8078,8 @@ const PaymentRequestsPage = ({ userProfile }) => {
   const [allUsers, setAllUsers] = useState([]);
   const [showQueried, setShowQueried] = useState(false);
   const [statusFilter, setStatusFilter] = useState('all');
+  const [prSiteFilter, setPrSiteFilter] = useState('');
+  const { sites: prSites } = useSites();
 
   const canBackfill = isInitiator || role === 'md';
   const canQuery = ['ico', 'accountant'].includes(role);
@@ -7984,7 +8146,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
     return acc;
   }, {});
 
-  const emptyForm = { amount: '', purpose: '', expense_category_id: '', disbursement_method: 'bank_transfer', order_item_id: '', _order_id: '', category_other_note: '', payeeMode: 'existing', supplier_id: '', payee_name: '', payee_bank_name: '', payee_account_number: '', payee_account_name: '', saveAsVendor: false };
+  const emptyForm = { site_id: DUTSE_SITE_ID, amount: '', purpose: '', expense_category_id: '', disbursement_method: 'bank_transfer', order_item_id: '', _order_id: '', category_other_note: '', payeeMode: 'existing', supplier_id: '', payee_name: '', payee_bank_name: '', payee_account_number: '', payee_account_name: '', saveAsVendor: false };
 
   const openEdit = async (req) => {
     const payeeMode = req.supplier_id ? 'existing' : 'new';
@@ -7997,6 +8159,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
       loadResaleItems();
     }
     setForm({
+      site_id: req.site_id || DUTSE_SITE_ID,
       amount: String(req.amount || ''),
       purpose: req.purpose || '',
       expense_category_id: req.expense_category_id || '',
@@ -8060,12 +8223,15 @@ const PaymentRequestsPage = ({ userProfile }) => {
         setForm(emptyForm);
         setAlert({ type: 'success', msg: `Request ${editTarget.reference} updated.` });
       } else {
+        // Site is set on create only. Edits leave it untouched so this change
+        // never interacts with the payment-request guard/state machine.
+        const createFields = { ...fields, site_id: form.site_id || DUTSE_SITE_ID };
         let req;
         try {
-          req = await paymentRequestsService.create(fields);
+          req = await paymentRequestsService.create(createFields);
         } catch (createErr) {
           if (createErr.code === '23505') {
-            req = await paymentRequestsService.create(fields);
+            req = await paymentRequestsService.create(createFields);
           } else {
             throw createErr;
           }
@@ -8240,7 +8406,8 @@ const PaymentRequestsPage = ({ userProfile }) => {
     (['ico', 'accountant', 'md'].includes(role) || r.requested_by === userId));
   const baseQueue = showQueried ? queriedRequests : ((!isInitiator && showHistory) ? requests : actionQueue);
   // Status filter takes precedence over the Action Queue / All / Queried toggle when active
-  const queue = statusFilter !== 'all' ? requests.filter(r => r.status === statusFilter) : baseQueue;
+  const statusQueue = statusFilter !== 'all' ? requests.filter(r => r.status === statusFilter) : baseQueue;
+  const queue = prSiteFilter ? statusQueue.filter(r => r.site_id === prSiteFilter) : statusQueue;
 
   const ALL_STATUSES = ['draft', 'ico_approved', 'md_approved', 'funded', 'disbursed', 'closed', 'queried'];
   const fundedRequests = requests.filter(r => r.status === 'funded');
@@ -8313,6 +8480,12 @@ const PaymentRequestsPage = ({ userProfile }) => {
             {editTarget ? `Edit Request — ${editTarget.reference}` : 'New Payment Request'}
           </div>
           <div style={styles.grid(2)}>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Site *</label>
+              {editTarget
+                ? <div style={{ ...styles.input, color: theme.textMuted }}>{siteName(editTarget.site_id, prSites)}</div>
+                : <SitePicker value={form.site_id} onChange={v => setForm(f => ({ ...f, site_id: v }))} style={styles.input} />}
+            </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Amount (₦) *</label>
               <input style={styles.input} type="number" min="1" placeholder="0"
@@ -8818,19 +8991,20 @@ const PaymentRequestsPage = ({ userProfile }) => {
             )}
           </button>
         ))}
+        <div style={{ width: '200px', marginLeft: 'auto' }}><SitePicker allowAll value={prSiteFilter} onChange={setPrSiteFilter} style={{ ...styles.input, padding: '6px 10px' }} /></div>
       </div>
 
       <div style={styles.card}>
         {loading ? <Spinner /> : queue.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '30px', color: theme.textMuted }}>
-            {statusFilter !== 'all' ? `No ${statusFilter.replace(/_/g, ' ')} requests.` : isInitiator ? 'No payment requests yet.' : showHistory ? 'No payment requests found.' : 'No requests pending in this queue.'}
+            {prSiteFilter && statusQueue.length > 0 ? `No requests for ${siteName(prSiteFilter, prSites)} in this view.` : statusFilter !== 'all' ? `No ${statusFilter.replace(/_/g, ' ')} requests.` : isInitiator ? 'No payment requests yet.' : showHistory ? 'No payment requests found.' : 'No requests pending in this queue.'}
           </div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
             <table style={styles.table}>
               <thead>
                 <tr>
-                  {['Reference', 'Amount', 'Purpose', 'Category', 'Method', 'Payee',
+                  {['Reference', 'Site', 'Amount', 'Purpose', 'Category', 'Method', 'Payee',
                     ...(!isInitiator ? ['Requested By'] : []),
                     'Status', 'Date', 'Actions'].map(h => (
                     <th key={h} style={styles.th}>{h}</th>
@@ -8843,6 +9017,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
                   return (
                     <tr key={req.id}>
                       <td style={styles.td}><strong style={{ fontFamily: 'monospace', fontSize: '12px' }}>{req.reference}</strong></td>
+                      <td style={styles.td}>{siteName(req.site_id, prSites)}</td>
                       <td style={styles.td}><strong style={{ color: theme.accent }}>{naira(req.amount)}</strong></td>
                       <td style={styles.td}>{req.purpose || '—'}</td>
                       <td style={styles.td}>{req.expense_category_id ? (catMap[req.expense_category_id] || '—') : <span style={{ color: theme.textMuted }}>—</span>}</td>
@@ -11480,6 +11655,7 @@ export default function App() {
             [data-board-view] button:not([data-board-allow]) { display: none !important; }
             [data-board-view] input { pointer-events: none; opacity: 0.8; }
             [data-board-view] select { pointer-events: none; opacity: 0.8; }
+            [data-board-view] select[data-board-allow] { pointer-events: auto; opacity: 1; }
           `}</style>
         )}
         {isICO && (

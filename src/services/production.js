@@ -5,7 +5,7 @@ export const productionService = {
   async getAll({ from, to } = {}) {
     let query = supabase
       .from('production_log')
-      .select('*, recorded_by_staff:staff(full_name)')
+      .select('*, recorded_by_staff:staff(full_name), machine:asset_id(code, name)')
       .order('date', { ascending: false })
 
     if (from) query = query.gte('date', from)

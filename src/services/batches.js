@@ -1,4 +1,6 @@
 import { supabase } from '../lib/supabase'
+import { finishedGoodsService } from './finishedGoods'
+import { isFactorySite } from './sites'
 
 export const batchesService = {
   async getAll() {
@@ -10,14 +12,24 @@ export const batchesService = {
     return data || []
   },
 
-  async getActive() {
-    const { data, error } = await supabase
+  // Active batches, optionally limited to one site (the waybill screen passes
+  // DUTSE_SITE_ID so only factory/yard batches can be loaded on a truck).
+  async getActive({ siteId = null } = {}) {
+    let q = supabase
       .from('batches')
       .select('*')
       .eq('status', 'active')
-      .order('date_cured', { ascending: false })
+    if (siteId) q = q.eq('site_id', siteId)
+    const { data, error } = await q.order('date_cured', { ascending: false })
     if (error) throw error
     return data || []
+  },
+
+  // Batches that may be loaded on a waybill: factory (Dutse yard) batches only.
+  // A client-site batch never feeds Dutse finished_goods_stock, so loading it
+  // would wrongly decrease Dutse yard stock (Phase 7A).
+  factoryBatchesOnly(batches, sites = []) {
+    return batches.filter(b => isFactorySite(b.site_id, sites))
   },
 
   async getNextNumber() {
@@ -46,6 +58,41 @@ export const batchesService = {
       )
     }
     return data
+  },
+
+  // Dutse yard stock (finished_goods_stock) belongs to the factory only. A batch
+  // at a client site never touches it (Phase 7A). delta > 0 increases, < 0
+  // decreases. Returns true when the yard was adjusted, false when skipped.
+  async adjustYardStock(siteId, sites, blockType, delta) {
+    if (!delta || !isFactorySite(siteId, sites)) return false
+    if (delta > 0) await finishedGoodsService.increase(blockType, delta)
+    else await finishedGoodsService.decrease(blockType, Math.abs(delta))
+    return true
+  },
+
+  // Create path used by the Batches page: insert (retrying once with a fresh
+  // number on a batch_number collision), then add to Dutse yard stock only for
+  // a factory batch. A yard-stock failure doesn't undo the batch; it is
+  // returned as yardError so the page can show it.
+  async createBatch({ batch, productionLogIds = [], sites = [] }) {
+    let batchNumber = batch.batch_number || await batchesService.getNextNumber()
+    let created
+    try {
+      created = await batchesService.create({ ...batch, batch_number: batchNumber }, productionLogIds)
+    } catch (e) {
+      if (e.code !== '23505') throw e
+      batchNumber = await batchesService.getNextNumber()
+      created = await batchesService.create({ ...batch, batch_number: batchNumber }, productionLogIds)
+    }
+    let yardUpdated = false
+    let yardError = null
+    try {
+      yardUpdated = await batchesService.adjustYardStock(batch.site_id, sites, batch.block_type, Number(batch.qty_accepted))
+    } catch (e) {
+      console.error('Finished goods (yard) update failed for batch', batchNumber, e)
+      yardError = e
+    }
+    return { batch: created, batchNumber, yardUpdated, yardError }
   },
 
   async restoreStock(id, qty) {

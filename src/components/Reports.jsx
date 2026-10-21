@@ -4,6 +4,8 @@ import autoTable from 'jspdf-autotable'
 import * as XLSX from 'xlsx'
 import { supabase } from '../lib/supabase'
 import { effectiveRolesOf } from '../lib/roles'
+import SitePicker, { useSites } from './SitePicker'
+import { siteName } from '../services/sites'
 
 // ── THEME ────────────────────────────────────────────────────
 const theme = {
@@ -43,11 +45,11 @@ const CAT_COLOR = {
 // ── REPORT CATALOG ───────────────────────────────────────────
 const CATALOG = [
   // PRODUCTION
-  { id: 'daily_production',    name: 'Daily Production Report',       category: 'production', description: 'Blocks produced, materials used, damages and cost per block for a single day', formats: ['pdf','excel'], roles: ['md','production_manager','assistant_production_manager','ico'], periodType: 'date' },
-  { id: 'weekly_production',   name: 'Weekly Production Summary',     category: 'production', description: 'Day-by-day production table, weekly totals and efficiency vs target',           formats: ['pdf','excel'], roles: ['md','production_manager','assistant_production_manager','accountant','ico'], periodType: 'week' },
-  { id: 'monthly_production',  name: 'Monthly Production Report',     category: 'production', description: 'Monthly totals, material costs, damage analysis and cost per block trend',      formats: ['pdf','excel'], roles: ['md','production_manager','assistant_production_manager','accountant','board_member','ico'], periodType: 'month' },
-  { id: 'production_cost',     name: 'Production Cost Analysis',      category: 'production', description: 'Cost per block, selling price and gross margin per block type',                 formats: ['pdf','excel'], roles: ['md','accountant','ico'], periodType: 'range' },
-  { id: 'damage_waste',        name: 'Damage & Waste Report',         category: 'production', description: 'Damages by stage, by block type, by vehicle and total value of damaged blocks', formats: ['pdf','excel'], roles: ['md','production_manager','assistant_production_manager','logistics_manager','ico'], periodType: 'range' },
+  { id: 'daily_production',    name: 'Daily Production Report',       category: 'production', description: 'Blocks produced, materials used, damages and cost per block for a single day', formats: ['pdf','excel'], roles: ['md','production_manager','assistant_production_manager','ico'], periodType: 'date', siteFilter: true },
+  { id: 'weekly_production',   name: 'Weekly Production Summary',     category: 'production', description: 'Day-by-day production table, weekly totals and efficiency vs target',           formats: ['pdf','excel'], roles: ['md','production_manager','assistant_production_manager','accountant','ico'], periodType: 'week', siteFilter: true },
+  { id: 'monthly_production',  name: 'Monthly Production Report',     category: 'production', description: 'Monthly totals, material costs, damage analysis and cost per block trend',      formats: ['pdf','excel'], roles: ['md','production_manager','assistant_production_manager','accountant','board_member','ico'], periodType: 'month', siteFilter: true },
+  { id: 'production_cost',     name: 'Production Cost Analysis',      category: 'production', description: 'Cost per block, selling price and gross margin per block type',                 formats: ['pdf','excel'], roles: ['md','accountant','ico'], periodType: 'range', siteFilter: true },
+  { id: 'damage_waste',        name: 'Damage & Waste Report',         category: 'production', description: 'Damages by stage, by block type, by vehicle and total value of damaged blocks', formats: ['pdf','excel'], roles: ['md','production_manager','assistant_production_manager','logistics_manager','ico'], periodType: 'range', siteFilter: true },
   // SALES
   { id: 'sales_report',        name: 'Sales Report',                  category: 'sales', description: 'All orders, sales by block type, by area and by marketer with collection rate',    formats: ['pdf','excel'], roles: ['md','accountant','bdm','ico'], periodType: 'range' },
   { id: 'revenue_report',      name: 'Revenue Report',                category: 'sales', description: 'Confirmed payments, daily revenue chart and outstanding balances summary',          formats: ['pdf','excel'], roles: ['md','accountant','ico'], periodType: 'range' },
@@ -77,7 +79,7 @@ const CATALOG = [
   { id: 'maintenance_cost',    name: 'Maintenance Cost Report',       category: 'vehicle', description: 'All maintenance records by vehicle, type and vendor with totals',               formats: ['pdf','excel'], roles: ['md','logistics_manager','accountant','ico'], periodType: 'range' },
   { id: 'fuel_consumption',    name: 'Fuel Consumption Report',       category: 'vehicle', description: 'Fuel dispensed per vehicle, cost per trip and blocks per litre efficiency',     formats: ['pdf','excel'], roles: ['md','logistics_manager','ico'], periodType: 'range' },
   // FINANCIAL
-  { id: 'expense_report',      name: 'Expense Report',                category: 'financial', description: 'All expenses by category with totals, trend and largest expenses',            formats: ['pdf','excel'], roles: ['md','accountant','ico'], periodType: 'range' },
+  { id: 'expense_report',      name: 'Expense Report',                category: 'financial', description: 'All expenses by category with totals, trend and largest expenses',            formats: ['pdf','excel'], roles: ['md','accountant','ico'], periodType: 'range', siteFilter: true },
   { id: 'pl_report',           name: 'Profit & Loss Report',          category: 'financial', description: 'Accrual income statement: revenue from goods delivered (not cash received), direct & operating costs by cost centre, gross and net profit; accrued labour, unpaid loading and unpriced items shown separately as not-yet-included',    formats: ['pdf','excel'], roles: ['md','accountant','ico','board_member'], periodType: 'range' },
   { id: 'balance_sheet',       name: 'Balance Sheet Report',          category: 'financial', description: 'Live-computed cash, receivables, inventory and payables combined with fixed assets and equity from static opening balances (pending accountant confirmation); includes a balance check',                        formats: ['pdf','excel'], roles: ['md','accountant','ico','board_member'], periodType: 'asAt' },
   { id: 'cash_flow',           name: 'Cash Flow Report',              category: 'financial', description: 'Operating cash flow (cash basis). Investing and financing activities are not yet tracked in this system.',                   formats: ['pdf','excel'], roles: ['md','accountant','ico','board_member'], periodType: 'range' },
@@ -164,19 +166,23 @@ function excelExport(filename, title, period, headers, rows, totalsRow = null) {
 }
 
 // ── DATA FETCHERS ────────────────────────────────────────────
-async function fetchProductionRange(from, to) {
+// siteId (optional) filters on each table's own site_id column (Phase 7A).
+async function fetchProductionRange(from, to, siteId) {
   let q = supabase.from('production_log').select('*, recorder:recorded_by(full_name)').order('date')
   if (from) q = q.gte('date', from)
   if (to)   q = q.lte('date', to)
+  if (siteId) q = q.eq('site_id', siteId)
   const { data, error } = await q
   if (error) throw error
   return data || []
 }
-async function fetchDamageRange(from, to) {
+async function fetchDamageRange(from, to, siteId) {
   let q = supabase.from('damage_log').select('*, delivery:waybill_id(waybill_number)').order('date')
   if (from) q = q.gte('date', from)
   if (to)   q = q.lte('date', to)
-  const { data } = await q
+  if (siteId) q = q.eq('site_id', siteId)
+  const { data, error } = await q
+  if (error) throw error
   const rows = data || []
   const ids = [...new Set(rows.map(r => r.recorded_by).filter(Boolean))]
   if (ids.length) {
@@ -212,10 +218,11 @@ async function fetchPaymentsRange(from, to) {
   if (error) throw error
   return data || []
 }
-async function fetchExpensesRange(from, to) {
+async function fetchExpensesRange(from, to, siteId) {
   let q = supabase.from('expenses').select('*, category:category_id(name, cost_center)').order('expense_date')
   if (from) q = q.gte('expense_date', from)
   if (to)   q = q.lte('expense_date', to)
+  if (siteId) q = q.eq('site_id', siteId)
   const { data, error } = await q
   if (error) throw error
   return data || []
@@ -261,9 +268,13 @@ async function fetchFuelRange(from, to) {
   return data || []
 }
 async function fetchInventoryItems() {
-  const { data } = await supabase.from('inventory_items').select('*').order('name')
+  const { data, error } = await supabase.from('inventory_items').select('*, site:site_id(name)').order('name')
+  if (error) throw error
   return data || []
 }
+// APCL stock value excludes client-owned (owner='client') material — it is
+// tracked, but it is the client's stock, not APCL's.
+const apclValue = i => i.owner === 'client' ? 0 : Number(i.current_stock) * Number(i.unit_cost || 0)
 async function fetchStockMovements(from, to) {
   let q = supabase.from('stock_movements').select('*, item:item_id(name,unit)').order('date')
   if (from) q = q.gte('date', from)
@@ -296,17 +307,17 @@ async function fetchSupplierTransactions(from, to) {
 const GENERATORS = {
   // 1. Daily Production
   daily_production: async (params) => {
-    const rows = await fetchProductionRange(params.date, params.date)
-    const damages = await fetchDamageRange(params.date, params.date)
+    const rows = await fetchProductionRange(params.date, params.date, params.site_id)
+    const damages = await fetchDamageRange(params.date, params.date, params.site_id)
     return { rows, damages }
   },
   // 2-3. Weekly/Monthly Production
-  weekly_production: async (params) => fetchProductionRange(params.from, params.to),
-  monthly_production: async (params) => fetchProductionRange(params.from, params.to),
+  weekly_production: async (params) => fetchProductionRange(params.from, params.to, params.site_id),
+  monthly_production: async (params) => fetchProductionRange(params.from, params.to, params.site_id),
   // 4. Production Cost
-  production_cost: async (params) => fetchProductionRange(params.from, params.to),
+  production_cost: async (params) => fetchProductionRange(params.from, params.to, params.site_id),
   // 5. Damage & Waste
-  damage_waste: async (params) => fetchDamageRange(params.from, params.to),
+  damage_waste: async (params) => fetchDamageRange(params.from, params.to, params.site_id),
   // 6. Sales
   sales_report: async (params) => fetchOrdersRange(params.from, params.to),
   // 7. Revenue
@@ -387,7 +398,7 @@ const GENERATORS = {
   // 22. Stock Movement
   stock_movement: async (params) => fetchStockMovements(params.from, params.to),
   // 23. Inventory Valuation
-  inventory_valuation: async () => fetchInventoryItems(),
+  inventory_valuation: async () => (await fetchInventoryItems()).filter(i => i.owner !== 'client'),
   // 24. Fleet Status
   fleet_status: async () => fetchAllVehicles(),
   // 25. Vehicle Utilisation
@@ -400,7 +411,7 @@ const GENERATORS = {
   // 27. Fuel Consumption
   fuel_consumption: async (params) => fetchFuelRange(params.from, params.to),
   // 28. Expense
-  expense_report: async (params) => fetchExpensesRange(params.from, params.to),
+  expense_report: async (params) => fetchExpensesRange(params.from, params.to, params.site_id),
   // 29. P&L — accrual income statement (delivered revenue, cost centres, memo)
   pl_report: async (params) => {
     const { from, to } = params
@@ -431,7 +442,7 @@ const GENERATORS = {
       // (quotations) and cancelled invoices are not receivables — exclude them.
       supabase.from('invoices').select('total_amount').not('status', 'in', '("draft","cancelled")').then(unwrap),
       supabase.from('payments').select('amount_paid').eq('status', 'confirmed').then(unwrap),
-      supabase.from('inventory_items').select('current_stock, unit_cost').then(unwrap),
+      supabase.from('inventory_items').select('current_stock, unit_cost').eq('owner', 'apcl').then(unwrap),
       // Trade Payables = approved but not-yet-disbursed expenses (no payment_request,
       // not ingested from a bank statement) — i.e. owed-but-unpaid. See PR note.
       supabase.from('expenses').select('amount').eq('status', 'approved').is('payment_request_id', null).is('ingestion_source', null).then(unwrap),
@@ -867,10 +878,10 @@ function renderPDF(reportId, data, params, period) {
       break
     }
     case 'stock_status': {
-      const head = ['Item', 'Unit', 'Current Stock', 'Reorder Level', 'Unit Cost (₦)', 'Total Value (₦)', 'Status']
-      const body = data.map(i => [i.name, i.unit||'—', i.current_stock, i.reorder_level||0, naira(i.unit_cost), naira(Number(i.current_stock)*Number(i.unit_cost||0)), Number(i.current_stock)<=Number(i.reorder_level)?'⚠ LOW':'OK'])
-      const total = data.reduce((s,i)=>s+Number(i.current_stock)*Number(i.unit_cost||0),0)
-      pdfTable(doc, startY, head, body, ['TOTAL','','','','',naira(total),''])
+      const head = ['Item', 'Site', 'Unit', 'Current Stock', 'Reorder Level', 'Unit Cost (₦)', 'APCL Value (₦)', 'Status']
+      const body = data.map(i => [i.name + (i.owner==='client'?' (client-owned)':''), i.site?.name||'—', i.unit||'—', i.current_stock, i.reorder_level||0, naira(i.unit_cost), i.owner==='client'?'Client-owned':naira(apclValue(i)), Number(i.current_stock)<=Number(i.reorder_level)?'⚠ LOW':'OK'])
+      const total = data.reduce((s,i)=>s+apclValue(i),0)
+      pdfTable(doc, startY, head, body, ['TOTAL (APCL)','','','','','',naira(total),''])
       break
     }
     case 'stock_movement': {
@@ -880,10 +891,10 @@ function renderPDF(reportId, data, params, period) {
       break
     }
     case 'inventory_valuation': {
-      const head = ['Item', 'Unit', 'Qty on Hand', 'Unit Cost (₦)', 'Total Value (₦)']
-      const body = data.map(i => [i.name, i.unit||'—', i.current_stock, naira(i.unit_cost), naira(Number(i.current_stock)*Number(i.unit_cost||0))])
-      const total = data.reduce((s,i)=>s+Number(i.current_stock)*Number(i.unit_cost||0),0)
-      pdfTable(doc, startY, head, body, ['TOTAL','','','',naira(total)])
+      const head = ['Item', 'Site', 'Unit', 'Qty on Hand', 'Unit Cost (₦)', 'Total Value (₦)']
+      const body = data.map(i => [i.name, i.site?.name||'—', i.unit||'—', i.current_stock, naira(i.unit_cost), naira(apclValue(i))])
+      const total = data.reduce((s,i)=>s+apclValue(i),0)
+      pdfTable(doc, startY, head, body, ['TOTAL','','','','',naira(total)])
       break
     }
     case 'fleet_status': {
@@ -1030,8 +1041,8 @@ function renderExcel(reportId, data, params, period) {
         data.map(s=>[s.full_name,s.role,s.staff_type,s.phone||'—',fmtDate(s.date_hired)]))
       break
     case 'stock_status':
-      excelExport(filename, report.name, period, ['Item','Unit','Current Stock','Reorder Level','Unit Cost (₦)','Total Value (₦)'],
-        data.map(i=>[i.name,i.unit||'—',i.current_stock,i.reorder_level||0,Number(i.unit_cost||0),Number(i.current_stock)*Number(i.unit_cost||0)]))
+      excelExport(filename, report.name, period, ['Item','Site','Owner','Unit','Current Stock','Reorder Level','Unit Cost (₦)','APCL Value (₦)'],
+        data.map(i=>[i.name,i.site?.name||'—',i.owner==='client'?'Client-owned':'APCL',i.unit||'—',i.current_stock,i.reorder_level||0,Number(i.unit_cost||0),apclValue(i)]))
       break
     case 'maintenance_cost':
       excelExport(filename, report.name, period, ['Date','Vehicle','Type','Description','Vendor','Cost (₦)'],
@@ -1134,7 +1145,8 @@ function getSchedules() {
 
 // ── GENERATE MODAL ───────────────────────────────────────────
 function GenerateModal({ report, userProfile, onClose, onGenerated }) {
-  const [params, setParams]   = useState({ date: today(), from: today().slice(0,8)+'01', to: today(), week: '', month: today().slice(0,7), customer_id: '' })
+  const [params, setParams]   = useState({ date: today(), from: today().slice(0,8)+'01', to: today(), week: '', month: today().slice(0,7), customer_id: '', site_id: '' })
+  const { sites } = useSites()
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState('')
   const [customers, setCustomers] = useState([])
@@ -1165,7 +1177,7 @@ function GenerateModal({ report, userProfile, onClose, onGenerated }) {
     try {
       const p = buildParams()
       const data = await GENERATORS[report.id](p)
-      const period = periodLabel(report, p)
+      const period = periodLabel(report, p) + (report.siteFilter ? ` · Site: ${p.site_id ? siteName(p.site_id, sites) : 'All sites'}` : '')
       if (format === 'pdf') {
         const doc = renderPDF(report.id, data, p, period)
         const url = doc.output('bloburl')
@@ -1221,6 +1233,12 @@ function GenerateModal({ report, userProfile, onClose, onGenerated }) {
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px' }}>
               <div><label style={lbl}>From</label><input type="date" style={styles.input} value={params.from} onChange={e=>setParams(p=>({...p,from:e.target.value}))} /></div>
               <div><label style={lbl}>To</label><input type="date" style={styles.input} value={params.to} onChange={e=>setParams(p=>({...p,to:e.target.value}))} /></div>
+            </div>
+          )}
+          {report.siteFilter && (
+            <div>
+              <label style={lbl}>Site</label>
+              <SitePicker allowAll value={params.site_id} onChange={v=>setParams(p=>({...p,site_id:v}))} style={styles.input} />
             </div>
           )}
           {report.extraFilters?.map(f => f.type === 'customer' && (
