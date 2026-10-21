@@ -1037,6 +1037,7 @@ APCL is starting a second business line. Smaller modular machines (QTJ4-26B and 
     - Any record that can't inherit falls back to Dutse.
   - AFTER triggers re-sync an auto-expense's site if its roster or payment request changes site.
   - Follow-up migration `phase7a_machine_models_and_one_roster_per_worker_day` (2026-10-21): machine names/models set; a worker can be on only one roster per day across all sites (double-pay guard); verified with a rolled-back test (same-day second site blocked, next-day other site allowed, date-move clash blocked).
+  - Bug fix (2026-10-21, migration `roster_delete_removes_its_auto_expense`): deleting a costed roster used to fail on expenses_daily_roster_id_fkey — the roster's auto-expense is now removed first. Fixes the existing Delete button and the 7A empty-roster cleanup.
 - **Site stock items (Rule 10.6):** cement, dust and diesel for Kado, and Bilaad-owned stock for Life Camp, are **not seeded yet**. The planning chat creates them, tagged by site, owner and material, only after the 7A frontend (deduction by site + material) is merged.
 - **Verification done 2026-10-21:**
   - All row counts and the expense and stock totals are unchanged.
@@ -1065,6 +1066,13 @@ APCL is starting a second business line. Smaller modular machines (QTJ4-26B and 
 - **Bilaad money tracking:** fee earned per *accepted* block, and recovery of the 25% mobilisation advance against the 43,745 blocks it covers.
 - **Client-owned stock:** a material yield report per site, showing blocks per bag against budget (40/bag for 9", 45/bag for 6"). This is APCL's evidence under the Bilaad warranty exclusion for client-supplied materials.
 - **Site handover:** a handover record per site that replaces "into Dutse yard" for client-site batches.
+- **Site capital asset register (MD, 2026-10-21):** every site keeps a register of its capital assets — block machine, generator, moulds, pallets, trolleys, mixer, water tank, pump, storage and other equipment — with code, description, quantity, acquisition date and cost, funding source (which investor pool, or APCL), current site, condition/status, and a movement history when an asset moves between sites (Dutse ↔ client sites). It feeds the SPV fixed-asset register in 7C (Term Sheet §5) and supports APCL's plant-removal right at demobilisation (Sequoia §10). Extends the existing `assets` table rather than a parallel one.
+- **Material receiving with accept/reject (MD, 2026-10-21):** every material delivery to a site is logged on arrival: date, material, delivered quantity, supplier/truck/waybill ref, and an inspection result — quantity accepted, quantity rejected, reason, photo. Only the accepted quantity enters site stock. For Bilaad (client-supplied materials) a rejection is APCL's written record that the client's material was refused before use (Contractor Warranty Form: APCL must promptly notify apparent material defects, and is not liable for defects from client-procured materials), so the client is notified. The same receiving flow is used for APCL's own purchases at Kado.
+- **Site reports and early warnings (MD, 2026-10-21):** per-site reports — production, accepted vs rejected blocks, damages, material received/used/remaining and yield against budget (40 bags/9", 45 bags/6") — exportable for the client. Warnings, through the existing notification system:
+  - Sequoia (Kado): the prepaid 25,000-block cycle running out — warn when the forecast at the current production rate is about 7 days from cycle completion (Proposal §3 advance notice), then track the completion notice and the 7-day remobilisation window (§6).
+  - Bilaad (Life Camp): the 25% mobilisation advance (covers 43,745 blocks) being used up, and client-supplied materials running low (days of stock left at the current usage rate), so APCL can ask Bilaad for funds/materials before production stops.
+  - Any site: site stock below reorder level.
+  - **Client report delivery — MD decided 2026-10-21:** a weekly PDF per site generated in the app, which the MD or site manager sends to the client (e.g. WhatsApp). No client login for now; a read-only client portal can be revisited later.
 
 **7C — investor pools and SPV ledger**
 - **Pools and capital:**
