@@ -12,14 +12,24 @@ export const batchesService = {
     return data || []
   },
 
-  async getActive() {
-    const { data, error } = await supabase
+  // Active batches, optionally limited to one site (the waybill screen passes
+  // DUTSE_SITE_ID so only factory/yard batches can be loaded on a truck).
+  async getActive({ siteId = null } = {}) {
+    let q = supabase
       .from('batches')
       .select('*')
       .eq('status', 'active')
-      .order('date_cured', { ascending: false })
+    if (siteId) q = q.eq('site_id', siteId)
+    const { data, error } = await q.order('date_cured', { ascending: false })
     if (error) throw error
     return data || []
+  },
+
+  // Batches that may be loaded on a waybill: factory (Dutse yard) batches only.
+  // A client-site batch never feeds Dutse finished_goods_stock, so loading it
+  // would wrongly decrease Dutse yard stock (Phase 7A).
+  factoryBatchesOnly(batches, sites = []) {
+    return batches.filter(b => isFactorySite(b.site_id, sites))
   },
 
   async getNextNumber() {

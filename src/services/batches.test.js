@@ -1,12 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
+const state = vi.hoisted(() => ({ calls: null }))
 vi.mock('../lib/supabase', async () => {
   const { createSupabaseMock } = await import('../test/supabaseMock')
-  return createSupabaseMock((table, ops) => {
+  const mock = createSupabaseMock((table, ops) => {
     if (table === 'batches' && ops[0][0] === 'insert') return { data: { id: 'b1', ...ops[0][1] }, error: null }
     if (table === 'batches' && ops[0][0] === 'select') return { data: [{ batch_number: 'APC-BATCH-007' }], error: null }
     return { data: null, error: null }
   })
+  state.calls = mock.calls
+  return { supabase: mock.supabase }
 })
 vi.mock('./finishedGoods', () => ({
   finishedGoodsService: { increase: vi.fn(), decrease: vi.fn() },
@@ -53,5 +56,32 @@ describe('batchesService.createBatch — Dutse yard stock', () => {
     expect(finishedGoodsService.decrease).not.toHaveBeenCalled()
     expect(await batchesService.adjustYardStock(DUTSE, SITES, '6 Inch Block', -100)).toBe(true)
     expect(finishedGoodsService.decrease).toHaveBeenCalledWith('6 Inch Block', 100)
+  })
+})
+
+describe('waybill batch picker — factory batches only', () => {
+  it('getActive({ siteId }) filters the query by site_id', async () => {
+    state.calls.length = 0
+    await batchesService.getActive({ siteId: DUTSE })
+    const call = state.calls.find(c => c.table === 'batches')
+    expect(call.ops).toContainEqual(['eq', 'status', 'active'])
+    expect(call.ops).toContainEqual(['eq', 'site_id', DUTSE])
+  })
+
+  it('getActive() without a site keeps the unfiltered behaviour', async () => {
+    state.calls.length = 0
+    await batchesService.getActive()
+    const call = state.calls.find(c => c.table === 'batches')
+    expect(call.ops.some(o => o[0] === 'eq' && o[1] === 'site_id')).toBe(false)
+  })
+
+  it('factoryBatchesOnly drops client-site batches (and uses the Dutse id before sites load)', () => {
+    const batches = [
+      { id: 'd1', site_id: DUTSE },
+      { id: 'k1', site_id: KADO },
+      { id: 'l1', site_id: '00000000-0000-4000-8000-000000000003' },
+    ]
+    expect(batchesService.factoryBatchesOnly(batches, SITES).map(b => b.id)).toEqual(['d1'])
+    expect(batchesService.factoryBatchesOnly(batches, []).map(b => b.id)).toEqual(['d1'])
   })
 })

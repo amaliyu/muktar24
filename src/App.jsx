@@ -2077,6 +2077,9 @@ const Waybills = ({ userProfile }) => {
   const [vehicles, setVehicles] = useState([]);
   const [activeBatches, setActiveBatches] = useState([]);
   const [batchMap, setBatchMap] = useState({});
+  const [batchSiteMap, setBatchSiteMap] = useState({});
+  const [batchLoadError, setBatchLoadError] = useState(null);
+  const { sites: wbSites } = useSites();
   const [activeOrders, setActiveOrders] = useState([]);
   const [scheduleItems, setScheduleItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -2119,15 +2122,24 @@ const Waybills = ({ userProfile }) => {
     }
     if (isDriverRole) { setLoading(false); return; } // drivers don't need orders/batches/schedules
     try {
+      setBatchLoadError(null);
       const [orders, activeBatches, allBatches, approvedScheds] = await Promise.all([
         ordersService.getForDelivery().catch(() => []),
-        batchesService.getActive().catch(() => []),
+        // Dutse (factory) batches only — a client-site batch must never be
+        // loadable here, or it would decrease Dutse yard stock. The error is
+        // surfaced, not swallowed: an empty picker must not hide a failed load.
+        batchesService.getActive({ siteId: DUTSE_SITE_ID }).catch(e => {
+          console.error("Could not load batches for waybill picker:", e);
+          setBatchLoadError(e.message || "unknown error");
+          return [];
+        }),
         batchesService.getAll().catch(() => []),
         schedulesService.getApproved().catch(() => []),
       ]);
       setActiveOrders(orders.filter(o => ["invoiced", "in_progress", "lpo_approved"].includes(o.status)));
-      setActiveBatches(activeBatches);
+      setActiveBatches(batchesService.factoryBatchesOnly(activeBatches));
       setBatchMap(Object.fromEntries(allBatches.map(b => [b.id, b.batch_number])));
+      setBatchSiteMap(Object.fromEntries(allBatches.map(b => [b.id, b.site_id])));
       const today = new Date().toISOString().split("T")[0];
       const items = approvedScheds.filter(s => s.schedule_date === today).flatMap(s => (s.items || []).map(it => ({ ...it, scheduleDate: s.schedule_date, scheduleId: s.id })));
       setScheduleItems(items);
@@ -2419,12 +2431,23 @@ const Waybills = ({ userProfile }) => {
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Batch Number</label>
-              <select style={styles.input} value={form.batchId} onChange={e => setForm({ ...form, batchId: e.target.value })}>
-                <option value="">— Select batch (optional) —</option>
-                {activeBatches.filter(b => !form.blockType || b.block_type === form.blockType).map(b => (
-                  <option key={b.id} value={b.id}>{b.batch_number} — {b.block_type} ({Number(b.qty_remaining).toLocaleString()} remaining)</option>
-                ))}
-              </select>
+              {form.batchId && batchSiteMap[form.batchId] && !isFactorySite(batchSiteMap[form.batchId], wbSites) ? (
+                // Should never happen (waybills only offer Dutse batches), but an
+                // existing waybill on a client-site batch is shown, not hidden.
+                <>
+                  <div style={{ ...styles.input, color: theme.textMuted }}>{batchMap[form.batchId] || form.batchId} — {siteName(batchSiteMap[form.batchId], wbSites)}</div>
+                  <div style={{ fontSize: "11px", color: theme.red, marginTop: "4px" }}>This waybill references a client-site batch, which should not be on a Dutse waybill. Batch is read-only here; tell the MD.</div>
+                </>
+              ) : (
+                <select style={styles.input} value={form.batchId} onChange={e => setForm({ ...form, batchId: e.target.value })}>
+                  <option value="">— Select batch (optional) —</option>
+                  {activeBatches.filter(b => !form.blockType || b.block_type === form.blockType).map(b => (
+                    <option key={b.id} value={b.id}>{b.batch_number} — {b.block_type} ({Number(b.qty_remaining).toLocaleString()} remaining)</option>
+                  ))}
+                  {form.batchId && !activeBatches.some(b => b.id === form.batchId) && <option value={form.batchId}>{batchMap[form.batchId] || "Current batch"} (not active)</option>}
+                </select>
+              )}
+              {batchLoadError && <div style={{ fontSize: "11px", color: theme.red, marginTop: "4px" }}>Could not load batches ({batchLoadError}).</div>}
             </div>
             {scheduleItems.length > 0 && (
               <div style={styles.formGroup}>

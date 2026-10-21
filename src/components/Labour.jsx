@@ -25,6 +25,10 @@ const friendlyEntryError = (error) => {
   // Surface it as-is rather than a raw Postgres error blob. Covers the race
   // where a payroll gets approved between page load and save.
   if (/is linked to a/i.test(error.message || '')) return error.message
+  // One-roster-per-worker-per-day guard (trg_one_roster_per_worker_day /
+  // trg_roster_date_change_check, P0001): the DB message names the worker,
+  // site and date — show it verbatim.
+  if (/can only be on one roster per day/i.test(error.message || '')) return error.message
   if (error.code === '23505' || /uq_roster_entry_worker|duplicate key/i.test(error.message || '')) {
     return 'This roster already has an entry for one of these workers. Please refresh and try again.'
   }
@@ -587,7 +591,29 @@ function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCanc
   // the list), so the site is changeable whenever the form is reachable.
   const [siteId, setSiteId] = useState(editRoster?.site_id || DUTSE_SITE_ID)
   const { sites } = useSites()
+  // Workers already on ANOTHER roster this date (any site) → labour_id: site
+  // name. UI hint only; the DB trigger is the real guard, so a failed lookup
+  // just means no hints (logged).
+  const [rosteredElsewhere, setRosteredElsewhere] = useState({})
+  useEffect(() => {
+    if (!date) return
+    let alive = true
+    supabase.from('daily_roster').select('id, site_id, entries:daily_roster_entries(labour_id)').eq('roster_date', date)
+      .then(({ data, error }) => {
+        if (!alive) return
+        if (error) { console.error('Could not check other rosters for this date:', error); setRosteredElsewhere({}); return }
+        const map = {}
+        for (const r of data || []) {
+          if (editRoster && r.id === editRoster.id) continue
+          for (const e of r.entries || []) map[String(e.labour_id)] = siteName(r.site_id, sites)
+        }
+        setRosteredElsewhere(map)
+      })
+    return () => { alive = false }
+  }, [date, editRoster, sites])
   // daily_roster_site_date_key: one roster per site per day.
+  // Only the 23505 site/date clash is rewritten; anything else (incl. the
+  // P0001 one-roster-per-worker message) falls through to the caller verbatim.
   const rosterError = (error) => error?.code === '23505' && !/uq_roster_entry_worker/i.test(error.message || '')
     ? `A roster already exists for ${siteName(siteId, sites)} on ${date}.`
     : null
@@ -758,11 +784,23 @@ function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCanc
         ico_status: submit ? 'submitted' : 'draft', md_status: 'pending',
         payment_week_ending: weekEnding, payment_status: 'unpaid', worker_count: entries.length,
       }).select('id').single()
-      if (re) { setSaving(false); return setErr(rosterError(re) || re.message) }
+      if (re) { setSaving(false); return setErr(rosterError(re) || friendlyEntryError(re)) }
       const { error: ee } = await supabase.from('daily_roster_entries').insert(entryRows(roster.id))
+      if (ee) {
+        // The roster row went in first; without its entries it would linger as
+        // an empty roster carrying its auto-expense. It is brand-new, draft or
+        // submitted and unlinked, so the creator's daily_roster delete policy
+        // covers it. .select() makes an RLS no-op visible (Rule 10.4).
+        const { data: removed, error: de } = await supabase.from('daily_roster').delete().eq('id', roster.id).select('id')
+        setSaving(false)
+        const entryMsg = friendlyEntryError(ee)
+        if (de || !removed?.length) {
+          return setErr(`${entryMsg} — and the empty roster could not be removed (${de?.message || 'delete was not permitted'}). Delete the ${siteName(siteId, sites)} roster for ${date} from the list.`)
+        }
+        return setErr(entryMsg)
+      }
       setSaving(false)
-      if (ee) setErr(friendlyEntryError(ee))
-      else onSave()
+      onSave()
     }
   }
 
@@ -815,7 +853,8 @@ function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCanc
                       <option value="">— Select —</option>
                       {activePool.map(w => {
                         const takenElsewhere = entries.some((r, j) => j !== i && String(r.labour_id) === String(w.id))
-                        return <option key={w.id} value={w.id} disabled={takenElsewhere}>{w.full_name}{takenElsewhere ? ' (already added)' : ''}</option>
+                        const otherRoster = String(row.labour_id) !== String(w.id) ? rosteredElsewhere[String(w.id)] : null
+                        return <option key={w.id} value={w.id} disabled={takenElsewhere || !!otherRoster}>{w.full_name}{takenElsewhere ? ' (already added)' : otherRoster ? ` (on ${otherRoster} roster)` : ''}</option>
                       })}
                     </select>
                   </td>
