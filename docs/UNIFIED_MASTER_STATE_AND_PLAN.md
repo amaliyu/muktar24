@@ -1036,6 +1036,7 @@ APCL is starting a second business line. Smaller modular machines (QTJ4-26B and 
     - `production_log` gets the site's active machine.
     - Any record that can't inherit falls back to Dutse.
   - AFTER triggers re-sync an auto-expense's site if its roster or payment request changes site.
+  - Follow-up migration `phase7a_machine_models_and_one_roster_per_worker_day` (2026-10-21): machine names/models set; a worker can be on only one roster per day across all sites (double-pay guard); verified with a rolled-back test (same-day second site blocked, next-day other site allowed, date-move clash blocked).
 - **Site stock items (Rule 10.6):** cement, dust and diesel for Kado, and Bilaad-owned stock for Life Camp, are **not seeded yet**. The planning chat creates them, tagged by site, owner and material, only after the 7A frontend (deduction by site + material) is merged.
 - **Verification done 2026-10-21:**
   - All row counts and the expense and stock totals are unchanged.
@@ -1080,11 +1081,12 @@ APCL is starting a second business line. Smaller modular machines (QTJ4-26B and 
 - ✅ **Repo was found PUBLIC (2026-10-21); MD set it PRIVATE the same day.** Anonymous access is now refused (verified). Only the current tree was scanned for secrets (none found); older commits were not checked.
 - ✅ **Backup tables locked (2026-10-21):** `_backup_roster_entries_20260721` and `_policy_snapshot_20260727` now have RLS on and all anon/authenticated grants revoked (verified). Dropping them is optional and is the MD's call.
 - **The Supabase connector cancelled `apply_migration` 4 times on 2026-10-21, then worked.** Cause unknown. If it recurs, check claude.ai → Settings → Connectors → Supabase tool permissions.
-- **Machine labels:** QTJ-01 = Life Camp, QTJ-02 = Kado. Confirm or swap. Confirm the second machine's model.
-- **Products for the mobile line:** confirm which existing product names the QTJ Turkish 9" and 6" blocks are logged under. The `block_type` trigger requires an exact match.
+- ✅ Machines confirmed by MD 2026-10-21: QTJ-01 = QTJ4-40 at Life Camp (Bilaad), rated 2,880–3,000 blocks/day, 25–30 kVA; QTJ-02 = QTJ4-26B at Kado (Sequoia), rated 4,430–5,000 blocks/day, 30–40 kVA. Asset names/metadata updated live.
+- ✅ MD decided 2026-10-21: QTJ blocks are logged under the existing products '9 Inch 3 Hole Block' and '6 Inch 3 Hole Closed' (14-day cure); the site filter separates machines.
 - **Investor pack vs final contracts (factual, for MD awareness):**
   - The Memorandum, Term Sheet §16 and Pitch still show Bilaad at 206,361 blocks / ₦49.733m, where the award is 174,982 / ≈₦42.17m.
   - The Pitch says the customer funds materials, which does not hold for Sequoia (full supply).
   - Sequoia's 9" rate of ₦1,000 leaves roughly ₦209/block over materials, against the ₦241 service-fee basis.
+  - The Term Sheet/Memorandum/Pitch describe the investor's QTJ4-26B with Bilaad as its anchor and a 2,880/day planning rate. Confirmed deployment puts the QTJ4-26B at Kado (Sequoia, full supply) and the QTJ4-40 at Life Camp (Bilaad); the QTJ4-26B is rated 4,430–5,000/day. The investor pack's anchor economics and capacity figures need re-basing before the SPV closes.
 - **Machine ownership wording:** Sequoia §10 calls the plant "APCL's property", while Term Sheet §5 places it in the SPV. Check this with counsel before the SPV is formed.
 - **This master document was last updated 2026-08-07 (PR #110); the repo is at PR #121.** Bring §1 session history up to date for PRs #111–#121 when this section is merged.
