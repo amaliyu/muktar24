@@ -11,7 +11,7 @@ export const maintenanceService = {
   async getAssets() {
     const { data, error } = await supabase
       .from('assets')
-      .select('id, name, code, asset_type, status, vehicle_id')
+      .select('id, name, code, asset_type, status, vehicle_id, site_id, site:site_id(name)')
       .order('asset_type')
       .order('name');
     if (error) throw error;
@@ -77,7 +77,7 @@ export const maintenanceService = {
   async getOpenDowntime() {
     const { data, error } = await supabase
       .from('downtime_log')
-      .select('*')
+      .select('*, site:site_id(name)')
       .eq('resolved', false)
       .order('start_time', { ascending: true });
     if (error) throw error;
@@ -87,7 +87,7 @@ export const maintenanceService = {
   async getResolvedDowntime(limit = 50) {
     const { data, error } = await supabase
       .from('downtime_log')
-      .select('*')
+      .select('*, site:site_id(name)')
       .eq('resolved', true)
       .order('end_time', { ascending: false })
       .limit(limit);

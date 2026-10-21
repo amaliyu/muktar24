@@ -4,15 +4,17 @@ export const inventoryService = {
   async getAllItems() {
     const { data, error } = await supabase
       .from('inventory_items')
-      .select('*')
+      .select('*, site:site_id(name, code)')
       .order('name')
     if (error) throw error
     return data || []
   },
 
-  async getLowStockItems() {
+  // Low-stock items, each carrying its own site (item.site.name) so alerts are
+  // per site — quantities from different sites are never summed together.
+  async getLowStockItems({ siteId = null } = {}) {
     const data = await inventoryService.getAllItems()
-    return data.filter(i => Number(i.current_stock) <= Number(i.reorder_level))
+    return data.filter(i => (!siteId || i.site_id === siteId) && Number(i.current_stock) <= Number(i.reorder_level))
   },
 
   async createItem(item) {
@@ -41,13 +43,14 @@ export const inventoryService = {
     if (error) throw error
   },
 
-  async getMovements({ itemId = null, from = null, to = null } = {}) {
+  async getMovements({ itemId = null, siteId = null, from = null, to = null } = {}) {
     let q = supabase
       .from('stock_movements')
-      .select('*, item:item_id(name, unit)')
+      .select('*, item:item_id(name, unit), site:site_id(name)')
       .order('date', { ascending: false })
       .order('created_at', { ascending: false })
     if (itemId) q = q.eq('item_id', itemId)
+    if (siteId) q = q.eq('site_id', siteId)
     if (from)   q = q.gte('date', from)
     if (to)     q = q.lte('date', to)
     const { data, error } = await q
@@ -112,32 +115,44 @@ export const inventoryService = {
     return data
   },
 
-  async autoDeductProduction({ cementBags, graniteDustKg, chippingsKg, dieselLitres, date, reference }) {
+  // Deduct a production entry's raw materials from the stock items AT ITS SITE.
+  // Items are resolved by exact site_id + material key (Rule 10.6) — never by
+  // name keyword, and never from another site. A material that was used
+  // (qty > 0) but has no item set up at the site is NOT deducted anywhere; it
+  // is returned in `missing` so the caller can warn. Client-owned items are
+  // deducted too (we track the client's stock); they're just not APCL value.
+  async autoDeductProduction({ siteId, cementBags, graniteDustKg, chippingsKg, dieselLitres, date, reference }) {
+    if (!siteId) throw new Error('autoDeductProduction: siteId is required')
     const items = await inventoryService.getAllItems()
-    const find = (keyword) => items.find(i => i.name.toLowerCase().includes(keyword.toLowerCase()))
+    const atSite = (material) => items.find(i => i.site_id === siteId && i.material === material)
 
-    const deductions = [
-      { item: find('cement'),   qty: Number(cementBags)    || 0 },
-      // The dust inventory row is named "DUST" — the old 'granite' keyword never
-      // matched, so dust was silently never auto-deducted. graniteDustKg still
-      // maps to the granite_dust_kg column; only the lookup keyword is fixed.
-      { item: find('dust'),     qty: Number(graniteDustKg) || 0 },
-      { item: find('chipping'), qty: Number(chippingsKg)   || 0 },
-      { item: find('diesel'),   qty: Number(dieselLitres)  || 0 },
-    ].filter(d => d.item && d.qty > 0)
+    const wanted = [
+      { material: 'cement',    qty: Number(cementBags)    || 0 },
+      { material: 'dust',      qty: Number(graniteDustKg) || 0 },
+      { material: 'chippings', qty: Number(chippingsKg)   || 0 },
+      { material: 'diesel',    qty: Number(dieselLitres)  || 0 },
+    ].filter(d => d.qty > 0)
 
-    for (const { item, qty } of deductions) {
+    const missing = []
+    const deducted = []
+    for (const { material, qty } of wanted) {
+      const item = atSite(material)
+      if (!item) { missing.push(material); continue }
       const newStock = Math.max(0, (Number(item.current_stock) || 0) - qty)
-      await supabase.from('inventory_items')
+      const { error: updErr } = await supabase.from('inventory_items')
         .update({ current_stock: newStock, updated_at: new Date().toISOString() })
         .eq('id', item.id)
-      await supabase.from('stock_movements').insert({
-        item_id: item.id, movement_type: 'out',
+      if (updErr) throw updErr
+      const { error: movErr } = await supabase.from('stock_movements').insert({
+        item_id: item.id, site_id: siteId, movement_type: 'out',
         quantity: qty, issued_to: 'Production',
         staff_name: 'Auto', reference, date,
         notes: 'Auto-deducted from production log',
       })
+      if (movErr) throw movErr
+      deducted.push({ material, itemId: item.id, qty })
     }
+    return { deducted, missing }
   },
 
   async deleteMovement(id, movement) {
@@ -179,7 +194,7 @@ export const inventoryService = {
     const { data, error } = await supabase.from('stock_movements')
       .update(newData)
       .eq('id', id)
-      .select('*, item:item_id(name, unit)')
+      .select('*, item:item_id(name, unit), site:site_id(name)')
       .single()
     if (error) throw error
     return data

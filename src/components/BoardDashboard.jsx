@@ -244,7 +244,7 @@ export default function BoardDashboard({ userProfile }) {
         // 12: Vehicles for expiring docs
         supabase.from('vehicles').select('id, vehicle_number, vehicle_name, insurance_expiry_date, road_worthiness_expiry_date').eq('status', 'active'),
         // 13: Low stock items
-        supabase.from('inventory_items').select('name, current_stock, reorder_level'),
+        supabase.from('inventory_items').select('name, current_stock, reorder_level, site:site_id(name)'),
         // 14: Pending LPO approvals
         supabase.from('lpo_orders').select('id').eq('status', 'pending'),
       ])
@@ -361,7 +361,7 @@ export default function BoardDashboard({ userProfile }) {
       // Low stock
       const lowStock = get(13)
         .filter(i => Number(i.current_stock) <= Number(i.reorder_level || 0))
-        .map(i => ({ name: i.name, stock: i.current_stock, reorder: i.reorder_level }))
+        .map(i => ({ name: i.site?.name ? `${i.name} @ ${i.site.name}` : i.name, stock: i.current_stock, reorder: i.reorder_level }))
         .slice(0, 8)
 
       // Pending approvals

@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { hasRole } from '../lib/roles'
+import SitePicker, { useSites } from './SitePicker'
+import { DUTSE_SITE_ID, siteName } from '../services/sites'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import * as XLSX from 'xlsx'
@@ -389,15 +391,20 @@ function DailyRosterTab({ pool, roles, userProfile }) {
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [deleteReason, setDeleteReason] = useState('')
   const [deleting, setDeleting] = useState(false)
+  const [siteFilter, setSiteFilter] = useState('')
+  const { sites } = useSites()
 
   const loadRosters = useCallback(async () => {
     setLoading(true)
     // Join the linked payroll's status — content editing is locked by the DB
     // once that payroll is ico_approved/md_approved/paid (see canEdit below).
-    const { data } = await supabase.from('daily_roster').select('*, payroll:payroll_id(status)').order('roster_date', { ascending: false })
+    const { data, error } = await supabase.from('daily_roster').select('*, payroll:payroll_id(status)').order('roster_date', { ascending: false })
+    if (error) setAlert({ msg: 'Could not load rosters: ' + error.message, type: 'error' })
     setRosters(data || [])
     setLoading(false)
   }, [])
+
+  const shownRosters = siteFilter ? rosters.filter(r => r.site_id === siteFilter) : rosters
 
   useEffect(() => { loadRosters() }, [loadRosters])
 
@@ -452,10 +459,10 @@ function DailyRosterTab({ pool, roles, userProfile }) {
     return <RosterCreateForm pool={pool} roles={roles} userProfile={userProfile} editRoster={editingRoster} onSave={() => { setEditingRoster(null); setViewMode('list'); loadRosters() }} onCancel={() => { setEditingRoster(null); setViewMode('list') }} />
   }
   if (viewMode === 'detail' && selectedRoster) {
-    return <RosterDetail roster={selectedRoster} roles={roles} pool={pool} userProfile={userProfile} onBack={() => { setSelectedRoster(null); setViewMode('list') }} onAction={handleAction} alert={alert} clearAlert={() => setAlert(null)} />
+    return <RosterDetail roster={selectedRoster} sites={sites} roles={roles} pool={pool} userProfile={userProfile} onBack={() => { setSelectedRoster(null); setViewMode('list') }} onAction={handleAction} alert={alert} clearAlert={() => setAlert(null)} />
   }
   if (viewMode === 'weekly') {
-    return <WeeklySummary rosters={rosters} onBack={() => setViewMode('list')} />
+    return <WeeklySummary rosters={shownRosters} sites={sites} onBack={() => setViewMode('list')} />
   }
 
   return (
@@ -471,13 +478,13 @@ function DailyRosterTab({ pool, roles, userProfile }) {
               {isApproved ? (
                 <>
                   <div style={{ fontSize: '13px', color: theme.textMuted, marginBottom: '16px' }}>
-                    This roster for <strong style={{ color: theme.text }}>{deleteTarget.roster_date}</strong> has been approved by ICO. Enter a reason for deletion:
+                    This roster for <strong style={{ color: theme.text }}>{siteName(deleteTarget.site_id, sites)}, {deleteTarget.roster_date}</strong> has been approved by ICO. Enter a reason for deletion:
                   </div>
                   <input style={styles.input} value={deleteReason} onChange={e => setDeleteReason(e.target.value)} placeholder="Reason for deletion…" autoFocus />
                 </>
               ) : (
                 <div style={{ fontSize: '13px', color: theme.textMuted, marginBottom: '8px' }}>
-                  Delete roster for <strong style={{ color: theme.text }}>{deleteTarget.roster_date}</strong>? This cannot be undone.
+                  Delete roster for <strong style={{ color: theme.text }}>{siteName(deleteTarget.site_id, sites)}, {deleteTarget.roster_date}</strong>? This cannot be undone.
                 </div>
               )}
               {alert && <div style={{ marginTop: '10px' }}><AlertBar msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} /></div>}
@@ -496,6 +503,7 @@ function DailyRosterTab({ pool, roles, userProfile }) {
         <div style={styles.row}>
           <button style={styles.tab(true)}>Roster List</button>
           <button style={styles.tab(false)} onClick={() => setViewMode('weekly')}>Weekly Summary</button>
+          <div style={{ width: '200px' }}><SitePicker allowAll value={siteFilter} onChange={setSiteFilter} style={styles.input} /></div>
         </div>
         {hasRole(userProfile, ...ROSTER_WRITE_ROLES) && (
           <button style={styles.btn('primary')} onClick={() => setViewMode('create')}>+ Create Roster</button>
@@ -507,14 +515,14 @@ function DailyRosterTab({ pool, roles, userProfile }) {
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead style={{ background: theme.surface }}>
               <tr>
-                {['Date', 'Workers', 'Total Cost', 'Target Met', 'ICO Status', 'MD Status', 'Payment', 'Actions'].map(h => (
+                {['Date', 'Site', 'Workers', 'Total Cost', 'Target Met', 'ICO Status', 'MD Status', 'Payment', 'Actions'].map(h => (
                   <th key={h} style={styles.th}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {rosters.length === 0 && <tr><td colSpan={8} style={{ ...styles.td, textAlign: 'center', color: theme.textMuted }}>No rosters yet.</td></tr>}
-              {rosters.map(r => {
+              {shownRosters.length === 0 && <tr><td colSpan={9} style={{ ...styles.td, textAlign: 'center', color: theme.textMuted }}>{rosters.length === 0 ? 'No rosters yet.' : 'No rosters for this site.'}</td></tr>}
+              {shownRosters.map(r => {
                 const icoSt = r.ico_status || 'draft'
                 const mdSt = r.md_status || 'pending'
                 const paySt = r.payment_status || 'unpaid'
@@ -540,6 +548,7 @@ function DailyRosterTab({ pool, roles, userProfile }) {
                 return (
                   <tr key={r.id} style={{ cursor: 'pointer' }} onClick={() => { setSelectedRoster(r); setViewMode('detail') }}>
                     <td style={styles.td}>{r.roster_date}</td>
+                    <td style={styles.td}>{siteName(r.site_id, sites)}</td>
                     <td style={styles.td}>{r.worker_count ?? '—'}</td>
                     <td style={styles.td}>{naira(r.total_daily_cost)}</td>
                     <td style={styles.td}><span style={styles.badge(r.target_met ? theme.green : theme.red)}>{r.target_met ? 'Yes' : 'No'}</span></td>
@@ -574,6 +583,14 @@ function DailyRosterTab({ pool, roles, userProfile }) {
 function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCancel }) {
   const isEdit = !!editRoster
   const [date, setDate] = useState(editRoster?.roster_date || todayStr())
+  // This form only opens for a roster that passes the edit lock (canEdit in
+  // the list), so the site is changeable whenever the form is reachable.
+  const [siteId, setSiteId] = useState(editRoster?.site_id || DUTSE_SITE_ID)
+  const { sites } = useSites()
+  // daily_roster_site_date_key: one roster per site per day.
+  const rosterError = (error) => error?.code === '23505' && !/uq_roster_entry_worker/i.test(error.message || '')
+    ? `A roster already exists for ${siteName(siteId, sites)} on ${date}.`
+    : null
   const [targetMet, setTargetMet] = useState(editRoster?.target_met || false)
   const [entries, setEntries] = useState([])
   const [saving, setSaving] = useState(false)
@@ -713,13 +730,13 @@ function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCanc
     if (isEdit) {
       const wasSubmitted = editRoster.ico_status === 'submitted'
       const { error: re } = await supabase.from('daily_roster').update({
-        roster_date: date, target_met: targetMet, total_daily_cost: grandTotal,
+        roster_date: date, site_id: siteId, target_met: targetMet, total_daily_cost: grandTotal,
         payment_week_ending: weekEnding, worker_count: entries.length,
         ico_status: submit ? 'submitted' : wasSubmitted ? 'draft' : (editRoster.ico_status || 'draft'),
         submitted_by: submit ? userProfile?.full_name : editRoster.submitted_by,
         submitted_date: submit ? todayStr() : editRoster.submitted_date,
       }).eq('id', editRoster.id)
-      if (re) { setSaving(false); return setErr(friendlyEntryError(re)) }
+      if (re) { setSaving(false); return setErr(rosterError(re) || friendlyEntryError(re)) }
       // Upsert the current set (kept workers UPDATED in place via the
       // roster_id,labour_id unique key; new workers INSERTED) — no wholesale
       // delete, so there is never a window where all entries are gone.
@@ -736,12 +753,12 @@ function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCanc
       else onSave()
     } else {
       const { data: roster, error: re } = await supabase.from('daily_roster').insert({
-        roster_date: date, target_met: targetMet, total_daily_cost: grandTotal,
+        roster_date: date, site_id: siteId, target_met: targetMet, total_daily_cost: grandTotal,
         submitted_by: userProfile?.full_name, submitted_date: submit ? todayStr() : null,
         ico_status: submit ? 'submitted' : 'draft', md_status: 'pending',
         payment_week_ending: weekEnding, payment_status: 'unpaid', worker_count: entries.length,
       }).select('id').single()
-      if (re) { setSaving(false); return setErr(re.message) }
+      if (re) { setSaving(false); return setErr(rosterError(re) || re.message) }
       const { error: ee } = await supabase.from('daily_roster_entries').insert(entryRows(roster.id))
       setSaving(false)
       if (ee) setErr(friendlyEntryError(ee))
@@ -752,11 +769,15 @@ function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCanc
   return (
     <div style={styles.card}>
       <div style={{ ...styles.row, justifyContent: 'space-between', marginBottom: '18px' }}>
-        <h3 style={{ margin: 0 }}>{isEdit ? `Edit Roster — ${editRoster.roster_date}` : 'Create Daily Roster'}</h3>
+        <h3 style={{ margin: 0 }}>{isEdit ? `Edit Roster — ${siteName(editRoster.site_id, sites)}, ${editRoster.roster_date}` : 'Create Daily Roster'}</h3>
         <button style={styles.btn('ghost')} onClick={onCancel}>Cancel</button>
       </div>
       {err && <AlertBar msg={err} type="error" onClose={() => setErr('')} />}
-      <div style={{ ...styles.row, gap: '20px', marginBottom: '18px', alignItems: 'center' }}>
+      <div style={{ ...styles.row, gap: '20px', marginBottom: '18px', alignItems: 'center', flexWrap: 'wrap' }}>
+        <div style={{ ...styles.formGroup, minWidth: '220px' }}>
+          <label style={styles.label}>Site</label>
+          <SitePicker value={siteId} onChange={setSiteId} style={styles.input} />
+        </div>
         <div style={styles.formGroup}>
           <label style={styles.label}>Roster Date</label>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -880,7 +901,7 @@ function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCanc
   )
 }
 
-function RosterDetail({ roster, roles, pool, userProfile, onBack, onAction, alert, clearAlert }) {
+function RosterDetail({ roster, sites = [], roles, pool, userProfile, onBack, onAction, alert, clearAlert }) {
   const [entries, setEntries] = useState([])
   const [loading, setLoading] = useState(true)
   const [comment, setComment] = useState('')
@@ -914,6 +935,10 @@ function RosterDetail({ roster, roles, pool, userProfile, onBack, onAction, aler
         <div style={styles.card}>
           <div style={{ fontSize: '11px', color: theme.textMuted, fontWeight: '700', textTransform: 'uppercase' }}>Date</div>
           <div style={{ fontSize: '18px', fontWeight: '700' }}>{roster.roster_date}</div>
+        </div>
+        <div style={styles.card}>
+          <div style={{ fontSize: '11px', color: theme.textMuted, fontWeight: '700', textTransform: 'uppercase' }}>Site</div>
+          <div style={{ fontSize: '18px', fontWeight: '700' }}>{siteName(roster.site_id, sites)}</div>
         </div>
         <div style={styles.card}>
           <div style={{ fontSize: '11px', color: theme.textMuted, fontWeight: '700', textTransform: 'uppercase' }}>Total Cost</div>
@@ -1033,7 +1058,7 @@ function RosterDetail({ roster, roles, pool, userProfile, onBack, onAction, aler
   )
 }
 
-function WeeklySummary({ rosters, onBack }) {
+function WeeklySummary({ rosters, sites = [], onBack }) {
   const groups = {}
   rosters.forEach(r => {
     const key = r.payment_week_ending || 'Unknown'
@@ -1053,18 +1078,19 @@ function WeeklySummary({ rosters, onBack }) {
             <div style={{ ...styles.row, justifyContent: 'space-between', marginBottom: '12px' }}>
               <div>
                 <div style={{ fontWeight: '700', fontSize: '15px' }}>Week ending {week}</div>
-                <div style={{ fontSize: '12px', color: theme.textMuted }}>{weekRosters.length} days · {targetDays} target-met days</div>
+                <div style={{ fontSize: '12px', color: theme.textMuted }}>{weekRosters.length} rosters · {targetDays} target-met</div>
               </div>
               <div style={{ textAlign: 'right' }}>
                 <div style={{ fontWeight: '700', fontSize: '18px', color: theme.accent }}>{naira(weekTotal)}</div>
               </div>
             </div>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead><tr>{['Date', 'Workers', 'Daily Total', 'Target Met', 'Status'].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
+              <thead><tr>{['Date', 'Site', 'Workers', 'Daily Total', 'Target Met', 'Status'].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
               <tbody>
                 {weekRosters.map(r => (
                   <tr key={r.id} style={{ background: r.target_met ? theme.green + '08' : 'transparent' }}>
                     <td style={styles.td}>{r.roster_date}</td>
+                    <td style={styles.td}>{siteName(r.site_id, sites)}</td>
                     <td style={styles.td}>{r.worker_count || '—'}</td>
                     <td style={{ ...styles.td, color: theme.accent, fontWeight: '600' }}>{naira(r.total_daily_cost)}</td>
                     <td style={styles.td}><span style={styles.badge(r.target_met ? theme.green : theme.textMuted)}>{r.target_met ? 'Yes' : 'No'}</span></td>
@@ -1223,8 +1249,9 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
 
     // Step 1: fetch source rows for the range
     const [rRes, lRes] = await Promise.all([
+      // All sites' rosters in the range — payroll is company-wide, never site-filtered.
       supabase.from('daily_roster')
-        .select('*, entries:daily_roster_entries(*)')
+        .select('*, entries:daily_roster_entries(*), site:site_id(name)')
         .gte('roster_date', rangeFrom)
         .lte('roster_date', rangeTo),
       supabase.from('truck_loading_log')
@@ -1577,11 +1604,11 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
                       <th style={{ ...styles.th, width: '36px', paddingRight: '4px' }}>
                         <input type="checkbox" checked={allChecked} onChange={toggleAll} />
                       </th>
-                      {['Date', 'Workers', 'Total Cost', 'ICO', 'MD', 'Payment', 'Payroll'].map(h => <th key={h} style={styles.th}>{h}</th>)}
+                      {['Date', 'Site', 'Workers', 'Total Cost', 'ICO', 'MD', 'Payment', 'Payroll'].map(h => <th key={h} style={styles.th}>{h}</th>)}
                     </tr>
                   </thead>
                   <tbody>
-                    {rosters.length === 0 && <tr><td colSpan={8} style={{ ...styles.td, textAlign: 'center', color: theme.textMuted }}>No rosters in this range.</td></tr>}
+                    {rosters.length === 0 && <tr><td colSpan={9} style={{ ...styles.td, textAlign: 'center', color: theme.textMuted }}>No rosters in this range.</td></tr>}
                     {rosters.map(r => {
                       const isThisDraft = isDraftMode && r.payroll_id === currentPayroll?.id
                       const isOtherPayroll = r.payroll_id != null && !isThisDraft
@@ -1591,6 +1618,7 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
                             <input type="checkbox" checked={checkedRosterIds.has(r.id)} disabled={isOtherPayroll} onChange={() => !isOtherPayroll && toggleRow(r.id)} />
                           </td>
                           <td style={styles.td}>{r.roster_date}</td>
+                          <td style={styles.td}>{r.site?.name || '—'}</td>
                           <td style={styles.td}>{r.worker_count ?? '—'}</td>
                           <td style={styles.td}>{naira(r.total_daily_cost)}</td>
                           <td style={styles.td}><span style={styles.badge(statusColor(r.ico_status || 'draft'))}>{(r.ico_status || 'draft').replace('_', ' ')}</span></td>

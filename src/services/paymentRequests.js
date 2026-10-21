@@ -31,7 +31,7 @@ export const paymentRequestsService = {
     return data || [];
   },
 
-  async create({ amount, purpose, expense_category_id, disbursement_method, supplier_id, payee_name, payee_bank_name, payee_account_number, payee_account_name, category_other_note, order_item_id }) {
+  async create({ site_id, amount, purpose, expense_category_id, disbursement_method, supplier_id, payee_name, payee_bank_name, payee_account_number, payee_account_name, category_other_note, order_item_id }) {
     const { data: ref, error: refErr } = await supabase.rpc('get_next_payment_request_reference');
     if (refErr) throw refErr;
     const { data: { user } } = await supabase.auth.getUser();
@@ -40,6 +40,8 @@ export const paymentRequestsService = {
       .insert({
         reference: ref,
         requested_by: user.id,
+        // Null lets the DB trigger default to Dutse; the form always sends one.
+        site_id: site_id || null,
         amount,
         purpose: purpose || null,
         expense_category_id: expense_category_id || null,

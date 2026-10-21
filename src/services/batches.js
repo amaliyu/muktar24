@@ -1,4 +1,6 @@
 import { supabase } from '../lib/supabase'
+import { finishedGoodsService } from './finishedGoods'
+import { isFactorySite } from './sites'
 
 export const batchesService = {
   async getAll() {
@@ -46,6 +48,41 @@ export const batchesService = {
       )
     }
     return data
+  },
+
+  // Dutse yard stock (finished_goods_stock) belongs to the factory only. A batch
+  // at a client site never touches it (Phase 7A). delta > 0 increases, < 0
+  // decreases. Returns true when the yard was adjusted, false when skipped.
+  async adjustYardStock(siteId, sites, blockType, delta) {
+    if (!delta || !isFactorySite(siteId, sites)) return false
+    if (delta > 0) await finishedGoodsService.increase(blockType, delta)
+    else await finishedGoodsService.decrease(blockType, Math.abs(delta))
+    return true
+  },
+
+  // Create path used by the Batches page: insert (retrying once with a fresh
+  // number on a batch_number collision), then add to Dutse yard stock only for
+  // a factory batch. A yard-stock failure doesn't undo the batch; it is
+  // returned as yardError so the page can show it.
+  async createBatch({ batch, productionLogIds = [], sites = [] }) {
+    let batchNumber = batch.batch_number || await batchesService.getNextNumber()
+    let created
+    try {
+      created = await batchesService.create({ ...batch, batch_number: batchNumber }, productionLogIds)
+    } catch (e) {
+      if (e.code !== '23505') throw e
+      batchNumber = await batchesService.getNextNumber()
+      created = await batchesService.create({ ...batch, batch_number: batchNumber }, productionLogIds)
+    }
+    let yardUpdated = false
+    let yardError = null
+    try {
+      yardUpdated = await batchesService.adjustYardStock(batch.site_id, sites, batch.block_type, Number(batch.qty_accepted))
+    } catch (e) {
+      console.error('Finished goods (yard) update failed for batch', batchNumber, e)
+      yardError = e
+    }
+    return { batch: created, batchNumber, yardUpdated, yardError }
   },
 
   async restoreStock(id, qty) {
