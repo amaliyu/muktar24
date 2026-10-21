@@ -3,7 +3,7 @@
 
 Repo: `amaliyu/muktar24` (PRIVATE) · Prod branch: `main` · Stack: React 18 + Vite 5 + Supabase (PostgreSQL, RLS) + Vercel
 App: APC Manager — internal ERP for Abuja Precast Concrete Limited
-**Updated: 2026-08-07 (Session 23 — Phase 6A maintenance + 6B curing sign-off, accounting-report rebuild, data-integrity fixes, multi-role access control; PRs #92–#110). Session 22 (2026-07-14) was the Phase 6 design-lock, planning-only — see §9.** All DB state verified by live query, not memory.
+**Updated: 2026-10-21 (Session 24 — Phase 7 design-lock + 7A DB applied; 7A frontend PR)**
 **Status: BETA. A physical/manual backup system runs in parallel — NO downtime pressure.**
 **Operating mode: SLOW AND VERIFIED — fix on a branch → test on the branch's Vercel preview AS THE AFFECTED ROLE → confirm with own eyes → MD merges → re-verify production.**
 
@@ -21,6 +21,9 @@ App: APC Manager — internal ERP for Abuja Precast Concrete Limited
 ---
 
 ## 1. SESSION HISTORY (most recent first)
+
+### 🔵 SESSION 24 (2026-10-21) — PHASE 7 DESIGN-LOCK + 7A DB
+**Phase 7 (mobile plant line & investor SPVs) design-locked with the MD. It is a deliberate priority override of the §3 queue. 7A DB applied and verified by the planning chat (migrations `phase7a_production_sites_foundation` + `phase7a_inventory_material_key`; tracked record in `supabase/migrations/20261021000000_phase7a_production_sites_foundation.sql`). The 7A frontend (site & machine tagging) is in a PR. Full design, decision log, sub-phase map and open items: see §11.**
 
 ### ✅ SESSION 23 (2026-07-15 → 2026-08-07) — PHASE 6A/6B BUILD + ACCOUNTING-REPORT REBUILD + DATA-INTEGRITY FIXES + MULTI-ROLE ACCESS
 **PRs: #92–#110 (19 PRs), all merged. This is the first build session after the Phase 6 design-lock (Session 22, §9). It combines the first two Phase 6 sub-phases (6A maintenance, 6B curing sign-off) with a large, unplanned accounting-report and data-integrity clean-up that surfaced while building — several confidently-"done" earlier features were found silently broken on inspection (see the recurring bug patterns catalogued in §10). No DB migrations were applied from this window; the few schema touches these PRs relied on (production_log audit columns, inventory unit fields) are noted per-PR and were applied via planning-chat where required.**
@@ -601,6 +604,7 @@ A long, multi-workstream session. All items below tested and merged unless noted
 
 ### Current work queue (as of 2026-08-07 — supersedes the abstract table above for day-to-day priority)
 Closed/settled and NOT in the active queue: payroll RPC cutover (#0/#2), RLS baseline rollout (#3), the whole HR module stream (#4). The active queue, in order:
+0. **Phase 7 (mobile plant line) — MD priority override 2026-10-21, see §11.** The items below continue for Dutse/Conmach after 7A ships.
 1. **Physical count reconciliation (post-backfill)** — once the historical backfill to January (see §2 warning) is declared complete, take a real physical inventory count and reconcile it against the system's computed stock. Nothing downstream that depends on true stock levels is trustworthy until this is done. **Blocks item 2.**
 2. **WAC (weighted-average-cost) costing → cost per 1,000 blocks** — implement weighted-average unit costing on inventory consumption to produce a real cost-per-1,000-blocks figure. **Blocked on (1)** — WAC is meaningless on stock quantities/values that are still being backfilled and not yet physically verified.
 3. **Waybill → order linkage** — close the remaining gap tying a waybill (delivery) back to its originating order, so delivery/fulfilment can be reconciled against what was sold.
@@ -967,3 +971,120 @@ The single most expensive trap: assuming a table has a `date` column. A query th
 **Pattern:** editing a stock-affecting row re-applies the new effect without first undoing the old one → double-count.
 - **Seen in:** inventory `editMovement` (PR #105) — re-applied a deduction using the *new* `movement_type` without reversing the *old* movement first. Fixed to reverse using `oldMovement.movement_type`, then apply the edit. Same shape as the production-delete reversal gap (PR #101), where deletion didn't reverse the consumed stock at all.
 - **Rule:** any edit/delete of a row that changed stock must first reverse the row's *original* effect (using the original type/quantity), then apply the new one. Never apply the delta from the new values alone.
+
+---
+
+## 11. PHASE 7 — MOBILE PLANT LINE & INVESTOR SPVs (Session 24, 2026-10-21)
+
+**Status: DESIGN LOCKED (MD approved 2026-10-21). 7A DB APPLIED 2026-10-21 by the planning chat (migrations `phase7a_production_sites_foundation` + `phase7a_inventory_material_key`), before/after verified. 7A frontend in PR. 7B/7C not started.**
+
+**Priority override (MD decision, 2026-10-21):** Phase 7 is deliberately moved AHEAD of the §3 work queue, under the §6 sequencing-override rule ("pulling work earlier is the MD's call to make deliberately, not by drift"). The §3 queue (physical count → WAC → waybill linkage → statement parser → DOXIX → ingestion) is **not cancelled**. It continues to govern Dutse/Conmach work and resumes after 7A ships.
+
+**Hard date:** both mobile machines start production **Monday 26 Oct 2026**. 7A must be live before the first block is logged. 7B and 7C follow within roughly two weeks. No investor split happens before the first month closes, so nothing is lost if 7A records the data correctly from day one.
+
+### Origin
+APCL is starting a second business line. Smaller modular machines (QTJ4-26B and smaller) are installed on large clients' own sites, unlike the fixed Conmach MD-20 at Dutse. Third-party investors fund the machines. Each machine's economics run through an SPV under the Commercial Term Sheet V2 and Investment Memorandum. The first two deployments are Bilaad (Life Camp) and Sequoia (Kado). Source documents, which the MD confirmed as final on 2026-10-21, are: the Sequoia Commercial Proposal & Terms of Engagement (19 Oct 2026), the Bilaad award plus Contractor Warranty Form, the SPV Term Sheet V2, the Investment Memorandum and the Investor Quick Pitch.
+
+### Contract facts (from the final documents)
+| | Bilaad — Life Camp | Sequoia — Kado |
+|---|---|---|
+| Site | Bali Grove, Plot 135 Kafe, Life Camp | Plot 498 Celina Ayom Crescent, Kado |
+| Model | **Service fee**: Bilaad supplies all materials; APCL supplies machine, crew and production management | **Full supply**: APCL buys materials and supplies labour; APCL's profit is what remains after costs |
+| Quantity | 174,982 (120,650 × 9" + 54,332 × 6") | Phase 1: 150,000 (125,000 × 9" + 25,000 × 6") |
+| Price | ₦241 per accepted block (≈ ₦42.17m) | Opening rates ₦1,000 (9") / ₦960 (6") — reference value ₦149m |
+| Money flow | 25% mobilisation advance ₦10,542,665.50 (covers 43,745 blocks) | Rolling 25,000-block cycles, each **fully prepaid in cleared funds** before it starts. Rate re-agreed in writing per cycle |
+| Clocks | Warranty: rectify an APCL-caused defect within **2 days** of notice | ~7-day advance notice before a cycle ends. After the completion notice, Sequoia has **7 calendar days** to send the schedule, agree the rate and mobilise; otherwise APCL may produce for third parties. Resume within **10 working days** after remobilisation. Inspection: **3 working days**, then deemed accepted |
+| Stock ownership | Materials are **Bilaad-owned** and must never appear as APCL stock or cost | Materials are APCL-owned and costed at the site |
+
+### DECISION LOG (agreed with MD, 2026-10-21)
+1. **Every operational record is tagged by site and machine.** This covers Dutse, Kado and Life Camp, and later sites. Existing records default to Dutse.
+2. **Two contract models are supported side by side:** `service_fee` (Bilaad) and `full_supply` (Sequoia). Neither contract's terms are carried over to the other.
+3. **Each machine is its own investment pool.** A machine can have one or more investors. Different machines have different investors.
+4. **Simple split first.** Each investor's share of the investor portion is pro rata to the capital they contributed. The waterfall thresholds (1×, 1.5×, 2× ICA) are measured on the pool total, so all investors in a pool move tiers together. Per-investor terms are deferred until a real deal needs them.
+5. **Waterfall as per Term Sheet V2:**
+   - below 1× ICA: 65% investor / 35% APCL
+   - 1× to 1.5×: 35 / 65
+   - 1.5× to 2×: 25 / 75
+   - above 2× through Year 5: 20 / 80
+
+   NDC is calculated monthly from cash actually received. At a threshold crossing, only the amount needed to reach the threshold uses the earlier tier. Bridge refunds reduce the ICA and are not counted as return.
+6. **APCL collects and the app allocates.** Clients keep paying APCL, because both contracts are in APCL's name. The app tags every receipt to its machine and treats it as owed to that machine's SPV until a monthly transfer.
+7. **SPV accounts live in the app as a separate ledger per machine.** They are kept apart from APCL's main accounts (TAJ Revenue, TAJ Operations, Moniepoint), so APCL's books stay clean and each investor sees only their own machine.
+
+### SUB-PHASE MAP
+| Sub | Scope | Depends on | Deadline |
+|---|---|---|---|
+| **7A** | Site and machine tagging (below) | None | **Live before Mon 26 Oct 2026** |
+| **7B** | Site contracts and cycles | 7A | ~2 weeks |
+| **7C** | Investor pools and SPV ledger | 7A; 7B for receipts | ~2 weeks, before first month-end |
+
+**7A — site and machine tagging**
+- **DB (planning chat applies):**
+  - New table `production_sites` with code, name, `site_type` (`factory`/`client_site`), `contract_model` (`own_sales`/`service_fee`/`full_supply`), client name, address and active flag. Seeded with DUTSE, KADO-SEQ and LIFECAMP-BIL. RLS: read for operational roles, write for MD only. Default anon/authenticated grants revoked.
+  - `assets.site_id` added. Two machines added: QTJ-01 at Life Camp and QTJ-02 at Kado. These labels are editable.
+  - NOT NULL `site_id` added to `production_log`, `batches`, `damage_log`, `daily_roster`, `stock_movements`, `inventory_items`, `downtime_log`, `expenses` and `payment_requests`. All are backfilled to Dutse and indexed.
+  - `production_log.asset_id` added, backfilled to the Conmach.
+  - `inventory_items.owner` added (`apcl`/`client`).
+  - `inventory_items.material` added (`cement`/`dust`/`chippings`/`diesel`), with a unique index on `(site_id, material)`. The four Dutse items are tagged. Production deducts stock by **site + material**, never by name (Rule 10.6).
+  - Existing rows were backfilled through a constant column default, NOT an UPDATE, so the roster, payroll and payment-request guard triggers never fired.
+  - `daily_roster` uniqueness changes from `(roster_date)` to `(site_id, roster_date)`, giving one roster per site per day.
+  - `fn_fill_site_id()` BEFORE trigger:
+    - `stock_movements` inherit the site from their item.
+    - `expenses` inherit from their source roster or payment request.
+    - `damage_log` inherits from its production entry.
+    - `downtime_log` inherits from its asset.
+    - `production_log` gets the site's active machine.
+    - Any record that can't inherit falls back to Dutse.
+  - AFTER triggers re-sync an auto-expense's site if its roster or payment request changes site.
+- **Site stock items (Rule 10.6):** cement, dust and diesel for Kado, and Bilaad-owned stock for Life Camp, are **not seeded yet**. The planning chat creates them, tagged by site, owner and material, only after the 7A frontend (deduction by site + material) is merged.
+- **Verification done 2026-10-21:**
+  - All row counts and the expense and stock totals are unchanged.
+  - 0 non-Dutse rows; every production row is linked to the Conmach.
+  - Rolled-back live test: a Kado roster's expense was tagged Kado; Life Camp production got QTJ-01; damage, stock movement and downtime inherited the right site; two rosters on one date at different sites both saved.
+  - anon cannot read `production_sites`.
+- **Frontend (Claude Code, one branch, one PR):**
+  - **Entry screens:** add a site picker on production, roster, damage, downtime, stock movements and payment requests, defaulting to Dutse.
+  - **Production entry:** set `asset_id` to the site's machine.
+  - **Stock deduction:** `autoDeductProduction` resolves items by `site_id` + `material`, never by keyword.
+  - **Finished goods:** batches at a client site must NOT increase Dutse `finished_goods_stock`.
+  - **Roster lookups:** lookups by date (App.jsx ~476, labour.js ~144) must also filter by site, since one date can now have several rosters.
+  - **Reports:** add a site filter to reports, dashboards and the KPI view. Low-stock alerts are scoped by site.
+- **Verification:**
+  - **Before migration:** snapshot row counts per affected table.
+  - **After migration:** confirm counts are unchanged, every row is Dutse, and inserts from each source path land on the right site.
+  - **Role tests (Rule 7):** smoke-test as `production_manager`, `assistant_production_manager`, `store_officer`, `hr_officer`, `ico`, `accountant` and `md` on the Vercel preview before merge.
+
+**7B — site contracts and cycles**
+- **Tables:**
+  - `site_contracts`: the client, the site, the model (`service_fee`/`full_supply`), quantities, rates and document references.
+  - `contract_cycles`: per cycle, the quantity by block type, the agreed rate, mobilisation received, status, completion-notice date, the remobilisation deadline (+7 calendar days) and the third-party-unlock date.
+- **Clocks with notifications:**
+  - Sequoia: 7-day advance notice, 7-day remobilisation, 3-working-day deemed acceptance, 10-working-day resume.
+  - Bilaad: 2-day warranty rectification.
+- **Bilaad money tracking:** fee earned per *accepted* block, and recovery of the 25% mobilisation advance against the 43,745 blocks it covers.
+- **Client-owned stock:** a material yield report per site, showing blocks per bag against budget (40/bag for 9", 45/bag for 6"). This is APCL's evidence under the Bilaad warranty exclusion for client-supplied materials.
+- **Site handover:** a handover record per site that replaces "into Dutse yard" for client-site batches.
+
+**7C — investor pools and SPV ledger**
+- **Pools and capital:**
+  - `investment_pools`: one per machine, linked to `assets`.
+  - `pool_investors`.
+  - `capital_events` (contribution, bridge, bridge refund), giving a computed ICA per pool and a pro-rata share per investor.
+  - The ₦27.0m already funded on machine 1 is recorded as the opening contribution.
+- **SPV accounts:** a separate ledger per pool, recording site receipts allocated from APCL and the monthly transfer.
+- **Monthly NDC:** `ndc_periods` records receipts, legitimate deductions per Term Sheet §10, and reserves.
+- **Waterfall:** a SECURITY DEFINER waterfall function computes tier splits at each threshold crossing. `distributions` records the investor and APCL shares per period.
+- **Investor access:** a read-only `investor` role through `has_any_role()`, scoped by RLS to the investor's own pool. It shows production, collections, costs, reserves, NDC, cumulative receipts and the current tier (Term Sheet §17).
+
+### OPEN ITEMS (raised this session — MD to action or decide)
+- ✅ **Repo was found PUBLIC (2026-10-21); MD set it PRIVATE the same day.** Anonymous access is now refused (verified). Only the current tree was scanned for secrets (none found); older commits were not checked.
+- ✅ **Backup tables locked (2026-10-21):** `_backup_roster_entries_20260721` and `_policy_snapshot_20260727` now have RLS on and all anon/authenticated grants revoked (verified). Dropping them is optional and is the MD's call.
+- **The Supabase connector cancelled `apply_migration` 4 times on 2026-10-21, then worked.** Cause unknown. If it recurs, check claude.ai → Settings → Connectors → Supabase tool permissions.
+- **Machine labels:** QTJ-01 = Life Camp, QTJ-02 = Kado. Confirm or swap. Confirm the second machine's model.
+- **Products for the mobile line:** confirm which existing product names the QTJ Turkish 9" and 6" blocks are logged under. The `block_type` trigger requires an exact match.
+- **Investor pack vs final contracts (factual, for MD awareness):**
+  - The Memorandum, Term Sheet §16 and Pitch still show Bilaad at 206,361 blocks / ₦49.733m, where the award is 174,982 / ≈₦42.17m.
+  - The Pitch says the customer funds materials, which does not hold for Sequoia (full supply).
+  - Sequoia's 9" rate of ₦1,000 leaves roughly ₦209/block over materials, against the ₦241 service-fee basis.
+- **Machine ownership wording:** Sequoia §10 calls the plant "APCL's property", while Term Sheet §5 places it in the SPV. Check this with counsel before the SPV is formed.
+- **This master document was last updated 2026-08-07 (PR #110); the repo is at PR #121.** Bring §1 session history up to date for PRs #111–#121 when this section is merged.
