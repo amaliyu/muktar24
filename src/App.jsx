@@ -48,6 +48,10 @@ import { sitesService, DUTSE_SITE_ID, isFactorySite, siteName } from './services
 import Messages from './components/Messages'
 import { messagesService } from './services/messages'
 import NotificationBell from './components/NotificationBell'
+import SiteContracts from './components/site/SiteContracts'
+import MaterialReceiving from './components/site/MaterialReceiving'
+import Handovers from './components/site/Handovers'
+import SiteDashboardCards from './components/site/SiteDashboardCards'
 import MessagesBell from './components/MessagesBell'
 import { advancesService } from './services/advances'
 import { paymentRequestsService } from './services/paymentRequests'
@@ -138,18 +142,18 @@ const APP_ROLES = [
 // Pages each role is allowed to access. 'all' = unrestricted.
 const ROLE_PAGES = {
   md:                 'all',
-  ico:                ['dashboard','production','inventory','batches','maintenance','waybills','vehicles','labour','truck_loading','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','advances','leave','payment_requests','messages'],
-  accountant:         ['dashboard','customers','orders','reports','kpi_dashboard','accounting','suppliers','products','my_profile','data_import','labour','waybills','advances','leave','payment_requests','truck_loading','trading_margin','messages'],
-  board_member:       ['dashboard','production','inventory','batches','maintenance','waybills','vehicles','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','trading_margin','messages'],
+  ico:                ['dashboard','production','inventory','batches','maintenance','site_contracts','material_receiving','handovers','waybills','vehicles','labour','truck_loading','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','advances','leave','payment_requests','messages'],
+  accountant:         ['dashboard','site_contracts','material_receiving','handovers','customers','orders','reports','kpi_dashboard','accounting','suppliers','products','my_profile','data_import','labour','waybills','advances','leave','payment_requests','truck_loading','trading_margin','messages'],
+  board_member:       ['dashboard','production','inventory','batches','maintenance','site_contracts','handovers','waybills','vehicles','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','trading_margin','messages'],
   bdm:                ['dashboard','customers','orders','pending_register','daily_schedule','lpo_approvals','reports','kpi_dashboard','my_profile','payment_requests','trading_margin','messages'],
-  store_officer:      ['dashboard','inventory','batches','maintenance','waybills','pending_register','daily_schedule','products','reports','my_profile','messages'],
-  logistics_manager:  ['dashboard','waybills','vehicles','labour','truck_loading','maintenance','pending_register','daily_schedule','customers','my_profile','payment_requests','messages'],
+  store_officer:      ['dashboard','inventory','batches','maintenance','site_contracts','material_receiving','handovers','waybills','pending_register','daily_schedule','products','reports','my_profile','messages'],
+  logistics_manager:  ['dashboard','site_contracts','handovers','waybills','vehicles','labour','truck_loading','maintenance','pending_register','daily_schedule','customers','my_profile','payment_requests','messages'],
   marketer:           ['dashboard','customers','orders','products','my_profile','messages'],
   driver:             ['dashboard','waybills','my_profile','messages'],
-  hr_officer:         ['dashboard','staff','reports','labour','my_profile','advances','leave','disciplinary','attendance_kiosk','attendance_flags','payment_requests','messages'],
+  hr_officer:         ['dashboard','site_contracts','staff','reports','labour','my_profile','advances','leave','disciplinary','attendance_kiosk','attendance_flags','payment_requests','messages'],
   kiosk_device:       ['attendance_kiosk'],
-  production_manager:           ['dashboard','production','inventory','batches','maintenance','reports','products','labour','truck_loading','my_profile','attendance_flags','payment_requests','messages'],
-  assistant_production_manager: ['dashboard','production','inventory','batches','maintenance','reports','products','labour','truck_loading','my_profile','attendance_flags','messages'],
+  production_manager:           ['dashboard','production','inventory','batches','maintenance','site_contracts','material_receiving','handovers','reports','products','labour','truck_loading','my_profile','attendance_flags','payment_requests','messages'],
+  assistant_production_manager: ['dashboard','production','inventory','batches','maintenance','site_contracts','material_receiving','handovers','reports','products','labour','truck_loading','my_profile','attendance_flags','messages'],
   // legacy roles — kept for any existing users
   operations:         ['dashboard','production','inventory','batches','waybills','vehicles','pending_register','daily_schedule','lpo_approvals','my_profile'],
   sales:              ['dashboard','customers','orders','my_profile'],
@@ -389,7 +393,7 @@ const StatCard = ({ label, value, sub, accent, pct }) => (
 );
 
 // ── DASHBOARD ─────────────────────────────────────────────────
-const Dashboard = ({ onNavigate, userProfile }) => {
+const Dashboard = ({ onNavigate, onOpenSite, userProfile }) => {
   const role = userProfile?.role || 'staff';
   const can = (...roles) => roles.includes(role);
   const isDriver = role === 'driver';
@@ -582,6 +586,10 @@ const Dashboard = ({ onNavigate, userProfile }) => {
             This Month
           </button>
         </div>
+      )}
+      {/* Phase 7B-1 site cards — loads on its own, independent of the date range. */}
+      {hasRole(userProfile, 'md', 'production_manager', 'assistant_production_manager', 'ico') && (
+        <SiteDashboardCards userProfile={userProfile} onOpenSite={onOpenSite} />
       )}
       {loading ? <Spinner /> : (
         <>
@@ -3228,7 +3236,7 @@ const Reports = ({ userProfile }) => <ReportsEngine userProfile={userProfile} />
 const UNITS = ["bags", "kg", "litres", "units", "tonnes", "metres", "packs"];
 const ISSUED_TO = ["Production", "Maintenance", "Logistics", "Administration", "Other"];
 
-const Inventory = ({ onLowStockChange, userProfile }) => {
+const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
   // Whoever is logged in is recorded as the person who entered the movement —
   // no free text, no override (deliberate accountability requirement).
   const recordedBy = userProfile?.full_name || userProfile?.email || null;
@@ -3345,6 +3353,10 @@ const Inventory = ({ onLowStockChange, userProfile }) => {
 
   const handleStockIn = async () => {
     if (!inForm.itemId || !inForm.quantity || !inForm.date) return setAlert({ type: "error", msg: "Item, quantity, and date are required." });
+    // Client-site deliveries go through Material Receiving (accept/reject split,
+    // rejection notice, photo). This manual path stays for Dutse only.
+    const inTarget = items.find(i => i.id === inForm.itemId);
+    if (inTarget && !isFactorySite(inTarget.site_id, sites)) return setAlert({ type: "error", msg: "Deliveries to a client site are recorded in Material Receiving, not Stock In." });
     if (suppliersList.length > 0 && !inForm.supplierId) return setAlert({ type: "error", msg: "Please select a supplier from the list." });
     setSaving(true);
     try {
@@ -3665,6 +3677,12 @@ const Inventory = ({ onLowStockChange, userProfile }) => {
                 <div style={{ fontSize: "11px", color: theme.accent, marginTop: "4px", fontWeight: "600" }}>{kgPreview(inForm.quantity)} will be stored</div>
               )}
             </div>
+            {inItemSel && !isFactorySite(inItemSel.site_id, sites) && (
+              <div style={{ ...styles.formGroup, gridColumn: "1 / -1", background: theme.blue + "1f", border: `1px solid ${theme.blue}66`, borderRadius: "4px", padding: "10px 14px", fontSize: "13px", color: theme.text }}>
+                {itemSiteLabel(inItemSel)} is a client site. Record this delivery in <strong>Material Receiving</strong> — it checks accepted vs rejected quantities and keeps the photo and rejection notice.
+                {onNavigate && <button onClick={() => onNavigate("material_receiving")} style={{ ...styles.btn("secondary"), marginLeft: "12px", padding: "6px 12px" }}>Open Material Receiving →</button>}
+              </div>
+            )}
             <div style={styles.formGroup}>
               <label style={styles.label}>Unit Cost at Purchase (₦)</label>
               <input style={styles.input} type="number" placeholder="0.00" value={inForm.unitCost} onChange={e => setInForm({ ...inForm, unitCost: e.target.value })} />
@@ -10854,6 +10872,9 @@ const navItems = [
     { id: "inventory", label: "Inventory", icon: "inventory" },
     { id: "batches", label: "Batches", icon: "batches" },
     { id: "maintenance", label: "Maintenance", icon: "maintenance" },
+    { id: "site_contracts", label: "Site Contracts", icon: "orders" },
+    { id: "material_receiving", label: "Material Receiving", icon: "inventory" },
+    { id: "handovers", label: "Handovers", icon: "batches" },
   ]},
   { section: "Logistics", items: [
     { id: "waybills", label: "Waybills", icon: "waybill" },
@@ -11332,6 +11353,8 @@ export default function App() {
   const [authMessage, setAuthMessage] = useState(''); // shown on LoginScreen after a forced sign-out
   const [profileLoadError, setProfileLoadError] = useState(false); // transient fetch failure, not a missing/inactive verdict
   const [active, setActive] = useState("dashboard");
+  // Site preselected when the Dashboard opens Site Contracts from a site card.
+  const [contractsSite, setContractsSite] = useState('');
   const [lowStockCount, setLowStockCount] = useState(0);
   const [lpoCount, setLpoCount] = useState(0);
   const [scheduleCount, setScheduleCount] = useState(0);
@@ -11529,10 +11552,17 @@ export default function App() {
   const boardMasked = isBoard && !BOARD_EXEMPT_PAGES.includes(safePage) && !grantedPages.has(safePage);
   const icoMasked   = isICO   && !ICO_EXEMPT_PAGES.includes(safePage)   && !grantedPages.has(safePage);
 
+  const openSiteContracts = (siteId) => { setContractsSite(siteId || ''); setActive('site_contracts'); };
+
   const pages = {
-    dashboard: isBoard ? <BoardDashboard userProfile={userProfile} /> : <Dashboard onNavigate={setActive} userProfile={userProfile} />,
+    dashboard: isBoard
+      ? <><SiteDashboardCards userProfile={userProfile} onOpenSite={openSiteContracts} /><BoardDashboard userProfile={userProfile} /></>
+      : <Dashboard onNavigate={setActive} onOpenSite={openSiteContracts} userProfile={userProfile} />,
     production: <Production userProfile={userProfile} />,
-    inventory: <Inventory onLowStockChange={setLowStockCount} userProfile={userProfile} />,
+    inventory: <Inventory onLowStockChange={setLowStockCount} userProfile={userProfile} onNavigate={setActive} />,
+    site_contracts: <SiteContracts userProfile={userProfile} initialSiteId={contractsSite} />,
+    material_receiving: <MaterialReceiving userProfile={userProfile} />,
+    handovers: <Handovers userProfile={userProfile} />,
     batches: <Batches userProfile={userProfile} />,
     waybills: <Waybills userProfile={userProfile} />,
     vehicles: <VehicleRegistry />,

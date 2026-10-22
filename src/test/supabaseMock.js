@@ -1,6 +1,7 @@
 // Minimal chainable stand-in for the supabase-js query builder, for service
 // tests. Every call is recorded on `calls`; the awaited result of a chain is
 // produced by `resolve(table, ops)` (default: { data: [], error: null }).
+// RPCs resolve through the same function as `resolve('rpc:<name>', args)`.
 export function createSupabaseMock(resolve = () => ({ data: [], error: null })) {
   const calls = []
   const from = (table) => {
@@ -15,7 +16,11 @@ export function createSupabaseMock(resolve = () => ({ data: [], error: null })) 
     builder.then = (onOk, onErr) => settle().then(onOk, onErr)
     return builder
   }
-  return { supabase: { from }, calls }
+  const rpc = (fn, args) => {
+    calls.push({ rpc: fn, args })
+    return Promise.resolve(resolve(`rpc:${fn}`, args))
+  }
+  return { supabase: { from, rpc }, calls }
 }
 
 // The first op of a given kind in a recorded call, e.g. op(call, 'insert').
