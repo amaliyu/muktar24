@@ -7,7 +7,7 @@ export function createSupabaseMock(resolve = () => ({ data: [], error: null })) 
   const from = (table) => {
     const ops = []
     const builder = {}
-    for (const m of ['select', 'insert', 'update', 'delete', 'upsert', 'eq', 'neq', 'in', 'gte', 'lte', 'order', 'limit', 'not', 'is']) {
+    for (const m of ['select', 'insert', 'update', 'delete', 'upsert', 'eq', 'neq', 'in', 'gte', 'lte', 'order', 'limit', 'not', 'is', 'or']) {
       builder[m] = (...args) => { ops.push([m, ...args]); return builder }
     }
     const settle = () => { calls.push({ table, ops }); return Promise.resolve(resolve(table, ops)) }

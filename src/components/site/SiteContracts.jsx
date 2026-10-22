@@ -4,6 +4,7 @@ import { siteName } from '../../services/sites'
 import { siteContractsService, lagosToday, isCycleFunded } from '../../services/siteContracts'
 import { hasRole } from '../../lib/roles'
 import { buildAdvanceNoticeText, buildCompletionNoticeText } from '../../utils/siteNotices'
+import WeeklyReportPanel, { WEEKLY_REPORT_ROLES } from './WeeklyReportPanel'
 import { theme, ui, Pill, fmtQty, fmtNaira, fmtDate, fmtDateTime, countdown, ErrorBox, SkeletonRows, CopyButton, ConfirmDialog, StackTable } from './siteUi'
 
 // Phase 7B-1 — client contracts and their prepaid cycles. The cycle is the
@@ -20,12 +21,13 @@ const CYCLE_EDIT_ROLES = ['md', 'accountant']
 
 const MODEL_LABEL = { service_fee: 'Service fee', full_supply: 'Full supply' }
 
-export default function SiteContracts({ userProfile, initialSiteId }) {
+export default function SiteContracts({ userProfile, initialSiteId, initialReport = false }) {
   const isReader = hasRole(userProfile, ...SITE_READ_ROLES)
   const isMD = userProfile?.role === 'md'
   const canHolidays = isMD || hasRole(userProfile, 'hr_officer')
   const canEditCycle = hasRole(userProfile, ...CYCLE_EDIT_ROLES)
   const seeMoney = hasRole(userProfile, ...MONEY_ROLES)
+  const canReport = hasRole(userProfile, ...WEEKLY_REPORT_ROLES)
   const { sites } = useSites()
 
   const [siteFilter, setSiteFilter] = useState(initialSiteId || '')
@@ -85,7 +87,9 @@ export default function SiteContracts({ userProfile, initialSiteId }) {
             <ContractBlock key={c.id} contract={c} sites={sites}
               cycles={cycles.filter(x => x.contract_id === c.id)}
               forecasts={forecasts.filter(f => f.contract_id === c.id)}
-              isMD={isMD} canEditCycle={canEditCycle} seeMoney={seeMoney} onChanged={load} />
+              isMD={isMD} canEditCycle={canEditCycle} seeMoney={seeMoney} onChanged={load}
+              userProfile={userProfile} canReport={canReport}
+              reportOpen={initialReport && !!initialSiteId && c.site_id === initialSiteId} />
           ))}
           {isMD && <WarningsRunner />}
         </>
@@ -97,7 +101,7 @@ export default function SiteContracts({ userProfile, initialSiteId }) {
 }
 
 // ── one contract ─────────────────────────────────────────────
-function ContractBlock({ contract: c, sites, cycles, forecasts, isMD, canEditCycle, seeMoney, onChanged }) {
+function ContractBlock({ contract: c, sites, cycles, forecasts, isMD, canEditCycle, seeMoney, onChanged, userProfile, canReport, reportOpen }) {
   const today = lagosToday()
   const [cycleForm, setCycleForm] = useState(null)
   const [action, setAction] = useState(null)     // { kind, cycle, reason }
@@ -105,6 +109,8 @@ function ContractBlock({ contract: c, sites, cycles, forecasts, isMD, canEditCyc
   const [actErr, setActErr] = useState(null)
   const [showHistory, setShowHistory] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  const [showReport, setShowReport] = useState(!!reportOpen)
+  useEffect(() => { if (reportOpen) setShowReport(true) }, [reportOpen])
   const site = siteName(c.site_id, sites)
   const full = c.contract_model === 'full_supply'
 
@@ -297,7 +303,12 @@ function ContractBlock({ contract: c, sites, cycles, forecasts, isMD, canEditCyc
       <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginTop: '12px' }}>
         <button type="button" data-board-allow data-ico-allow style={ui.btn('ghost')} onClick={() => setShowHistory(s => !s)}>{showHistory ? 'Hide' : 'Show'} cycle history</button>
         {isMD && <button type="button" style={ui.btn('ghost')} onClick={() => setShowSettings(s => !s)}>{showSettings ? 'Hide' : 'Contract'} settings</button>}
+        {canReport && <button type="button" data-board-allow data-ico-allow style={ui.btn('secondary')} onClick={() => setShowReport(s => !s)}>{showReport ? 'Hide weekly report' : 'Weekly report'}</button>}
       </div>
+      {showReport && canReport && <WeeklyReportPanel contract={c} site={{ id: c.site_id, name: site }} userProfile={userProfile} />}
+      {!canReport && hasRole(userProfile, 'accountant') && (
+        <div style={{ ...ui.hint, marginTop: '8px' }}>Weekly report: not available to the accountant role yet — it needs production records the accountant cannot read.</div>
+      )}
       {showHistory && <CycleHistory cycles={cycles} seeMoney={seeMoney} />}
       {showSettings && isMD && <ContractSettings contract={c} onSaved={onChanged} />}
 
