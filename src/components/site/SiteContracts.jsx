@@ -306,9 +306,6 @@ function ContractBlock({ contract: c, sites, cycles, forecasts, isMD, canEditCyc
         {canReport && <button type="button" data-board-allow data-ico-allow style={ui.btn('secondary')} onClick={() => setShowReport(s => !s)}>{showReport ? 'Hide weekly report' : 'Weekly report'}</button>}
       </div>
       {showReport && canReport && <WeeklyReportPanel contract={c} site={{ id: c.site_id, name: site }} userProfile={userProfile} />}
-      {!canReport && hasRole(userProfile, 'accountant') && (
-        <div style={{ ...ui.hint, marginTop: '8px' }}>Weekly report: not available to the accountant role yet — it needs production records the accountant cannot read.</div>
-      )}
       {showHistory && <CycleHistory cycles={cycles} seeMoney={seeMoney} />}
       {showSettings && isMD && <ContractSettings contract={c} onSaved={onChanged} />}
 

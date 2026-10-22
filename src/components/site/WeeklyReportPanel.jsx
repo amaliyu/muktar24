@@ -9,11 +9,12 @@ import { theme, ui, fmtQty, ErrorBox } from './siteUi'
 // fetched, turned into a model by the pure builder, then drawn. A failed fetch
 // is shown and no PDF is produced (Rule 10.5).
 //
-// Roles: the report reads production_log / damage_log / stock_movements, which
-// RLS does not let the accountant read — an accountant's report would silently
-// show no production, so the accountant is not offered it (see PR notes).
-export const WEEKLY_REPORT_ROLES = ['md', 'production_manager', 'assistant_production_manager', 'ico', 'board_member']
-export const WEEKLY_INTERNAL_ROLES = ['md', 'ico']
+// Roles: every role here can read production_log / damage_log / stock_movements
+// (accountant read access added by migration accountant_read_production_damage_stock).
+// A role without that access would silently get an empty week — check RLS
+// before adding one.
+export const WEEKLY_REPORT_ROLES = ['md', 'production_manager', 'assistant_production_manager', 'ico', 'board_member', 'accountant']
+export const WEEKLY_INTERNAL_ROLES = ['md', 'ico', 'accountant']
 
 const isoShift = (iso, days) => new Date(Date.parse(`${iso}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10)
 

@@ -37,4 +37,14 @@ describe('WeeklyReportPanel', () => {
     render(<WeeklyReportPanel contract={contract} site={site} userProfile={{ role: 'ico', effectiveRoles: ['ico'] }} />)
     expect(screen.getByRole('button', { name: 'Internal PDF' })).toBeInTheDocument()
   })
+
+  it('accountant is offered both versions and the internal fetch includes expenses', async () => {
+    fetchMock.mockResolvedValueOnce(empty)
+    render(<WeeklyReportPanel contract={contract} site={site} userProfile={{ role: 'accountant', effectiveRoles: ['accountant'] }} />)
+    expect(screen.getByRole('button', { name: 'Client PDF' })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Internal PDF' }))
+    await screen.findByRole('status')
+    expect(fetchMock.mock.calls[0][0].internal).toBe(true)
+    expect(pdfMock.mock.calls[0][0].version).toBe('internal')
+  })
 })
