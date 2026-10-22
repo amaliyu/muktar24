@@ -20,6 +20,11 @@ const TABLE_PAGE = {
   weekly_labour_payroll: 'labour',
   lpo_orders:           'lpo_approvals',
   delivery_schedules:   'schedule_approvals',
+  // Phase 7B-1 site warnings (run_site_warnings / record_material_receipt)
+  contract_cycles:      'site_contracts',
+  block_handovers:      'handovers',
+  material_receipts:    'material_receiving',
+  inventory_items:      'material_receiving',   // "materials running low" → record the next delivery
 }
 
 function relativeTime(iso) {
