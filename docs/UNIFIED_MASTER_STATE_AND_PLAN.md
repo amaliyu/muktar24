@@ -976,7 +976,7 @@ The single most expensive trap: assuming a table has a `date` column. A query th
 
 ## 11. PHASE 7 — MOBILE PLANT LINE & INVESTOR SPVs (Session 24, 2026-10-21)
 
-**Status: DESIGN LOCKED (MD approved 2026-10-21). 7A DB APPLIED 2026-10-21 by the planning chat (migrations `phase7a_production_sites_foundation` + `phase7a_inventory_material_key`), before/after verified. 7A frontend in PR. 7B/7C not started.**
+**Status: DESIGN LOCKED. 7A LIVE (PR #122 merged 2026-10-21). 7B DESIGN APPROVED 2026-10-22; 7B-1 DB APPLIED 2026-10-22 (migration `phase7b1_contracts_cycles_handovers_receiving_warnings`), verified with rolled-back tests; 7B-1 frontend in PR. 7B-2 and 7C not started.**
 
 **Priority override (MD decision, 2026-10-21):** Phase 7 is deliberately moved AHEAD of the §3 work queue, under the §6 sequencing-override rule ("pulling work earlier is the MD's call to make deliberately, not by drift"). The §3 queue (physical count → WAC → waybill linkage → statement parser → DOXIX → ingestion) is **not cancelled**. It continues to govern Dutse/Conmach work and resumes after 7A ships.
 
@@ -1038,7 +1038,7 @@ APCL is starting a second business line. Smaller modular machines (QTJ4-26B and 
   - AFTER triggers re-sync an auto-expense's site if its roster or payment request changes site.
   - Follow-up migration `phase7a_machine_models_and_one_roster_per_worker_day` (2026-10-21): machine names/models set; a worker can be on only one roster per day across all sites (double-pay guard); verified with a rolled-back test (same-day second site blocked, next-day other site allowed, date-move clash blocked).
   - Bug fix (2026-10-21, migration `roster_delete_removes_its_auto_expense`): deleting a costed roster used to fail on expenses_daily_roster_id_fkey — the roster's auto-expense is now removed first. Fixes the existing Delete button and the 7A empty-roster cleanup.
-- **Site stock items (Rule 10.6):** cement, dust and diesel for Kado, and Bilaad-owned stock for Life Camp, are **not seeded yet**. The planning chat creates them, tagged by site, owner and material, only after the 7A frontend (deduction by site + material) is merged.
+- **Site stock items (Rule 10.6):** seeded 2026-10-21 after PR #122 went live (migration `phase7a_seed_site_stock_items`): Kado cement/dust/diesel (APCL-owned) and Life Camp cement/dust/diesel (Bilaad-owned), opening balance 0 by MD decision.
 - **Verification done 2026-10-21:**
   - All row counts and the expense and stock totals are unchanged.
   - 0 non-Dutse rows; every production row is linked to the Conmach.
@@ -1056,23 +1056,120 @@ APCL is starting a second business line. Smaller modular machines (QTJ4-26B and 
   - **After migration:** confirm counts are unchanged, every row is Dutse, and inserts from each source path land on the right site.
   - **Role tests (Rule 7):** smoke-test as `production_manager`, `assistant_production_manager`, `store_officer`, `hr_officer`, `ico`, `accountant` and `md` on the Vercel preview before merge.
 
-**7B — site contracts and cycles**
-- **Tables:**
-  - `site_contracts`: the client, the site, the model (`service_fee`/`full_supply`), quantities, rates and document references.
-  - `contract_cycles`: per cycle, the quantity by block type, the agreed rate, mobilisation received, status, completion-notice date, the remobilisation deadline (+7 calendar days) and the third-party-unlock date.
-- **Clocks with notifications:**
-  - Sequoia: 7-day advance notice, 7-day remobilisation, 3-working-day deemed acceptance, 10-working-day resume.
-  - Bilaad: 2-day warranty rectification.
-- **Bilaad money tracking:** fee earned per *accepted* block, and recovery of the 25% mobilisation advance against the 43,745 blocks it covers.
-- **Client-owned stock:** a material yield report per site, showing blocks per bag against budget (40/bag for 9", 45/bag for 6"). This is APCL's evidence under the Bilaad warranty exclusion for client-supplied materials.
-- **Site handover:** a handover record per site that replaces "into Dutse yard" for client-site batches.
-- **Site capital asset register (MD, 2026-10-21):** every site keeps a register of its capital assets — block machine, generator, moulds, pallets, trolleys, mixer, water tank, pump, storage and other equipment — with code, description, quantity, acquisition date and cost, funding source (which investor pool, or APCL), current site, condition/status, and a movement history when an asset moves between sites (Dutse ↔ client sites). It feeds the SPV fixed-asset register in 7C (Term Sheet §5) and supports APCL's plant-removal right at demobilisation (Sequoia §10). Extends the existing `assets` table rather than a parallel one.
-- **Material receiving with accept/reject (MD, 2026-10-21):** every material delivery to a site is logged on arrival: date, material, delivered quantity, supplier/truck/waybill ref, and an inspection result — quantity accepted, quantity rejected, reason, photo. Only the accepted quantity enters site stock. For Bilaad (client-supplied materials) a rejection is APCL's written record that the client's material was refused before use (Contractor Warranty Form: APCL must promptly notify apparent material defects, and is not liable for defects from client-procured materials), so the client is notified. The same receiving flow is used for APCL's own purchases at Kado.
-- **Site reports and early warnings (MD, 2026-10-21):** per-site reports — production, accepted vs rejected blocks, damages, material received/used/remaining and yield against budget (40 bags/9", 45 bags/6") — exportable for the client. Warnings, through the existing notification system:
-  - Sequoia (Kado): the prepaid 25,000-block cycle running out — warn when the forecast at the current production rate is about 7 days from cycle completion (Proposal §3 advance notice), then track the completion notice and the 7-day remobilisation window (§6).
-  - Bilaad (Life Camp): the 25% mobilisation advance (covers 43,745 blocks) being used up, and client-supplied materials running low (days of stock left at the current usage rate), so APCL can ask Bilaad for funds/materials before production stops.
-  - Any site: site stock below reorder level.
-  - **Client report delivery — MD decided 2026-10-21:** a weekly PDF per site generated in the app, which the MD or site manager sends to the client (e.g. WhatsApp). No client login for now; a read-only client portal can be revisited later.
+**7B — site contracts, receiving, handover, warnings, reports, asset register** (design approved by MD 2026-10-22)
+
+#### Principles
+- **The cycle is the unit of money.** Each contract is a series of prepaid cycles. A Sequoia cycle is 25,000 blocks, fully paid before it starts. Bilaad's cycle 1 is the 25% mobilisation advance, covering 43,745 blocks. One model, one set of warnings, for both contract types.
+- **Forecasts use actual output, never rated output** (MD, 2026-10-21: the proposals deliberately understated output, and real site capacity is not yet known). The forecast rate is the site's average over its last 5 production days. Until 5 days exist, it falls back to the contract's planning rate. Planning rates, editable by the MD:
+  - Bilaad: 2,777/day (174,982 blocks ÷ 63 days in the award).
+  - Sequoia: 2,880/day (the conservative figure; the proposal states none).
+- **Warnings are prompts for the MD, never automatic messages to clients.** The app tells APCL. The MD or site manager decides what to send.
+- **Client-facing reports carry quantities only.** No APCL costs, material prices or margins ever appear on a client PDF. The Sequoia margin is thin, so this matters.
+- **Money is recorded once.** Cycle payments are recorded against the cycle with a reference. A link to the existing invoices/payments flow is optional and is reconciled in 7C. 7B does not change the existing accounting.
+
+#### Delivery order
+- **7B-1, this week, needed from cycle 1:**
+  - contracts and cycles
+  - cycle payments
+  - block handover and acceptance
+  - material receiving with accept/reject
+  - forecasts and warnings
+- **7B-2, following week:**
+  - weekly site PDF
+  - capital asset register
+
+#### 7B-1 — tables (planning chat applies; RLS on; anon/authenticated defaults revoked)
+
+**`site_contracts`** — one row per client contract.
+- **Fields:** `site_id`, `client_name`, `contract_ref`, `contract_model` (`service_fee`/`full_supply`), `total_qty_9in`, `total_qty_6in`.
+- **Money basis:** `fee_per_block` (service fee) or `opening_rate_9in` / `opening_rate_6in` (full supply).
+- **Warning settings:** `planning_rate_per_day`, `advance_notice_days` (Sequoia 7), `material_warning_days` (default 3), `status`, `notes`.
+- **Seeded:**
+  - Bilaad: BR/PMO/BALI GROVE/APCL/2026/001, 120,650 × 9" + 54,332 × 6", ₦241/accepted block.
+  - Sequoia: Phase 1, 125,000 × 9" + 25,000 × 6", ₦1,000 / ₦960 opening.
+
+**`contract_cycles`** — one row per prepaid cycle.
+- **Identity:** `contract_id`, `cycle_no`.
+- **Scope and price:** `qty_9in`, `qty_6in`, `rate_9in`, `rate_6in` (agreed for this cycle), `amount_due`.
+- **Payment and dates:** `amount_received`, `payment_ref`, `paid_on`, `schedule_received_on`, `started_on`.
+- **Notices:** `advance_notice_sent_on`, `completed_on`, `completion_notice_sent_on`.
+- **Computed by the DB, not typed:**
+  - `remobilisation_deadline` = completion notice + 7 calendar days (Sequoia §3/§6).
+  - `third_party_from` = deadline + 1 day.
+- **Statuses:** `awaiting_payment` → `active` → `completed` → `closed`.
+- **Rule:** a cycle cannot become `active` until `amount_received >= amount_due` and a schedule date is set (Proposal §3: "not required to commence until … full mobilisation … in cleared funds"). This is enforced by a guard trigger. The MD can override with a written reason, which is audited.
+- **Seeded:**
+  - Sequoia cycle 1: 25,000 blocks, mix per Sequoia's schedule (MD enters it).
+  - Bilaad cycle 1: 43,745 blocks, ₦10,542,665.50.
+
+**`block_handovers`** — what is handed to the client, and the client's verdict.
+- **Fields:** `site_id`, `cycle_id`, `handover_date`, `block_type`, `qty_handed_over`, `qty_accepted`, `qty_rejected`, `rejection_reason`, `client_rep`, `photo_path`, `status` (`pending`/`accepted`/`deemed_accepted`/`partly_rejected`/`rejected`).
+- **Sequoia (§7):** a handover still `pending` after 3 working days becomes `deemed_accepted`, via a nightly job.
+- **Bilaad:** the fee is earned only on accepted blocks (₦241 per accepted block).
+- **Warranty clock:** a rejection opens a 2-day rectification clock (warranty form). It is closed by a rectification entry.
+- **Stock:** handover moves blocks out of site yard stock (see "Site yard" below).
+
+**`material_receipts`** — every delivery checked on arrival.
+- **Fields:** `site_id`, `item_id` (a site stock item), `received_on`, `qty_delivered`, `qty_accepted`, `qty_rejected`, `rejection_reason`, `supplier_or_source`, `truck_or_waybill_ref`, `photo_path`, `received_by`.
+- **Write path:** one SECURITY DEFINER RPC, `record_material_receipt`. It inserts the receipt, adds **only the accepted quantity** to stock (stock movement + current stock) and notifies the MD of any rejection. It is atomic, so receipt and stock can never disagree. Direct inserts are blocked.
+- **Client notice:** for client-owned material (Bilaad), the rejection produces a ready-to-send notice (date, material, quantity, reason, photo). This is APCL's written record under the warranty form's "promptly notify apparent defects in materials before use".
+- **Edits:** reverse-then-apply, Rule 10.7.
+
+**Site yard (handover stock).** Client-site blocks never enter Dutse `finished_goods_stock`. 7B adds a per-site yard balance: accepted batches minus handovers minus damages. The site page shows it as a view, not a stored counter, so it cannot drift.
+
+#### 7B-1 — forecasts and warnings
+- **View `v_cycle_forecast`** (per active cycle):
+  - blocks counted toward the cycle (Sequoia: produced at the site since the cycle started; Bilaad: accepted)
+  - blocks remaining
+  - 5-day actual average, or the planning rate
+  - forecast days left and forecast completion date
+- **View `v_site_material_runway`** (per site item): current stock, 5-day average daily usage from `production_log`, days left.
+- **Nightly job (pg_cron) `run_site_warnings()`.** Each warning goes to md and production_manager through the existing `notifications` table, at most once per day per warning:
+  - **Sequoia cycle near end:** forecast days left ≤ 7 and advance notice not yet sent → "Send Sequoia the 7-day notice".
+  - **Cycle complete, completion notice not sent** → "Send completion notice".
+  - **Remobilisation window:**
+    - day 5 of 7 → "2 days left for Sequoia to remobilise".
+    - day 8 → "Third-party production now allowed (§6)".
+  - **Remobilised:** after Sequoia remobilises, a 10-working-day resume deadline is tracked.
+  - **Bilaad advance running out:** forecast days left on cycle 1 ≤ `advance_notice_days` (default 7) → "Request next Bilaad payment".
+  - **Materials running low:** any site item with days left ≤ `material_warning_days` → "Kado cement: ~2 days left". For Bilaad items the message reads "ask Bilaad for materials".
+  - **Handover pending** 2 working days (Sequoia), the day before deemed acceptance → "Chase written acceptance".
+  - **Rectification open** past 2 days → "Bilaad defect not yet rectified".
+- **Marking a notice as sent:** an MD "mark notice sent" button on the cycle stops the repeats and records the date. That date is evidence of notice.
+
+#### 7B-1 — screens (Claude Code)
+- **Site Contracts page** (md, accountant, ico read; md write; production_manager read):
+  - per contract: cycles list with status chips
+  - for the current cycle: progress bar (done/remaining), forecast finish date, notice buttons, payment entry
+- **Material Receiving** (store_officer, production_manager, APM): one form per delivery, accepted/rejected split, photo, and a "copy rejection notice" button (WhatsApp-ready text).
+- **Handovers** (production_manager, APM, store_officer enter; md sees all): handover entry, then the client verdict entry; deemed-acceptance shown automatically.
+- **Site dashboard card per site:** today's output, 5-day average, cycle remaining, forecast finish, material days left, open warnings.
+
+#### 7B-2 — weekly site PDF
+- **Contents:** one PDF per site per week (Mon–Sun):
+  - production by type
+  - handed over / accepted / rejected / pending
+  - damages
+  - materials received (accepted/rejected), used and remaining
+  - yield (blocks per bag) against budget (40 for 9", 45 for 6")
+  - cycle status (prepaid, done, remaining, forecast finish)
+  - for Bilaad: fee earned on accepted blocks and advance remaining
+- **Versions:**
+  - a client version: quantities only, plus the client's own payments
+  - an internal version, which adds material cost and margin for Sequoia
+- **Sending:** generated in the app; the MD or site manager sends it (MD decision, 2026-10-21).
+
+#### 7B-2 — capital asset register
+- **Extend `assets`:** add `category` (machine, generator, mould, pallet, trolley, mixer, tank, pump, storage, tool, vehicle, other), `quantity`, `serial_or_tag`, `acquired_on`, `acquisition_cost`, `funding_source` (`apcl` or an investor pool, linked in 7C), `condition` (`good`/`fair`/`needs_repair`/`out_of_service`) and `notes`.
+- **New `asset_movements`:** asset, from site, to site, date, quantity, reason, moved by. The asset's site updates through a trigger.
+- **Register view per site:** feeds the SPV fixed-asset register in 7C (Term Sheet §5) and the plant-removal list at demobilisation (Sequoia §10).
+- **Seed:** the Conmach, QTJ4-40 and QTJ4-26B now; generators, moulds, pallets and trolleys entered by the MD.
+
+#### Open items for 7B
+- **Bilaad payments after the advance:** the payment schedule after the mobilisation advance is not recorded. The design handles any next payment as cycle 2, but the actual NEC4 payment terms (interim valuations?) need confirming.
+- **Bilaad signature:** the Bilaad award was "not yet signed" as of 15 Oct. Confirm the signed version before seeding, in case targeted amendments changed the quantities or the fee.
+- **Sequoia cycle 1 mix:** the 9" / 6" split comes from Sequoia's written schedule (Proposal §3). The MD enters it when received.
+- **Working days:** Mon–Sat or Mon–Fri? This affects the 3-working-day and 10-working-day clocks. Assumed Mon–Fri, excluding public holidays (holidays entered by the MD).
 
 **7C — investor pools and SPV ledger**
 - **Pools and capital:**
