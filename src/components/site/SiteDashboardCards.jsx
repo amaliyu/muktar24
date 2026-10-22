@@ -1,13 +1,18 @@
 import { useEffect, useState } from 'react'
 import { useSites } from '../SitePicker'
 import { siteContractsService, lagosToday } from '../../services/siteContracts'
+import { hasRole } from '../../lib/roles'
 import { theme, ui, fmtQty, fmtDec, fmtDate, ErrorBox, SkeletonRows } from './siteUi'
 
 // Phase 7B-1 — one card per client site on the main Dashboard. Each figure
 // comes from a view (v_cycle_forecast, v_site_material_runway, v_site_yard), so
 // the card never keeps its own counters. A failed load shows the error, never
 // zeros (Rule 10.5). Tapping a card opens Site Contracts for that site.
+// Who gets the "Weekly report" shortcut on each card.
+const REPORT_LINK_ROLES = ['md', 'production_manager', 'assistant_production_manager', 'ico', 'board_member']
+
 export default function SiteDashboardCards({ userProfile, onOpenSite }) {
+  const showReportLink = hasRole(userProfile, ...REPORT_LINK_ROLES)
   const { sites, error: sitesErr } = useSites()
   const clientSites = sites.filter(s => s.site_type === 'client_site')
   const [data, setData] = useState(null)
@@ -96,6 +101,14 @@ export default function SiteDashboardCards({ userProfile, onOpenSite }) {
                     <span>{fmtQty(y.in_yard)}</span>
                   </div>
                 ))}
+
+                {showReportLink && (
+                  <div style={{ marginTop: '12px', borderTop: `1px solid ${theme.border}`, paddingTop: '8px' }}>
+                    <button type="button" data-board-allow data-ico-allow style={ui.small()}
+                      onKeyDown={e => e.stopPropagation()}
+                      onClick={e => { e.stopPropagation(); onOpenSite?.(s.id, { report: true }) }}>Weekly report</button>
+                  </div>
+                )}
               </div>
             )
           })}

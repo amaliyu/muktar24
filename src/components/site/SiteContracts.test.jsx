@@ -51,6 +51,7 @@ describe('SiteContracts', () => {
     await screen.findByText('Sequoia Projects Limited')
     expect(screen.queryByRole('button', { name: 'Start cycle' })).toBeNull()
     expect(screen.getByRole('button', { name: /Payment \/ scope/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Weekly report' })).toBeInTheDocument()
     unmount()
     render(<SiteContracts userProfile={{ id: 's', role: 'store_officer', effectiveRoles: ['store_officer'] }} />)
     await screen.findByText('Sequoia Projects Limited')

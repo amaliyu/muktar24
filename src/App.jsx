@@ -52,6 +52,7 @@ import SiteContracts from './components/site/SiteContracts'
 import MaterialReceiving from './components/site/MaterialReceiving'
 import Handovers from './components/site/Handovers'
 import SiteDashboardCards from './components/site/SiteDashboardCards'
+import AssetRegister from './components/site/AssetRegister'
 import MessagesBell from './components/MessagesBell'
 import { advancesService } from './services/advances'
 import { paymentRequestsService } from './services/paymentRequests'
@@ -142,18 +143,18 @@ const APP_ROLES = [
 // Pages each role is allowed to access. 'all' = unrestricted.
 const ROLE_PAGES = {
   md:                 'all',
-  ico:                ['dashboard','production','inventory','batches','maintenance','site_contracts','material_receiving','handovers','waybills','vehicles','labour','truck_loading','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','advances','leave','payment_requests','messages'],
-  accountant:         ['dashboard','site_contracts','material_receiving','handovers','customers','orders','reports','kpi_dashboard','accounting','suppliers','products','my_profile','data_import','labour','waybills','advances','leave','payment_requests','truck_loading','trading_margin','messages'],
-  board_member:       ['dashboard','production','inventory','batches','maintenance','site_contracts','handovers','waybills','vehicles','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','trading_margin','messages'],
+  ico:                ['dashboard','production','inventory','batches','maintenance','asset_register','site_contracts','material_receiving','handovers','waybills','vehicles','labour','truck_loading','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','advances','leave','payment_requests','messages'],
+  accountant:         ['dashboard','asset_register','site_contracts','material_receiving','handovers','customers','orders','reports','kpi_dashboard','accounting','suppliers','products','my_profile','data_import','labour','waybills','advances','leave','payment_requests','truck_loading','trading_margin','messages'],
+  board_member:       ['dashboard','production','inventory','batches','maintenance','asset_register','site_contracts','handovers','waybills','vehicles','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','trading_margin','messages'],
   bdm:                ['dashboard','customers','orders','pending_register','daily_schedule','lpo_approvals','reports','kpi_dashboard','my_profile','payment_requests','trading_margin','messages'],
-  store_officer:      ['dashboard','inventory','batches','maintenance','site_contracts','material_receiving','handovers','waybills','pending_register','daily_schedule','products','reports','my_profile','messages'],
-  logistics_manager:  ['dashboard','site_contracts','handovers','waybills','vehicles','labour','truck_loading','maintenance','pending_register','daily_schedule','customers','my_profile','payment_requests','messages'],
+  store_officer:      ['dashboard','inventory','batches','maintenance','asset_register','site_contracts','material_receiving','handovers','waybills','pending_register','daily_schedule','products','reports','my_profile','messages'],
+  logistics_manager:  ['dashboard','asset_register','site_contracts','handovers','waybills','vehicles','labour','truck_loading','maintenance','pending_register','daily_schedule','customers','my_profile','payment_requests','messages'],
   marketer:           ['dashboard','customers','orders','products','my_profile','messages'],
   driver:             ['dashboard','waybills','my_profile','messages'],
   hr_officer:         ['dashboard','site_contracts','staff','reports','labour','my_profile','advances','leave','disciplinary','attendance_kiosk','attendance_flags','payment_requests','messages'],
   kiosk_device:       ['attendance_kiosk'],
-  production_manager:           ['dashboard','production','inventory','batches','maintenance','site_contracts','material_receiving','handovers','reports','products','labour','truck_loading','my_profile','attendance_flags','payment_requests','messages'],
-  assistant_production_manager: ['dashboard','production','inventory','batches','maintenance','site_contracts','material_receiving','handovers','reports','products','labour','truck_loading','my_profile','attendance_flags','messages'],
+  production_manager:           ['dashboard','production','inventory','batches','maintenance','asset_register','site_contracts','material_receiving','handovers','reports','products','labour','truck_loading','my_profile','attendance_flags','payment_requests','messages'],
+  assistant_production_manager: ['dashboard','production','inventory','batches','maintenance','asset_register','site_contracts','material_receiving','handovers','reports','products','labour','truck_loading','my_profile','attendance_flags','messages'],
   // legacy roles — kept for any existing users
   operations:         ['dashboard','production','inventory','batches','waybills','vehicles','pending_register','daily_schedule','lpo_approvals','my_profile'],
   sales:              ['dashboard','customers','orders','my_profile'],
@@ -10872,6 +10873,7 @@ const navItems = [
     { id: "inventory", label: "Inventory", icon: "inventory" },
     { id: "batches", label: "Batches", icon: "batches" },
     { id: "maintenance", label: "Maintenance", icon: "maintenance" },
+    { id: "asset_register", label: "Asset Register", icon: "maintenance" },
     { id: "site_contracts", label: "Site Contracts", icon: "orders" },
     { id: "material_receiving", label: "Material Receiving", icon: "inventory" },
     { id: "handovers", label: "Handovers", icon: "batches" },
@@ -11355,6 +11357,7 @@ export default function App() {
   const [active, setActive] = useState("dashboard");
   // Site preselected when the Dashboard opens Site Contracts from a site card.
   const [contractsSite, setContractsSite] = useState('');
+  const [contractsReport, setContractsReport] = useState(false);
   const [lowStockCount, setLowStockCount] = useState(0);
   const [lpoCount, setLpoCount] = useState(0);
   const [scheduleCount, setScheduleCount] = useState(0);
@@ -11552,7 +11555,7 @@ export default function App() {
   const boardMasked = isBoard && !BOARD_EXEMPT_PAGES.includes(safePage) && !grantedPages.has(safePage);
   const icoMasked   = isICO   && !ICO_EXEMPT_PAGES.includes(safePage)   && !grantedPages.has(safePage);
 
-  const openSiteContracts = (siteId) => { setContractsSite(siteId || ''); setActive('site_contracts'); };
+  const openSiteContracts = (siteId, opts = {}) => { setContractsSite(siteId || ''); setContractsReport(!!opts.report); setActive('site_contracts'); };
 
   const pages = {
     dashboard: isBoard
@@ -11560,7 +11563,8 @@ export default function App() {
       : <Dashboard onNavigate={setActive} onOpenSite={openSiteContracts} userProfile={userProfile} />,
     production: <Production userProfile={userProfile} />,
     inventory: <Inventory onLowStockChange={setLowStockCount} userProfile={userProfile} onNavigate={setActive} />,
-    site_contracts: <SiteContracts userProfile={userProfile} initialSiteId={contractsSite} />,
+    site_contracts: <SiteContracts userProfile={userProfile} initialSiteId={contractsSite} initialReport={contractsReport} />,
+    asset_register: <AssetRegister userProfile={userProfile} />,
     material_receiving: <MaterialReceiving userProfile={userProfile} />,
     handovers: <Handovers userProfile={userProfile} />,
     batches: <Batches userProfile={userProfile} />,
@@ -11631,7 +11635,7 @@ export default function App() {
               {section.items.map(item => {
                 const badge = getBadge(item.id);
                 return (
-                  <div key={item.id} style={styles.navItem(active === item.id)} onClick={() => { setActive(item.id); if (isMobile) setSidebarOpen(false); }}>
+                  <div key={item.id} style={styles.navItem(active === item.id)} onClick={() => { setActive(item.id); setContractsReport(false); if (isMobile) setSidebarOpen(false); }}>
                     <Icon name={item.icon} size={14} />
                     <span style={{ flex: 1 }}>{item.label}</span>
                     {badge > 0 && (

@@ -976,7 +976,7 @@ The single most expensive trap: assuming a table has a `date` column. A query th
 
 ## 11. PHASE 7 — MOBILE PLANT LINE & INVESTOR SPVs (Session 24, 2026-10-21)
 
-**Status: DESIGN LOCKED. 7A LIVE (PR #122 merged 2026-10-21). 7B DESIGN APPROVED 2026-10-22; 7B-1 DB APPLIED 2026-10-22 (migration `phase7b1_contracts_cycles_handovers_receiving_warnings`), verified with rolled-back tests; 7B-1 frontend in PR. 7B-2 and 7C not started.**
+**Status: DESIGN LOCKED. 7A LIVE (PR #122 merged 2026-10-21). 7B DESIGN APPROVED 2026-10-22; 7B-1 DB APPLIED 2026-10-22 (migration `phase7b1_contracts_cycles_handovers_receiving_warnings`), verified with rolled-back tests; 7B-1 LIVE (PR #123 merged 2026-10-22). 7B-2 DB APPLIED 2026-10-22 (migration `phase7b2_asset_register_and_movements` — run by the MD in the Supabase SQL Editor because connector approvals were being cancelled), verified with rolled-back tests; 7B-2 frontend in PR. 7C not started.**
 
 **Priority override (MD decision, 2026-10-21):** Phase 7 is deliberately moved AHEAD of the §3 work queue, under the §6 sequencing-override rule ("pulling work earlier is the MD's call to make deliberately, not by drift"). The §3 queue (physical count → WAC → waybill linkage → statement parser → DOXIX → ingestion) is **not cancelled**. It continues to govern Dutse/Conmach work and resumes after 7A ships.
 
@@ -1164,6 +1164,7 @@ APCL is starting a second business line. Smaller modular machines (QTJ4-26B and 
 - **New `asset_movements`:** asset, from site, to site, date, quantity, reason, moved by. The asset's site updates through a trigger.
 - **Register view per site:** feeds the SPV fixed-asset register in 7C (Term Sheet §5) and the plant-removal list at demobilisation (Sequoia §10).
 - **Seed:** the Conmach, QTJ4-40 and QTJ4-26B now; generators, moulds, pallets and trolleys entered by the MD.
+- **As built (2026-10-22):** `assets.asset_type` now allows `equipment` (non-machine, non-vehicle items). New columns on `assets`: `category` (required), `quantity`, `serial_or_tag`, `acquired_on`, `acquisition_cost`, `funding_source` (`apcl`/`investor`), `investment_pool_ref` (linked properly in 7C), `condition`, `notes`, `parent_asset_id`, `updated_at`. Existing rows: vehicles → category vehicle; machines → machine; QTJ-01/QTJ-02 → funding investor. `asset_movements` is written only by the RPC `move_asset(p_asset_id, p_to_site_id, p_quantity, p_moved_on, p_reason)` (md, production_manager, APM, logistics_manager). A part move splits the record with a pro-rata cost (e.g. 200 of 600 pallets). A direct edit of `assets.site_id` is blocked by `trg_assets_site_guard`, so every move is logged. View `v_site_asset_register`. The accountant can now read `assets`.
 
 #### Open items for 7B
 - **Bilaad payments after the advance:** the payment schedule after the mobilisation advance is not recorded. The design handles any next payment as cycle 2, but the actual NEC4 payment terms (interim valuations?) need confirming.
