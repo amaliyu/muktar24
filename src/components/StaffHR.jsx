@@ -290,7 +290,7 @@ const StaffFormModal = ({ onClose, onSaved, editTarget, roles }) => {
     } else {
       hrStaffService.getNextEmployeeNumber().then(num => {
         setForm(f => ({ ...f, employee_number: num }));
-      }).catch(() => {});
+      }).catch(() => {}); // prefill only: the field can be typed, and save assigns the next number on a clash
     }
   }, []);
 
@@ -619,7 +619,7 @@ const StaffProfile = ({ staffId, onBack, onUpdated, roles, userProfile }) => {
       const from = new Date(Date.now() - 30 * 86400000).toISOString().split("T")[0];
       attendanceService.getByRange(from, to, staffId)
         .then(setAttendanceHistory)
-        .catch(() => {})
+        .catch(e => setAlert({ type: "error", msg: "Could not load attendance history: " + e.message }))
         .finally(() => setAttendanceLoading(false));
     }
   }, [tab, staffId]);
@@ -1217,7 +1217,7 @@ const AttendanceTab = () => {
   const [view, setView] = useState("entry");
 
   useEffect(() => {
-    staffService.getActive().then(s => { setActiveStaff(s); }).catch(() => {});
+    staffService.getActive().then(s => { setActiveStaff(s); }).catch(e => setAlert({ type: "error", msg: "Could not load the staff list: " + e.message }));
   }, []);
 
   useEffect(() => {
@@ -1228,7 +1228,12 @@ const AttendanceTab = () => {
         const ex = existingMap[s.id];
         return { staff_id: s.id, full_name: s.full_name, role: s.staffRole?.role_name || s.role || "—", staff_type: s.staff_type, daily_rate: s.daily_rate, present: ex ? ex.present : true, hours_worked: ex ? (ex.hours_worked || "") : "", notes: ex ? (ex.notes || "") : "" };
       }));
-    }).catch(() => {});
+    }).catch(e => {
+      // No sheet rather than an all-present default that would overwrite the
+      // day's real attendance on save.
+      setRows([]);
+      setAlert({ type: "error", msg: "Could not load attendance already recorded for this date, so the sheet is hidden: " + e.message });
+    });
   }, [attendanceDate, activeStaff]);
 
   const loadHistory = async () => {
@@ -2158,9 +2163,10 @@ const Staff = ({ userProfile }) => {
   const [tab, setTab] = useState("directory");
   const [profileStaffId, setProfileStaffId] = useState(null);
   const [roles, setRoles] = useState([]);
+  const [rolesErr, setRolesErr] = useState("");
 
   useEffect(() => {
-    rolesService.getActive().then(setRoles).catch(() => {});
+    rolesService.getActive().then(setRoles).catch(e => setRolesErr("Could not load staff roles (role pickers will be empty): " + e.message));
   }, []);
 
   if (profileStaffId) {
@@ -2173,6 +2179,7 @@ const Staff = ({ userProfile }) => {
           </div>
           <button style={styles.btn("secondary")} onClick={() => setProfileStaffId(null)}>← Back to Directory</button>
         </div>
+        {rolesErr && <Alert msg={rolesErr} type="error" onClose={() => setRolesErr("")} />}
         <StaffProfile staffId={profileStaffId} onBack={() => setProfileStaffId(null)} roles={roles} userProfile={userProfile} />
       </div>
     );
@@ -2191,6 +2198,7 @@ const Staff = ({ userProfile }) => {
           <button key={id} style={{ ...styles.btn(tab === id ? "primary" : "secondary"), fontSize: "13px" }} onClick={() => setTab(id)}>{label}</button>
         ))}
       </div>
+      {rolesErr && <Alert msg={rolesErr} type="error" onClose={() => setRolesErr("")} />}
       {tab === "directory"     && <StaffDirectory onViewProfile={setProfileStaffId} roles={roles} userProfile={userProfile} />}
       {tab === "onboarding"    && <OnboardingTab />}
       {tab === "attendance"    && <AttendanceTab />}

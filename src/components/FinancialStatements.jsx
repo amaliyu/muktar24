@@ -62,6 +62,18 @@ async function addPdfHeader(doc, title, subtitle) {
 }
 
 // ── BALANCE SHEET ──────────────────────────────────────────────────
+// Sources that failed to load. The statement still renders from the rest,
+// so the gap must be visible — a missing source would otherwise read as ₦0.
+const SourceWarnings = ({ warnings }) => {
+  if (!warnings?.length) return null
+  return (
+    <div role="alert" style={{ background: theme.red + '18', border: `1px solid ${theme.red}44`, borderRadius: '8px', padding: '10px 14px', marginBottom: '12px', fontSize: '13px', color: theme.red }}>
+      <strong>Incomplete — figures below leave out:</strong>
+      <ul style={{ margin: '6px 0 0', paddingLeft: '18px' }}>{warnings.map((m, i) => <li key={i}>{m}</li>)}</ul>
+    </div>
+  )
+}
+
 const BalanceSheetTab = ({ userProfile }) => {
   const [asAt, setAsAt] = useState(today())
   const [compareDate, setCompareDate] = useState('')
@@ -261,6 +273,7 @@ const BalanceSheetTab = ({ userProfile }) => {
       </div>
 
       {err && <div style={{ color: theme.red, marginBottom: '12px', fontSize: '12px' }}>{err}</div>}
+      <SourceWarnings warnings={[...(data?.warnings || []), ...(compareData?.warnings || []).map(m => `Comparison date: ${m}`)]} />
       {loading && <div style={{ color: theme.textMuted, marginBottom: '12px' }}>Loading...</div>}
 
       {bs && (
@@ -606,6 +619,7 @@ const IncomeStatementTab = ({ userProfile }) => {
       </div>
 
       {err && <div style={{ color: theme.red, marginBottom: '12px', fontSize: '12px' }}>{err}</div>}
+      <SourceWarnings warnings={data?.warnings} />
       {loading && <div style={{ color: theme.textMuted, marginBottom: '12px' }}>Loading...</div>}
 
       {is && (
@@ -792,6 +806,7 @@ const CashFlowTab = ({ userProfile }) => {
       </div>
 
       {err && <div style={{ color: theme.red, marginBottom: '12px', fontSize: '12px' }}>{err}</div>}
+      <SourceWarnings warnings={data?.warnings} />
       {loading && <div style={{ color: theme.textMuted, marginBottom: '12px' }}>Loading...</div>}
 
       {cf && (
@@ -881,7 +896,11 @@ const ManagementAccountsTab = ({ userProfile }) => {
         return incomeStatementService.getData(pFrom, pEnd.toISOString().split('T')[0])
       })(),
     ]).then(([is, bs, cf, prevIs]) => {
-      setData({ is: is.value, bs: bs.value, cf: cf.value, prevIs: prevIs.value })
+      const warnings = [['Income statement', is], ['Balance sheet', bs], ['Cash flow', cf], ['Previous month', prevIs]]
+        .flatMap(([name, r]) => r.status === 'rejected'
+          ? [`${name} could not be loaded: ${r.reason?.message || r.reason}`]
+          : (r.value?.warnings || []).map(m => `${name}: ${m}`))
+      setData({ is: is.value, bs: bs.value, cf: cf.value, prevIs: prevIs.value, warnings })
     }).finally(() => setLoading(false))
   }, [from, to])
 
@@ -1024,6 +1043,7 @@ const ManagementAccountsTab = ({ userProfile }) => {
       </div>
 
       {err && <div style={{ color: theme.red, marginBottom: '12px', fontSize: '12px' }}>{err}</div>}
+      <SourceWarnings warnings={data?.warnings} />
       {loading && <div style={{ color: theme.textMuted, marginBottom: '12px' }}>Loading...</div>}
 
       {is && (

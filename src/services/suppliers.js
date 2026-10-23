@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase'
 import { getSignedDocUrl, docStoragePath } from './storage'
+import { deleteById } from '../utils/checkedDelete'
 
 export const suppliersService = {
   async getAll() {
@@ -61,13 +62,13 @@ export const supplierTransactionsService = {
   },
 
   async delete(id) {
-    const { error } = await supabase.from('supplier_transactions').delete().eq('id', id)
-    if (error) throw error
+    await deleteById(supabase, 'supplier_transactions', id)
   },
 
   async getBalance(supplierId) {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('supplier_transactions').select('transaction_type, amount').eq('supplier_id', supplierId)
+    if (error) throw error
     if (!data) return 0
     return data.reduce((sum, t) => {
       if (t.transaction_type === 'purchase') return sum + Number(t.amount)
@@ -77,7 +78,8 @@ export const supplierTransactionsService = {
   },
 
   async getAllBalances() {
-    const { data } = await supabase.from('supplier_transactions').select('supplier_id, transaction_type, amount')
+    const { data, error } = await supabase.from('supplier_transactions').select('supplier_id, transaction_type, amount')
+    if (error) throw error
     if (!data) return {}
     const map = {}
     data.forEach(t => {
@@ -117,10 +119,13 @@ export const supplierDocumentsService = {
     return getSignedDocUrl('supplier-documents', value)
   },
 
+  // Row first, then the file (see vehicleDocumentsService.delete).
   async delete(id, fileUrl) {
+    await deleteById(supabase, 'supplier_documents', id)
     const path = docStoragePath('supplier-documents', fileUrl)
-    if (path) await supabase.storage.from('supplier-documents').remove([path])
-    const { error } = await supabase.from('supplier_documents').delete().eq('id', id)
-    if (error) throw error
+    if (path) {
+      const { error } = await supabase.storage.from('supplier-documents').remove([path])
+      if (error) throw new Error(`The document record was deleted, but its file could not be removed from storage: ${error.message}`)
+    }
   },
 }

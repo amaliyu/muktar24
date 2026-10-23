@@ -5,6 +5,7 @@ import { expensesService } from '../services/accounting'
 import { suppliersService, supplierTransactionsService } from '../services/suppliers'
 import { supabase } from '../lib/supabase'
 import { ConfirmDialog, fmtDate } from './site/siteUi'
+import { deleteMaintenanceRecord, deleteWhere } from '../utils/checkedDelete'
 
 const theme = {
   bg: '#0f1117', surface: '#1a1d27', card: '#21263a', border: '#2e3452',
@@ -185,7 +186,7 @@ const MaintenanceTab = ({ vehicleId, vehicleNumber, vehicleName }) => {
     finally { setLoading(false) }
   }
   useEffect(() => { load() }, [vehicleId])
-  useEffect(() => { suppliersService.getActive().then(setSuppliers).catch(() => {}) }, [])
+  useEffect(() => { suppliersService.getActive().then(setSuppliers).catch(e => setAlert({ type: 'error', msg: 'Could not load the supplier list: ' + e.message })) }, [])
 
   const openCreate = () => { setEditTarget(null); setForm(emptyForm); setReceiptUrl(''); setReceiptSignedUrl(''); setShowForm(true) }
   const openEdit = (r) => {
@@ -193,7 +194,7 @@ const MaintenanceTab = ({ vehicleId, vehicleNumber, vehicleName }) => {
     setForm({ maintenance_date: r.maintenance_date, maintenance_type: r.maintenance_type, description: r.description || '', cost: String(r.cost || ''), supplierId: r.supplier_id || '', vendor_name: r.vendor_name || '', vendor_phone: r.vendor_phone || '', downtime_days: String(r.downtime_days || ''), next_maintenance_date: r.next_maintenance_date || '', recorded_by: r.recorded_by || '', notes: r.notes || '' })
     setReceiptUrl(r.receipt_url || '')
     setReceiptSignedUrl(r.receipt_url ? (recUrls[r.id] || '') : '')
-    if (r.receipt_url && !recUrls[r.id]) maintenanceService.getSignedUrl(r.receipt_url).then(u => setReceiptSignedUrl(u || '')).catch(() => {})
+    if (r.receipt_url && !recUrls[r.id]) maintenanceService.getSignedUrl(r.receipt_url).then(u => setReceiptSignedUrl(u || '')).catch(() => {}) // preview link only; the receipt itself is kept
     setShowForm(true)
   }
 
@@ -220,7 +221,8 @@ const MaintenanceTab = ({ vehicleId, vehicleNumber, vehicleName }) => {
         const existing = await supabase.from('supplier_transactions').select('id').eq('linked_expense_id', expId).maybeSingle()
         if (existing.data?.id) {
           await supplierTransactionsService.update ? null : null
-          await supabase.from('supplier_transactions').update({ amount, description: expDesc, transaction_date: form.maintenance_date }).eq('id', existing.data.id)
+          const { error: txnErr } = await supabase.from('supplier_transactions').update({ amount, description: expDesc, transaction_date: form.maintenance_date }).eq('id', existing.data.id)
+          if (txnErr) throw new Error(`Saved, but the linked supplier transaction could not be updated: ${txnErr.message}`)
         } else {
           await supplierTransactionsService.create({ supplier_id: form.supplierId, transaction_date: form.maintenance_date, transaction_type: 'purchase', amount, description: expDesc, linked_expense_id: expId })
         }
@@ -239,8 +241,12 @@ const MaintenanceTab = ({ vehicleId, vehicleNumber, vehicleName }) => {
             await upsertSupplierTxn(exp.id, cost)
           }
         } else if (editTarget.linked_expense_id) {
-          await supabase.from('supplier_transactions').delete().eq('linked_expense_id', editTarget.linked_expense_id)
-          await expensesService.delete(editTarget.linked_expense_id)
+          // Cost cleared: remove the expense made from this record. Each step is
+          // checked so a blocked delete is reported, not taken as done.
+          try { await deleteWhere(supabase, 'supplier_transactions', 'linked_expense_id', editTarget.linked_expense_id) }
+          catch (e) { throw new Error(`The record was updated, but its linked supplier transaction could not be removed: ${e.message}. The linked expense is still in place.`) }
+          try { await deleteWhere(supabase, 'expenses', 'id', editTarget.linked_expense_id) }
+          catch (e) { throw new Error(`The record was updated, but its linked expense could not be removed: ${e.message}. The expense is still in place.`) }
           await maintenanceService.update(editTarget.id, { linked_expense_id: null })
         }
         setAlert({ type: 'success', msg: 'Maintenance record updated.' })
@@ -261,15 +267,9 @@ const MaintenanceTab = ({ vehicleId, vehicleNumber, vehicleName }) => {
   }
 
   const handleDelete = async (r) => {
-    try {
-      if (r.linked_expense_id) {
-        try { await supabase.from('supplier_transactions').delete().eq('linked_expense_id', r.linked_expense_id) } catch {}
-        try { await expensesService.delete(r.linked_expense_id) } catch {}
-      }
-      await maintenanceService.delete(r.id)
-      await load()
-      setAlert({ type: 'success', msg: 'Record, linked expense, and supplier transaction deleted.' })
-    } catch (e) { setAlert({ type: 'error', msg: e.message }) }
+    const result = await deleteMaintenanceRecord(supabase, r)
+    await load()
+    setAlert({ type: result.ok ? 'success' : 'error', msg: result.message })
   }
 
   const handleReceiptUpload = async (file) => {
@@ -506,7 +506,7 @@ const DocumentsTab = ({ vehicleId }) => {
       }))
       setDocUrls(Object.fromEntries(entries))
     }
-    catch { setDocs([]) }
+    catch (e) { setDocs([]); setAlert({ type: 'error', msg: 'Could not load documents: ' + e.message }) }
     finally { setLoading(false) }
   }
   useEffect(() => { load() }, [vehicleId])
@@ -522,8 +522,9 @@ const DocumentsTab = ({ vehicleId }) => {
   }
 
   const handleDelete = async (doc) => {
-    try { await vehicleDocumentsService.delete(doc.id, doc.file_url); await load() }
-    catch (e) { setAlert({ type: 'error', msg: e.message }) }
+    try { await vehicleDocumentsService.delete(doc.id, doc.file_url); setAlert({ type: 'success', msg: 'Document deleted.' }) }
+    catch (e) { setAlert({ type: 'error', msg: 'Delete failed: ' + e.message }) }
+    await load()
   }
 
   return (
@@ -614,18 +615,19 @@ const VehicleProfile = ({ vehicle: initialVehicle, staff, staffMap, onBack, onUp
         .order('waybill_date', { ascending: false })
       if (error) throw error
       setDeliveries(data || [])
-    } catch { setDeliveries([]) }
+    } catch (e) { setDeliveries([]); setAlert({ type: 'error', msg: 'Could not load delivery history: ' + e.message }) }
     finally { setDelvLoading(false) }
   }
 
   const loadFleetAvg = async () => {
     try {
-      const { data } = await supabase.from('waybills').select('quantity_loaded, quantity_damaged')
+      const { data, error } = await supabase.from('waybills').select('quantity_loaded, quantity_damaged')
+      if (error) throw error
       if (!data || data.length === 0) { setFleetAvgRate(0); return }
       const tl = data.reduce((s, w) => s + (w.quantity_loaded || 0), 0)
       const td = data.reduce((s, w) => s + (w.quantity_damaged || 0), 0)
       setFleetAvgRate(tl > 0 ? (td / tl) * 100 : 0)
-    } catch { setFleetAvgRate(0) }
+    } catch (e) { setFleetAvgRate(0); setAlert({ type: 'error', msg: 'Could not load the fleet damage average: ' + e.message }) }
   }
 
   const handleUpdate = async () => {
@@ -634,7 +636,7 @@ const VehicleProfile = ({ vehicle: initialVehicle, staff, staffMap, onBack, onUp
       setVehicle(updated)
       setEditing(false)
       onUpdate()
-    } catch {}
+    } catch (e) { setEditing(false); setAlert({ type: 'error', msg: 'The vehicle was saved, but the profile could not be refreshed: ' + e.message }) }
   }
 
   const statusColor = { active: theme.green, inactive: theme.textMuted, maintenance: theme.accent }
@@ -653,6 +655,7 @@ const VehicleProfile = ({ vehicle: initialVehicle, staff, staffMap, onBack, onUp
       <div style={{ ...styles.row, marginBottom: '20px' }}>
         <button style={styles.btn()} onClick={onBack}>← All Vehicles</button>
       </div>
+      {alert && <AlertBar msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
 
       {/* Vehicle Header */}
       <div style={{ ...styles.card, borderLeft: `5px solid ${theme.accent}`, marginBottom: '24px' }}>

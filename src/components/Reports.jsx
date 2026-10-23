@@ -1154,7 +1154,7 @@ function GenerateModal({ report, userProfile, onClose, onGenerated }) {
 
   useEffect(() => {
     if (report.extraFilters?.some(f => f.type === 'customer')) {
-      fetchCustomers().then(setCustomers).catch(() => {})
+      fetchCustomers().then(setCustomers).catch(e => setError('Could not load customers for the filter: ' + (e?.message || e)))
     }
   }, [report])
 

@@ -62,7 +62,7 @@ export default function NotificationBell({ userProfile, onNavigate, isMobile }) 
     if (!userProfile?.id) return
     notificationsService.getUnreadCount(userProfile.id)
       .then(setUnreadCount)
-      .catch(() => {})
+      .catch(() => {}) // badge count only; the next poll retries
   }, [userProfile?.id])
 
   const loadNotifications = useCallback(async () => {

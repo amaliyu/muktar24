@@ -93,7 +93,7 @@ const Messages = ({ userProfile, onUnreadChange }) => {
     if (!userProfile) return
     setLoading(true)
     loadInbox()
-    messagesService.getAllUsers(userProfile.id).then(setAllUsers).catch(() => {})
+    messagesService.getAllUsers(userProfile.id).then(setAllUsers).catch(e => setAlert({ type: 'error', msg: 'Could not load the people list for new messages: ' + (e?.message || e) }))
   }, [userProfile])
 
   // Scroll to bottom when messages change or entering thread view

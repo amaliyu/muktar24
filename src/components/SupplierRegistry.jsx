@@ -179,6 +179,7 @@ const TransactionsTab = ({ supplierId, companyName }) => {
     setSaving(true)
     try {
       let expenseId = null
+      let expenseErr = null
       if (payForm.create_expense) {
         try {
           const exp = await expensesService.create({
@@ -187,7 +188,7 @@ const TransactionsTab = ({ supplierId, companyName }) => {
             notes: `Supplier payment: ${companyName}${payForm.reference ? ' · Ref: ' + payForm.reference : ''}`,
           })
           expenseId = exp.id
-        } catch { /* non-blocking */ }
+        } catch (e) { expenseErr = e } // the payment is still recorded; the message below says the P&L entry failed
       }
       await supplierTransactionsService.create({
         supplier_id: supplierId, transaction_date: payForm.transaction_date,
@@ -197,15 +198,18 @@ const TransactionsTab = ({ supplierId, companyName }) => {
       })
       setPayForm({ transaction_date: todayStr(), amount: '', description: '', reference: '', payment_method: 'Bank Transfer', create_expense: true })
       setShowPayForm(false)
-      setAlert({ type: 'success', msg: `Payment of ${naira(payForm.amount)} recorded${expenseId ? ' and added to P&L expenses.' : '.'}` })
+      setAlert(expenseErr
+        ? { type: 'error', msg: `Payment of ${naira(payForm.amount)} recorded, but it could not be added to P&L expenses: ${expenseErr.message}. Record the expense in Accounting.` }
+        : { type: 'success', msg: `Payment of ${naira(payForm.amount)} recorded${expenseId ? ' and added to P&L expenses.' : '.'}` })
       await load()
     } catch (e) { setAlert({ type: 'error', msg: e.message }) }
     finally { setSaving(false) }
   }
 
   const handleDelete = async (id) => {
-    try { await supplierTransactionsService.delete(id); await load() }
-    catch (e) { setAlert({ type: 'error', msg: e.message }) }
+    try { await supplierTransactionsService.delete(id); setAlert({ type: 'success', msg: 'Transaction deleted.' }) }
+    catch (e) { setAlert({ type: 'error', msg: 'Delete failed: ' + e.message }) }
+    await load()
   }
 
   return (
@@ -292,18 +296,20 @@ const SupplyHistoryTab = ({ supplierId, companyName }) => {
   const [stockMoves, setStockMoves] = useState([])
   const [maintenance, setMaintenance] = useState([])
   const [loading, setLoading] = useState(true)
+  const [loadErr, setLoadErr] = useState('')
 
   useEffect(() => {
     const load = async () => {
-      setLoading(true)
+      setLoading(true); setLoadErr('')
+      const rows = r => { if (r.error) throw r.error; return r.data || [] }
       try {
         const [sm, vm] = await Promise.all([
-          supabase.from('stock_movements').select('*, item:item_id(name, unit)').or(`supplier_id.eq.${supplierId},supplier.ilike.%${companyName}%`).eq('movement_type', 'in').order('date', { ascending: false }).then(r => r.data || []),
-          supabase.from('vehicle_maintenance').select('*, vehicle:vehicle_id(vehicle_number, vehicle_name)').or(`supplier_id.eq.${supplierId},vendor_name.ilike.%${companyName}%`).order('maintenance_date', { ascending: false }).then(r => r.data || []),
+          supabase.from('stock_movements').select('*, item:item_id(name, unit)').or(`supplier_id.eq.${supplierId},supplier.ilike.%${companyName}%`).eq('movement_type', 'in').order('date', { ascending: false }).then(rows),
+          supabase.from('vehicle_maintenance').select('*, vehicle:vehicle_id(vehicle_number, vehicle_name)').or(`supplier_id.eq.${supplierId},vendor_name.ilike.%${companyName}%`).order('maintenance_date', { ascending: false }).then(rows),
         ])
         setStockMoves(sm)
         setMaintenance(vm)
-      } catch { }
+      } catch (e) { setLoadErr('Could not load the supply history: ' + e.message) }
       finally { setLoading(false) }
     }
     load()
@@ -315,6 +321,7 @@ const SupplyHistoryTab = ({ supplierId, companyName }) => {
   if (loading) return <Spinner />
   return (
     <div>
+      {loadErr && <AlertBar msg={loadErr} />}
       <div style={{ ...styles.grid(2), marginBottom: '20px' }}>
         <div style={{ background: theme.surface, borderRadius: '8px', padding: '14px', borderTop: `3px solid ${theme.blue}` }}>
           <div style={{ fontSize: '11px', color: theme.textMuted, textTransform: 'uppercase' }}>Stock Supplied (Value)</div>
@@ -397,7 +404,7 @@ const SupplierDocumentsTab = ({ supplierId }) => {
       }))
       setDocUrls(Object.fromEntries(entries))
     }
-    catch { }
+    catch (e) { setAlert({ type: 'error', msg: 'Could not load documents: ' + e.message }) }
     finally { setLoading(false) }
   }
   useEffect(() => { load() }, [supplierId])
@@ -415,8 +422,9 @@ const SupplierDocumentsTab = ({ supplierId }) => {
   }
 
   const handleDelete = async (doc) => {
-    try { await supplierDocumentsService.delete(doc.id, doc.file_url); await load() }
-    catch (e) { setAlert({ type: 'error', msg: e.message }) }
+    try { await supplierDocumentsService.delete(doc.id, doc.file_url); setAlert({ type: 'success', msg: 'Document deleted.' }) }
+    catch (e) { setAlert({ type: 'error', msg: 'Delete failed: ' + e.message }) }
+    await load()
   }
 
   return (
@@ -462,7 +470,7 @@ const SupplierProfile = ({ supplier: initialSupplier, onBack, onUpdate }) => {
   const [balance, setBalance] = useState(0)
 
   useEffect(() => {
-    supplierTransactionsService.getBalance(supplier.id).then(setBalance).catch(() => {})
+    supplierTransactionsService.getBalance(supplier.id).then(setBalance).catch(e => setAlert({ type: 'error', msg: 'Could not load the balance: ' + e.message }))
   }, [supplier.id])
 
   const TABS = [
@@ -572,9 +580,11 @@ const SupplierRegistry = () => {
   const load = async () => {
     setLoading(true)
     try {
-      const [s, b] = await Promise.all([suppliersService.getAll(), supplierTransactionsService.getAllBalances().catch(() => ({}))])
+      let balErr = null
+      const [s, b] = await Promise.all([suppliersService.getAll(), supplierTransactionsService.getAllBalances().catch(e => { balErr = e; return {} })])
       setSuppliers(s)
       setBalances(b)
+      if (balErr) setAlert({ type: 'error', msg: 'Suppliers loaded, but balances could not be loaded (shown as ₦0): ' + balErr.message })
     } catch (e) { setAlert({ type: 'error', msg: 'Could not load suppliers: ' + e.message }) }
     finally { setLoading(false) }
   }

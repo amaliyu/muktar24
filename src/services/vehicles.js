@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase'
 import { getSignedDocUrl, docStoragePath } from './storage'
+import { deleteById } from '../utils/checkedDelete'
 
 const today = () => new Date().toISOString().split('T')[0]
 const plusDays = (d) => { const dt = new Date(); dt.setDate(dt.getDate() + d); return dt.toISOString().split('T')[0] }
@@ -87,8 +88,7 @@ export const maintenanceService = {
   },
 
   async delete(id) {
-    const { error } = await supabase.from('vehicle_maintenance').delete().eq('id', id)
-    if (error) throw error
+    await deleteById(supabase, 'vehicle_maintenance', id)
   },
 
   async uploadReceipt(file) {
@@ -123,8 +123,7 @@ export const fuelLogService = {
   },
 
   async delete(id) {
-    const { error } = await supabase.from('vehicle_fuel_log').delete().eq('id', id)
-    if (error) throw error
+    await deleteById(supabase, 'vehicle_fuel_log', id)
   },
 
   async deleteByWaybill(waybillId) {
@@ -173,10 +172,14 @@ export const vehicleDocumentsService = {
     return getSignedDocUrl('vehicle-documents', value)
   },
 
+  // Row first, then the file: a blocked row delete leaves the file in place
+  // instead of a record pointing at a missing file.
   async delete(id, fileUrl) {
+    await deleteById(supabase, 'vehicle_documents', id)
     const path = docStoragePath('vehicle-documents', fileUrl)
-    if (path) await supabase.storage.from('vehicle-documents').remove([path])
-    const { error } = await supabase.from('vehicle_documents').delete().eq('id', id)
-    if (error) throw error
+    if (path) {
+      const { error } = await supabase.storage.from('vehicle-documents').remove([path])
+      if (error) throw new Error(`The document record was deleted, but its file could not be removed from storage: ${error.message}`)
+    }
   },
 }

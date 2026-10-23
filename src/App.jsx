@@ -78,6 +78,7 @@ import { Z } from './lib/zIndex'
 import { defaultMachineId, resolveMachine } from './utils/productionMachine'
 import MobileScope from './components/MobileScope'
 import { ConfirmDialog, fmtDate } from './components/site/siteUi'
+import { deleteWhere } from './utils/checkedDelete'
 
 const theme = {
   bg: "#0f1117", surface: "#1a1d27", card: "#21263a", border: "#2e3452",
@@ -225,6 +226,7 @@ const InvoiceEditorModal = ({ editor, setEditor, onSave, saving }) => {
   // Active products power the line-item datalist (pick-or-type) and the
   // optional unit-price default. Hooks must run before the early return below.
   const [products, setProducts] = useState([]);
+  // Suggestions only — a line can still be typed in full, so a failed load is safe to ignore.
   useEffect(() => { productsService.getActive().then(setProducts).catch(() => {}); }, []);
   if (!editor) return null;
   const { items, delivery_cost, include_vat, discount } = editor;
@@ -371,8 +373,9 @@ const Icon = ({ name, size = 16 }) => {
 
 const ProductSelect = ({ value, onChange, style, showEmpty = false }) => {
   const [products, setProducts] = useState([]);
+  const [loadErr, setLoadErr] = useState('');
   useEffect(() => {
-    productsService.getActive().then(setProducts).catch(() => {});
+    productsService.getActive().then(setProducts).catch(e => setLoadErr(e?.message || 'unknown error'));
   }, []);
   const categories = [...new Set(products.map(p => p.category))];
   return (
@@ -380,6 +383,7 @@ const ProductSelect = ({ value, onChange, style, showEmpty = false }) => {
       const p = products.find(pr => pr.name === e.target.value);
       onChange(e.target.value, p?.unit || "pieces");
     }}>
+      {loadErr && <option value="" disabled>Could not load products: {loadErr}</option>}
       {showEmpty && <option value="">— Select product —</option>}
       {value && !products.find(p => p.name === value) && <option value={value}>{value}</option>}
       {categories.length === 0 && !value && <option value="9 Inch 3 Hole Block">9 Inch 3 Hole Block</option>}
@@ -1350,7 +1354,7 @@ const Orders = ({ onNavigate, userProfile }) => {
     try {
       const prods = await productsService.getActive();
       prods.forEach(p => { productMap[p.name] = p.unit; });
-    } catch {}
+    } catch { /* unit labels only ("pcs" beside a line); lines still show without them */ }
     return productMap;
   };
 
@@ -1374,8 +1378,9 @@ const Orders = ({ onNavigate, userProfile }) => {
       if (existingInvoice) {
         // Read saved line items; fall back to order_items if none exist yet
         // (existing invoices have no invoice_items rows).
-        let savedItems = [];
-        try { savedItems = await invoicesService.getItems(existingInvoice.id); } catch {}
+        // A failed read must stop here: falling back to order_items would show
+        // (and on save, overwrite) the invoice with the wrong lines.
+        const savedItems = await invoicesService.getItems(existingInvoice.id);
         const editorItems = savedItems.length > 0
           ? savedItems.map(it => ({ description: it.block_type || "", quantity: it.quantity, unit_price: it.unit_price, unit: productMap[it.block_type] || "" }))
           : fromOrderItems(selected.order_items || []);
@@ -1419,8 +1424,9 @@ const Orders = ({ onNavigate, userProfile }) => {
     setInvoicing(true);
     try {
       const productMap = await loadProductUnits();
-      let items = [];
-      try { items = await invoicesService.getItems(invoice.id); } catch {}
+      // Not caught here: a PDF built from order_items instead of the saved
+      // invoice lines would be wrong, so a failed read reports the error.
+      const items = await invoicesService.getItems(invoice.id);
       const pdfItems = items.length > 0
         ? items.map(it => ({ description: it.block_type || "", quantity: it.quantity, unit_price: it.unit_price, unit: productMap[it.block_type] || "" }))
         : (selected?.order_items || []).map(i => ({ description: i.block_type || "", quantity: i.quantity, unit_price: i.unit_price, unit: productMap[i.block_type] || "" }));
@@ -1448,11 +1454,14 @@ const Orders = ({ onNavigate, userProfile }) => {
       await invoicesService.issue(invoice.id);
       // Issuing a draft is the point the order becomes a firm sale — advance it
       // to 'invoiced' now (a draft/quotation left it untouched).
-      if (selected?.id) { try { await ordersService.updateStatus(selected.id, "invoiced"); } catch {} }
+      let statusErr = null;
+      if (selected?.id) { try { await ordersService.updateStatus(selected.id, "invoiced"); } catch (e) { statusErr = e; } }
       setIssueTarget(null);
       const newOrders = await load();
       if (newOrders) setSelected(newOrders.find(o => o.id === selected?.id) || null);
-      setAlert({ type: "success", msg: `Invoice ${invoice.invoice_number} issued — it is now a receivable.` });
+      setAlert(statusErr
+        ? { type: "error", msg: `Invoice ${invoice.invoice_number} issued, but the order could not be moved to "invoiced": ${statusErr.message}` }
+        : { type: "success", msg: `Invoice ${invoice.invoice_number} issued — it is now a receivable.` });
     } catch (e) {
       setIssueTarget(null);
       setAlert({ type: "error", msg: cleanInvoiceError(e) });
@@ -2340,28 +2349,41 @@ const Waybills = ({ userProfile }) => {
   };
 
   const handleDeleteWaybill = async (waybill) => {
+    // Each reversal step is attempted as before, but a failure is recorded and
+    // named in the result instead of being dropped (§10.5).
+    const failed = [];
+    const done = [];
+    const step = async (label, fn) => {
+      try { await fn(); done.push(label); } catch (e) { failed.push(`${label} (${e?.message || e})`); }
+    };
     try {
       // Step 1 — Restore finished goods stock
-      try { await finishedGoodsService.increase(waybill.block_type, waybill.quantity_loaded); } catch {}
+      await step('finished goods stock restore', () => finishedGoodsService.increase(waybill.block_type, waybill.quantity_loaded));
       // Step 2 — Restore batch stock
-      try { if (waybill.batch_id) await batchesService.restoreStock(waybill.batch_id, waybill.quantity_loaded); } catch {}
+      if (waybill.batch_id) await step('batch stock restore', () => batchesService.restoreStock(waybill.batch_id, waybill.quantity_loaded));
       // Step 3 — Reverse transit damage log entry
-      try { await productionService.deleteTransitDamage(waybill.waybill_number); } catch {}
+      await step('transit damage reversal', () => productionService.deleteTransitDamage(waybill.waybill_number));
       // Step 3b — Delete linked fuel log entry
-      try { await fuelLogService.deleteByWaybill(waybill.id); } catch {}
+      await step('fuel log removal', () => fuelLogService.deleteByWaybill(waybill.id));
       // Step 4 — Delete the waybill record
-      await waybillsService.delete(waybill.id);
-      // Step 5 — Resync pending delivery register (waybill is now gone so recount is accurate)
       try {
+        await waybillsService.delete(waybill.id);
+      } catch (e) {
+        throw new Error(`${e.message}${done.length ? ` — already done before the failure: ${done.join(', ')}; check stock before retrying` : ''}`);
+      }
+      // Step 5 — Resync pending delivery register (waybill is now gone so recount is accurate)
+      await step('pending delivery register resync', async () => {
         if (waybill.order_id) {
           const pending = await pendingDeliveryService.getByOrder(waybill.order_id);
           for (const entry of pending) {
             if (entry.block_type === waybill.block_type) await pendingDeliveryService.resyncFromWaybills(entry);
           }
         }
-      } catch {}
+      });
       await load();
-      setAlert({ type: "success", msg: `Waybill ${waybill.waybill_number} deleted — finished goods, batch and pending delivery register all reversed.` });
+      setAlert(failed.length
+        ? { type: "error", msg: `Waybill ${waybill.waybill_number} deleted, but these steps failed and need fixing by hand: ${failed.join('; ')}.` }
+        : { type: "success", msg: `Waybill ${waybill.waybill_number} deleted — finished goods, batch and pending delivery register all reversed.` });
     } catch (e) {
       setAlert({ type: "error", msg: "Failed to delete waybill. " + e.message });
     } finally {
@@ -3470,7 +3492,8 @@ const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
     setMovConfirmDelete(null);
     try {
       if (m.movement_type === "in") {
-        try { await supabase.from('supplier_transactions').delete().eq('linked_stock_movement_id', m.id); } catch {}
+        try { await deleteWhere(supabase, 'supplier_transactions', 'linked_stock_movement_id', m.id); }
+        catch (e) { throw new Error(`The movement was not deleted because its linked supplier transaction could not be removed: ${e.message}. Nothing was changed.`); }
       }
       await inventoryService.deleteMovement(m.id, m);
       await load();
@@ -4541,13 +4564,17 @@ const ScheduleApprovals = () => {
       const rejected = rejectedItems[sched.id] || [];
       await schedulesService.icoApprove(sched.id, approvedBy, notes[sched.id] || null, rejected);
       const approved = (sched.items || []).filter(i => !rejected.includes(i.id));
+      const registerErrs = [];
       for (const item of approved) {
         if (item.pending_register_id) {
-          await pendingDeliveryService.updateDelivered(item.pending_register_id, 0).catch(() => {});
+          try { await pendingDeliveryService.updateDelivered(item.pending_register_id, 0); }
+          catch (e) { registerErrs.push(e?.message || String(e)); }
           await supabaseUpdateScheduleItemStatus(item.pending_register_id);
         }
       }
-      setAlert({ type: "success", msg: `Schedule approved by ICO. ${rejected.length > 0 ? `${rejected.length} delivery(ies) removed.` : ""}` });
+      setAlert(registerErrs.length
+        ? { type: "error", msg: `Schedule approved by ICO, but ${registerErrs.length} pending-delivery register line(s) could not be updated: ${registerErrs[0]}` }
+        : { type: "success", msg: `Schedule approved by ICO. ${rejected.length > 0 ? `${rejected.length} delivery(ies) removed.` : ""}` });
       await load();
     } catch (e) { setAlert({ type: "error", msg: "Failed: " + e.message }); }
     finally { setSaving(null); }
@@ -5272,7 +5299,7 @@ const BookkeepingTab = () => {
       .catch(e => setErr(e?.message || 'An error occurred')).finally(() => setLoading(false));
   }, [date]);
 
-  useEffect(() => { suppliersService.getActive().then(setAcctSuppliers).catch(() => {}); }, []);
+  useEffect(() => { suppliersService.getActive().then(setAcctSuppliers).catch(e => setErr('Could not load the supplier list: ' + (e?.message || e))); }, []);
 
   const addIncome = async () => {
     if (!incomeForm.source || !incomeForm.amount) return;
@@ -6118,18 +6145,21 @@ const BankAccountsTab = ({ userProfile }) => {
   };
 
   useEffect(() => {
-    // Supporting data — fail silently so they don't block the accounts tab
-    expenseCategoriesService.getActive().then(setExpCategories).catch(() => {});
-    accountingService.getOpenInvoices().then(setAllInvoices).catch(() => {});
-    customersService.getAll().then(setAllCustomers).catch(() => {});
-    paymentRequestsService.listDisbursed().then(setPaymentRequests).catch(() => {});
+    // Supporting data — a failure must not block the accounts tab, but it is
+    // named so an empty picker or "no match" is not mistaken for real data.
+    const supportErr = (what) => (e) => setErr(`Could not load ${what}: ${e?.message || e}`);
+    expenseCategoriesService.getActive().then(setExpCategories).catch(supportErr('expense categories'));
+    accountingService.getOpenInvoices().then(setAllInvoices).catch(supportErr('open invoices'));
+    customersService.getAll().then(setAllCustomers).catch(supportErr('customers'));
+    paymentRequestsService.listDisbursed().then(setPaymentRequests).catch(supportErr('disbursed payment requests (for matching)'));
     // Core accounts load
     bankAccountsService.getAll()
       .then(async (existing) => {
         let all = [...existing];
         for (const seed of SEED_ACCOUNTS) {
           if (!existing.find(a => a.account_number === seed.account_number)) {
-            try { const created = await bankAccountsService.create(seed); all = [...all, created]; } catch {}
+            try { const created = await bankAccountsService.create(seed); all = [...all, created]; }
+            catch (e) { setErr(`Could not add the standard account ${seed.account_number}: ${e.message}`); }
           }
         }
         all.sort((a, b) => {
@@ -6157,7 +6187,7 @@ const BankAccountsTab = ({ userProfile }) => {
 
   useEffect(() => {
     if (!selected) { setSuggestedTxs([]); return; }
-    bankTransactionsService.getSuggested(selected.id).then(setSuggestedTxs).catch(() => {});
+    bankTransactionsService.getSuggested(selected.id).then(setSuggestedTxs).catch(e => setErr('Could not load suggested matches: ' + (e?.message || e)));
   }, [selected?.id]);
 
   const openImport = (acct) => { setImportAcct(acct.id); setImportFile(null); setImportStep('upload'); setErr(''); setOk(''); setReconUnverified(false); setReconWarnAcked(false); };
@@ -6226,7 +6256,11 @@ const BankAccountsTab = ({ userProfile }) => {
     }
     // ─────────────────────────────────────────────────────────────────────────
 
-    const withDups = await bankTransactionsService.checkDuplicates(importAcct, txs).catch(() => txs.map(t => ({ ...t, isDuplicate: false })));
+    // A failed duplicate check must stop the import: treating every row as new
+    // would import transactions that are already on the account.
+    let withDups;
+    try { withDups = await bankTransactionsService.checkDuplicates(importAcct, txs); }
+    catch (e) { setErr('Could not check for transactions already imported, so the import was stopped: ' + e.message); return; }
     const acct = accounts.find(a => a.id === importAcct);
     let payments = [], expenses2 = [], invoices2 = allInvoices, customers2 = allCustomers;
     try {
@@ -6236,7 +6270,10 @@ const BankAccountsTab = ({ userProfile }) => {
       ]);
       if (!invoices2.length) invoices2 = await accountingService.getOpenInvoices().catch(() => []);
       if (!customers2.length) customers2 = await customersService.getAll().catch(() => []);
-    } catch {}
+    } catch (e) {
+      // The import can go ahead; rows just won't be auto-matched — say so.
+      setErr('Payments and expenses could not be loaded, so no rows were auto-matched: ' + e.message);
+    }
     const matched = autoMatchTransactions(
       withDups.filter(t => !t.isDuplicate),
       payments, expenses2,
@@ -6276,7 +6313,7 @@ const BankAccountsTab = ({ userProfile }) => {
       setOk(`Imported ${preview.length} transactions (${preview.filter(t => t.autoMatch).length} auto-matched)`);
       setImportStep(null);
       if (selected?.id === importAcct) {
-        bankTransactionsService.getByAccount(importAcct, txFrom || null, txTo || null).then(setTransactions).catch(() => {});
+        bankTransactionsService.getByAccount(importAcct, txFrom || null, txTo || null).then(setTransactions).catch(e => setErr('Imported, but the transaction list could not be refreshed: ' + (e?.message || e)));
       }
     } catch (e) { setErr(e?.message || 'An error occurred'); } finally { setImporting(false); }
   };
@@ -6368,7 +6405,7 @@ const BankAccountsTab = ({ userProfile }) => {
           // 'partially_paid' value in the invoices_status_check constraint, so
           // writing one would fail; the outstanding balance is derived from
           // (total_amount − confirmed payments) instead.
-          accountingService.getOpenInvoices().then(setAllInvoices).catch(() => {});
+          accountingService.getOpenInvoices().then(setAllInvoices).catch(e => setErr('Saved, but the open-invoice list could not be refreshed: ' + (e?.message || e)));
         }
         await bankTransactionsService.updateMatch(tx.id, 'matched', 'payment', payment.id, `Invoice: ${inv?.invoice_number || ''}`);
         setTransactions(t => t.map(x => x.id === tx.id ? { ...x, match_status: 'matched', matched_to_type: 'payment' } : x));
@@ -7200,7 +7237,7 @@ const ReconciliationTab = () => {
 
   useEffect(() => {
     if (!accountId) return;
-    bankReconciliationsService.getByAccount(accountId).then(setHistory).catch(() => {});
+    bankReconciliationsService.getByAccount(accountId).then(setHistory).catch(e => setErr('Could not load reconciliation history: ' + (e?.message || e)));
   }, [accountId]);
 
   const runReconciliation = async () => {
@@ -7419,8 +7456,8 @@ const ReceiptsTab = () => {
 
   useEffect(() => {
     loadReceipts();
-    receiptsService.getMissingReceiptExpenses().then(setMissingCount).catch(() => {});
-    expensesService.getAll().then(all => setApprovedExpenses(all.filter(e => e.status === 'approved'))).catch(() => {});
+    receiptsService.getMissingReceiptExpenses().then(setMissingCount).catch(() => {}); // count badge only
+    expensesService.getAll().then(all => setApprovedExpenses(all.filter(e => e.status === 'approved'))).catch(e => setErr('Could not load expenses to link receipts to: ' + (e?.message || e)));
   }, []);
 
   const handleUpload = async () => {
@@ -7434,7 +7471,7 @@ const ReceiptsTab = () => {
       setUploadFile(null);
       setUploadForm({ receipt_date: today, vendor_name: '', amount: '', tax_category: '', notes: '', expense_id: '' });
       setOk(`Receipt ${rec.receipt_number} uploaded`);
-      receiptsService.getMissingReceiptExpenses().then(setMissingCount).catch(() => {});
+      receiptsService.getMissingReceiptExpenses().then(setMissingCount).catch(() => {}); // count badge only
     } catch (e) { setErr(e?.message || 'An error occurred'); }
     finally { setUploading(false); }
   };
@@ -7454,6 +7491,7 @@ const ReceiptsTab = () => {
       const folder = zip.folder('receipts');
 
       let csvRows = 'Receipt Number,Date,Vendor,Category,Amount,File Name\n';
+      const missingFiles = [];
 
       await Promise.all(receipts.map(async (r) => {
         try {
@@ -7462,8 +7500,10 @@ const ReceiptsTab = () => {
           if (res?.ok) {
             const blob = await res.blob();
             folder.file(r.file_name || `${r.receipt_number}.file`, blob);
+          } else {
+            missingFiles.push(r.receipt_number);
           }
-        } catch {}
+        } catch { missingFiles.push(r.receipt_number); }
         const cat = r.expense?.category?.name || r.tax_category || '';
         csvRows += `"${r.receipt_number}","${r.receipt_date}","${r.vendor_name}","${cat}","${r.amount}","${r.file_name || ''}"\n`;
       }));
@@ -7475,6 +7515,7 @@ const ReceiptsTab = () => {
       a.href = url; a.download = `TaxPackage_${today}.zip`; a.click();
       URL.revokeObjectURL(url);
       setOk('Tax package downloaded');
+      if (missingFiles.length) setErr(`${missingFiles.length} receipt file(s) could not be downloaded and are missing from the zip (still listed in summary.csv): ${missingFiles.join(', ')}`);
     } catch (e) { setErr('Export failed: ' + e.message); }
     finally { setExportLoading(false); }
   };
@@ -8180,15 +8221,16 @@ const PaymentRequestsPage = ({ userProfile }) => {
       ]);
       setRequests(reqs);
       setCategories(cats);
-      if (isInitiator || role === 'md') paymentRequestsService.getActiveSuppliers().then(setActiveSuppliers).catch(() => {});
-      if (canReviewVendors) paymentRequestsService.getPendingVendors().then(setPendingVendors).catch(() => {});
+      if (isInitiator || role === 'md') paymentRequestsService.getActiveSuppliers().then(setActiveSuppliers).catch(e => setAlert({ type: 'error', msg: 'Could not load the vendor list: ' + (e?.message || e) }));
+      if (canReviewVendors) paymentRequestsService.getPendingVendors().then(setPendingVendors).catch(e => setAlert({ type: 'error', msg: 'Could not load vendors awaiting review: ' + (e?.message || e) }));
     } catch (e) { setAlert({ type: 'error', msg: e.message }); }
     finally { setLoading(false); }
   };
 
   useEffect(() => { load(); }, []);
-  useEffect(() => { bankAccountsService.getAll().then(setBankAccounts).catch(() => {}); }, []);
+  useEffect(() => { bankAccountsService.getAll().then(setBankAccounts).catch(e => setAlert({ type: 'error', msg: 'Could not load bank accounts: ' + (e?.message || e) })); }, []);
   useEffect(() => {
+    // Names for the "requested by" display only; ids still work without them.
     supabase.from('user_profiles_directory').select('id, full_name, role').order('full_name')
       .then(({ data }) => setAllUsers(data || [])).catch(() => {});
   }, []);
@@ -8210,10 +8252,9 @@ const PaymentRequestsPage = ({ userProfile }) => {
     const payeeMode = req.supplier_id ? 'existing' : 'new';
     let _order_id = '';
     if (req.order_item_id && req.expense_category_id === tradingPurchasesId) {
-      try {
-        const { data } = await supabase.from('order_items').select('order_id').eq('id', req.order_item_id).single();
-        _order_id = data?.order_id || '';
-      } catch {}
+      const { data, error } = await supabase.from('order_items').select('order_id').eq('id', req.order_item_id).single();
+      if (error) setAlert({ type: 'error', msg: 'Could not look up the linked order for this resale item — pick the order again before saving. ' + error.message });
+      _order_id = data?.order_id || '';
       loadResaleItems();
     }
     setForm({
@@ -8901,7 +8942,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
         const payeeName = req.supplier?.company_name || req.payee_name;
         const copyAcct = async () => {
           if (!acctNum) return;
-          try { await navigator.clipboard.writeText(acctNum); setCopiedField('acct'); setTimeout(() => setCopiedField(null), 2000); } catch {}
+          try { await navigator.clipboard.writeText(acctNum); setCopiedField('acct'); setTimeout(() => setCopiedField(null), 2000); } catch { /* clipboard blocked by the browser; the number stays on screen to copy by hand */ }
         };
         const cat = categories.find(c => c.id === req.expense_category_id);
         const closureMechanism = cat?.closure_mechanism;
@@ -9490,7 +9531,7 @@ const MyHRPage = ({ userProfile }) => {
       setAdvForm({ amount: '', reason: '', installments: '1' });
       setShowAdvForm(false);
       setAlert({ type: 'success', msg: 'Advance request submitted.' });
-      advancesService.listMine(myStaff.id).then(setAdvances).catch(() => {});
+      advancesService.listMine(myStaff.id).then(setAdvances).catch(e => setAlert({ type: 'error', msg: 'Submitted, but your list could not be refreshed: ' + (e?.message || e) }));
     } catch (e) { setAlert({ type: 'error', msg: e.message }); }
     finally { setAdvSaving(false); }
   };
@@ -9504,7 +9545,7 @@ const MyHRPage = ({ userProfile }) => {
       setLeaveForm({ leave_type: 'annual', is_paid: true, start_date: '', end_date: '', days: '', reason: '' });
       setShowLeaveForm(false);
       setAlert({ type: 'success', msg: 'Leave request submitted.' });
-      leaveService.listMine(myStaff.id).then(setLeaves).catch(() => {});
+      leaveService.listMine(myStaff.id).then(setLeaves).catch(e => setAlert({ type: 'error', msg: 'Submitted, but your list could not be refreshed: ' + (e?.message || e) }));
     } catch (e) { setAlert({ type: 'error', msg: e.message }); }
     finally { setLeaveSaving(false); }
   };
@@ -10018,7 +10059,7 @@ const DisciplinaryPage = ({ userProfile }) => {
       try {
         const rows = await disciplinaryService.getAudit(caseId);
         setAudit(a => ({ ...a, [caseId]: rows }));
-      } catch (_) {}
+      } catch (e) { setAlert({ type: 'error', msg: 'Could not load the case history: ' + e.message }); }
       finally { setAuditLoading(false); }
     }
   };
@@ -10027,7 +10068,7 @@ const DisciplinaryPage = ({ userProfile }) => {
     try {
       const rows = await disciplinaryService.getAudit(caseId);
       setAudit(a => ({ ...a, [caseId]: rows }));
-    } catch (_) {}
+    } catch (e) { setAlert({ type: 'error', msg: 'Saved, but the case history could not be refreshed: ' + e.message }); }
   };
 
   const handleIssue = async () => {
@@ -10315,7 +10356,7 @@ const TruckLoadingPage = ({ userProfile }) => {
       truckLoadingService.getAssignments(),
       productsService.getActive(),
     ]).then(([v, a, p]) => { setVehicles(v); setAssignments(a); setProducts(p); })
-      .catch(() => {});
+      .catch(e => setLogAlert({ type: 'error', msg: 'Could not load vehicles, loader assignments or products: ' + (e?.message || e) }));
   }, []);
 
   // Load (and reload) the log list whenever the range or null-toggle changes.
@@ -11514,7 +11555,7 @@ export default function App() {
         return;
       }
       setUserProfile(await attachEffectiveRoles(profile));
-      supabase.from('user_profiles').update({ last_login: new Date().toISOString() }).eq('id', user.id).then(() => {}).catch(() => {});
+      supabase.from('user_profiles').update({ last_login: new Date().toISOString() }).eq('id', user.id).then(() => {}).catch(() => {}); // last-login stamp only
     } catch (err) {
       if (err?.code === 'PGRST116') {
         // No profile row at all — do not auto-create one.
@@ -11538,11 +11579,13 @@ export default function App() {
   const investorOnly = userProfile?.role === 'investor';
   useEffect(() => {
     if (investorOnly) return;
+    // Sidebar badge counts only; the pages load and report their own errors.
     lpoService.getPending().then(l => setLpoCount(l.length)).catch(() => {});
     schedulesService.getSubmitted().then(s => setScheduleCount(s.length)).catch(() => {});
   }, [active, investorOnly]);
 
-  // Poll unread message count for the nav badge (30s interval; skip while on Messages page)
+  // Poll unread message count for the nav badge (30s interval; skip while on Messages page).
+  // Badge only, so a failed poll is safe to ignore — the next one retries.
   useEffect(() => {
     if (!userProfile || active === 'messages' || userProfile.role === 'investor') return;
     messagesService.getTotalUnread(userProfile.id).then(setUnreadMsgCount).catch(() => {});
