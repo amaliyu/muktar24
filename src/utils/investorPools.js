@@ -239,7 +239,7 @@ export function buildCloseStatement({ period, distributions = [], investors = []
     month: period.period_month,
     term: term ? termLabel(term) : null,
     lines: statementLines(period),
-    excluded: { label: 'Site expenses not deductible under these terms', amount: round2(period.excluded_expenses), note: 'not deductible under these terms' },
+    excluded: { label: 'Excluded site expenses', amount: round2(period.excluded_expenses), note: 'not deductible under these terms' },
     ica: round2(period.ica),
     investorsPaidBefore: round2(period.investor_receipts_before),
     tiers: tierRows(period),
