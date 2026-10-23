@@ -1172,16 +1172,32 @@ APCL is starting a second business line. Smaller modular machines (QTJ4-26B and 
 - **Sequoia cycle 1 mix:** the 9" / 6" split comes from Sequoia's written schedule (Proposal §3). The MD enters it when received.
 - **Working days:** Mon–Sat or Mon–Fri? This affects the 3-working-day and 10-working-day clocks. Assumed Mon–Fri, excluding public holidays (holidays entered by the MD).
 
-**7C — investor pools and SPV ledger**
-- **Pools and capital:**
-  - `investment_pools`: one per machine, linked to `assets`.
-  - `pool_investors`.
-  - `capital_events` (contribution, bridge, bridge refund), giving a computed ICA per pool and a pro-rata share per investor.
-  - The ₦27.0m already funded on machine 1 is recorded as the opening contribution.
-- **SPV accounts:** a separate ledger per pool, recording site receipts allocated from APCL and the monthly transfer.
-- **Monthly NDC:** `ndc_periods` records receipts, legitimate deductions per Term Sheet §10, and reserves.
-- **Waterfall:** a SECURITY DEFINER waterfall function computes tier splits at each threshold crossing. `distributions` records the investor and APCL shares per period.
-- **Investor access:** a read-only `investor` role through `has_any_role()`, scoped by RLS to the investor's own pool. It shows production, collections, costs, reserves, NDC, cumulative receipts and the current tier (Term Sheet §17).
+**7C — investor pools and SPV ledger (design superseded 2026-10-23; DB LIVE 2026-10-23)**
+The machine-based draft above (investment_pools / pool_investors / capital_events) was replaced after MD review on 2026-10-23. Decision 3 ("each machine is its own pool") is SUPERSEDED: the pool is per SITE.
+
+DECISIONS (MD, 2026-10-23)
+- Investors are entered manually in an investor register and picked from lists. Production sites likewise; new sites/investors are added without code.
+- One pool per site. Several investors may fund different items at one site (machine, generator, pallets…).
+- An investor's share of the investor portion = their capital-days ÷ the site's capital-days in the month (mid-month top-ups and asset moves are fair).
+- Capital tied to an asset follows the asset: when it moves (move_asset), its capital moves from the move date, pro rata to quantity for part moves.
+- APCL's own capital at a site counts in the pool: APCL is a contributor in the register, earning its capital share of the investor portion on top of its operator share.
+- Terms are DATA, not code (term_templates, versioned): tiers, term years, deductible expense categories, optional management fee (pct + basis). Seed "Term Sheet V2" (65/35 <1×, 35/65 1–1.5×, 25/75 1.5–2×, 20/80 >2×; fee 0). A version used by an approved month is locked; changes = new version + site_pool_terms effective date.
+- Optional APCL management fee kept as a switchable field (default 0). Switch on only in a new terms version agreed with that investor — Term Sheet §10 bars introducing it to suppress NDC.
+- Deductions follow Term Sheet §10 (direct site costs, staffing/supervision, machine & generator maintenance, taxes, insurance, reserve, working capital, SPV admin/audit, approved-budget items). Only expenses tagged to the site count. Reserve (§14) is a monthly budget amount per site, not a fixed %.
+- Thresholds count only distributions actually PAID (§12). Negative months carry a deficit forward.
+- Collection: APCL keeps collecting (contracts in APCL's name). Every client receipt is recorded once in site_receipts and is owed to the site's SPV until the monthly transfer. The final investor agreement must amend Term Sheet §13 (dedicated SPV bank account) accordingly.
+
+AS BUILT — DB (applied 2026-10-23 via the SQL Editor after a rolled-back test that matched hand calculations; record: supabase/migrations/20261023000000_phase7c_investor_pools_ndc_waterfall.sql)
+- Tables: investors (APCL seeded, kind='apcl'), capital_contributions (contribution | bridge | bridge_refund | correction; no edit/delete — corrections are offsetting entries), term_templates, site_pool_terms, site_reserve_budgets, site_receipts (void, never edit/delete; locked once the month is approved), spv_transfers, ndc_periods (draft → approved | voided), distributions (written only by the functions).
+- assets.investor_id (pick from the register; investment_pool_ref is legacy free text).
+- contract_cycles.amount_received is now kept equal to the cycle's receipts. The existing 7B-1 payment form still works: a direct increase auto-creates a site receipt for the difference; a decrease is refused ("void the receipt").
+- RPCs: compute_ndc_period(p_site_id, p_month) [md, accountant; month must have ended; earlier drafts must be approved first], approve_ndc_period(p_period_id) [md; refused while the month has pending site expenses], void_ndc_period(p_period_id, p_reason) [md; refused if any line paid or a later month approved], mark_distribution_paid(p_distribution_id, p_paid_on, p_reference) [md, accountant].
+- Helpers: fn_site_capital_on(site, day), fn_asset_family_site_weights(asset, day), fn_site_terms(site, month), fn_my_investor_sites().
+- Views: v_spv_ledger (receipts owed to SPV, transfers, payouts), v_investor_position (capital, paid, due per investor per site).
+- RLS: md/accountant/ico/board_member read; md writes investors, capital, terms, reserve; md/accountant record receipts and transfers. A login linked via investors.user_id reads only its own sites, approved months and its own distributions (role 'investor' to be added in the 7C frontend).
+- Test (rolled back): Kado Sept — receipts ₦12.0m, deductible ₦4.0m, excluded ₦0.1m, reserve ₦0.5m → NDC ₦7.5m; ICA ₦30m; investors 65% = ₦4,875,000 (A ₦4,618,421 @94.74% capital-days; APCL-as-contributor ₦256,579 from 16 Sept); APCL operator ₦2,625,000. Life Camp tier crossing (ICA ₦1m, NDC ₦5m) → investors ₦2,006,593.41 across all four tiers. Locks held: payment decrease, receipt into approved month, edit of used terms, recompute of approved month, bad tiers, accountant approval.
+
+7C FRONTEND (next — Claude Code): Investor register; capital contributions per site; terms editor (tiers, tick-box deductible categories, fee, versions) and site terms assignment; reserve budget per month; site receipts (record/void) replacing the cycle payment edit; monthly close page (compute → review → MD approve → mark paid); SPV ledger per site; investor read-only portal.
 
 ### OPEN ITEMS (raised this session — MD to action or decide)
 - ✅ **Repo was found PUBLIC (2026-10-21); MD set it PRIVATE the same day.** Anonymous access is now refused (verified). Only the current tree was scanned for secrets (none found); older commits were not checked.
