@@ -3,6 +3,7 @@ import { useSites } from '../SitePicker'
 import { siteName } from '../../services/sites'
 import { lagosToday } from '../../services/siteContracts'
 import { assetsService, assetTypeFor, ASSET_CATEGORIES, ASSET_CONDITIONS, ASSET_STATUSES } from '../../services/assets'
+import { investorsService } from '../../services/investors'
 import { generatePlantOnSitePDF } from '../../utils/generatePlantOnSitePDF'
 import { hasRole } from '../../lib/roles'
 import { theme, ui, Pill, fmtQty, fmtNaira, fmtDate, fmtDateTime, ErrorBox, SkeletonRows, ConfirmDialog, StackTable, useIsMobile } from './siteUi'
@@ -30,7 +31,8 @@ export default function AssetRegister({ userProfile }) {
   const canWrite = hasRole(userProfile, ...ASSET_WRITE_ROLES)
   const seeMoney = hasRole(userProfile, ...MONEY_ROLES)
   const canCost = canWrite && hasRole(userProfile, ...COST_ENTRY_ROLES)
-  const canPoolRef = userProfile?.role === 'md'
+  // Only the MD sets the funding investor (picked from the investor register).
+  const canInvestor = userProfile?.role === 'md'
   const { sites, error: sitesErr } = useSites()
   const isMobile = useIsMobile()
 
@@ -45,11 +47,20 @@ export default function AssetRegister({ userProfile }) {
   const [notice, setNotice] = useState(null)
   const [pdfErr, setPdfErr] = useState(null)
 
+  // Investor names are shown to the money roles (who can read the register).
+  const [investors, setInvestors] = useState([])
   const load = async () => {
     if (!canRead) { setLoading(false); return }
     setLoading(true); setErr(null)
     try {
-      setRows(await assetsService.listRegister())
+      const [reg, links, invs] = await Promise.all([
+        assetsService.listRegister(),
+        seeMoney ? assetsService.listInvestorLinks() : [],
+        seeMoney ? investorsService.listInvestors() : [],
+      ])
+      const byId = Object.fromEntries(links.map(l => [l.id, l.investor_id]))
+      setRows(reg.map(r => ({ ...r, investor_id: byId[r.asset_id] || null })))
+      setInvestors(invs)
     } catch (e) {
       setErr(e)
     } finally {
@@ -76,6 +87,7 @@ export default function AssetRegister({ userProfile }) {
     .filter(g => g.items.length > 0)
 
   const detail = detailId ? rows.find(r => r.asset_id === detailId) : null
+  const investorOf = (r) => (r.investor_id ? investors.find(i => i.id === r.investor_id)?.name || 'Investor not found' : null)
 
   const exportPlant = async (g) => {
     setPdfErr(null)
@@ -123,7 +135,7 @@ export default function AssetRegister({ userProfile }) {
           {canWrite && <button type="button" style={{ ...ui.small(theme.accent), marginLeft: '12px' }} onClick={() => setForm(blankForm())}>Add asset</button>}
         </div>
       ) : !err && shownGroups.map(g => (
-        <SiteGroup key={g.name} group={g} seeMoney={seeMoney} canWrite={canWrite} isMobile={isMobile}
+        <SiteGroup key={g.name} group={g} seeMoney={seeMoney} canWrite={canWrite} isMobile={isMobile} investorOf={investorOf}
           onExport={g.siteType === 'client_site' ? () => exportPlant(g) : null}
           onDetail={(r) => setDetailId(r.asset_id)}
           onEdit={(r) => setForm(formFrom(r))}
@@ -131,7 +143,7 @@ export default function AssetRegister({ userProfile }) {
       ))}
 
       {form && (
-        <AssetForm form={form} setForm={setForm} sites={sites} canCost={canCost} canPoolRef={canPoolRef}
+        <AssetForm form={form} setForm={setForm} sites={sites} canCost={canCost} canInvestor={canInvestor} investors={investors}
           onClose={() => setForm(null)}
           onSaved={async (msg) => { setForm(null); setNotice(msg); await load() }} />
       )}
@@ -141,7 +153,7 @@ export default function AssetRegister({ userProfile }) {
           onMoved={async (msg) => { setMove(null); setNotice(msg); await load() }} />
       )}
       {detail && (
-        <DetailDrawer asset={detail} rows={rows} sites={sites} seeMoney={seeMoney} isMobile={isMobile}
+        <DetailDrawer asset={detail} rows={rows} sites={sites} seeMoney={seeMoney} isMobile={isMobile} investorOf={investorOf}
           onOpen={(id) => setDetailId(id)} onClose={() => setDetailId(null)} />
       )}
     </div>
@@ -149,7 +161,7 @@ export default function AssetRegister({ userProfile }) {
 }
 
 // ── one site group ───────────────────────────────────────────
-function SiteGroup({ group: g, seeMoney, canWrite, isMobile, onExport, onDetail, onEdit, onMove }) {
+function SiteGroup({ group: g, seeMoney, canWrite, isMobile, investorOf, onExport, onDetail, onEdit, onMove }) {
   const qtyByCat = {}
   for (const r of g.items) qtyByCat[r.category] = (qtyByCat[r.category] || 0) + Number(r.quantity || 0)
   const split = (src) => g.items.filter(r => r.funding_source === src)
@@ -200,7 +212,10 @@ function SiteGroup({ group: g, seeMoney, canWrite, isMobile, onExport, onDetail,
             <td style={ui.td}>{r.serial_or_tag || '—'}</td>
             <td style={ui.td}><Pill label={label(r.condition)} color={CONDITION_COLOR[r.condition]} /></td>
             <td style={ui.td}><Pill label={label(r.status)} color={STATUS_COLOR[r.status]} /></td>
-            <td style={ui.td}><Pill label={r.funding_source === 'investor' ? 'Investor' : 'APCL'} color={r.funding_source === 'investor' ? theme.accent : theme.blue} /></td>
+            <td style={ui.td}>
+              <Pill label={r.funding_source === 'investor' ? 'Investor' : 'APCL'} color={r.funding_source === 'investor' ? theme.accent : theme.blue} />
+              {seeMoney && investorOf(r) && <div style={ui.hint}>{investorOf(r)}</div>}
+            </td>
             <td style={ui.td}>{fmtDate(r.acquired_on)}</td>
             <td style={ui.td}>{fmtDate(r.last_moved_on)}</td>
             {seeMoney && <td style={{ ...ui.td, ...ui.right }}>{fmtNaira(r.acquisition_cost)}</td>}
@@ -229,18 +244,18 @@ const Fact = ({ label: l, value, sub }) => (
 // ── add / edit ───────────────────────────────────────────────
 const blankForm = () => ({
   mode: 'add', name: '', code: '', category: '', quantity: '1', serial_or_tag: '', acquired_on: '',
-  acquisition_cost: '', funding_source: 'apcl', investment_pool_ref: '', condition: 'good', status: 'active', notes: '', site_id: '',
+  acquisition_cost: '', funding_source: 'apcl', investor_id: '', investment_pool_ref: '', condition: 'good', status: 'active', notes: '', site_id: '',
 })
 const formFrom = (r) => ({
   mode: 'edit', id: r.asset_id, siteLabel: r.site_name,
   name: r.name || '', code: r.code || '', category: r.category || '', quantity: String(r.quantity ?? 1),
   serial_or_tag: r.serial_or_tag || '', acquired_on: r.acquired_on || '',
   acquisition_cost: r.acquisition_cost == null ? '' : String(r.acquisition_cost),
-  funding_source: r.funding_source || 'apcl', investment_pool_ref: r.investment_pool_ref || '',
+  funding_source: r.funding_source || 'apcl', investor_id: r.investor_id || '', investment_pool_ref: r.investment_pool_ref || '',
   condition: r.condition || 'good', status: r.status || 'active', notes: r.notes || '',
 })
 
-function AssetForm({ form, setForm, sites, canCost, canPoolRef, onClose, onSaved }) {
+function AssetForm({ form, setForm, sites, canCost, canInvestor, investors = [], onClose, onSaved }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
   const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }))
@@ -257,14 +272,14 @@ function AssetForm({ form, setForm, sites, canCost, canPoolRef, onClose, onSaved
       acquired_on: form.acquired_on || null, funding_source: form.funding_source,
       condition: form.condition, status: form.status, notes: form.notes.trim() || null,
       acquisition_cost: form.acquisition_cost === '' ? null : Number(form.acquisition_cost),
-      investment_pool_ref: form.investment_pool_ref.trim() || null,
+      investor_id: form.investor_id || null,
     }
     try {
       if (form.mode === 'add') {
-        await assetsService.createAsset({ ...payload, site_id: form.site_id || null }, { canCost, canPoolRef })
+        await assetsService.createAsset({ ...payload, site_id: form.site_id || null }, { canCost, canInvestor })
         await onSaved(`${payload.name} added${form.site_id ? ` at ${siteName(form.site_id, sites)}` : ''}.`)
       } else {
-        await assetsService.updateAsset(form.id, payload, { canCost, canPoolRef })
+        await assetsService.updateAsset(form.id, payload, { canCost, canInvestor })
         await onSaved(`${payload.name} saved.`)
       }
     } catch (e) {
@@ -305,8 +320,19 @@ function AssetForm({ form, setForm, sites, canCost, canPoolRef, onClose, onSaved
             <option value="investor">Investor</option>
           </select>
         </Field>
-        {canPoolRef && (
-          <Field id="af-pool" label="Investment pool ref"><input id="af-pool" style={ui.input} value={form.investment_pool_ref} onChange={set('investment_pool_ref')} /></Field>
+        {canInvestor && form.funding_source === 'investor' && (
+          <Field id="af-investor" label="Investor">
+            <select id="af-investor" style={ui.input} value={form.investor_id} onChange={set('investor_id')}>
+              <option value="">Not set</option>
+              {investors.filter(i => i.kind !== 'apcl' && (i.is_active || i.id === form.investor_id)).map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
+            </select>
+            <div style={ui.hint}>From the investor register.</div>
+          </Field>
+        )}
+        {canInvestor && form.investment_pool_ref && (
+          <Field id="af-pool" label="Pool ref (legacy)">
+            <div id="af-pool" style={{ ...ui.input, display: 'flex', alignItems: 'center', background: 'transparent', color: theme.textMuted }}>{form.investment_pool_ref}</div>
+          </Field>
         )}
         <Field id="af-cond" label="Condition">
           <select id="af-cond" style={ui.input} value={form.condition} onChange={set('condition')}>
@@ -400,7 +426,7 @@ function MoveDialog({ move, setMove, sites, onClose, onMoved }) {
 }
 
 // ── detail drawer ────────────────────────────────────────────
-function DetailDrawer({ asset: a, rows, sites, seeMoney, isMobile, onOpen, onClose }) {
+function DetailDrawer({ asset: a, rows, sites, seeMoney, isMobile, investorOf, onOpen, onClose }) {
   const [moves, setMoves] = useState(null)
   const [err, setErr] = useState(null)
   const load = () => {
@@ -434,7 +460,8 @@ function DetailDrawer({ asset: a, rows, sites, seeMoney, isMobile, onOpen, onClo
           <Fact label="Serial / tag" value={a.serial_or_tag || '—'} />
           <Fact label="Acquired" value={fmtDate(a.acquired_on)} />
           {seeMoney && <Fact label="Acquisition cost" value={fmtNaira(a.acquisition_cost)} />}
-          {seeMoney && a.investment_pool_ref && <Fact label="Pool ref" value={a.investment_pool_ref} />}
+          {seeMoney && investorOf(a) && <Fact label="Investor" value={investorOf(a)} />}
+          {seeMoney && a.investment_pool_ref && <Fact label="Pool ref (legacy)" value={a.investment_pool_ref} />}
         </div>
         {a.notes && <div style={{ ...ui.hint, marginBottom: '16px', whiteSpace: 'pre-wrap' }}>{a.notes}</div>}
         {a.parent_asset_id && (

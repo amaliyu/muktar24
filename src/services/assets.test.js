@@ -11,7 +11,7 @@ import { op } from '../test/supabaseMock'
 import { assetsService, assetTypeFor } from './assets'
 
 const GUARD = 'Use "Move asset" to change where an asset is.'
-const form = { name: 'TEST trolley', code: '', category: 'trolley', quantity: 4, serial_or_tag: null, acquired_on: null, funding_source: 'apcl', condition: 'good', status: 'active', notes: null, acquisition_cost: 120000, investment_pool_ref: 'POOL-1', site_id: 'dutse' }
+const form = { name: 'TEST trolley', code: '', category: 'trolley', quantity: 4, serial_or_tag: null, acquired_on: null, funding_source: 'apcl', condition: 'good', status: 'active', notes: null, acquisition_cost: 120000, investment_pool_ref: 'POOL-1', investor_id: 'inv-1', site_id: 'dutse' }
 
 describe('assetsService', () => {
   beforeEach(() => { state.resolve = () => ({ data: [{ id: 'a1' }], error: null }); state.mock.calls.length = 0 })
@@ -22,17 +22,22 @@ describe('assetsService', () => {
     expect(assetTypeFor('trolley')).toBe('equipment')
   })
 
-  it('edit never sends site_id, and leaves cost / pool ref out for roles that may not set them', async () => {
-    await assetsService.updateAsset('a1', form, { canCost: false, canPoolRef: false })
+  it('edit never sends site_id, and leaves cost / investor out for roles that may not set them', async () => {
+    await assetsService.updateAsset('a1', form, { canCost: false, canInvestor: false })
     const payload = op(state.mock.calls[0], 'update')[1]
     expect(payload).not.toHaveProperty('site_id')
     expect(payload).not.toHaveProperty('acquisition_cost')
+    expect(payload).not.toHaveProperty('investor_id')
     expect(payload).not.toHaveProperty('investment_pool_ref')
     expect(payload.asset_type).toBe('equipment')
-    await assetsService.updateAsset('a1', form, { canCost: true, canPoolRef: true })
+    await assetsService.updateAsset('a1', form, { canCost: true, canInvestor: true })
     const p2 = op(state.mock.calls[1], 'update')[1]
-    expect(p2).toMatchObject({ acquisition_cost: 120000, investment_pool_ref: 'POOL-1' })
+    // APCL-funded: the investor is cleared; the legacy pool ref is never written.
+    expect(p2).toMatchObject({ acquisition_cost: 120000, investor_id: null })
+    expect(p2).not.toHaveProperty('investment_pool_ref')
     expect(p2).not.toHaveProperty('site_id')
+    await assetsService.updateAsset('a1', { ...form, funding_source: 'investor' }, { canInvestor: true })
+    expect(op(state.mock.calls[2], 'update')[1].investor_id).toBe('inv-1')
   })
 
   it('add sends site_id', async () => {

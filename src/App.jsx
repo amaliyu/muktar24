@@ -53,6 +53,13 @@ import MaterialReceiving from './components/site/MaterialReceiving'
 import Handovers from './components/site/Handovers'
 import SiteDashboardCards from './components/site/SiteDashboardCards'
 import AssetRegister from './components/site/AssetRegister'
+import InvestorRegister from './components/investors/InvestorRegister'
+import Capital from './components/investors/Capital'
+import Terms from './components/investors/Terms'
+import MonthlyClose from './components/investors/MonthlyClose'
+import SpvLedger from './components/investors/SpvLedger'
+import ReserveBudget from './components/investors/ReserveBudget'
+import MyInvestment from './components/investors/MyInvestment'
 import MessagesBell from './components/MessagesBell'
 import { advancesService } from './services/advances'
 import { paymentRequestsService } from './services/paymentRequests'
@@ -138,14 +145,15 @@ const APP_ROLES = [
   { id: 'production_manager',           label: 'Production Manager' },
   { id: 'assistant_production_manager', label: 'Assistant Production Manager' },
   { id: 'staff',                        label: 'Staff (Employee — Self-Service Only)' },
+  { id: 'investor',                     label: 'Investor (read-only — My Investment only)' },
 ];
 
 // Pages each role is allowed to access. 'all' = unrestricted.
 const ROLE_PAGES = {
   md:                 'all',
-  ico:                ['dashboard','production','inventory','batches','maintenance','asset_register','site_contracts','material_receiving','handovers','waybills','vehicles','labour','truck_loading','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','advances','leave','payment_requests','messages'],
-  accountant:         ['dashboard','asset_register','site_contracts','material_receiving','handovers','customers','orders','reports','kpi_dashboard','accounting','suppliers','products','my_profile','data_import','labour','waybills','advances','leave','payment_requests','truck_loading','trading_margin','messages'],
-  board_member:       ['dashboard','production','inventory','batches','maintenance','asset_register','site_contracts','handovers','waybills','vehicles','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','trading_margin','messages'],
+  ico:                ['dashboard','investor_register','capital','terms','monthly_close','spv_ledger','reserve_budget','production','inventory','batches','maintenance','asset_register','site_contracts','material_receiving','handovers','waybills','vehicles','labour','truck_loading','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','advances','leave','payment_requests','messages'],
+  accountant:         ['dashboard','investor_register','capital','terms','monthly_close','spv_ledger','reserve_budget','asset_register','site_contracts','material_receiving','handovers','customers','orders','reports','kpi_dashboard','accounting','suppliers','products','my_profile','data_import','labour','waybills','advances','leave','payment_requests','truck_loading','trading_margin','messages'],
+  board_member:       ['dashboard','investor_register','capital','terms','monthly_close','spv_ledger','reserve_budget','production','inventory','batches','maintenance','asset_register','site_contracts','handovers','waybills','vehicles','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','trading_margin','messages'],
   bdm:                ['dashboard','customers','orders','pending_register','daily_schedule','lpo_approvals','reports','kpi_dashboard','my_profile','payment_requests','trading_margin','messages'],
   store_officer:      ['dashboard','inventory','batches','maintenance','asset_register','site_contracts','material_receiving','handovers','waybills','pending_register','daily_schedule','products','reports','my_profile','messages'],
   logistics_manager:  ['dashboard','asset_register','site_contracts','handovers','waybills','vehicles','labour','truck_loading','maintenance','pending_register','daily_schedule','customers','my_profile','payment_requests','messages'],
@@ -159,6 +167,8 @@ const ROLE_PAGES = {
   operations:         ['dashboard','production','inventory','batches','waybills','vehicles','pending_register','daily_schedule','lpo_approvals','my_profile'],
   sales:              ['dashboard','customers','orders','my_profile'],
   staff:              ['my_hr','my_profile','messages'],
+  // Phase 7C — external investor login: its own portal and profile, nothing else.
+  investor:           ['my_investment','my_profile'],
 };
 
 // Pages where the read-only CSS mask does NOT apply — the role can fully
@@ -10908,6 +10918,15 @@ const navItems = [
     { id: "accounting", label: "Accounting", icon: "orders" },
     { id: "payment_requests", label: "Payment Requests", icon: "orders" },
   ]},
+  { section: "Investors (SPV)", items: [
+    { id: "my_investment", label: "My Investment", icon: "orders" },
+    { id: "investor_register", label: "Investor Register", icon: "staff" },
+    { id: "capital", label: "Capital", icon: "orders" },
+    { id: "terms", label: "Terms", icon: "reports" },
+    { id: "monthly_close", label: "Monthly Close", icon: "approve" },
+    { id: "spv_ledger", label: "SPV Ledger", icon: "orders" },
+    { id: "reserve_budget", label: "Reserve Budget", icon: "orders" },
+  ]},
   { section: "Settings", items: [
     { id: "products", label: "Products", icon: "products" },
     { id: "suppliers", label: "Suppliers", icon: "supplier" },
@@ -10934,7 +10953,8 @@ const RoleGrantsManager = ({ users }) => {
   const [busy, setBusy]       = useState(false);
   const [revoking, setRevoking] = useState(null);
 
-  const grantableRoles = APP_ROLES.filter(r => r.id !== 'md');
+  // 'investor' is a separate external login (investors.user_id), never a grant.
+  const grantableRoles = APP_ROLES.filter(r => r.id !== 'md' && r.id !== 'investor');
   const userName = (id) => users.find(u => u.id === id)?.full_name || users.find(u => u.id === id)?.email || 'Unknown';
   const userPrimary = (id) => { const u = users.find(u => u.id === id); return u ? (APP_ROLES.find(r => r.id === u.role)?.label || u.role) : '—'; };
   const roleLabel = (id) => APP_ROLES.find(r => r.id === id)?.label || id;
@@ -11484,14 +11504,17 @@ export default function App() {
   const handleLogout = async () => { await authService.signOut(); setSession(null); setUserProfile(null); setActive('dashboard'); };
 
   // Load approval badge counts (must be before any conditional returns)
+  // An investor login never requests staff tables (7C).
+  const investorOnly = userProfile?.role === 'investor';
   useEffect(() => {
+    if (investorOnly) return;
     lpoService.getPending().then(l => setLpoCount(l.length)).catch(() => {});
     schedulesService.getSubmitted().then(s => setScheduleCount(s.length)).catch(() => {});
-  }, [active]);
+  }, [active, investorOnly]);
 
   // Poll unread message count for the nav badge (30s interval; skip while on Messages page)
   useEffect(() => {
-    if (!userProfile || active === 'messages') return;
+    if (!userProfile || active === 'messages' || userProfile.role === 'investor') return;
     messagesService.getTotalUnread(userProfile.id).then(setUnreadMsgCount).catch(() => {});
     const interval = setInterval(() => {
       messagesService.getTotalUnread(userProfile.id).then(setUnreadMsgCount).catch(() => {});
@@ -11544,6 +11567,9 @@ export default function App() {
   const canSee = (pageId) => {
     if (pageId === 'my_profile') return true;
     if (pageId === 'my_hr') return !!userProfile?.staff_id;
+    // The investor portal is only for a login with the investor role (md's
+    // 'all' does not include it — md has no investor record).
+    if (pageId === 'my_investment') return effRoles.includes('investor');
     return allowedPages === 'all' || allowedPages.includes(pageId);
   };
   const visibleNav = navItems
@@ -11597,6 +11623,13 @@ export default function App() {
     messages: <Messages userProfile={userProfile} onUnreadChange={setUnreadMsgCount} />,
     my_hr: <MyHRPage userProfile={userProfile} />,
     my_profile: <MyProfile userProfile={userProfile} />,
+    investor_register: <InvestorRegister userProfile={userProfile} />,
+    capital: <Capital userProfile={userProfile} />,
+    terms: <Terms userProfile={userProfile} />,
+    monthly_close: <MonthlyClose userProfile={userProfile} />,
+    spv_ledger: <SpvLedger userProfile={userProfile} />,
+    reserve_budget: <ReserveBudget userProfile={userProfile} />,
+    my_investment: <MyInvestment userProfile={userProfile} />,
   };
 
   const getBadge = (id) => {
@@ -11660,16 +11693,16 @@ export default function App() {
         </div>
       </div>
       {showChangePwd && <ChangePasswordModal onClose={() => setShowChangePwd(false)} />}
-      <MessagesBell
+      {!investorOnly && <MessagesBell
         unreadMsgCount={unreadMsgCount}
         onNavigate={(page) => { setActive(page); if (isMobile) setSidebarOpen(false); }}
         isMobile={isMobile}
-      />
-      <NotificationBell
+      />}
+      {!investorOnly && <NotificationBell
         userProfile={userProfile}
         onNavigate={(page) => { setActive(page); if (isMobile) setSidebarOpen(false); }}
         isMobile={isMobile}
-      />
+      />}
       <main style={{ ...styles.main, ...(isMobile ? { marginLeft: 0, padding: '16px 14px', paddingTop: '58px' } : {}) }} {...(boardMasked ? { 'data-board-view': 'true' } : {})} {...(icoMasked ? { 'data-ico-view': 'true' } : {})}>
         {/* Mobile hamburger */}
         {isMobile && (

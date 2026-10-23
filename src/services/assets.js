@@ -31,6 +31,8 @@ export const assetTypeFor = (category) => (category === 'machine' ? 'machine' : 
 
 // Fields any writer may send on edit. site_id is never here (use moveAsset).
 const EDITABLE = ['name', 'code', 'category', 'asset_type', 'quantity', 'serial_or_tag', 'acquired_on', 'funding_source', 'condition', 'status', 'notes']
+// Only an investor-funded asset carries an investor.
+const investorFor = (form) => (form.funding_source === 'investor' ? form.investor_id || null : null)
 const pick = (obj, keys) => Object.fromEntries(keys.filter(k => k in obj).map(k => [k, obj[k]]))
 
 export const assetsService = {
@@ -49,19 +51,27 @@ export const assetsService = {
       .order('created_at', { ascending: false }))
   },
 
-  // canMoney: md/accountant may set acquisition_cost; md alone may set
-  // investment_pool_ref. Otherwise those columns are left out entirely.
-  async createAsset(form, { canCost = false, canPoolRef = false } = {}) {
+  // v_site_asset_register predates assets.investor_id (7C), so the funding
+  // investor is read from assets directly.
+  async listInvestorLinks() {
+    return must(await supabase.from('assets').select('id, investor_id').not('investor_id', 'is', null))
+  },
+
+  // md/accountant may set acquisition_cost; md alone may set the funding
+  // investor (assets.investor_id, picked from the investor register).
+  // Otherwise those columns are left out entirely. investment_pool_ref is
+  // legacy free text (7B-2) and is no longer written.
+  async createAsset(form, { canCost = false, canInvestor = false } = {}) {
     const payload = { ...pick(form, EDITABLE), asset_type: assetTypeFor(form.category), site_id: form.site_id || null }
     if (canCost) payload.acquisition_cost = form.acquisition_cost
-    if (canPoolRef) payload.investment_pool_ref = form.investment_pool_ref
+    if (canInvestor) payload.investor_id = investorFor(form)
     return must(await supabase.from('assets').insert(payload).select().single())
   },
 
-  async updateAsset(id, form, { canCost = false, canPoolRef = false } = {}) {
+  async updateAsset(id, form, { canCost = false, canInvestor = false } = {}) {
     const payload = { ...pick(form, EDITABLE), asset_type: assetTypeFor(form.category) }
     if (canCost) payload.acquisition_cost = form.acquisition_cost
-    if (canPoolRef) payload.investment_pool_ref = form.investment_pool_ref
+    if (canInvestor) payload.investor_id = investorFor(form)
     return mustTouch(await supabase.from('assets').update(payload).eq('id', id).select(), 'Asset')
   },
 

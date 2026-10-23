@@ -22,8 +22,10 @@ const mustTouch = (res, what) => {
 
 // Columns verified against the live schema on 2026-10-22 (Rule 11).
 const CONTRACT_SETTINGS = ['planning_rate_per_day', 'advance_notice_days', 'material_warning_days', 'notes']
-const CYCLE_EDITABLE = ['qty_9in', 'qty_6in', 'qty_total', 'rate_9in', 'rate_6in', 'amount_due', 'amount_received',
-  'payment_ref', 'paid_on', 'schedule_received_on', 'notes']
+// amount_received / paid_on are not editable: since 7C the DB keeps them equal
+// to the cycle's site_receipts (record or void a receipt instead).
+const CYCLE_EDITABLE = ['qty_9in', 'qty_6in', 'qty_total', 'rate_9in', 'rate_6in', 'amount_due',
+  'payment_ref', 'schedule_received_on', 'notes']
 const pick = (obj, keys) => Object.fromEntries(keys.filter(k => k in obj).map(k => [k, obj[k]]))
 
 // Today's date in Lagos as YYYY-MM-DD (the DB's current_date is UTC, which is

@@ -22,10 +22,15 @@ vi.mock('../../services/assets', async () => {
         { asset_id: 'q2', code: 'QTJ-02', name: 'QTJ4-26B', asset_type: 'machine', category: 'machine', quantity: 1, condition: 'good', status: 'active', funding_source: 'investor', acquisition_cost: 27000000, site_id: 'kado', site_name: 'Kado Site (Sequoia)', site_type: 'client_site' },
       ]),
       listMovements: vi.fn(async () => []),
+      listInvestorLinks: vi.fn(async () => [{ id: 'q2', investor_id: 'inv-a' }]),
       moveAsset: vi.fn(async () => { throw new Error(MOVE_ERR) }),
     },
   }
 })
+
+vi.mock('../../services/investors', () => ({
+  investorsService: { listInvestors: vi.fn(async () => [{ id: 'inv-a', name: 'TEST Investor A', kind: 'external', is_active: true }]) },
+}))
 
 import AssetRegister from './AssetRegister'
 
@@ -52,6 +57,18 @@ describe('AssetRegister', () => {
     expect(screen.queryByRole('button', { name: 'Add asset' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Move' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull()
+    expect(screen.getByText('TEST Investor A')).toBeInTheDocument()
+  })
+
+  it('md picks the funding investor from the register (no free-text pool ref)', async () => {
+    const user = userEvent.setup()
+    render(<AssetRegister userProfile={as('md')} />)
+    await screen.findByText('TEST trolley')
+    await user.click(screen.getAllByRole('button', { name: 'Edit' })[1])
+    expect(screen.queryByLabelText(/Investment pool ref/)).toBeNull()
+    expect(screen.getByLabelText('Investor')).toHaveValue('inv-a')
+    await user.selectOptions(screen.getByLabelText('Funding source'), 'apcl')
+    expect(screen.queryByLabelText('Investor')).toBeNull()
   })
 
   it('a part move shows the split hint and the RPC message verbatim', async () => {
