@@ -4,6 +4,7 @@ import SitePicker from './SitePicker'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { Z } from '../lib/zIndex'
+import { fmtDate } from './site/siteUi'
 
 const theme = {
   bg: '#0f1117', surface: '#1a1d27', card: '#21263a', border: '#2e3452',
@@ -464,10 +465,10 @@ export default function KPIDashboard() {
   return (
     <div style={s.page}>
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
+      <div className="m-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
         <div>
           <div style={{ fontSize: '20px', fontWeight: '800', color: theme.text }}>KPI Dashboard</div>
-          <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '2px' }}>Abuja Precast Concrete Limited · {range.from} → {range.to}</div>
+          <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '2px' }}>Abuja Precast Concrete Limited · {fmtDate(range.from)} → {fmtDate(range.to)}</div>
         </div>
         <div style={s.row}>
           <button data-ico-allow data-board-allow style={s.btn('primary')} onClick={downloadPDF}>↓ KPI Report PDF</button>

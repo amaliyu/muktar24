@@ -1396,7 +1396,7 @@ export default function Reports({ userProfile }) {
   return (
     <div>
       {/* HEADER */}
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'20px', flexWrap:'wrap', gap:'12px' }}>
+      <div className="m-header" style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'20px', flexWrap:'wrap', gap:'12px' }}>
         <div>
           <div style={{ fontSize:'22px', fontWeight:'800', color:theme.text, marginBottom:'4px' }}>Reports</div>
           <div style={{ fontSize:'13px', color:theme.textMuted }}>{CATALOG.length} reports across {CATEGORIES.length - 1} categories</div>
@@ -1406,7 +1406,7 @@ export default function Reports({ userProfile }) {
 
       <div style={{ display:'grid', gridTemplateColumns:'200px 1fr', gap:'20px', alignItems:'start' }}>
         {/* LEFT SIDEBAR */}
-        <div style={{ ...styles.card, padding:'12px 0', position:'sticky', top:'20px' }}>
+        <div className="m-pills" style={{ ...styles.card, padding:'12px 0', position:'sticky', top:'20px' }}>
           {CATEGORIES.map(cat => (
             <div key={cat.id} onClick={() => setActiveCategory(cat.id)}
               style={{ padding:'9px 16px', cursor:'pointer', display:'flex', justifyContent:'space-between', alignItems:'center', background: activeCategory===cat.id ? theme.accent+'18' : 'transparent', borderLeft: activeCategory===cat.id ? `3px solid ${theme.accent}` : '3px solid transparent', fontSize:'13px', color: activeCategory===cat.id ? theme.accent : theme.text, fontWeight: activeCategory===cat.id ? '700' : '400', transition:'all 0.15s' }}>

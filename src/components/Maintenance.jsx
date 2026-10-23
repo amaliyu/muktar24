@@ -705,7 +705,7 @@ export default function Maintenance({ userProfile }) {
 
   return (
     <div style={styles.page}>
-      <div style={{ ...styles.row, justifyContent: 'space-between', marginBottom: '20px' }}>
+      <div className="m-header" style={{ ...styles.row, justifyContent: 'space-between', marginBottom: '20px' }}>
         <div>
           <h1 style={{ margin: 0, fontSize: '22px', fontWeight: '700', color: theme.text }}>Maintenance</h1>
           <div style={{ fontSize: '13px', color: theme.textMuted, marginTop: '4px' }}>

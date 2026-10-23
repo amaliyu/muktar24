@@ -76,8 +76,8 @@ import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { Z } from './lib/zIndex'
 import { defaultMachineId, resolveMachine } from './utils/productionMachine'
-import MobileScope from './components/MobileScope'
-import { ConfirmDialog, fmtDate } from './components/site/siteUi'
+import MobileScope, { revealOnPhone } from './components/MobileScope'
+import { ConfirmDialog, fmtDate, fmtDay, fmtDateTime } from './components/site/siteUi'
 import { deleteWhere } from './utils/checkedDelete'
 
 const theme = {
@@ -1905,7 +1905,7 @@ const Orders = ({ onNavigate, userProfile }) => {
       </div>
 
       {loading ? <Spinner /> : (
-        <div style={styles.grid(2)}>
+        <div className="m-stack" style={styles.grid(2)}>
           <div style={styles.card}>
             <div style={styles.sectionTitle}>All Orders</div>
             {orders.length === 0 ? (
@@ -1914,7 +1914,7 @@ const Orders = ({ onNavigate, userProfile }) => {
               const total = orderTotal(o);
               const paid = orderPaid(o);
               return (
-                <div key={o.id} onClick={() => setSelected(o)} style={{ padding: "14px", borderRadius: "8px", marginBottom: "8px", background: selected?.id === o.id ? "rgba(245,166,35,0.08)" : "transparent", border: `1px solid ${selected?.id === o.id ? theme.accent + "44" : theme.border}`, cursor: "pointer", transition: "all 0.15s" }}>
+                <div key={o.id} onClick={() => { setSelected(o); revealOnPhone('order-detail'); }} style={{ padding: "14px", borderRadius: "8px", marginBottom: "8px", background: selected?.id === o.id ? "rgba(245,166,35,0.08)" : "transparent", border: `1px solid ${selected?.id === o.id ? theme.accent + "44" : theme.border}`, cursor: "pointer", transition: "all 0.15s" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <div>
                       <div style={{ fontWeight: "600", fontSize: "14px" }}>{o.customer?.name || "—"}</div>
@@ -1935,7 +1935,7 @@ const Orders = ({ onNavigate, userProfile }) => {
             })}
           </div>
 
-          <div style={styles.card}>
+          <div id="order-detail" className={selected ? undefined : "m-hide"} style={styles.card}>
             {selected ? (() => {
               const total = orderTotal(selected);
               const paid = orderPaid(selected);
@@ -2028,7 +2028,7 @@ const Orders = ({ onNavigate, userProfile }) => {
                         <div style={{ fontSize: "11px", fontWeight: "700", color: theme.textMuted, marginBottom: "8px", textTransform: "uppercase", letterSpacing: "0.06em" }}>Payment History</div>
                         {allPayments.map(p => (
                           <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: `1px solid ${theme.border}22`, fontSize: "13px" }}>
-                            <span style={{ color: theme.textMuted }}>{p.payment_date}</span>
+                            <span style={{ color: theme.textMuted }}>{fmtDate(p.payment_date)}</span>
                             <span style={{ color: theme.green, fontWeight: "600" }}>{naira(p.amount_paid)}</span>
                             <span style={styles.badge(p.status === "confirmed" ? theme.green : theme.accent)}>{p.status}</span>
                             <div style={{ display: "flex", gap: "6px" }}>
@@ -3045,7 +3045,7 @@ const Customers = ({ userProfile }) => {
               {filtered.map(c => {
                 const { totalValue, outstanding, orderCount } = getStats(c);
                 return (
-                  <div key={c.id} onClick={() => { setSelected(c); setEditMode(false); }} style={{ padding: "12px 14px", borderRadius: "8px", marginBottom: "6px", cursor: "pointer", border: `1px solid ${selected?.id === c.id ? theme.accent + "66" : theme.border}`, background: selected?.id === c.id ? "rgba(245,166,35,0.06)" : "transparent", transition: "all 0.15s" }}>
+                  <div key={c.id} onClick={() => { setSelected(c); setEditMode(false); revealOnPhone('customer-detail'); }} style={{ padding: "12px 14px", borderRadius: "8px", marginBottom: "6px", cursor: "pointer", border: `1px solid ${selected?.id === c.id ? theme.accent + "66" : theme.border}`, background: selected?.id === c.id ? "rgba(245,166,35,0.06)" : "transparent", transition: "all 0.15s" }}>
                     <div style={{ fontWeight: "600", fontSize: "13px" }}>{c.name}</div>
                     {c.company_name && <div style={{ fontSize: "11px", color: theme.accent, marginTop: "1px" }}>{c.company_name}</div>}
                     <div style={{ fontSize: "11px", color: theme.textMuted, marginTop: "2px" }}>{c.phone}{c.location ? ` · ${c.location}` : ""}</div>
@@ -3061,7 +3061,7 @@ const Customers = ({ userProfile }) => {
           )}
         </div>
 
-        <div style={styles.card}>
+        <div id="customer-detail" className={selected ? undefined : "m-hide"} style={styles.card}>
           {!selected ? (
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "300px", color: theme.textMuted, fontSize: "13px" }}>← Select a customer to view profile</div>
           ) : editMode ? (
@@ -3083,7 +3083,7 @@ const Customers = ({ userProfile }) => {
                     <div style={{ display: "flex", gap: "8px", marginTop: "8px", flexWrap: "wrap" }}>
                       {selected.how_heard && <span style={styles.badge(theme.blue)}>{howHeardLabel(selected.how_heard)}</span>}
                       {selected.marketer?.full_name && <span style={styles.badge(theme.green)}>via {selected.marketer.full_name}</span>}
-                      {selected.date_registered && <span style={{ fontSize: "11px", color: theme.textMuted }}>Registered: {selected.date_registered}</span>}
+                      {selected.date_registered && <span style={{ fontSize: "11px", color: theme.textMuted }}>Registered: {fmtDate(selected.date_registered)}</span>}
                     </div>
                   </div>
                   <div style={{ display: "flex", gap: "8px" }}>
@@ -3166,7 +3166,7 @@ const Customers = ({ userProfile }) => {
                         const paid = (o.invoices || []).flatMap(inv => inv.payments || []).filter(p => p.status === "confirmed").reduce((s, p) => s + Number(p.amount_paid), 0);
                         return (
                           <tr key={o.id}>
-                            <td style={styles.td}>{o.created_at?.split("T")[0]}</td>
+                            <td style={styles.td}>{fmtDay(o.created_at)}</td>
                             <td style={styles.td}>{(o.order_items || []).map(i => i.block_type).join(", ") || "—"}</td>
                             <td style={styles.td}><strong style={{ color: theme.accent }}>{naira(val)}</strong></td>
                             <td style={styles.td}><span style={{ color: theme.green }}>{naira(paid)}</span></td>
@@ -3213,7 +3213,7 @@ const Customers = ({ userProfile }) => {
                             {filteredWaybills.map(w => (
                               <tr key={w.id}>
                                 <td style={styles.td}><span style={{ color: theme.accent, fontWeight: "600" }}>{w.waybill_number}</span></td>
-                                <td style={styles.td}>{w.waybill_date}</td>
+                                <td style={styles.td}>{fmtDate(w.waybill_date)}</td>
                                 <td style={styles.td}><span style={styles.badge(theme.blue)}>{w.block_type}</span></td>
                                 <td style={styles.td}>{fmt(w.quantity_loaded)}</td>
                                 <td style={styles.td}><strong style={{ color: theme.green }}>{fmt(w.quantity_received)}</strong></td>
@@ -4107,7 +4107,7 @@ const LPOApprovals = () => {
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                   <div>
                     <div style={{ fontWeight: "700", fontSize: "15px" }}>{order.customer?.name || "—"}</div>
-                    <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "3px" }}>{order.customer?.location} · Submitted by: {lpo.submitted_by || "—"} · {lpo.submitted_at?.split("T")[0]}</div>
+                    <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "3px" }}>{order.customer?.location} · Submitted by: {lpo.submitted_by || "—"} · {fmtDay(lpo.submitted_at)}</div>
                     <div style={{ marginTop: "8px", display: "flex", gap: "12px", fontSize: "13px", flexWrap: "wrap", alignItems: "center" }}>
                       {(order.order_items || []).map((it, i) => (
                         <span key={i} style={styles.badge(theme.blue)}>{it.quantity?.toLocaleString()} {it.block_type}</span>
@@ -4145,7 +4145,7 @@ const LPOApprovals = () => {
                     <tr key={l.id}>
                       <td style={styles.td}><strong>{l.order?.customer?.name || "—"}</strong></td>
                       <td style={styles.td}>{l.submitted_by || "—"}</td>
-                      <td style={styles.td}>{l.decided_at?.split("T")[0] || "—"}</td>
+                      <td style={styles.td}>{fmtDay(l.decided_at)}</td>
                       <td style={styles.td}><span style={styles.badge(statusColor(l.md_decision))}>{l.md_decision}</span></td>
                       <td style={styles.td}><span style={{ fontSize: "12px", color: theme.textMuted }}>{l.md_note || "—"}</span></td>
                     </tr>
@@ -4491,7 +4491,7 @@ const DailySchedule = () => {
           <div key={s.id} style={{ borderRadius: "8px", border: `1px solid ${theme.border}`, marginBottom: "10px", overflow: "hidden" }}>
             <div style={{ padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", background: expandedId === s.id ? "rgba(245,166,35,0.06)" : "transparent" }} onClick={() => setExpandedId(expandedId === s.id ? null : s.id)}>
               <div>
-                <strong>{s.schedule_date}</strong>
+                <strong>{fmtDate(s.schedule_date)}</strong>
                 <span style={{ fontSize: "12px", color: theme.textMuted, marginLeft: "10px" }}>Created by {s.created_by || "—"} · {(s.items || []).length} deliveries</span>
                 {s.ico_notes && <div style={{ fontSize: "11px", color: theme.textMuted, marginTop: "3px" }}>ICO note: {s.ico_notes}</div>}
               </div>
@@ -4669,7 +4669,7 @@ const ScheduleApprovals = () => {
           <div key={sched.id} style={{ ...styles.card, marginBottom: "14px", borderLeft: `4px solid ${theme.accent}` }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }} onClick={() => setExpandedId(isOpen ? null : sched.id)}>
               <div>
-                <div style={{ fontWeight: "700", fontSize: "15px" }}>Schedule for {sched.schedule_date}</div>
+                <div style={{ fontWeight: "700", fontSize: "15px" }}>Schedule for {fmtDate(sched.schedule_date)}</div>
                 <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "3px" }}>Created by {sched.created_by || "—"} · {(sched.items || []).length} customers · Submitted for ICO review</div>
               </div>
               <span style={{ ...styles.badge(theme.accent), cursor: "pointer" }}>{isOpen ? "▲ Hide" : "▼ Review"}</span>
@@ -5408,7 +5408,7 @@ const BookkeepingTab = () => {
       {ok && <Alert msg={ok} type="success" onClose={() => setOk('')} />}
       {loading && <Spinner />}
 
-      <div style={styles.row}>
+      <div className="m-col" style={styles.row}>
         <div style={{ flex: 1 }}>
           <div style={styles.sectionTitle}>Income</div>
           {payments.length > 0 && (
@@ -5909,7 +5909,7 @@ const ReceivablesTab = () => {
                 <tr key={i}>
                   <td style={{ ...styles.td, fontWeight: '600' }}>{r.customer}</td>
                   <td style={styles.td}>{r.invoice}</td>
-                  <td style={styles.td}>{r.issuedDate ? new Date(r.issuedDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</td>
+                  <td style={styles.td}>{fmtDate(r.issuedDate)}</td>
                   <td style={styles.td}>{r.days === 999 ? '—' : `${r.days}d`}</td>
                   <td style={{ ...styles.td, fontWeight: '700', color: bucketColor(r.bucket) }}>{r.bucket}</td>
                   <td style={{ ...styles.td, textAlign: 'right' }}>{naira(r.invoiced)}</td>
@@ -6602,7 +6602,7 @@ const BankAccountsTab = ({ userProfile }) => {
                     <tbody>
                       {preview.map((t, i) => (
                         <tr key={i} style={{ opacity: t.isDuplicate ? 0.4 : 1 }}>
-                          <td style={styles.td}>{t.transaction_date}</td>
+                          <td style={styles.td}>{fmtDate(t.transaction_date)}</td>
                           <td style={{ ...styles.td, maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.description}</td>
                           <td style={{ ...styles.td, textAlign: 'right', color: theme.red }}>{t.debit > 0 ? naira(t.debit) : ''}</td>
                           <td style={{ ...styles.td, textAlign: 'right', color: theme.green }}>{t.credit > 0 ? naira(t.credit) : ''}</td>
@@ -6679,7 +6679,7 @@ const BankAccountsTab = ({ userProfile }) => {
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: Z.modal + 2, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '10px', padding: '20px', width: '460px', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
             <div style={{ fontWeight: '700', marginBottom: '4px' }}>Link to Payment Request</div>
-            <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '12px' }}>{suggestModal.description} · {naira(suggestModal.debit)} · {suggestModal.transaction_date}</div>
+            <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '12px' }}>{suggestModal.description} · {naira(suggestModal.debit)} · {fmtDate(suggestModal.transaction_date)}</div>
             <input style={{ ...styles.input, marginBottom: '10px' }} placeholder="Search reference, payee, or purpose…"
               value={prSearch} onChange={e => setPrSearch(e.target.value)} autoFocus />
             <div style={{ overflowY: 'auto', flex: 1 }}>
@@ -6782,7 +6782,7 @@ const BankAccountsTab = ({ userProfile }) => {
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: Z.modal + 3, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '12px', padding: '24px', width: '420px' }}>
             <div style={{ fontWeight: '700', fontSize: '15px', marginBottom: '4px' }}>Create Expense Record</div>
-            <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '16px' }}>From bank transaction: {createExpModal.transaction_date} · {naira(createExpModal.debit)}</div>
+            <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '16px' }}>From bank transaction: {fmtDate(createExpModal.transaction_date)} · {naira(createExpModal.debit)}</div>
             {modalErr && <div style={{ background: theme.red + '22', border: `1px solid ${theme.red}`, borderRadius: '6px', padding: '8px 12px', fontSize: '12px', color: theme.red, marginBottom: '12px' }}>{modalErr}</div>}
             <div style={styles.formGroup}>
               <label style={styles.label}>Category *</label>
@@ -6801,7 +6801,7 @@ const BankAccountsTab = ({ userProfile }) => {
             </div>
             <div style={{ ...styles.card, padding: '10px 14px', marginBottom: '16px', background: theme.surface2 || theme.bg }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
-                <span style={{ color: theme.textMuted }}>Date</span><span>{createExpModal.transaction_date}</span>
+                <span style={{ color: theme.textMuted }}>Date</span><span>{fmtDate(createExpModal.transaction_date)}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', fontWeight: '700', marginTop: '4px' }}>
                 <span style={{ color: theme.textMuted }}>Amount</span><span style={{ color: theme.red }}>{naira(createExpModal.debit)}</span>
@@ -6845,7 +6845,7 @@ const BankAccountsTab = ({ userProfile }) => {
               {/* Header */}
               <div style={{ fontWeight: '700', fontSize: '15px', marginBottom: '4px' }}>Record Incoming Payment</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
-                <div style={{ fontSize: '12px', color: theme.textMuted }}>{tx.transaction_date}</div>
+                <div style={{ fontSize: '12px', color: theme.textMuted }}>{fmtDate(tx.transaction_date)}</div>
                 <div style={{ fontWeight: '700', color: theme.green, fontSize: '15px' }}>{naira(tx.credit)}</div>
               </div>
               <div style={{ fontSize: '11px', color: theme.textMuted, marginBottom: '14px', background: theme.bg, borderRadius: '6px', padding: '7px 10px', fontFamily: 'monospace', wordBreak: 'break-all' }}>
@@ -6922,7 +6922,7 @@ const BankAccountsTab = ({ userProfile }) => {
                             onClick={() => setCreatePaymentForm(f => ({ ...f, invoice_id: inv.id }))}>
                             <div>
                               <div style={{ fontSize: '12px', fontWeight: '600' }}>{inv.invoice_number}</div>
-                              <div style={{ fontSize: '11px', color: theme.textMuted }}>{inv.order?.customer?.name} · {inv.issued_date}</div>
+                              <div style={{ fontSize: '11px', color: theme.textMuted }}>{inv.order?.customer?.name} · {fmtDate(inv.issued_date)}</div>
                             </div>
                             <div style={{ textAlign: 'right' }}>
                               <div style={{ fontSize: '12px', color: amtMatch ? theme.green : theme.textMuted, fontWeight: amtMatch ? '700' : '400' }}>{naira(rem)} remaining</div>
@@ -7055,7 +7055,7 @@ const BankAccountsTab = ({ userProfile }) => {
                       const pr = paymentRequests.find(p => p.id === stx.matched_to_id);
                       return (
                         <tr key={stx.id}>
-                          <td style={{ ...styles.td, whiteSpace: 'nowrap' }}>{stx.transaction_date}</td>
+                          <td style={{ ...styles.td, whiteSpace: 'nowrap' }}>{fmtDate(stx.transaction_date)}</td>
                           <td style={{ ...styles.td, maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={stx.description}>{stx.description}</td>
                           <td style={{ ...styles.td, textAlign: 'right', color: theme.red, fontWeight: '600' }}>{stx.debit > 0 ? naira(stx.debit) : ''}</td>
                           <td style={styles.td}>
@@ -7122,7 +7122,7 @@ const BankAccountsTab = ({ userProfile }) => {
                       const prCandidate = (isUnmatched && tx.debit > 0) ? findPRCandidate(tx) : null;
                       return (
                         <tr key={tx.id}>
-                          <td style={{ ...styles.td, whiteSpace: 'nowrap' }}>{tx.transaction_date}</td>
+                          <td style={{ ...styles.td, whiteSpace: 'nowrap' }}>{fmtDate(tx.transaction_date)}</td>
                           <td style={{ ...styles.td, maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={tx.description}>{tx.description}</td>
                           <td style={{ ...styles.td, textAlign: 'right', color: theme.red, fontWeight: '600' }}>{tx.debit > 0 ? naira(tx.debit) : ''}</td>
                           <td style={{ ...styles.td, textAlign: 'right', color: theme.green, fontWeight: '600' }}>{tx.credit > 0 ? naira(tx.credit) : ''}</td>
@@ -7403,8 +7403,8 @@ const ReconciliationTab = () => {
             <tbody>
               {history.map(r => (
                 <tr key={r.id}>
-                  <td style={styles.td}>{r.period_from} — {r.period_to}</td>
-                  <td style={styles.td}>{r.reconciliation_date}</td>
+                  <td style={styles.td}>{fmtDate(r.period_from)} — {fmtDate(r.period_to)}</td>
+                  <td style={styles.td}>{fmtDate(r.reconciliation_date)}</td>
                   <td style={{ ...styles.td, color: Math.abs(r.difference) < 0.01 ? theme.green : theme.red, fontWeight: '600' }}>{naira(Math.abs(r.difference || 0))}</td>
                   <td style={styles.td}><span style={styles.badge(r.status === 'completed' ? theme.green : theme.accent)}>{r.status}</span></td>
                   <td style={{ ...styles.td, color: theme.textMuted }}>{r.reconciled_by || '—'}</td>
@@ -7563,7 +7563,7 @@ const ReceiptsTab = () => {
                 <option value="">— None —</option>
                 {approvedExpenses.map(e => (
                   <option key={e.id} value={e.id}>
-                    {e.expense_date} · {e.description} · ₦{Number(e.amount).toLocaleString()}
+                    {fmtDate(e.expense_date)} · {e.description} · ₦{Number(e.amount).toLocaleString()}
                   </option>
                 ))}
               </select>
@@ -7605,7 +7605,7 @@ const ReceiptsTab = () => {
                     <div style={{ fontSize: '11px', fontWeight: '700', color: theme.accent }}>{r.receipt_number}</div>
                     <div style={{ fontSize: '11px', fontWeight: '600', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.vendor_name}</div>
                     <div style={{ fontSize: '11px', color: theme.green, fontWeight: '600' }}>{naira(r.amount)}</div>
-                    <div style={{ fontSize: '10px', color: theme.textMuted }}>{r.receipt_date}</div>
+                    <div style={{ fontSize: '10px', color: theme.textMuted }}>{fmtDate(r.receipt_date)}</div>
                     <div style={{ display: 'flex', gap: '4px', marginTop: '8px' }}>
                       <a href={signedMap[r.id] || undefined} target="_blank" rel="noreferrer" style={{ ...styles.btn('secondary'), padding: '3px 8px', fontSize: '10px', textDecoration: 'none', display: 'inline-block' }}>↓</a>
                       <button style={{ ...styles.btn('danger'), padding: '3px 8px', fontSize: '10px' }} onClick={() => handleDelete(r)}>✕</button>
@@ -7881,7 +7881,7 @@ const MyProfile = ({ userProfile }) => {
                       <td style={styles.td}><a href={doc.displayUrl || '#'} target="_blank" rel="noreferrer" style={{ color: theme.blue, textDecoration: 'none', fontWeight: '600' }}>{doc.file_name}</a></td>
                       <td style={styles.td}><span style={styles.badge(theme.blue)}>{doc.document_type}</span></td>
                       <td style={styles.td}>{doc.file_size ? fmtBytes(doc.file_size) : '—'}</td>
-                      <td style={styles.td}>{doc.uploaded_at ? new Date(doc.uploaded_at).toLocaleDateString('en-GB') : '—'}</td>
+                      <td style={styles.td}>{fmtDay(doc.uploaded_at)}</td>
                       <td style={styles.td}>
                         <button data-ico-allow style={{ ...styles.btn('danger'), padding: '4px 10px', fontSize: '11px' }} onClick={() => handleDeleteDoc(doc)}>Delete</button>
                       </td>
@@ -8118,7 +8118,7 @@ const PaymentRequestAttachmentRow = ({ att }) => {
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: '13px', color: theme.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{fileName}</div>
         <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '2px' }}>
-          {att.uploader_name || 'Unknown'}{att.created_at ? ` · ${new Date(att.created_at).toLocaleDateString('en-GB')}` : ''}
+          {att.uploader_name || 'Unknown'}{att.created_at ? ` · ${fmtDateTime(att.created_at)}` : ''}
         </div>
         {att.note && <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '2px', fontStyle: 'italic' }}>{att.note}</div>}
         {failed && <div style={{ fontSize: '11px', color: theme.red, marginTop: '2px' }}>Couldn&rsquo;t load file.</div>}
@@ -8642,7 +8642,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
                       <option value="">— None —</option>
                       {Object.entries(resaleOrderMap).map(([id, o]) => (
                         <option key={id} value={id}>
-                          {o.customer?.name || '—'} · {o.created_at ? new Date(o.created_at).toLocaleDateString('en-GB') : '—'}
+                          {o.customer?.name || '—'} · {fmtDay(o.created_at)}
                         </option>
                       ))}
                     </select>
@@ -8973,7 +8973,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
                 <DL label="Category" value={req.expense_category_id ? catMap[req.expense_category_id] : null} />
                 {req.category_other_note && <DL label="Category note" value={req.category_other_note} />}
                 <DL label="Disbursement method" value={req.disbursement_method === 'bank_transfer' ? 'Bank Transfer' : req.disbursement_method === 'cash' ? 'Cash' : req.disbursement_method} />
-                {req.transaction_date && <DL label="Transaction Date (Historical)" value={new Date(req.transaction_date).toLocaleDateString('en-GB')} />}
+                {req.transaction_date && <DL label="Transaction Date (Historical)" value={fmtDate(req.transaction_date)} />}
               </div>
               <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: '16px', marginTop: '4px' }}>
                 <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '12px' }}>Payee / Bank Details</div>
@@ -9000,7 +9000,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
               {!isInitiator && req.requester?.full_name && (
                 <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: '16px', marginTop: '4px' }}>
                   <DL label="Requested by" value={req.requester.full_name} />
-                  <DL label="Date" value={req.created_at ? new Date(req.created_at).toLocaleDateString('en-GB') : null} />
+                  <DL label="Date" value={req.created_at ? fmtDay(req.created_at) : null} />
                 </div>
               )}
               {(canUploadEvidence || attachments.length > 0) && (
@@ -9127,7 +9127,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
                         <span style={styles.badge(statusColor(req.status))}>{req.status}</span>
                         {req.transaction_date && <span style={{ ...styles.badge('#f59e0b'), marginLeft: '4px', fontSize: '10px', color: '#000' }}>Historical</span>}
                       </td>
-                      <td style={styles.td}>{req.transaction_date ? new Date(req.transaction_date).toLocaleDateString('en-GB') : req.created_at ? new Date(req.created_at).toLocaleDateString('en-GB') : '—'}</td>
+                      <td style={styles.td}>{req.transaction_date ? fmtDate(req.transaction_date) : fmtDay(req.created_at)}</td>
                       <td style={styles.td}>
                         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                           <button style={{ ...styles.btn('secondary'), ...sm }} onClick={() => setDetailReq(req)}>View</button>
@@ -9171,7 +9171,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
                       <td style={styles.td}>{v.bank_name || '—'}</td>
                       <td style={styles.td}><span style={{ fontFamily: 'monospace', fontSize: '12px' }}>{v.bank_account_number || '—'}</span></td>
                       <td style={styles.td}>{v.bank_account_name || '—'}</td>
-                      <td style={styles.td}>{v.created_at ? new Date(v.created_at).toLocaleDateString('en-GB') : '—'}</td>
+                      <td style={styles.td}>{fmtDay(v.created_at)}</td>
                       <td style={styles.td}>
                         <button
                           style={{ ...styles.btn('primary'), ...sm, background: theme.green, color: '#000' }}
@@ -9414,8 +9414,8 @@ const LeavePage = ({ userProfile }) => {
                     <td style={styles.td}><strong>{req.staff?.full_name || '—'}</strong></td>
                     <td style={styles.td}><span style={styles.badge(theme.accent)}>{req.leave_type}</span></td>
                     <td style={styles.td}>{req.is_paid ? <span style={{ color: theme.green, fontWeight: '600' }}>Yes</span> : <span style={{ color: theme.textMuted }}>No</span>}</td>
-                    <td style={styles.td}>{req.start_date || '—'}</td>
-                    <td style={styles.td}>{req.end_date || '—'}</td>
+                    <td style={styles.td}>{fmtDate(req.start_date)}</td>
+                    <td style={styles.td}>{fmtDate(req.end_date)}</td>
                     <td style={styles.td}><strong>{req.days ?? '—'}</strong></td>
                     <td style={styles.td}>{req.reason || '—'}</td>
                     <td style={styles.td}><span style={styles.badge(leaveStatusColor(status))}>{status}</span></td>
@@ -9709,8 +9709,8 @@ const MyHRPage = ({ userProfile }) => {
               <tr key={req.id}>
                 <td style={styles.td}><span style={styles.badge(theme.accent)}>{req.leave_type}</span></td>
                 <td style={styles.td}>{req.is_paid ? <span style={{ color: theme.green, fontWeight: '600' }}>Yes</span> : <span style={{ color: theme.textMuted }}>No</span>}</td>
-                <td style={styles.td}>{req.start_date || '—'}</td>
-                <td style={styles.td}>{req.end_date || '—'}</td>
+                <td style={styles.td}>{fmtDate(req.start_date)}</td>
+                <td style={styles.td}>{fmtDate(req.end_date)}</td>
                 <td style={styles.td}><strong>{req.days ?? '—'}</strong></td>
                 <td style={styles.td}>{req.reason || '—'}</td>
                 <td style={styles.td}><span style={styles.badge(leaveStatusColor(req.status))}>{req.status}</span></td>
@@ -9738,7 +9738,7 @@ const MyHRPage = ({ userProfile }) => {
                 <div>
                   <div style={{ fontWeight: '600', fontSize: '14px', color: theme.text }}>{c.title}</div>
                   <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '2px' }}>
-                    {DISC_TYPES.find(t => t.id === c.type)?.label || c.type} · {c.incident_date || '—'}
+                    {DISC_TYPES.find(t => t.id === c.type)?.label || c.type} · {fmtDate(c.incident_date)}
                     {c.response_deadline ? ` · Respond by ${c.response_deadline}` : ''}
                   </div>
                 </div>
@@ -9961,7 +9961,7 @@ const AttendanceFlagsPage = ({ userProfile }) => {
                   <div>
                     <div style={{ fontWeight: '600', fontSize: '14px' }}>{row.staff?.full_name || '—'}</div>
                     <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '2px' }}>
-                      {row.staff?.employee_number || ''} · {row.date}
+                      {row.staff?.employee_number || ''} · {fmtDate(row.date)}
                     </div>
                   </div>
                   <span style={styles.badge(theme.red)}>Flagged</span>
@@ -10181,7 +10181,7 @@ const DisciplinaryPage = ({ userProfile }) => {
               <div>
                 <div style={{ fontWeight: '600', fontSize: '14px', color: theme.text }}>{c.title}</div>
                 <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '2px' }}>
-                  {c.staff?.full_name || '—'} · {DISC_TYPES.find(t => t.id === c.type)?.label || c.type} · {c.incident_date || '—'}
+                  {c.staff?.full_name || '—'} · {DISC_TYPES.find(t => t.id === c.type)?.label || c.type} · {fmtDate(c.incident_date)}
                 </div>
               </div>
               <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -10893,7 +10893,7 @@ const TradingMarginReport = () => {
                       <tr key={r.order_id || i}>
                         <td style={styles.td}><strong style={{ fontFamily: 'monospace', fontSize: '12px' }}>{r.invoice_number || (r.order_id ? r.order_id.slice(0, 8) + ' (not invoiced)' : '—')}</strong></td>
                         <td style={styles.td}>{r.customer_name || '—'}</td>
-                        <td style={styles.td}>{r.order_date ? new Date(r.order_date).toLocaleDateString('en-GB') : '—'}</td>
+                        <td style={styles.td}>{fmtDate(r.order_date)}</td>
                         <td style={styles.td}><strong>{naira(r.sale_amount)}</strong></td>
                         <td style={styles.td}>{naira(r.purchase_cost)}</td>
                         <td style={styles.td}>
@@ -11067,7 +11067,7 @@ const RoleGrantsManager = ({ users }) => {
     finally { setRevoking(null); }
   };
 
-  const fmtD = (d) => d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+  const fmtD = fmtDay;
   const expiringSoon = (d) => d && new Date(d) < new Date(Date.now() + 14 * 86400000);
 
   return (
@@ -11409,7 +11409,7 @@ const UserManagement = ({ userProfile }) => {
                       </span>
                     </td>
                     <td style={{ padding:'8px 10px', color:theme.textMuted, fontSize:'11px' }}>
-                      {u.last_login ? new Date(u.last_login).toLocaleString('en-GB',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}) : '—'}
+                      {u.last_login ? fmtDateTime(u.last_login) : '—'}
                     </td>
                     <td style={{ padding:'8px 10px' }}>
                       {u.id !== userProfile?.id && isMD && (
@@ -11668,34 +11668,34 @@ export default function App() {
     handovers: <Handovers userProfile={userProfile} />,
     batches: <MobileScope><Batches userProfile={userProfile} /></MobileScope>,
     waybills: <MobileScope><Waybills userProfile={userProfile} /></MobileScope>,
-    vehicles: <VehicleRegistry />,
-    staff: <Staff userProfile={userProfile} />,
-    customers: <Customers userProfile={userProfile} />,
-    orders: <Orders onNavigate={setActive} userProfile={userProfile} />,
+    vehicles: <MobileScope fit><VehicleRegistry /></MobileScope>,
+    staff: <MobileScope fit><Staff userProfile={userProfile} /></MobileScope>,
+    customers: <MobileScope fit><Customers userProfile={userProfile} /></MobileScope>,
+    orders: <MobileScope fit><Orders onNavigate={setActive} userProfile={userProfile} /></MobileScope>,
     pending_register: <MobileScope><PendingDeliveryRegister /></MobileScope>,
-    daily_schedule: <DailySchedule />,
-    lpo_approvals: <LPOApprovals />,
-    schedule_approvals: <ScheduleApprovals />,
-    reports: <Reports userProfile={userProfile} />,
-    kpi_dashboard: <KPIDashboard />,
-    trading_margin: <TradingMarginReport />,
-    products: <Products />,
-    suppliers: <SupplierRegistry />,
-    accounting: <Accounting userProfile={userProfile} />,
+    daily_schedule: <MobileScope fit><DailySchedule /></MobileScope>,
+    lpo_approvals: <MobileScope fit><LPOApprovals /></MobileScope>,
+    schedule_approvals: <MobileScope fit><ScheduleApprovals /></MobileScope>,
+    reports: <MobileScope fit><Reports userProfile={userProfile} /></MobileScope>,
+    kpi_dashboard: <MobileScope fit><KPIDashboard /></MobileScope>,
+    trading_margin: <MobileScope fit><TradingMarginReport /></MobileScope>,
+    products: <MobileScope fit><Products /></MobileScope>,
+    suppliers: <MobileScope fit><SupplierRegistry /></MobileScope>,
+    accounting: <MobileScope fit><Accounting userProfile={userProfile} /></MobileScope>,
     data_import: <DataImport />,
-    user_management: <UserManagement userProfile={userProfile} />,
+    user_management: <MobileScope fit><UserManagement userProfile={userProfile} /></MobileScope>,
     labour: <MobileScope><Labour userProfile={userProfile} /></MobileScope>,
-    maintenance: <Maintenance userProfile={userProfile} />,
+    maintenance: <MobileScope fit><Maintenance userProfile={userProfile} /></MobileScope>,
     truck_loading: <MobileScope><TruckLoadingPage userProfile={userProfile} /></MobileScope>,
-    advances: <AdvancesPage userProfile={userProfile} />,
-    payment_requests: <PaymentRequestsPage userProfile={userProfile} />,
-    leave: <LeavePage userProfile={userProfile} />,
-    disciplinary: <DisciplinaryPage userProfile={userProfile} />,
+    advances: <MobileScope fit><AdvancesPage userProfile={userProfile} /></MobileScope>,
+    payment_requests: <MobileScope fit><PaymentRequestsPage userProfile={userProfile} /></MobileScope>,
+    leave: <MobileScope fit><LeavePage userProfile={userProfile} /></MobileScope>,
+    disciplinary: <MobileScope fit><DisciplinaryPage userProfile={userProfile} /></MobileScope>,
     attendance_kiosk: <AttendanceKiosk userProfile={userProfile} />,
-    attendance_flags: <AttendanceFlagsPage userProfile={userProfile} />,
-    messages: <Messages userProfile={userProfile} onUnreadChange={setUnreadMsgCount} />,
+    attendance_flags: <MobileScope fit><AttendanceFlagsPage userProfile={userProfile} /></MobileScope>,
+    messages: <MobileScope fit><Messages userProfile={userProfile} onUnreadChange={setUnreadMsgCount} /></MobileScope>,
     my_hr: <MyHRPage userProfile={userProfile} />,
-    my_profile: <MyProfile userProfile={userProfile} />,
+    my_profile: <MobileScope fit><MyProfile userProfile={userProfile} /></MobileScope>,
     investor_register: <InvestorRegister userProfile={userProfile} />,
     capital: <Capital userProfile={userProfile} />,
     terms: <Terms userProfile={userProfile} />,
@@ -11765,7 +11765,7 @@ export default function App() {
           </div>
         </div>
       </div>
-      {showChangePwd && <ChangePasswordModal onClose={() => setShowChangePwd(false)} />}
+      {showChangePwd && <MobileScope fit><ChangePasswordModal onClose={() => setShowChangePwd(false)} /></MobileScope>}
       {!investorOnly && <MessagesBell
         unreadMsgCount={unreadMsgCount}
         onNavigate={(page) => { setActive(page); if (isMobile) setSidebarOpen(false); }}

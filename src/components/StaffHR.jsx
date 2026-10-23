@@ -10,6 +10,7 @@ import { generatePayrollPDF } from '../utils/generatePayrollPDF';
 import { generateIDCardPDF, generateBusinessCardPDF } from '../utils/cardGenerator';
 import { supabase } from '../lib/supabase';
 import { Z } from '../lib/zIndex'
+import { fmtDate, fmtDay, fmtDateTime } from './site/siteUi';
 
 const theme = {
   bg: "#0f1117", surface: "#1a1d27", card: "#21263a", border: "#2e3452",
@@ -729,7 +730,7 @@ const StaffProfile = ({ staffId, onBack, onUpdated, roles, userProfile }) => {
           {/* Right: status + actions */}
           <div style={{ textAlign: "right", display: "flex", flexDirection: "column", gap: "6px", alignItems: "flex-end" }}>
             <span style={styles.badge(statusColor)}>{staff.employment_status || "active"}</span>
-            <div style={{ fontSize: "12px", color: theme.textMuted }}>Hired: {staff.date_hired || "—"}</div>
+            <div style={{ fontSize: "12px", color: theme.textMuted }}>Hired: {fmtDate(staff.date_hired)}</div>
             <button style={{ ...styles.btn("secondary"), fontSize: "12px" }} onClick={() => setEditMode(true)}>Edit Profile</button>
 
             {/* ID Card button */}
@@ -820,7 +821,7 @@ const StaffProfile = ({ staffId, onBack, onUpdated, roles, userProfile }) => {
               ["Role", roleName],
               ["Job Title", staff.job_title],
               ["Staff Type", staff.staff_type],
-              ["Date Hired", staff.date_hired],
+              ["Date Hired", fmtDate(staff.date_hired)],
               ["Employment Status", staff.employment_status],
             ].map(([label, val]) => (
               <div key={label} style={styles.formGroup}>
@@ -866,7 +867,7 @@ const StaffProfile = ({ staffId, onBack, onUpdated, roles, userProfile }) => {
                 <tbody>
                   {attendanceHistory.map(a => (
                     <tr key={a.id}>
-                      <td style={styles.td}>{a.date}</td>
+                      <td style={styles.td}>{fmtDate(a.date)}</td>
                       <td style={styles.td}><span style={styles.badge(a.present ? theme.green : theme.red)}>{a.present ? "Present" : "Absent"}</span></td>
                       <td style={styles.td}>{a.hours_worked ? a.hours_worked + "h" : "—"}</td>
                       <td style={styles.td}>{a.notes || "—"}</td>
@@ -892,10 +893,10 @@ const StaffProfile = ({ staffId, onBack, onUpdated, roles, userProfile }) => {
                 <tbody>
                   {payrollHistory.map(l => (
                     <tr key={l.id}>
-                      <td style={styles.td}>{l.payroll_run ? `${l.payroll_run.period_from} → ${l.payroll_run.period_to}` : "—"}</td>
+                      <td style={styles.td}>{l.payroll_run ? `${fmtDate(l.payroll_run.period_from)} → ${fmtDate(l.payroll_run.period_to)}` : "—"}</td>
                       <td style={styles.td}><strong style={{ color: theme.accent }}>{naira(l.amount_due)}</strong></td>
                       <td style={styles.td}>{naira(l.amount_paid)}</td>
-                      <td style={styles.td}>{l.payment_date || "—"}</td>
+                      <td style={styles.td}>{fmtDate(l.payment_date)}</td>
                       <td style={styles.td}>{l.payment_method || "—"}</td>
                       <td style={styles.td}><span style={styles.badge(l.payroll_run?.status === "paid" ? theme.green : theme.blue)}>{l.payroll_run?.status || "—"}</span></td>
                     </tr>
@@ -1133,7 +1134,7 @@ const StaffDirectory = ({ onViewProfile, userProfile }) => {
                       </td>
                       <td style={styles.td}><span style={styles.badge(s.staff_type === "permanent" ? theme.blue : s.staff_type === "daily" ? theme.accent : theme.textMuted)}>{s.staff_type}</span></td>
                       <td style={styles.td}>{s.staff_type === "permanent" ? naira(s.monthly_salary) + "/mo" : naira(s.daily_rate) + "/day"}</td>
-                      <td style={styles.td}>{s.date_hired || "—"}</td>
+                      <td style={styles.td}>{fmtDate(s.date_hired)}</td>
                       <td style={styles.td}><span style={styles.badge(statusColor(s))}>{s.employment_status || "active"}</span></td>
                       <td style={styles.td}>
                         <div style={{ display: "flex", gap: "6px" }}>
@@ -1379,7 +1380,7 @@ const AttendanceTab = () => {
                 <tbody>
                   {filteredHistory.map(h => (
                     <tr key={h.id}>
-                      <td style={styles.td}>{h.date}</td>
+                      <td style={styles.td}>{fmtDate(h.date)}</td>
                       <td style={styles.td}><strong>{h.staff?.full_name || "—"}</strong></td>
                       <td style={styles.td}>{h.staff?.role || "—"}</td>
                       <td style={styles.td}><span style={styles.badge(h.present ? theme.green : theme.red)}>{h.present ? "Present" : "Absent"}</span></td>
@@ -1911,8 +1912,8 @@ const PayrollTab = ({ userProfile }) => {
               <tbody>
                 {runs.map(r => (
                   <tr key={r.id}>
-                    <td style={styles.td}>{r.period_from} → {r.period_to}</td>
-                    <td style={styles.td}>{r.run_date}</td>
+                    <td style={styles.td}>{fmtDate(r.period_from)} → {fmtDate(r.period_to)}</td>
+                    <td style={styles.td}>{fmtDate(r.run_date)}</td>
                     <td style={styles.td}>{r.prepared_by || "—"}</td>
                     <td style={styles.td}><strong style={{ color: theme.green }}>{naira(r.total_payroll)}</strong></td>
                     <td style={styles.td}><span style={styles.badge(statusColor(r.status))}>{r.status}</span></td>
@@ -1929,7 +1930,7 @@ const PayrollTab = ({ userProfile }) => {
         <div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
             <div>
-              <div style={{ fontSize: "16px", fontWeight: "700" }}>Payroll Run — {selectedRun.period_from} → {selectedRun.period_to}</div>
+              <div style={{ fontSize: "16px", fontWeight: "700" }}>Payroll Run — {fmtDate(selectedRun.period_from)} → {fmtDate(selectedRun.period_to)}</div>
               <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "2px" }}>Prepared by {selectedRun.prepared_by || "—"} · <span style={styles.badge(statusColor(selectedRun.status))}>{selectedRun.status}</span></div>
             </div>
             <div style={{ display: "flex", gap: "8px" }}>
@@ -2103,7 +2104,7 @@ const OnboardingTab = () => {
               <div>
                 <div style={{ fontWeight: '700', fontSize: '15px' }}>{s.full_name}</div>
                 <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '2px' }}>
-                  {s.staffRole?.role_name || s.role || '—'} · {s.staff_type} · Hired {s.date_hired || '—'}
+                  {s.staffRole?.role_name || s.role || '—'} · {s.staff_type} · Hired {fmtDate(s.date_hired)}
                 </div>
               </div>
               {canEdit && (
@@ -2172,7 +2173,7 @@ const Staff = ({ userProfile }) => {
   if (profileStaffId) {
     return (
       <div>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "28px" }}>
+        <div className="m-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "28px" }}>
           <div>
             <div style={{ fontSize: "22px", fontWeight: "700", color: theme.text }}>Staff Profile</div>
             <div style={{ fontSize: "13px", color: theme.textMuted, marginTop: "3px" }}>HR Management System</div>
@@ -2187,7 +2188,7 @@ const Staff = ({ userProfile }) => {
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "28px" }}>
+      <div className="m-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "28px" }}>
         <div>
           <div style={{ fontSize: "22px", fontWeight: "700", color: theme.text }}>HR Management</div>
           <div style={{ fontSize: "13px", color: theme.textMuted, marginTop: "3px" }}>Staff directory, attendance tracking, payroll, and roles</div>

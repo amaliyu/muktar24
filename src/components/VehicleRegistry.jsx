@@ -4,7 +4,7 @@ import { staffService } from '../services/staff'
 import { expensesService } from '../services/accounting'
 import { suppliersService, supplierTransactionsService } from '../services/suppliers'
 import { supabase } from '../lib/supabase'
-import { ConfirmDialog, fmtDate } from './site/siteUi'
+import { ConfirmDialog, fmtDate, fmtDay } from './site/siteUi'
 import { deleteMaintenanceRecord, deleteWhere } from '../utils/checkedDelete'
 
 const theme = {
@@ -290,7 +290,7 @@ const MaintenanceTab = ({ vehicleId, vehicleNumber, vehicleName }) => {
     <div>
       {alert && <AlertBar msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
       {confirmDel && <ConfirmDialog title={`Delete the ${confirmDel.maintenance_type || 'maintenance'} record of ${fmtDate(confirmDel.maintenance_date)} for ${vehicleNumber || 'this vehicle'}?`} body="This also removes the linked P&L expense and supplier transaction. This cannot be undone." confirmLabel="Delete record" danger onCancel={() => setConfirmDel(null)} onConfirm={() => { const x = confirmDel; setConfirmDel(null); handleDelete(x) }} />}
-      {overdueNext && <AlertBar msg={`Maintenance overdue! Next service was due ${overdueNext.next_maintenance_date} (${overdueNext.maintenance_type})`} type="warning" />}
+      {overdueNext && <AlertBar msg={`Maintenance overdue! Next service was due ${fmtDate(overdueNext.next_maintenance_date)} (${overdueNext.maintenance_type})`} type="warning" />}
       <div style={{ ...styles.row, justifyContent: 'space-between', marginBottom: '16px' }}>
         <div>
           <span style={{ fontSize: '13px', color: theme.textMuted }}>Total maintenance cost: </span>
@@ -356,7 +356,7 @@ const MaintenanceTab = ({ vehicleId, vehicleNumber, vehicleName }) => {
           <tbody>
             {records.map(r => (
               <tr key={r.id}>
-                <td style={styles.td}>{r.maintenance_date}</td>
+                <td style={styles.td}>{fmtDate(r.maintenance_date)}</td>
                 <td style={styles.td}><span style={styles.badge(theme.blue)}>{r.maintenance_type}</span></td>
                 <td style={styles.td}>{r.description || '—'}</td>
                 <td style={styles.td}>
@@ -365,7 +365,7 @@ const MaintenanceTab = ({ vehicleId, vehicleNumber, vehicleName }) => {
                 </td>
                 <td style={styles.td}>{r.vendor_name || '—'}{r.vendor_phone && <div style={{ fontSize: '11px', color: theme.textMuted }}>{r.vendor_phone}</div>}</td>
                 <td style={styles.td}>{r.downtime_days ? `${r.downtime_days}d` : '—'}</td>
-                <td style={styles.td}>{r.next_maintenance_date ? <span style={{ color: expiryColor(r.next_maintenance_date) }}>{r.next_maintenance_date}</span> : '—'}</td>
+                <td style={styles.td}>{r.next_maintenance_date ? <span style={{ color: expiryColor(r.next_maintenance_date) }}>{fmtDate(r.next_maintenance_date)}</span> : '—'}</td>
                 <td style={styles.td}>
                   <div style={styles.row}>
                     {r.receipt_url && recUrls[r.id] && <a href={recUrls[r.id]} target="_blank" rel="noreferrer" style={{ fontSize: '11px', color: theme.blue }}>Receipt</a>}
@@ -467,7 +467,7 @@ const FuelLogTab = ({ vehicleId }) => {
           <tbody>
             {entries.map(e => (
               <tr key={e.id}>
-                <td style={styles.td}>{e.date}</td>
+                <td style={styles.td}>{fmtDate(e.date)}</td>
                 <td style={styles.td}><strong style={{ color: theme.blue }}>{fmt(e.litres_dispensed)} L</strong></td>
                 <td style={styles.td}>{e.cost_per_litre ? naira(e.cost_per_litre) : '—'}</td>
                 <td style={styles.td}><strong style={{ color: theme.accent }}>{naira(e.total_cost)}</strong></td>
@@ -559,8 +559,8 @@ const DocumentsTab = ({ vehicleId }) => {
               <div key={d.id} style={{ ...styles.card, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 18px', borderLeft: `3px solid ${expired ? theme.red : expiring ? theme.accent : theme.border}` }}>
                 <div>
                   <div style={{ fontWeight: '700', fontSize: '13px' }}>{d.document_label}</div>
-                  <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '3px' }}>{d.file_name} · Uploaded {d.uploaded_at?.split('T')[0]}</div>
-                  {d.expiry_date && <div style={{ fontSize: '11px', color: expiryColor(d.expiry_date), marginTop: '3px' }}>Expires: {d.expiry_date}{expired ? ' — EXPIRED' : expiring ? ` — Expires in ${daysUntil(d.expiry_date)} days` : ''}</div>}
+                  <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '3px' }}>{d.file_name} · Uploaded {fmtDay(d.uploaded_at)}</div>
+                  {d.expiry_date && <div style={{ fontSize: '11px', color: expiryColor(d.expiry_date), marginTop: '3px' }}>Expires: {fmtDate(d.expiry_date)}{expired ? ' — EXPIRED' : expiring ? ` — Expires in ${daysUntil(d.expiry_date)} days` : ''}</div>}
                 </div>
                 <div style={styles.row}>
                   <a href={docUrls[d.id] || undefined} target="_blank" rel="noreferrer" style={{ ...styles.btn(), textDecoration: 'none', padding: '6px 12px', fontSize: '12px' }}>View</a>
@@ -659,7 +659,7 @@ const VehicleProfile = ({ vehicle: initialVehicle, staff, staffMap, onBack, onUp
 
       {/* Vehicle Header */}
       <div style={{ ...styles.card, borderLeft: `5px solid ${theme.accent}`, marginBottom: '24px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px' }}>
+        <div className="m-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px' }}>
           <div>
             <div style={{ fontSize: '24px', fontWeight: '800', color: theme.accent, letterSpacing: '0.05em' }}>{vehicle.vehicle_number}</div>
             <div style={{ fontSize: '15px', fontWeight: '600', color: theme.text, marginTop: '4px' }}>{vehicle.vehicle_name || vehicle.vehicle_type}</div>
@@ -682,13 +682,13 @@ const VehicleProfile = ({ vehicle: initialVehicle, staff, staffMap, onBack, onUp
           {vehicle.insurance_expiry_date && (
             <div style={{ fontSize: '12px' }}>
               <span style={{ color: theme.textMuted }}>Insurance: </span>
-              <span style={{ color: expiryColor(vehicle.insurance_expiry_date), fontWeight: '600' }}>{vehicle.insurance_expiry_date}{isExpired(vehicle.insurance_expiry_date) ? ' — EXPIRED' : isExpiring(vehicle.insurance_expiry_date) ? ` (${daysUntil(vehicle.insurance_expiry_date)}d)` : ''}</span>
+              <span style={{ color: expiryColor(vehicle.insurance_expiry_date), fontWeight: '600' }}>{fmtDate(vehicle.insurance_expiry_date)}{isExpired(vehicle.insurance_expiry_date) ? ' — EXPIRED' : isExpiring(vehicle.insurance_expiry_date) ? ` (${daysUntil(vehicle.insurance_expiry_date)}d)` : ''}</span>
             </div>
           )}
           {vehicle.road_worthiness_expiry_date && (
             <div style={{ fontSize: '12px' }}>
               <span style={{ color: theme.textMuted }}>Road Worthiness: </span>
-              <span style={{ color: expiryColor(vehicle.road_worthiness_expiry_date), fontWeight: '600' }}>{vehicle.road_worthiness_expiry_date}{isExpired(vehicle.road_worthiness_expiry_date) ? ' — EXPIRED' : isExpiring(vehicle.road_worthiness_expiry_date) ? ` (${daysUntil(vehicle.road_worthiness_expiry_date)}d)` : ''}</span>
+              <span style={{ color: expiryColor(vehicle.road_worthiness_expiry_date), fontWeight: '600' }}>{fmtDate(vehicle.road_worthiness_expiry_date)}{isExpired(vehicle.road_worthiness_expiry_date) ? ' — EXPIRED' : isExpiring(vehicle.road_worthiness_expiry_date) ? ` (${daysUntil(vehicle.road_worthiness_expiry_date)}d)` : ''}</span>
             </div>
           )}
         </div>
@@ -743,7 +743,7 @@ const VehicleProfile = ({ vehicle: initialVehicle, staff, staffMap, onBack, onUp
                 <tbody>
                   {deliveries.map(d => (
                     <tr key={d.id}>
-                      <td style={styles.td}>{d.waybill_date}</td>
+                      <td style={styles.td}>{fmtDate(d.waybill_date)}</td>
                       <td style={styles.td}><span style={{ color: theme.accent, fontWeight: '600' }}>{d.waybill_number}</span></td>
                       <td style={styles.td}>{d.receiver_name || '—'}</td>
                       <td style={styles.td}><span style={styles.badge(theme.blue)}>{d.block_type}</span></td>
@@ -815,7 +815,7 @@ const VehicleProfile = ({ vehicle: initialVehicle, staff, staffMap, onBack, onUp
                           const r = d.quantity_loaded > 0 ? (d.quantity_damaged / d.quantity_loaded * 100).toFixed(1) : '0.0'
                           return (
                             <tr key={d.id}>
-                              <td style={styles.td}>{d.waybill_date}</td>
+                              <td style={styles.td}>{fmtDate(d.waybill_date)}</td>
                               <td style={styles.td}><span style={{ color: theme.accent, fontWeight: '600' }}>{d.waybill_number}</span></td>
                               <td style={styles.td}>{d.receiver_name || '—'}</td>
                               <td style={styles.td}><span style={styles.badge(theme.blue)}>{d.block_type}</span></td>
@@ -893,7 +893,7 @@ const VehicleRegistry = () => {
 
   return (
     <div style={styles.page}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px', flexWrap: 'wrap', gap: '12px' }}>
+      <div className="m-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px', flexWrap: 'wrap', gap: '12px' }}>
         <div>
           <div style={{ fontSize: '20px', fontWeight: '800', color: theme.text }}>Vehicle Registry</div>
           <div style={{ fontSize: '13px', color: theme.textMuted, marginTop: '3px' }}>Fleet management, maintenance tracking, and fuel logs</div>
@@ -934,7 +934,7 @@ const VehicleRegistry = () => {
           {vehicles.length === 0 ? 'No vehicles registered yet. Click "+ Register Vehicle" to add your first vehicle.' : 'No vehicles match your filters.'}
         </div>
       ) : (
-        <div style={styles.grid(2)}>
+        <div className="m-stack" style={styles.grid(2)}>
           {filtered.map(v => {
             const insExpired = v.insurance_expiry_date && isExpired(v.insurance_expiry_date)
             const insExpiring = v.insurance_expiry_date && isExpiring(v.insurance_expiry_date)

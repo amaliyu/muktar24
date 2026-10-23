@@ -569,7 +569,7 @@ export default function OpeningBalances({ userProfile }) {
       )}
 
       {/* ── Header ─────────────────────────────────────────────── */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px', flexWrap: 'wrap', gap: '12px' }}>
+      <div className="m-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px', flexWrap: 'wrap', gap: '12px' }}>
         <div>
           <div style={{ fontSize: '22px', fontWeight: '800', color: theme.text }}>Opening Balances</div>
           <div style={{ fontSize: '13px', color: theme.textMuted, marginTop: '4px' }}>

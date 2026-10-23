@@ -275,7 +275,7 @@ const TransactionsTab = ({ supplierId, companyName }) => {
               return acc
             }, []).reverse().map(t => (
               <tr key={t.id}>
-                <td style={styles.td}>{t.transaction_date}</td>
+                <td style={styles.td}>{fmtDate(t.transaction_date)}</td>
                 <td style={styles.td}><span style={styles.badge(t.transaction_type === 'purchase' ? theme.red : t.transaction_type === 'payment' ? theme.green : theme.blue)}>{t.transaction_type}</span></td>
                 <td style={styles.td}>{t.description || '—'}</td>
                 <td style={styles.td}>{t.transaction_type === 'purchase' ? <strong style={{ color: theme.red }}>{naira(t.amount)}</strong> : <span style={{ color: theme.textMuted }}>—</span>}</td>
@@ -343,7 +343,7 @@ const SupplyHistoryTab = ({ supplierId, companyName }) => {
             <tbody>
               {stockMoves.map(m => (
                 <tr key={m.id}>
-                  <td style={styles.td}>{m.date}</td>
+                  <td style={styles.td}>{fmtDate(m.date)}</td>
                   <td style={styles.td}>{m.item?.name || '—'}</td>
                   <td style={styles.td}>{fmt(m.quantity)} {m.item?.unit || ''}</td>
                   <td style={styles.td}>{m.unit_cost ? naira(m.unit_cost) : '—'}</td>
@@ -363,7 +363,7 @@ const SupplyHistoryTab = ({ supplierId, companyName }) => {
             <tbody>
               {maintenance.map(m => (
                 <tr key={m.id}>
-                  <td style={styles.td}>{m.maintenance_date}</td>
+                  <td style={styles.td}>{fmtDate(m.maintenance_date)}</td>
                   <td style={styles.td}>{m.vehicle?.vehicle_number || '—'}</td>
                   <td style={styles.td}>{m.maintenance_type}</td>
                   <td style={styles.td}>{m.description || '—'}</td>
@@ -499,7 +499,7 @@ const SupplierProfile = ({ supplier: initialSupplier, onBack, onUpdate }) => {
       </div>
 
       <div style={{ ...styles.card, marginBottom: '20px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px' }}>
+        <div className="m-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px' }}>
           <div>
             <div style={{ fontSize: '22px', fontWeight: '800', color: theme.text }}>{supplier.company_name}</div>
             <div style={{ fontSize: '12px', color: theme.accent, fontWeight: '600', marginTop: '2px' }}>{supplier.supplier_number}</div>
@@ -610,7 +610,7 @@ const SupplierRegistry = () => {
 
   return (
     <div style={styles.page}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px', flexWrap: 'wrap', gap: '12px' }}>
+      <div className="m-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px', flexWrap: 'wrap', gap: '12px' }}>
         <div>
           <div style={{ fontSize: '20px', fontWeight: '800', color: theme.text }}>Supplier Registry</div>
           <div style={{ fontSize: '13px', color: theme.textMuted, marginTop: '3px' }}>Manage suppliers, track transactions, and monitor balances</div>
@@ -661,7 +661,7 @@ const SupplierRegistry = () => {
           {suppliers.length === 0 ? 'No suppliers registered. Click "+ Register Supplier" to get started.' : 'No suppliers match your filters.'}
         </div>
       ) : (
-        <div style={styles.grid(2)}>
+        <div className="m-stack" style={styles.grid(2)}>
           {filtered.map(s => {
             const bal = balances[s.id] || 0
             const statusColor = STATUS_COLORS[s.status] || theme.textMuted

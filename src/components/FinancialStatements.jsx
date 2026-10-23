@@ -3,6 +3,7 @@ import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { balanceSheetService, incomeStatementService, cashFlowService, openingBalancesService, financialAdjustmentsService } from '../services/financialService'
 import { hasRole } from '../lib/roles'
+import { fmtDate } from './site/siteUi'
 
 const theme = {
   bg: '#0f1117', surface: '#1a1d27', card: '#21263a', border: '#2e3452',
@@ -281,9 +282,9 @@ const BalanceSheetTab = ({ userProfile }) => {
           {bsC && (
             <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '8px', padding: '8px 14px', marginBottom: '14px', fontSize: '11px', color: theme.textMuted, display: 'flex', gap: '20px' }}>
               <span>Comparison mode:</span>
-              <span style={{ color: theme.text }}>{asAt} (current)</span>
+              <span style={{ color: theme.text }}>{fmtDate(asAt)} (current)</span>
               <span>vs</span>
-              <span style={{ color: theme.accent }}>{compareDate}</span>
+              <span style={{ color: theme.accent }}>{fmtDate(compareDate)}</span>
             </div>
           )}
 
@@ -311,8 +312,8 @@ const BalanceSheetTab = ({ userProfile }) => {
             <div style={{ ...s.row(), fontWeight: '700', color: theme.textMuted, fontSize: '11px' }}>
               <span></span>
               <div style={{ display: 'flex', gap: '12px' }}>
-                {bsC && <span style={{ minWidth: '90px', textAlign: 'right' }}>{compareDate}</span>}
-                <span style={{ minWidth: '90px', textAlign: 'right' }}>{asAt}</span>
+                {bsC && <span style={{ minWidth: '90px', textAlign: 'right' }}>{fmtDate(compareDate)}</span>}
+                <span style={{ minWidth: '90px', textAlign: 'right' }}>{fmtDate(asAt)}</span>
               </div>
             </div>
 
@@ -1149,7 +1150,7 @@ export default function FinancialStatements({ userProfile }) {
     { id: 'management', label: 'Management Accounts' },
   ]
   return (
-    <div>
+    <div className="m-statement">
       <div style={s.tabBar}>
         {TABS.map(t => (
           <button key={t.id} style={s.tab(tab === t.id)} onClick={() => setTab(t.id)}>{t.label}</button>
