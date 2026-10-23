@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { maintenanceService } from '../services/maintenance'
 import { getSignedDocUrl } from '../services/storage'
 import { hasRole } from '../lib/roles'
+import { fmtDateTime as fmtLagosDateTime } from './site/siteUi'
 
 const theme = {
   bg: '#0f1117', surface: '#1a1d27', card: '#21263a', border: '#2e3452',
@@ -54,9 +55,8 @@ const humanDuration = (fromIso, toIso) => {
   return parts.join(' ')
 }
 
-const fmtDateTime = (iso) => iso ? new Date(iso).toLocaleString('en-GB', {
-  day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
-}) : '—'
+// Lagos time, house format: "22 Oct, 4:30pm".
+const fmtDateTime = (iso) => iso ? fmtLagosDateTime(iso) : '—'
 
 const styles = {
   page: { padding: '24px 28px', color: theme.text, minHeight: '100vh', background: theme.bg },

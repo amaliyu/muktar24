@@ -109,9 +109,9 @@ const VehicleForm = ({ vehicle, staff, onSave, onCancel }) => {
           <select style={styles.input} value={form.vehicle_type} onChange={e => upd('vehicle_type', e.target.value)}>{VEHICLE_TYPES.map(t => <option key={t}>{t}</option>)}</select></div>
         <div style={styles.formGroup}><label style={styles.label}>Make</label><input style={styles.input} placeholder="e.g. Mack, Volvo" value={form.make} onChange={e => upd('make', e.target.value)} /></div>
         <div style={styles.formGroup}><label style={styles.label}>Model</label><input style={styles.input} value={form.model} onChange={e => upd('model', e.target.value)} /></div>
-        <div style={styles.formGroup}><label style={styles.label}>Year</label><input style={styles.input} type="number" placeholder="e.g. 2018" value={form.year} onChange={e => upd('year', e.target.value)} /></div>
+        <div style={styles.formGroup}><label style={styles.label}>Year</label><input style={styles.input} type="number" inputMode="decimal" placeholder="e.g. 2018" value={form.year} onChange={e => upd('year', e.target.value)} /></div>
         <div style={styles.formGroup}><label style={styles.label}>Color</label><input style={styles.input} placeholder="e.g. Yellow" value={form.color} onChange={e => upd('color', e.target.value)} /></div>
-        <div style={styles.formGroup}><label style={styles.label}>Capacity (blocks/trip)</label><input style={styles.input} type="number" placeholder="e.g. 500" value={form.capacity_blocks} onChange={e => upd('capacity_blocks', e.target.value)} /></div>
+        <div style={styles.formGroup}><label style={styles.label}>Capacity (blocks/trip)</label><input style={styles.input} type="number" inputMode="decimal" placeholder="e.g. 500" value={form.capacity_blocks} onChange={e => upd('capacity_blocks', e.target.value)} /></div>
         <div style={styles.formGroup}><label style={styles.label}>Ownership</label>
           <select style={styles.input} value={form.ownership} onChange={e => upd('ownership', e.target.value)}>
             <option value="company_owned">Company Owned</option>
@@ -131,7 +131,7 @@ const VehicleForm = ({ vehicle, staff, onSave, onCancel }) => {
         <div style={styles.formGroup}><label style={styles.label}>Insurance Expiry</label><input style={styles.input} type="date" value={form.insurance_expiry_date} onChange={e => upd('insurance_expiry_date', e.target.value)} /></div>
         <div style={styles.formGroup}><label style={styles.label}>Road Worthiness Expiry</label><input style={styles.input} type="date" value={form.road_worthiness_expiry_date} onChange={e => upd('road_worthiness_expiry_date', e.target.value)} /></div>
         <div style={styles.formGroup}><label style={styles.label}>Purchase Date</label><input style={styles.input} type="date" value={form.purchase_date} onChange={e => upd('purchase_date', e.target.value)} /></div>
-        <div style={styles.formGroup}><label style={styles.label}>Purchase Price (₦)</label><input style={styles.input} type="number" value={form.purchase_price} onChange={e => upd('purchase_price', e.target.value)} /></div>
+        <div style={styles.formGroup}><label style={styles.label}>Purchase Price (₦)</label><input style={styles.input} type="number" inputMode="decimal" value={form.purchase_price} onChange={e => upd('purchase_price', e.target.value)} /></div>
         <div style={{ ...styles.formGroup, gridColumn: 'span 3' }}><label style={styles.label}>Notes</label><input style={styles.input} value={form.notes} onChange={e => upd('notes', e.target.value)} /></div>
       </div>
       {form.vehicle_type === 'Rental' && (
@@ -139,8 +139,8 @@ const VehicleForm = ({ vehicle, staff, onSave, onCancel }) => {
           <div style={{ fontSize: '12px', fontWeight: '700', color: theme.accent, marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Rental Details</div>
           <div style={styles.grid(3)}>
             <div style={styles.formGroup}><label style={styles.label}>Owner Name</label><input style={styles.input} placeholder="e.g. Alhaji Musa" value={form.owner_name} onChange={e => upd('owner_name', e.target.value)} /></div>
-            <div style={styles.formGroup}><label style={styles.label}>Owner Phone</label><input style={styles.input} placeholder="e.g. 0801234567" value={form.owner_phone} onChange={e => upd('owner_phone', e.target.value)} /></div>
-            <div style={styles.formGroup}><label style={styles.label}>Monthly Rental (₦)</label><input style={styles.input} type="number" placeholder="e.g. 150000" value={form.monthly_rental_amount} onChange={e => upd('monthly_rental_amount', e.target.value)} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Owner Phone</label><input style={styles.input} inputMode="tel" placeholder="e.g. 0801234567" value={form.owner_phone} onChange={e => upd('owner_phone', e.target.value)} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Monthly Rental (₦)</label><input style={styles.input} type="number" inputMode="decimal" placeholder="e.g. 150000" value={form.monthly_rental_amount} onChange={e => upd('monthly_rental_amount', e.target.value)} /></div>
             <div style={styles.formGroup}><label style={styles.label}>Contract Start Date</label><input style={styles.input} type="date" value={form.contract_start_date} onChange={e => upd('contract_start_date', e.target.value)} /></div>
             <div style={{ ...styles.formGroup, gridColumn: 'span 2' }}><label style={styles.label}>Maintenance Responsibility</label><input style={{ ...styles.input, color: theme.textMuted }} value="APCL (Abuja Precast Concrete Limited)" readOnly /></div>
           </div>
@@ -307,7 +307,7 @@ const MaintenanceTab = ({ vehicleId, vehicleNumber, vehicleName }) => {
               <select style={styles.input} value={form.maintenance_type} onChange={e => setForm(f => ({ ...f, maintenance_type: e.target.value }))}>
                 {MAINTENANCE_TYPES.map(t => <option key={t}>{t}</option>)}
               </select></div>
-            <div style={styles.formGroup}><label style={styles.label}>Cost (₦)</label><input style={styles.input} type="number" value={form.cost} onChange={e => setForm(f => ({ ...f, cost: e.target.value }))} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Cost (₦)</label><input style={styles.input} type="number" inputMode="decimal" value={form.cost} onChange={e => setForm(f => ({ ...f, cost: e.target.value }))} /></div>
             <div style={{ ...styles.formGroup, gridColumn: 'span 3' }}><label style={styles.label}>Description</label><input style={styles.input} placeholder="What was done?" value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} /></div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Vendor / Supplier</label>
@@ -323,7 +323,7 @@ const MaintenanceTab = ({ vehicleId, vehicleNumber, vehicleName }) => {
               {!form.supplierId && <input style={{ ...styles.input, marginTop: suppliers.length > 0 ? '6px' : '0' }} placeholder="Or enter vendor name manually" value={form.vendor_name} onChange={e => setForm(f => ({ ...f, vendor_name: e.target.value }))} />}
             </div>
             <div style={styles.formGroup}><label style={styles.label}>Vendor Phone</label><input style={styles.input} value={form.vendor_phone} onChange={e => setForm(f => ({ ...f, vendor_phone: e.target.value }))} /></div>
-            <div style={styles.formGroup}><label style={styles.label}>Downtime (days)</label><input style={styles.input} type="number" value={form.downtime_days} onChange={e => setForm(f => ({ ...f, downtime_days: e.target.value }))} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Downtime (days)</label><input style={styles.input} type="number" inputMode="decimal" value={form.downtime_days} onChange={e => setForm(f => ({ ...f, downtime_days: e.target.value }))} /></div>
             <div style={styles.formGroup}><label style={styles.label}>Next Maintenance Date</label><input style={styles.input} type="date" value={form.next_maintenance_date} onChange={e => setForm(f => ({ ...f, next_maintenance_date: e.target.value }))} /></div>
             <div style={styles.formGroup}><label style={styles.label}>Recorded By</label><input style={styles.input} value={form.recorded_by} onChange={e => setForm(f => ({ ...f, recorded_by: e.target.value }))} /></div>
             <div style={styles.formGroup}><label style={styles.label}>Receipt</label>
@@ -366,7 +366,7 @@ const MaintenanceTab = ({ vehicleId, vehicleNumber, vehicleName }) => {
                 <td style={styles.td}>{r.vendor_name || '—'}{r.vendor_phone && <div style={{ fontSize: '11px', color: theme.textMuted }}>{r.vendor_phone}</div>}</td>
                 <td style={styles.td}>{r.downtime_days ? `${r.downtime_days}d` : '—'}</td>
                 <td style={styles.td}>{r.next_maintenance_date ? <span style={{ color: expiryColor(r.next_maintenance_date) }}>{fmtDate(r.next_maintenance_date)}</span> : '—'}</td>
-                <td style={styles.td}>
+                <td className="m-actions" style={styles.td}>
                   <div style={styles.row}>
                     {r.receipt_url && recUrls[r.id] && <a href={recUrls[r.id]} target="_blank" rel="noreferrer" style={{ fontSize: '11px', color: theme.blue }}>Receipt</a>}
                     <button style={{ ...styles.btn(), padding: '3px 8px', fontSize: '11px' }} onClick={() => openEdit(r)}>Edit</button>
@@ -441,10 +441,10 @@ const FuelLogTab = ({ vehicleId }) => {
         <div style={{ ...styles.card, borderLeft: `4px solid ${theme.green}`, marginBottom: '16px' }}>
           <div style={styles.grid(3)}>
             <div style={styles.formGroup}><label style={styles.label}>Date</label><input style={styles.input} type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} /></div>
-            <div style={styles.formGroup}><label style={styles.label}>Litres Dispensed</label><input style={styles.input} type="number" placeholder="0" value={form.litres_dispensed} onChange={e => setForm(f => ({ ...f, litres_dispensed: e.target.value }))} /></div>
-            <div style={styles.formGroup}><label style={styles.label}>Cost per Litre (₦)</label><input style={styles.input} type="number" placeholder="0" value={form.cost_per_litre} onChange={e => setForm(f => ({ ...f, cost_per_litre: e.target.value }))} /></div>
-            <div style={styles.formGroup}><label style={styles.label}>Total Cost (₦) {autoTotal > 0 ? <span style={{ color: theme.green }}>= {naira(autoTotal)}</span> : '(auto)'}</label><input style={styles.input} type="number" placeholder="Auto-calculated" value={autoTotal || form.total_cost} readOnly={autoTotal > 0} onChange={e => setForm(f => ({ ...f, total_cost: e.target.value }))} /></div>
-            <div style={styles.formGroup}><label style={styles.label}>Odometer (km)</label><input style={styles.input} type="number" value={form.odometer_reading} onChange={e => setForm(f => ({ ...f, odometer_reading: e.target.value }))} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Litres Dispensed</label><input style={styles.input} type="number" inputMode="decimal" placeholder="0" value={form.litres_dispensed} onChange={e => setForm(f => ({ ...f, litres_dispensed: e.target.value }))} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Cost per Litre (₦)</label><input style={styles.input} type="number" inputMode="decimal" placeholder="0" value={form.cost_per_litre} onChange={e => setForm(f => ({ ...f, cost_per_litre: e.target.value }))} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Total Cost (₦) {autoTotal > 0 ? <span style={{ color: theme.green }}>= {naira(autoTotal)}</span> : '(auto)'}</label><input style={styles.input} type="number" inputMode="decimal" placeholder="Auto-calculated" value={autoTotal || form.total_cost} readOnly={autoTotal > 0} onChange={e => setForm(f => ({ ...f, total_cost: e.target.value }))} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Odometer (km)</label><input style={styles.input} type="number" inputMode="decimal" value={form.odometer_reading} onChange={e => setForm(f => ({ ...f, odometer_reading: e.target.value }))} /></div>
             <div style={styles.formGroup}><label style={styles.label}>Dispensed By</label><input style={styles.input} value={form.dispensed_by} onChange={e => setForm(f => ({ ...f, dispensed_by: e.target.value }))} /></div>
             <div style={styles.formGroup}><label style={styles.label}>Purpose</label>
               <select style={styles.input} value={form.purpose} onChange={e => setForm(f => ({ ...f, purpose: e.target.value }))}>
@@ -714,7 +714,7 @@ const VehicleProfile = ({ vehicle: initialVehicle, staff, staffMap, onBack, onUp
             ['Ownership', vehicle.ownership === 'company_owned' ? 'Company Owned' : 'Hired'],
             ['Status', vehicle.status],
             ['Assigned Driver', staffMap?.[vehicle.assigned_driver_id]?.full_name || '—'],
-            ['Purchase Date', vehicle.purchase_date || '—'],
+            ['Purchase Date', fmtDate(vehicle.purchase_date)],
             ['Purchase Price', vehicle.purchase_price ? naira(vehicle.purchase_price) : '—'],
             ['Insurance Expiry', vehicle.insurance_expiry_date || '—'],
             ['Road Worthiness Expiry', vehicle.road_worthiness_expiry_date || '—'],

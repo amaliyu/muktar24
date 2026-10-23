@@ -295,8 +295,8 @@ const InvoiceEditorModal = ({ editor, setEditor, onSave, saving }) => {
           {items.map((item, idx) => (
             <div key={idx} style={{ display: 'flex', gap: '8px', marginBottom: '8px', alignItems: 'center' }}>
               <input list="invoice-line-products" style={{ ...styles.input, flex: 2 }} placeholder="Select or type product…" value={item.description} onChange={e => onDescriptionChange(idx, e.target.value)} />
-              <input style={{ ...styles.input, flex: 1 }} type="number" placeholder="Qty" value={item.quantity} onChange={e => updItem(idx, 'quantity', e.target.value)} />
-              <input style={{ ...styles.input, flex: 1 }} type="number" placeholder="Unit Price" value={item.unit_price} onChange={e => updItem(idx, 'unit_price', e.target.value)} />
+              <input style={{ ...styles.input, flex: 1 }} type="number" inputMode="decimal" placeholder="Qty" value={item.quantity} onChange={e => updItem(idx, 'quantity', e.target.value)} />
+              <input style={{ ...styles.input, flex: 1 }} type="number" inputMode="decimal" placeholder="Unit Price" value={item.unit_price} onChange={e => updItem(idx, 'unit_price', e.target.value)} />
               <div style={{ ...styles.input, flex: 1, background: 'transparent', color: theme.accent, fontWeight: '700', fontSize: '12px' }}>
                 {item.quantity && item.unit_price ? N((Number(item.quantity) || 0) * (Number(item.unit_price) || 0)) : '—'}
               </div>
@@ -309,11 +309,11 @@ const InvoiceEditorModal = ({ editor, setEditor, onSave, saving }) => {
           <div style={styles.grid(3)}>
             <div style={styles.formGroup}>
               <label style={styles.label}>Delivery Cost (₦)</label>
-              <input style={styles.input} type="number" placeholder="0" value={editor.delivery_cost} onChange={e => upd('delivery_cost', e.target.value)} />
+              <input style={styles.input} type="number" inputMode="decimal" placeholder="0" value={editor.delivery_cost} onChange={e => upd('delivery_cost', e.target.value)} />
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Discount (₦)</label>
-              <input style={styles.input} type="number" placeholder="0" value={editor.discount} onChange={e => upd('discount', e.target.value)} />
+              <input style={styles.input} type="number" inputMode="decimal" placeholder="0" value={editor.discount} onChange={e => upd('discount', e.target.value)} />
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>VAT</label>
@@ -1821,11 +1821,11 @@ const Orders = ({ onNavigate, userProfile }) => {
                   </div>
                   <div style={{ flex: 1 }}>
                     {idx === 0 && <label style={styles.label}>Quantity</label>}
-                    <input style={styles.input} type="number" placeholder="e.g. 10000" value={item.quantity} onChange={e => updateItem(idx, "quantity", e.target.value)} />
+                    <input style={styles.input} type="number" inputMode="decimal" placeholder="e.g. 10000" value={item.quantity} onChange={e => updateItem(idx, "quantity", e.target.value)} />
                   </div>
                   <div style={{ flex: 1 }}>
                     {idx === 0 && <label style={styles.label}>Unit Price (₦)</label>}
-                    <input style={styles.input} type="number" placeholder="e.g. 250" value={item.unitPrice} onChange={e => updateItem(idx, "unitPrice", e.target.value)} />
+                    <input style={styles.input} type="number" inputMode="decimal" placeholder="e.g. 250" value={item.unitPrice} onChange={e => updateItem(idx, "unitPrice", e.target.value)} />
                   </div>
                   <div style={{ flex: 1 }}>
                     {idx === 0 && <label style={styles.label}>Subtotal</label>}
@@ -1850,7 +1850,7 @@ const Orders = ({ onNavigate, userProfile }) => {
                 {item.sourceType === 'resale' && (
                   <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                     <label style={{ ...styles.label, marginBottom: 0, fontSize: "12px", whiteSpace: "nowrap" }}>Partner cost (₦):</label>
-                    <input style={{ ...styles.input, maxWidth: "200px" }} type="number" min="0" placeholder="Cost basis (optional)" value={item.costBasis} onChange={e => updateItem(idx, "costBasis", e.target.value)} />
+                    <input style={{ ...styles.input, maxWidth: "200px" }} type="number" inputMode="decimal" min="0" placeholder="Cost basis (optional)" value={item.costBasis} onChange={e => updateItem(idx, "costBasis", e.target.value)} />
                   </div>
                 )}
               </div>
@@ -1961,8 +1961,8 @@ const Orders = ({ onNavigate, userProfile }) => {
                         <div key={idx} style={{ marginBottom: "10px", padding: item.sourceType === 'resale' ? "8px" : "0", background: item.sourceType === 'resale' ? theme.accent + "08" : "transparent", borderRadius: "6px", border: item.sourceType === 'resale' ? `1px solid ${theme.accent}33` : "1px solid transparent" }}>
                           <div style={{ display: "flex", gap: "8px", marginBottom: item.sourceType === 'resale' ? "6px" : "0", alignItems: "center" }}>
                             <ProductSelect value={item.blockType} onChange={(name, unit) => { const it = [...orderEditItems]; it[idx] = { ...it[idx], blockType: name, unit }; setOrderEditItems(it); }} style={{ ...styles.input, flex: 1 }} />
-                            <input style={{ ...styles.input, flex: 1 }} type="number" placeholder="Qty" value={item.quantity} onChange={e => { const it = [...orderEditItems]; it[idx] = { ...it[idx], quantity: e.target.value }; setOrderEditItems(it); }} />
-                            <input style={{ ...styles.input, flex: 1 }} type="number" placeholder="Unit Price" value={item.unitPrice} onChange={e => { const it = [...orderEditItems]; it[idx] = { ...it[idx], unitPrice: e.target.value }; setOrderEditItems(it); }} />
+                            <input style={{ ...styles.input, flex: 1 }} type="number" inputMode="decimal" placeholder="Qty" value={item.quantity} onChange={e => { const it = [...orderEditItems]; it[idx] = { ...it[idx], quantity: e.target.value }; setOrderEditItems(it); }} />
+                            <input style={{ ...styles.input, flex: 1 }} type="number" inputMode="decimal" placeholder="Unit Price" value={item.unitPrice} onChange={e => { const it = [...orderEditItems]; it[idx] = { ...it[idx], unitPrice: e.target.value }; setOrderEditItems(it); }} />
                             <div style={{ ...styles.input, flex: 1, background: "transparent", color: theme.accent, fontWeight: "700" }}>{item.quantity && item.unitPrice ? naira(parseInt(item.quantity) * parseFloat(item.unitPrice)) : "—"}</div>
                             <div style={{ display: "flex", gap: "3px", flexShrink: 0 }}>
                               {["manufactured", "resale"].map(t => (
@@ -1976,7 +1976,7 @@ const Orders = ({ onNavigate, userProfile }) => {
                           {item.sourceType === 'resale' && (
                             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                               <label style={{ ...styles.label, marginBottom: 0, fontSize: "12px", whiteSpace: "nowrap" }}>Partner cost (₦):</label>
-                              <input style={{ ...styles.input, maxWidth: "180px" }} type="number" min="0" placeholder="Cost basis (optional)" value={item.costBasis} onChange={e => { const it = [...orderEditItems]; it[idx] = { ...it[idx], costBasis: e.target.value }; setOrderEditItems(it); }} />
+                              <input style={{ ...styles.input, maxWidth: "180px" }} type="number" inputMode="decimal" min="0" placeholder="Cost basis (optional)" value={item.costBasis} onChange={e => { const it = [...orderEditItems]; it[idx] = { ...it[idx], costBasis: e.target.value }; setOrderEditItems(it); }} />
                             </div>
                           )}
                         </div>
@@ -2090,7 +2090,7 @@ const Orders = ({ onNavigate, userProfile }) => {
                         <div style={styles.row}>
                           <div style={{ flex: 1 }}>
                             <label style={styles.label}>Amount (₦)</label>
-                            <input style={styles.input} type="number" placeholder="e.g. 500000" value={payForm.amount} onChange={e => setPayForm({ ...payForm, amount: e.target.value })} />
+                            <input style={styles.input} type="number" inputMode="decimal" placeholder="e.g. 500000" value={payForm.amount} onChange={e => setPayForm({ ...payForm, amount: e.target.value })} />
                           </div>
                           <div style={{ flex: 1 }}>
                             <label style={styles.label}>Payment Date</label>
@@ -4450,7 +4450,7 @@ const DailySchedule = () => {
                   </div>
                   {sel && (
                     <div style={{ display: "flex", gap: "8px" }}>
-                      <div><label style={{ ...styles.label, fontSize: "10px" }}>Qty Today</label><input style={{ ...styles.input, width: "100px" }} type="number" value={sel.qtyToday} onChange={e => updateSelectedQty(entry.id, e.target.value)} /></div>
+                      <div><label style={{ ...styles.label, fontSize: "10px" }}>Qty Today</label><input style={{ ...styles.input, width: "100px" }} type="number" inputMode="decimal" value={sel.qtyToday} onChange={e => updateSelectedQty(entry.id, e.target.value)} /></div>
                       <div><label style={{ ...styles.label, fontSize: "10px" }}>Instructions</label><input style={{ ...styles.input, width: "180px" }} placeholder="Optional" value={sel.notes} onChange={e => updateSelectedNotes(entry.id, e.target.value)} /></div>
                     </div>
                   )}
@@ -5222,7 +5222,7 @@ const Products = () => {
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Default Unit Price (₦)</label>
-              <input style={styles.input} type="number" placeholder="0" value={form.unit_price} onChange={e => setForm({ ...form, unit_price: e.target.value })} />
+              <input style={styles.input} type="number" inputMode="decimal" placeholder="0" value={form.unit_price} onChange={e => setForm({ ...form, unit_price: e.target.value })} />
             </div>
             <div style={{ ...styles.formGroup, gridColumn: "span 2" }}>
               <label style={styles.label}>Description (optional)</label>
@@ -5435,7 +5435,7 @@ const BookkeepingTab = () => {
             <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Add Other Income</div>
             <div style={styles.formGroup}><label style={styles.label}>Source *</label><input style={styles.input} placeholder="e.g. Equipment rental, Scrap sale" value={incomeForm.source} onChange={e => setIncomeForm(f => ({ ...f, source: e.target.value }))} /></div>
             <div style={styles.formGroup}><label style={styles.label}>Description</label><input style={styles.input} placeholder="Optional details" value={incomeForm.description} onChange={e => setIncomeForm(f => ({ ...f, description: e.target.value }))} /></div>
-            <div style={styles.formGroup}><label style={styles.label}>Amount (₦) *</label><input type="number" style={styles.input} placeholder="0" value={incomeForm.amount} onChange={e => setIncomeForm(f => ({ ...f, amount: e.target.value }))} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Amount (₦) *</label><input type="number" inputMode="decimal" style={styles.input} placeholder="0" value={incomeForm.amount} onChange={e => setIncomeForm(f => ({ ...f, amount: e.target.value }))} /></div>
             <button style={styles.btn('primary')} onClick={addIncome}>+ Add Income</button>
           </div>
           {incomeList.length > 0 && (
@@ -5506,7 +5506,7 @@ const BookkeepingTab = () => {
             <div style={styles.row}>
               <div style={{ flex: 1, ...styles.formGroup }}>
                 <label style={styles.label}>Amount (₦) *</label>
-                <input type="number" style={styles.input} placeholder="0" value={expenseForm.amount} onChange={e => setExpenseForm(f => ({ ...f, amount: e.target.value }))} />
+                <input type="number" inputMode="decimal" style={styles.input} placeholder="0" value={expenseForm.amount} onChange={e => setExpenseForm(f => ({ ...f, amount: e.target.value }))} />
               </div>
               <div style={{ flex: 1, ...styles.formGroup }}>
                 <label style={styles.label}>Vendor / Payee</label>
@@ -6867,7 +6867,7 @@ const BankAccountsTab = ({ userProfile }) => {
               {/* Payment amount (editable for partial) */}
               <div style={styles.formGroup}>
                 <label style={styles.label}>Payment Amount (₦) — edit for partial payment</label>
-                <input type="number" style={styles.input} value={createPaymentForm.paymentAmount}
+                <input type="number" inputMode="decimal" style={styles.input} value={createPaymentForm.paymentAmount}
                   onChange={e => setCreatePaymentForm(f => ({ ...f, paymentAmount: e.target.value }))}
                   placeholder={String(tx.credit)} />
               </div>
@@ -7547,7 +7547,7 @@ const ReceiptsTab = () => {
             {uploadFile && <div style={{ fontSize: '11px', color: theme.textMuted, marginBottom: '8px' }}>Selected: {uploadFile.name}</div>}
             <div style={styles.formGroup}><label style={styles.label}>Date *</label><input type="date" style={styles.input} value={uploadForm.receipt_date} onChange={e => setUploadForm(f => ({ ...f, receipt_date: e.target.value }))} /></div>
             <div style={styles.formGroup}><label style={styles.label}>Vendor *</label><input style={styles.input} placeholder="Supplier name" value={uploadForm.vendor_name} onChange={e => setUploadForm(f => ({ ...f, vendor_name: e.target.value }))} /></div>
-            <div style={styles.formGroup}><label style={styles.label}>Amount (₦) *</label><input type="number" style={styles.input} placeholder="0" value={uploadForm.amount} onChange={e => setUploadForm(f => ({ ...f, amount: e.target.value }))} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Amount (₦) *</label><input type="number" inputMode="decimal" style={styles.input} placeholder="0" value={uploadForm.amount} onChange={e => setUploadForm(f => ({ ...f, amount: e.target.value }))} /></div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Link to Expense (optional)</label>
               <select style={styles.input} value={uploadForm.expense_id} onChange={e => {
@@ -8012,11 +8012,11 @@ const AdvancesPage = ({ userProfile }) => {
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Amount (₦)</label>
-              <input style={styles.input} type="number" placeholder="0" value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} />
+              <input style={styles.input} type="number" inputMode="decimal" placeholder="0" value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} />
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Installments</label>
-              <input style={styles.input} type="number" min="1" placeholder="1" value={form.installments} onChange={e => setForm(f => ({ ...f, installments: e.target.value }))} />
+              <input style={styles.input} type="number" inputMode="decimal" min="1" placeholder="1" value={form.installments} onChange={e => setForm(f => ({ ...f, installments: e.target.value }))} />
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Reason</label>
@@ -8525,7 +8525,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
         </div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
           {!isInitiator && (
-            <div style={{ display: 'flex', gap: '4px' }}>
+            <div className="m-wrap" style={{ display: 'flex', gap: '4px' }}>
               {[['Action Queue', 'queue'], ['All Requests', 'all'], ...((canQuery || role === 'md') ? [['Queried', 'queried']] : [])].map(([label, val]) => {
                 const active = val === 'queried' ? showQueried : (!showQueried && showHistory === (val === 'all'));
                 return (
@@ -8587,7 +8587,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Amount (₦) *</label>
-              <input style={styles.input} type="number" min="1" placeholder="0"
+              <input style={styles.input} type="number" inputMode="decimal" min="1" placeholder="0"
                 value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} />
             </div>
             <div style={styles.formGroup}>
@@ -8705,7 +8705,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
                   </div>
                   <div style={styles.formGroup}>
                     <label style={styles.label}>Account number</label>
-                    <input style={styles.input} placeholder="10-digit account number"
+                    <input style={styles.input} inputMode="numeric" placeholder="10-digit account number"
                       value={form.payee_account_number} onChange={e => setForm(f => ({ ...f, payee_account_number: e.target.value }))} />
                   </div>
                   <div style={styles.formGroup}>
@@ -8749,7 +8749,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Amount (₦) *</label>
-              <input style={styles.input} type="number" min="1" placeholder="0"
+              <input style={styles.input} type="number" inputMode="decimal" min="1" placeholder="0"
                 value={backfillForm.amount}
                 onChange={e => setBackfillForm(f => ({ ...f, amount: e.target.value }))} />
             </div>
@@ -8834,7 +8834,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
                 </div>
                 <div style={styles.formGroup}>
                   <label style={styles.label}>Account number</label>
-                  <input style={styles.input} placeholder="10-digit account number"
+                  <input style={styles.input} inputMode="numeric" placeholder="10-digit account number"
                     value={backfillForm.payee_account_number}
                     onChange={e => setBackfillForm(f => ({ ...f, payee_account_number: e.target.value }))} />
                 </div>
@@ -9350,7 +9350,7 @@ const LeavePage = ({ userProfile }) => {
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Days</label>
-              <input type="number" min="1" style={styles.input} value={form.days} onChange={e => setFormField('days', e.target.value)} placeholder="Auto-filled from dates" />
+              <input type="number" inputMode="decimal" min="1" style={styles.input} value={form.days} onChange={e => setFormField('days', e.target.value)} placeholder="Auto-filled from dates" />
             </div>
           </div>
           <div style={styles.formGroup}>
@@ -9739,7 +9739,7 @@ const MyHRPage = ({ userProfile }) => {
                   <div style={{ fontWeight: '600', fontSize: '14px', color: theme.text }}>{c.title}</div>
                   <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '2px' }}>
                     {DISC_TYPES.find(t => t.id === c.type)?.label || c.type} · {fmtDate(c.incident_date)}
-                    {c.response_deadline ? ` · Respond by ${c.response_deadline}` : ''}
+                    {c.response_deadline ? ` · Respond by ${fmtDate(c.response_deadline)}` : ''}
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
@@ -9979,7 +9979,7 @@ const AttendanceFlagsPage = ({ userProfile }) => {
                 <div style={{ marginTop: '12px', display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
                   <div style={styles.formGroup}>
                     <label style={styles.label}>Hours Worked</label>
-                    <input type="number" step="0.5" min="0" max="24"
+                    <input type="number" inputMode="decimal" step="0.5" min="0" max="24"
                       style={{ ...styles.input, width: '100px' }}
                       placeholder="e.g. 8"
                       value={form.hours_worked ?? ''}
@@ -10238,7 +10238,7 @@ const DisciplinaryPage = ({ userProfile }) => {
                 </div>
                 {c.response_deadline && (
                   <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '8px' }}>
-                    <strong style={{ color: theme.text }}>Response deadline:</strong> {c.response_deadline}
+                    <strong style={{ color: theme.text }}>Response deadline:</strong> {fmtDate(c.response_deadline)}
                   </div>
                 )}
                 {c.employee_response && (
@@ -10262,7 +10262,7 @@ const DisciplinaryPage = ({ userProfile }) => {
                     {entry.actor_role ? ` — ${entry.actor_role}` : ''}
                     {entry.note ? `: "${entry.note}"` : ''}
                     <span style={{ marginLeft: '8px', fontSize: '11px', color: theme.textDim }}>
-                      {entry.created_at ? new Date(entry.created_at).toLocaleDateString() : ''}
+                      {entry.created_at ? fmtDateTime(entry.created_at) : ''}
                     </span>
                   </div>
                 ))}

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import { openingBalancesService } from '../services/financialService'
 import { Z } from '../lib/zIndex'
-import { ConfirmDialog, ui } from './site/siteUi'
+import { ConfirmDialog, ui, fmtDay, fmtDateTime as fmtStamp } from './site/siteUi'
 
 // ── Theme ─────────────────────────────────────────────────────────────
 const theme = {
@@ -15,8 +15,9 @@ const theme = {
 const naira  = (n) => `₦${Math.round(Number(n) || 0).toLocaleString()}`
 const num    = (n) => Number(n) || 0
 const isoToday = () => new Date().toISOString().split('T')[0]
-const fmtDate  = (d) => d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'
-const fmtDateTime = (d) => d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'
+// Lagos calendar day / time (house format: "29 Aug 2026", "22 Oct, 4:30pm").
+const fmtDate  = (d) => fmtDay(d)
+const fmtDateTime = (d) => fmtStamp(d)
 
 // Default fixed-asset rows (non-vehicle)
 const FIXED_ASSET_DEFAULTS = [

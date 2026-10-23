@@ -29,6 +29,7 @@ import { useEffect, useRef } from 'react'
 //   m-only    shown on phones only (e.g. the block type under a row's date)
 //   m-stack   side-by-side panels (list | detail): one column on phones
 //   m-pills   (fit) a vertical list of filter links becomes a row of pills
+//   m-tap     (fit) a link used as a button: 44px tap target
 //   m-statement (fit) P&L / balance sheet / cash flow: label | amount lines
 //             stay two columns, labels wrap, amounts right-aligned
 //
@@ -156,6 +157,7 @@ const CSS = `
   .m-fit .m-statement [style*="justify-content: space-between"]:not(.m-nowrap):not(:has(input, select, textarea)) > :first-child { flex: 1 1 auto; min-width: 0; }
   .m-fit .m-statement [style*="justify-content: space-between"]:not(.m-nowrap):not(:has(input, select, textarea)) > :not(:first-child) { flex-shrink: 0; text-align: right; font-variant-numeric: tabular-nums; }
   .m-fit button { min-width: 44px; }
+  .m-fit a.m-tap { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 0 8px; }
   .m-scope .m-stack { display: grid !important; grid-template-columns: minmax(0, 1fr) !important; gap: 16px !important; }
   .m-scope .m-stack > * { min-width: 0; }
   .m-fit [style*="gap: 2px"], .m-fit [style*="gap: 3px"], .m-fit [style*="gap: 4px"], .m-fit [style*="gap: 5px"], .m-fit [style*="gap: 6px"] { gap: 8px !important; }
@@ -166,6 +168,7 @@ const CSS = `
   .m-fit td.m-auto-actions::before { display: none; }
   .m-fit td.m-auto-actions > div { display: flex !important; flex-direction: column !important; align-items: stretch !important; gap: 8px !important; width: 100%; }
   .m-fit td.m-auto-actions button { width: 100%; }
+  .m-fit :is(td.m-actions, td.m-auto-actions) a { display: flex; align-items: center; justify-content: center; min-height: 44px; border: 1px solid #2e3452; border-radius: 4px; }
   .m-fit table:not(.m-keep) tr > td.m-auto-key {
     grid-column: 2; grid-row: 1; text-align: right !important;
     font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; max-width: 55vw;
@@ -193,7 +196,7 @@ function inferRoles(table, headers) {
     Array.from(tr.cells).forEach(td => {
       const span = td.colSpan || 1
       const onlyButtons = !explicitActions && td.querySelector('button') &&
-        !Array.from(td.querySelectorAll('*')).some(el => el.tagName !== 'BUTTON' && !el.closest('button') && el.children.length === 0 && el.textContent.trim()) &&
+        !Array.from(td.querySelectorAll('*')).some(el => el.tagName !== 'BUTTON' && el.tagName !== 'A' && !el.closest('button, a') && el.children.length === 0 && el.textContent.trim()) &&
         !Array.from(td.childNodes).some(n => n.nodeType === 3 && n.textContent.trim())
       setClass(td, 'm-auto-actions', !!onlyButtons)
       setClass(td, 'm-auto-key', span === 1 && col === keyCol && !td.classList.contains('m-title') && !tr.querySelector('td.m-key'))

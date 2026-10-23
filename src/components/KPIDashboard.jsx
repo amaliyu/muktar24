@@ -846,7 +846,7 @@ export default function KPIDashboard() {
             ].map(([key, label, ph]) => (
               <div key={key} style={{ marginBottom: '14px' }}>
                 <label style={s.label}>{label}</label>
-                <input type="number" style={{ ...s.input, width: '100%', boxSizing: 'border-box' }} placeholder={ph}
+                <input type="number" inputMode="decimal" style={{ ...s.input, width: '100%', boxSizing: 'border-box' }} placeholder={ph}
                   value={targetForm[key] || ''}
                   onChange={e => setTargetForm(f => ({ ...f, [key]: e.target.value ? Number(e.target.value) : '' }))} />
               </div>

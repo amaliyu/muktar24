@@ -455,10 +455,10 @@ const StaffFormModal = ({ onClose, onSaved, editTarget, roles }) => {
                 </div>
               </div>
               {form.staff_type === "permanent" && (
-                <div style={styles.formGroup}><label style={styles.label}>Monthly Salary (₦)</label><input type="number" style={styles.input} placeholder="e.g. 85000" value={form.monthly_salary} onChange={e => upd("monthly_salary", e.target.value)} /></div>
+                <div style={styles.formGroup}><label style={styles.label}>Monthly Salary (₦)</label><input type="number" inputMode="decimal" style={styles.input} placeholder="e.g. 85000" value={form.monthly_salary} onChange={e => upd("monthly_salary", e.target.value)} /></div>
               )}
               {form.staff_type === "daily" && (
-                <div style={styles.formGroup}><label style={styles.label}>Daily Rate (₦)</label><input type="number" style={styles.input} placeholder="e.g. 3500" value={form.daily_rate} onChange={e => upd("daily_rate", e.target.value)} /></div>
+                <div style={styles.formGroup}><label style={styles.label}>Daily Rate (₦)</label><input type="number" inputMode="decimal" style={styles.input} placeholder="e.g. 3500" value={form.daily_rate} onChange={e => upd("daily_rate", e.target.value)} /></div>
               )}
             </div>
           )}
@@ -506,7 +506,7 @@ const StaffFormModal = ({ onClose, onSaved, editTarget, roles }) => {
                 </select>
               </div>
               <div style={styles.grid(2)}>
-                <div style={styles.formGroup}><label style={styles.label}>Account Number</label><input style={styles.input} placeholder="10-digit account number" value={form.bank_account_number} onChange={e => upd("bank_account_number", e.target.value)} /></div>
+                <div style={styles.formGroup}><label style={styles.label}>Account Number</label><input style={styles.input} inputMode="numeric" placeholder="10-digit account number" value={form.bank_account_number} onChange={e => upd("bank_account_number", e.target.value)} /></div>
                 <div style={styles.formGroup}><label style={styles.label}>Account Name (as on bank)</label><input style={styles.input} placeholder="Name as on bank account" value={form.bank_account_name} onChange={e => upd("bank_account_name", e.target.value)} /></div>
               </div>
               <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "8px" }}>Bank details used for salary/wage transfers</div>
@@ -775,7 +775,7 @@ const StaffProfile = ({ staffId, onBack, onUpdated, roles, userProfile }) => {
           <div style={styles.grid(2)}>
             {[
               ["Full Name", staff.full_name],
-              ["Date of Birth", staff.date_of_birth],
+              ["Date of Birth", fmtDate(staff.date_of_birth)],
               ["Gender", staff.gender],
               ["Marital Status", staff.marital_status],
               ["State of Origin", staff.state_of_origin],
@@ -940,7 +940,7 @@ const StaffProfile = ({ staffId, onBack, onUpdated, roles, userProfile }) => {
                     <tr key={doc.id}>
                       <td style={styles.td}><span style={styles.badge(theme.blue)}>{doc.document_label}</span></td>
                       <td style={styles.td}>{doc.file_name}</td>
-                      <td style={styles.td}>{doc.uploaded_at ? new Date(doc.uploaded_at).toLocaleDateString() : "—"}</td>
+                      <td style={styles.td}>{fmtDay(doc.uploaded_at)}</td>
                       <td style={styles.td}>
                         <div style={{ display: "flex", gap: "6px" }}>
                           <a href={doc.displayUrl || '#'} target="_blank" rel="noopener noreferrer" style={{ ...styles.btn("secondary"), padding: "4px 10px", fontSize: "11px", textDecoration: "none" }}>View</a>
@@ -1251,7 +1251,7 @@ const AttendanceTab = () => {
     try {
       const records = rows.map(r => ({ staff_id: r.staff_id, date: attendanceDate, present: r.present, hours_worked: r.hours_worked ? parseFloat(r.hours_worked) : null, notes: r.notes || null, recorded_by: "Admin" }));
       await attendanceService.saveAll(records);
-      setAlert({ type: "success", msg: `Attendance saved for ${attendanceDate} (${rows.filter(r => r.present).length} present, ${rows.filter(r => !r.present).length} absent).` });
+      setAlert({ type: "success", msg: `Attendance saved for ${fmtDate(attendanceDate)} (${rows.filter(r => r.present).length} present, ${rows.filter(r => !r.present).length} absent).` });
     } catch (e) {
       const msg = e.message?.includes('not active') || e.message?.includes('not eligible')
         ? 'This staff member is not active and cannot be added to attendance/payroll.'
@@ -1312,7 +1312,7 @@ const AttendanceTab = () => {
             <div style={{ ...styles.card, textAlign: "center", padding: "40px", color: theme.textMuted }}>No active staff found.</div>
           ) : (
             <div style={styles.card}>
-              <div style={styles.sectionTitle}>Staff Attendance — {attendanceDate}</div>
+              <div style={styles.sectionTitle}>Staff Attendance — {fmtDate(attendanceDate)}</div>
               <table style={styles.table}>
                 <thead><tr>{["Name","Role","Type","Present/Absent","Hours Worked","Notes"].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
                 <tbody>
@@ -1327,7 +1327,7 @@ const AttendanceTab = () => {
                           <button onClick={() => updateRow(r.staff_id, "present", false)} style={{ padding: "5px 14px", borderRadius: "6px", fontSize: "12px", fontWeight: "600", cursor: "pointer", border: "none", background: !r.present ? theme.red : theme.surface, color: !r.present ? "#fff" : theme.textMuted }}>Absent</button>
                         </div>
                       </td>
-                      <td style={styles.td}><input style={{ ...styles.input, width: "80px" }} type="number" placeholder="8" value={r.hours_worked} onChange={e => updateRow(r.staff_id, "hours_worked", e.target.value)} /></td>
+                      <td style={styles.td}><input style={{ ...styles.input, width: "80px" }} type="number" inputMode="decimal" placeholder="8" value={r.hours_worked} onChange={e => updateRow(r.staff_id, "hours_worked", e.target.value)} /></td>
                       <td style={styles.td}><input style={styles.input} placeholder="Optional note" value={r.notes} onChange={e => updateRow(r.staff_id, "notes", e.target.value)} /></td>
                     </tr>
                   ))}
@@ -1506,7 +1506,7 @@ const LeaveBalancesTab = ({ userProfile }) => {
           </div>
           {policyActive && policy?.activated_at && (
             <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '12px' }}>
-              Activated {new Date(policy.activated_at).toLocaleString()}
+              Activated {fmtDateTime(policy.activated_at)}
             </div>
           )}
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -1599,7 +1599,7 @@ const LeaveBalancesTab = ({ userProfile }) => {
                     <td style={styles.td}>
                       {isMD && !policyActive && ann ? (
                         <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-                          <input style={{ ...styles.input, width: '60px', padding: '4px 6px' }} type="number" min="0"
+                          <input style={{ ...styles.input, width: '60px', padding: '4px 6px' }} type="number" inputMode="decimal" min="0"
                             value={entitlementEdits[annKey] ?? ann.entitled_days}
                             onChange={e => setEntitlementEdits(ed => ({ ...ed, [annKey]: e.target.value }))} />
                           {entitlementEdits[annKey] !== undefined && (
@@ -1617,7 +1617,7 @@ const LeaveBalancesTab = ({ userProfile }) => {
                     <td style={styles.td}>
                       {isMD && !policyActive && sick ? (
                         <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-                          <input style={{ ...styles.input, width: '60px', padding: '4px 6px' }} type="number" min="0"
+                          <input style={{ ...styles.input, width: '60px', padding: '4px 6px' }} type="number" inputMode="decimal" min="0"
                             value={entitlementEdits[sickKey] ?? sick.entitled_days}
                             onChange={e => setEntitlementEdits(ed => ({ ...ed, [sickKey]: e.target.value }))} />
                           {entitlementEdits[sickKey] !== undefined && (
@@ -2001,7 +2001,7 @@ const PayrollTab = ({ userProfile }) => {
                       <td style={styles.td}><span style={styles.badge(l.staff_type === "permanent" ? theme.blue : theme.accent)}>{l.staff_type}</span></td>
                       <td style={styles.td}><strong style={{ color: theme.accent }}>{naira(l.amount_due)}</strong></td>
                       <td style={styles.td}>{(l.deductions || 0) > 0 ? <span style={{ color: theme.red }}>−{naira(l.deductions)}{leaveDeductionDerived > 0 && <span style={{ fontSize: "11px", color: theme.textMuted, display: "block" }}>{(l.advance_deduction || 0) > 0 && <>Loan {naira(l.advance_deduction)} + </>}Leave {naira(leaveDeductionDerived)}</span>}</span> : <span style={{ color: theme.textMuted }}>—</span>}</td>
-                      <td style={styles.td}>{editable ? <input style={{ ...styles.input, width: "110px" }} type="number" value={e.amount_paid} onChange={ev => setPaymentEdits(pe => ({ ...pe, [l.id]: { ...pe[l.id], amount_paid: ev.target.value } }))} /> : naira(l.amount_paid)}</td>
+                      <td style={styles.td}>{editable ? <input style={{ ...styles.input, width: "110px" }} type="number" inputMode="decimal" value={e.amount_paid} onChange={ev => setPaymentEdits(pe => ({ ...pe, [l.id]: { ...pe[l.id], amount_paid: ev.target.value } }))} /> : naira(l.amount_paid)}</td>
                       <td style={styles.td}>{editable ? <input type="date" style={{ ...styles.input, width: "130px" }} value={e.payment_date} onChange={ev => setPaymentEdits(pe => ({ ...pe, [l.id]: { ...pe[l.id], payment_date: ev.target.value } }))} /> : l.payment_date || "—"}</td>
                       <td style={styles.td}>{editable ? <select style={{ ...styles.input, width: "110px" }} value={e.payment_method} onChange={ev => setPaymentEdits(pe => ({ ...pe, [l.id]: { ...pe[l.id], payment_method: ev.target.value } }))}><option value="cash">Cash</option><option value="transfer">Transfer</option></select> : l.payment_method || "—"}</td>
                       <td style={styles.td}>{l.notes || "—"}</td>
@@ -2146,7 +2146,7 @@ const OnboardingTab = () => {
                         />
                       </td>
                       <td style={styles.td}>{row?.completed_by || '—'}</td>
-                      <td style={styles.td}>{row?.completed_at ? new Date(row.completed_at).toLocaleDateString('en-GB') : '—'}</td>
+                      <td style={styles.td}>{fmtDay(row?.completed_at)}</td>
                     </tr>
                   );
                 })}

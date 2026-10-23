@@ -293,8 +293,8 @@ const BalanceSheetTab = ({ userProfile }) => {
             <div style={{ ...s.card, background: theme.surface, marginBottom: '14px' }}>
               <div style={{ fontWeight: '700', marginBottom: '10px', fontSize: '13px' }}>Edit Balance Entry</div>
               <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-                <div><div style={s.label}>Cost / Amount (₦)</div><input type="number" style={s.input} value={editVal.amount} onChange={e => setEditVal(v => ({...v, amount: e.target.value}))} /></div>
-                <div><div style={s.label}>Accumulated Depreciation (₦)</div><input type="number" style={s.input} value={editVal.depreciation_amount} onChange={e => setEditVal(v => ({...v, depreciation_amount: e.target.value}))} /></div>
+                <div><div style={s.label}>Cost / Amount (₦)</div><input type="number" inputMode="decimal" style={s.input} value={editVal.amount} onChange={e => setEditVal(v => ({...v, amount: e.target.value}))} /></div>
+                <div><div style={s.label}>Accumulated Depreciation (₦)</div><input type="number" inputMode="decimal" style={s.input} value={editVal.depreciation_amount} onChange={e => setEditVal(v => ({...v, depreciation_amount: e.target.value}))} /></div>
                 <div style={{ flex: 2 }}><div style={s.label}>Notes</div><input style={{ ...s.input, width: '100%' }} value={editVal.notes} onChange={e => setEditVal(v => ({...v, notes: e.target.value}))} /></div>
               </div>
               <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
@@ -459,7 +459,7 @@ const BalanceSheetTab = ({ userProfile }) => {
               {showAdjForm && (
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '10px' }}>
                   <input style={s.input} placeholder="Account name" value={adjForm.account_name} onChange={e => setAdjForm(v => ({...v, account_name: e.target.value}))} />
-                  <input type="number" style={s.input} placeholder="Amount (₦)" value={adjForm.amount} onChange={e => setAdjForm(v => ({...v, amount: e.target.value}))} />
+                  <input type="number" inputMode="decimal" style={s.input} placeholder="Amount (₦)" value={adjForm.amount} onChange={e => setAdjForm(v => ({...v, amount: e.target.value}))} />
                   <input style={s.input} placeholder="Reason" value={adjForm.reason} onChange={e => setAdjForm(v => ({...v, reason: e.target.value}))} />
                   <button style={s.btn('primary')} onClick={addAdj}>Add</button>
                   <button style={s.btn('secondary')} onClick={() => setShowAdjForm(false)}>Cancel</button>
@@ -857,7 +857,7 @@ const CashFlowTab = ({ userProfile }) => {
               {showAdjForm && (
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '10px' }}>
                   <input style={s.input} placeholder="Description (include: invest/loan/capital for correct section)" value={adjForm.account_name} onChange={e => setAdjForm(v => ({...v, account_name: e.target.value}))} />
-                  <input type="number" style={s.input} placeholder="Amount (₦, negative for outflows)" value={adjForm.amount} onChange={e => setAdjForm(v => ({...v, amount: e.target.value}))} />
+                  <input type="number" inputMode="decimal" style={s.input} placeholder="Amount (₦, negative for outflows)" value={adjForm.amount} onChange={e => setAdjForm(v => ({...v, amount: e.target.value}))} />
                   <input style={s.input} placeholder="Reason" value={adjForm.reason} onChange={e => setAdjForm(v => ({...v, reason: e.target.value}))} />
                   <button style={s.btn('primary')} onClick={addAdj}>Add</button>
                   <button style={s.btn('secondary')} onClick={() => setShowAdjForm(false)}>Cancel</button>

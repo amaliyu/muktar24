@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { suppliersService, supplierTransactionsService, supplierDocumentsService } from '../services/suppliers'
 import { expensesService } from '../services/accounting'
 import { supabase } from '../lib/supabase'
-import { ConfirmDialog, fmtDate } from './site/siteUi'
+import { ConfirmDialog, fmtDate, fmtDay } from './site/siteUi'
 
 const theme = {
   bg: "#0f1117", surface: "#1a1d27", card: "#21263a", border: "#2e3452",
@@ -238,7 +238,7 @@ const TransactionsTab = ({ supplierId, companyName }) => {
           <div style={{ fontWeight: '700', marginBottom: '12px' }}>Record Payment to {companyName}</div>
           <div style={styles.grid(3)}>
             <div style={styles.formGroup}><label style={styles.label}>Date</label><input style={styles.input} type="date" value={payForm.transaction_date} onChange={e => setPayForm(f => ({ ...f, transaction_date: e.target.value }))} /></div>
-            <div style={styles.formGroup}><label style={styles.label}>Amount (₦) *</label><input style={styles.input} type="number" value={payForm.amount} onChange={e => setPayForm(f => ({ ...f, amount: e.target.value }))} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Amount (₦) *</label><input style={styles.input} type="number" inputMode="decimal" value={payForm.amount} onChange={e => setPayForm(f => ({ ...f, amount: e.target.value }))} /></div>
             <div style={styles.formGroup}><label style={styles.label}>Payment Method</label>
               <select style={styles.input} value={payForm.payment_method} onChange={e => setPayForm(f => ({ ...f, payment_method: e.target.value }))}>
                 {['Bank Transfer', 'Cash', 'Cheque', 'Mobile Transfer'].map(m => <option key={m}>{m}</option>)}
@@ -449,9 +449,9 @@ const SupplierDocumentsTab = ({ supplierId }) => {
             <div key={d.id} style={{ ...styles.row, ...styles.card, padding: '12px 16px' }}>
               <div style={{ flex: 1 }}>
                 <div style={{ fontWeight: '600', fontSize: '13px' }}>{d.document_label}</div>
-                <div style={{ fontSize: '11px', color: theme.textMuted }}>{d.file_name} {d.file_size ? `· ${(d.file_size / 1024).toFixed(0)} KB` : ''} · {new Date(d.uploaded_at).toLocaleDateString('en-NG')}</div>
+                <div style={{ fontSize: '11px', color: theme.textMuted }}>{d.file_name} {d.file_size ? `· ${(d.file_size / 1024).toFixed(0)} KB` : ''} · {fmtDay(d.uploaded_at)}</div>
               </div>
-              <a href={docUrls[d.id] || undefined} target="_blank" rel="noreferrer" style={{ fontSize: '12px', color: theme.blue }}>View</a>
+              <a className="m-tap" href={docUrls[d.id] || undefined} target="_blank" rel="noreferrer" style={{ fontSize: '12px', color: theme.blue }}>View</a>
               <button style={{ ...styles.btn('danger'), padding: '3px 8px', fontSize: '11px' }} onClick={() => setConfirmDel(d)}>Delete</button>
             </div>
           ))}
