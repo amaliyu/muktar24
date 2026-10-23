@@ -716,8 +716,8 @@ const VehicleProfile = ({ vehicle: initialVehicle, staff, staffMap, onBack, onUp
             ['Assigned Driver', staffMap?.[vehicle.assigned_driver_id]?.full_name || '—'],
             ['Purchase Date', fmtDate(vehicle.purchase_date)],
             ['Purchase Price', vehicle.purchase_price ? naira(vehicle.purchase_price) : '—'],
-            ['Insurance Expiry', vehicle.insurance_expiry_date || '—'],
-            ['Road Worthiness Expiry', vehicle.road_worthiness_expiry_date || '—'],
+            ['Insurance Expiry', fmtDate(vehicle.insurance_expiry_date)],
+            ['Road Worthiness Expiry', fmtDate(vehicle.road_worthiness_expiry_date)],
           ].map(([label, val]) => (
             <div key={label} style={{ padding: '12px 0', borderBottom: `1px solid ${theme.border}22`, display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ fontSize: '12px', color: theme.textMuted }}>{label}</span>
