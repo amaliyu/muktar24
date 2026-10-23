@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { notificationsService } from '../services/notifications'
+import { Z } from '../lib/zIndex'
 
 const theme = {
   bg: "#0f1117", surface: "#1a1d27", card: "#21263a", border: "#2e3452",
-  text: "#e8eaf0", textMuted: "#6b7280", accent: "#f5a623",
+  text: "#e8eaf0", textMuted: "#a0a7bf", accent: "#f5a623",
   green: "#2dd4a0", red: "#f06b6b", blue: "#5b8dee",
 }
 
@@ -142,7 +143,7 @@ export default function NotificationBell({ userProfile, onNavigate, isMobile }) 
     position: 'fixed',
     top: isMobile ? '10px' : '14px',
     right: isMobile ? '12px' : '28px',
-    zIndex: 400,
+    zIndex: Z.floating,
   }
 
   const buttonStyle = {
@@ -150,8 +151,9 @@ export default function NotificationBell({ userProfile, onNavigate, isMobile }) 
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    width: '36px',
-    height: '36px',
+    // 44×44 on phones (touch target); compact on desktop.
+    width: isMobile ? '44px' : '36px',
+    height: isMobile ? '44px' : '36px',
     background: theme.surface,
     border: `1px solid ${theme.border}`,
     borderRadius: '8px',

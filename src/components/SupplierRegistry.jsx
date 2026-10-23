@@ -2,11 +2,12 @@ import React, { useState, useEffect } from 'react'
 import { suppliersService, supplierTransactionsService, supplierDocumentsService } from '../services/suppliers'
 import { expensesService } from '../services/accounting'
 import { supabase } from '../lib/supabase'
+import { ConfirmDialog, fmtDate } from './site/siteUi'
 
 const theme = {
   bg: "#0f1117", surface: "#1a1d27", card: "#21263a", border: "#2e3452",
   accent: "#f5a623", accentDim: "#c47d0e", green: "#2dd4a0", red: "#f06b6b",
-  blue: "#5b8dee", text: "#e8eaf0", textMuted: "#7c839e", textDim: "#4a5175",
+  blue: "#5b8dee", text: "#e8eaf0", textMuted: "#a0a7bf", textDim: "#8a91ac",
 }
 const styles = {
   page: { color: theme.text, fontFamily: "'DM Sans','Segoe UI',sans-serif" },
@@ -158,6 +159,7 @@ const TransactionsTab = ({ supplierId, companyName }) => {
   const [showPayForm, setShowPayForm] = useState(false)
   const [saving, setSaving] = useState(false)
   const [alert, setAlert] = useState(null)
+  const [confirmDel, setConfirmDel] = useState(null)
   const [payForm, setPayForm] = useState({ transaction_date: todayStr(), amount: '', description: '', reference: '', payment_method: 'Bank Transfer', create_expense: true })
 
   const load = async () => {
@@ -202,7 +204,6 @@ const TransactionsTab = ({ supplierId, companyName }) => {
   }
 
   const handleDelete = async (id) => {
-    if (!window.confirm('Delete this transaction?')) return
     try { await supplierTransactionsService.delete(id); await load() }
     catch (e) { setAlert({ type: 'error', msg: e.message }) }
   }
@@ -210,6 +211,7 @@ const TransactionsTab = ({ supplierId, companyName }) => {
   return (
     <div>
       {alert && <AlertBar msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
+      {confirmDel && <ConfirmDialog title={`Delete the ${confirmDel.transaction_type} of ${naira(confirmDel.amount)} on ${fmtDate(confirmDel.transaction_date)} for ${companyName || 'this supplier'}?`} body="This cannot be undone." confirmLabel="Delete transaction" danger onCancel={() => setConfirmDel(null)} onConfirm={() => { const x = confirmDel; setConfirmDel(null); handleDelete(x.id) }} />}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '20px' }}>
         {[
           { label: 'Total Purchased', value: naira(totalPurchased), color: theme.red },
@@ -275,7 +277,7 @@ const TransactionsTab = ({ supplierId, companyName }) => {
                 <td style={styles.td}>{t.transaction_type === 'purchase' ? <strong style={{ color: theme.red }}>{naira(t.amount)}</strong> : <span style={{ color: theme.textMuted }}>—</span>}</td>
                 <td style={styles.td}>{t.transaction_type === 'payment' ? <strong style={{ color: theme.green }}>{naira(t.amount)}</strong> : <span style={{ color: theme.textMuted }}>—</span>}</td>
                 <td style={styles.td}>{t.reference || '—'}</td>
-                <td style={styles.td}><button style={{ ...styles.btn('danger'), padding: '2px 7px', fontSize: '11px' }} onClick={() => handleDelete(t.id)}>×</button></td>
+                <td style={styles.td}><button style={{ ...styles.btn('danger'), padding: '2px 7px', fontSize: '11px' }} onClick={() => setConfirmDel(t)} aria-label="Delete transaction">×</button></td>
               </tr>
             ))}
           </tbody>
@@ -381,6 +383,7 @@ const SupplierDocumentsTab = ({ supplierId }) => {
   const [uploading, setUploading] = useState(false)
   const [label, setLabel] = useState('')
   const [alert, setAlert] = useState(null)
+  const [confirmDel, setConfirmDel] = useState(null)
 
   const DOC_LABELS = ['Registration Certificate', 'Tax Clearance', 'Product Catalogue', 'Contract Agreement', 'Quality Certificate', 'Other']
 
@@ -412,7 +415,6 @@ const SupplierDocumentsTab = ({ supplierId }) => {
   }
 
   const handleDelete = async (doc) => {
-    if (!window.confirm('Delete this document?')) return
     try { await supplierDocumentsService.delete(doc.id, doc.file_url); await load() }
     catch (e) { setAlert({ type: 'error', msg: e.message }) }
   }
@@ -420,6 +422,7 @@ const SupplierDocumentsTab = ({ supplierId }) => {
   return (
     <div>
       {alert && <AlertBar msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
+      {confirmDel && <ConfirmDialog title={`Delete the document "${confirmDel.document_label}"?`} body={`${confirmDel.file_name || 'The file'} is removed from storage. This cannot be undone.`} confirmLabel="Delete document" danger onCancel={() => setConfirmDel(null)} onConfirm={() => { const x = confirmDel; setConfirmDel(null); handleDelete(x) }} />}
       <div style={{ ...styles.row, marginBottom: '16px' }}>
         <select style={{ ...styles.input, width: '200px' }} value={label} onChange={e => setLabel(e.target.value)}>
           <option value="">— Select document type —</option>
@@ -441,7 +444,7 @@ const SupplierDocumentsTab = ({ supplierId }) => {
                 <div style={{ fontSize: '11px', color: theme.textMuted }}>{d.file_name} {d.file_size ? `· ${(d.file_size / 1024).toFixed(0)} KB` : ''} · {new Date(d.uploaded_at).toLocaleDateString('en-NG')}</div>
               </div>
               <a href={docUrls[d.id] || undefined} target="_blank" rel="noreferrer" style={{ fontSize: '12px', color: theme.blue }}>View</a>
-              <button style={{ ...styles.btn('danger'), padding: '3px 8px', fontSize: '11px' }} onClick={() => handleDelete(d)}>Delete</button>
+              <button style={{ ...styles.btn('danger'), padding: '3px 8px', fontSize: '11px' }} onClick={() => setConfirmDel(d)}>Delete</button>
             </div>
           ))}
         </div>

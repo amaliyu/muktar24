@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { getSignedDocUrl } from '../../services/storage'
 import { longDate } from '../../utils/siteNotices'
+import { Z } from '../../lib/zIndex'
 
 // Shared look for the Phase 7B-1 site pages. Same dark palette as App.jsx so
 // the pages sit in the existing app; house rules applied on top: tabular
@@ -8,7 +9,7 @@ import { longDate } from '../../utils/siteNotices'
 export const theme = {
   bg: '#0f1117', surface: '#1a1d27', card: '#21263a', border: '#2e3452',
   accent: '#f5a623', green: '#2dd4a0', red: '#f06b6b', blue: '#5b8dee',
-  text: '#e8eaf0', textMuted: '#7c839e', textDim: '#4a5175',
+  text: '#e8eaf0', textMuted: '#a0a7bf', textDim: '#8a91ac',
 }
 
 const num = { fontVariantNumeric: 'tabular-nums' }
@@ -155,9 +156,10 @@ export const CopyButton = ({ text, label = 'Copy notice text' }) => {
 }
 
 export function useIsMobile() {
-  const [m, setM] = useState(typeof window !== 'undefined' && window.innerWidth < 768)
+  // <= 768 matches the App shell and the phone CSS breakpoint (max-width: 768px).
+  const [m, setM] = useState(typeof window !== 'undefined' && window.innerWidth <= 768)
   useEffect(() => {
-    const h = () => setM(window.innerWidth < 768)
+    const h = () => setM(window.innerWidth <= 768)
     window.addEventListener('resize', h)
     return () => window.removeEventListener('resize', h)
   }, [])
@@ -165,7 +167,7 @@ export function useIsMobile() {
 }
 
 export const ConfirmDialog = ({ title, body, confirmLabel = 'Confirm', danger = false, children, onConfirm, onCancel, busy = false, confirmDisabled = false }) => (
-  <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '16px' }}>
+  <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: Z.modal, padding: '16px' }}>
     <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: '8px', padding: '20px', width: '100%', maxWidth: '440px', boxShadow: '0 8px 24px rgba(0,0,0,.4)' }}>
       <div style={{ fontSize: '16px', fontWeight: '700', color: theme.text, marginBottom: '8px' }}>{title}</div>
       {body && <div style={{ fontSize: '13px', color: theme.textMuted, marginBottom: '12px', lineHeight: 1.45 }}>{body}</div>}

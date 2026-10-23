@@ -5,7 +5,7 @@ import { supabase } from '../lib/supabase'
 const theme = {
   bg: '#0f1117', surface: '#1a1d27', card: '#21263a', border: '#2e3452',
   accent: '#f5a623', green: '#2dd4a0', red: '#f06b6b', blue: '#5b8dee',
-  text: '#e8eaf0', textMuted: '#7c839e',
+  text: '#e8eaf0', textMuted: '#a0a7bf',
 }
 
 const naira = (n) => `₦${Math.round(Number(n) || 0).toLocaleString()}`

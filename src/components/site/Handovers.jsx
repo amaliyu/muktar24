@@ -5,6 +5,7 @@ import { productsService } from '../../services/products'
 import { siteContractsService, lagosToday } from '../../services/siteContracts'
 import { hasRole } from '../../lib/roles'
 import { compressImage } from '../../utils/compressImage'
+import { handoverYardWarning } from '../../utils/handoverYard'
 import { theme, ui, Pill, fmtQty, fmtDate, countdown, daysFrom, ErrorBox, SkeletonRows, PhotoLink, ConfirmDialog, StackTable } from './siteUi'
 
 // Phase 7B-1 — blocks handed to the client and the client's verdict.
@@ -37,6 +38,7 @@ export default function Handovers({ userProfile }) {
   const [delTarget, setDelTarget] = useState(null)
   const [dlgBusy, setDlgBusy] = useState(false)
   const [dlgErr, setDlgErr] = useState(null)
+  const [yardConfirm, setYardConfirm] = useState(null)   // warning text awaiting "Save anyway"
 
   useEffect(() => {
     productsService.getActive().then(p => setProducts(p.filter(x => x.is_own_production !== false))).catch(e => setFormErr(e))
@@ -69,9 +71,22 @@ export default function Handovers({ userProfile }) {
   const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }))
   const formProblem = !form.siteId ? 'Choose the site.' : !form.blockType ? 'Choose the block type.' : !(Number(form.qty) > 0) ? 'Enter the quantity handed over.' : !form.date ? 'Enter the date.' : null
 
-  const submit = async (e) => {
+  const submit = (e) => {
     e.preventDefault()
     if (formProblem || busy) return
+    // Compare with the yard balance first; a missing yard row means 0 in the
+    // yard. If the yard did not load, there is nothing to compare against.
+    const warning = handoverYardWarning({
+      qty: form.qty,
+      balance: err || loading ? null : (formYard ? formYard.in_yard : 0),
+      blockType: form.blockType,
+      siteName: siteName(form.siteId, sites),
+    })
+    if (warning) { setYardConfirm(warning); return }
+    save()
+  }
+
+  const save = async () => {
     setBusy(true); setFormErr(null); setOk('')
     let photoPath = null
     let photoWarn = ''
@@ -306,6 +321,16 @@ export default function Handovers({ userProfile }) {
             <textarea id="r-notes" style={ui.textarea} value={rectify.notes} onChange={e => setRectify(v => ({ ...v, notes: e.target.value }))} /></div>
           <ErrorBox error={dlgErr} />
         </ConfirmDialog>
+      )}
+
+      {yardConfirm && (
+        <ConfirmDialog
+          title="Yard balance too low"
+          body={yardConfirm}
+          confirmLabel="Save anyway"
+          onCancel={() => setYardConfirm(null)}
+          onConfirm={() => { setYardConfirm(null); save() }}
+        />
       )}
 
       {delTarget && (

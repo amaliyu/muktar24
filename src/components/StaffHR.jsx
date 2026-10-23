@@ -9,11 +9,12 @@ import { rolesService, documentsService, hrStaffService, photoService } from '..
 import { generatePayrollPDF } from '../utils/generatePayrollPDF';
 import { generateIDCardPDF, generateBusinessCardPDF } from '../utils/cardGenerator';
 import { supabase } from '../lib/supabase';
+import { Z } from '../lib/zIndex'
 
 const theme = {
   bg: "#0f1117", surface: "#1a1d27", card: "#21263a", border: "#2e3452",
   accent: "#f5a623", accentDim: "#c47d0e", green: "#2dd4a0", red: "#f06b6b",
-  blue: "#5b8dee", text: "#e8eaf0", textMuted: "#7c839e", textDim: "#4a5175",
+  blue: "#5b8dee", text: "#e8eaf0", textMuted: "#a0a7bf", textDim: "#8a91ac",
 };
 const styles = {
   btn: (variant) => ({ padding: "8px 18px", borderRadius: "8px", fontSize: "13px", fontWeight: "600", cursor: "pointer", border: variant === "secondary" ? `1px solid ${theme.border}` : "none", background: variant === "primary" ? theme.accent : variant === "danger" ? theme.red : theme.surface, color: variant === "primary" ? "#000" : variant === "danger" ? "#fff" : theme.textMuted }),
@@ -361,7 +362,7 @@ const StaffFormModal = ({ onClose, onSaved, editTarget, roles }) => {
   const tabs = ["Personal Info", "Employment", "Contact & Emergency", "Next of Kin", "Bank Details"];
 
   return (
-    <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.7)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+    <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.7)", zIndex: Z.modal, display: "flex", alignItems: "center", justifyContent: "center" }}>
       <div style={{ background: theme.card, borderRadius: "12px", width: "760px", maxWidth: "95vw", maxHeight: "90vh", overflow: "hidden", display: "flex", flexDirection: "column" }}>
         {/* Header */}
         <div style={{ padding: "18px 24px", borderBottom: `1px solid ${theme.border}`, display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
@@ -1160,7 +1161,7 @@ const StaffDirectory = ({ onViewProfile, userProfile }) => {
       )}
 
       {pinTarget && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: Z.modal, display: "flex", alignItems: "center", justifyContent: "center" }}>
           <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: "12px", padding: "24px", width: "340px", maxWidth: "95vw" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
               <div style={{ fontWeight: "700", fontSize: "15px", color: theme.text }}>Set Kiosk PIN — {pinTarget.full_name}</div>

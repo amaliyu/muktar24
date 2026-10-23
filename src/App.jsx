@@ -74,11 +74,15 @@ import { photoService } from './services/hrService'
 import { generateIDCardPDF, generateBusinessCardPDF } from './utils/cardGenerator'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
+import { Z } from './lib/zIndex'
+import { defaultMachineId, resolveMachine } from './utils/productionMachine'
+import MobileScope from './components/MobileScope'
+import { ConfirmDialog, fmtDate } from './components/site/siteUi'
 
 const theme = {
   bg: "#0f1117", surface: "#1a1d27", card: "#21263a", border: "#2e3452",
   accent: "#f5a623", accentDim: "#c47d0e", green: "#2dd4a0", red: "#f06b6b",
-  blue: "#5b8dee", text: "#e8eaf0", textMuted: "#7c839e", textDim: "#4a5175",
+  blue: "#5b8dee", text: "#e8eaf0", textMuted: "#a0a7bf", textDim: "#8a91ac",
 };
 
 const styles = {
@@ -86,15 +90,15 @@ const styles = {
   sidebar: { width: "240px", minHeight: "100vh", background: theme.surface, borderRight: `1px solid ${theme.border}`, display: "flex", flexDirection: "column", position: "fixed", top: 0, left: 0, bottom: 0 },
   logo: { padding: "20px 20px 16px", borderBottom: `1px solid ${theme.border}` },
   logoTitle: { fontSize: "12px", fontWeight: "700", color: theme.accent, letterSpacing: "0.06em", textTransform: "uppercase", lineHeight: "1.3" },
-  logoSub: { fontSize: "10.5px", color: theme.textMuted, marginTop: "3px", lineHeight: "1.4" },
+  logoSub: { fontSize: "12px", color: theme.textMuted, marginTop: "3px", lineHeight: "1.4" },
   nav: { padding: "12px 0", flex: 1, overflowY: "auto" },
-  navSection: { padding: "8px 20px 4px", fontSize: "10px", fontWeight: "700", color: theme.textDim, letterSpacing: "0.12em", textTransform: "uppercase" },
+  navSection: { padding: "8px 20px 4px", fontSize: "11px", fontWeight: "700", color: theme.textDim, letterSpacing: "0.12em", textTransform: "uppercase" },
   navItem: (active) => ({ display: "flex", alignItems: "center", gap: "10px", padding: "9px 20px", fontSize: "13.5px", fontWeight: active ? "600" : "400", color: active ? theme.accent : theme.textMuted, background: active ? "rgba(245,166,35,0.08)" : "transparent", borderLeft: active ? `3px solid ${theme.accent}` : "3px solid transparent", cursor: "pointer", transition: "all 0.15s" }),
   main: { marginLeft: "240px", flex: 1, padding: "28px 32px", minHeight: "100vh" },
-  header: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "28px" },
+  header: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "12px", marginBottom: "28px" },
   pageTitle: { fontSize: "22px", fontWeight: "700", color: theme.text },
   pageSubtitle: { fontSize: "13px", color: theme.textMuted, marginTop: "3px" },
-  badge: (color) => ({ display: "inline-block", padding: "3px 10px", borderRadius: "20px", fontSize: "11px", fontWeight: "600", background: color + "22", color, border: `1px solid ${color}44` }),
+  badge: (color) => ({ display: "inline-block", padding: "3px 10px", borderRadius: "20px", fontSize: "12px", fontWeight: "600", background: color + "22", color, border: `1px solid ${color}44` }),
   grid: (cols) => ({ display: "grid", gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: "16px", marginBottom: "24px" }),
   card: { background: theme.card, border: `1px solid ${theme.border}`, borderRadius: "12px", padding: "20px" },
   statCard: (accent) => ({ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: "12px", padding: "20px", borderTop: `3px solid ${accent}` }),
@@ -254,7 +258,7 @@ const InvoiceEditorModal = ({ editor, setEditor, onSave, saving }) => {
   });
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', zIndex: 1000, overflowY: 'auto', padding: '24px 16px' }}>
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', zIndex: Z.modal, overflowY: 'auto', padding: '24px 16px' }}>
       <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: '12px', width: '100%', maxWidth: '720px' }}>
         <div style={{ padding: '20px 24px', borderBottom: `1px solid ${theme.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
@@ -348,7 +352,7 @@ const InvoiceEditorModal = ({ editor, setEditor, onSave, saving }) => {
 };
 
 const ConfirmModal = ({ msg, onConfirm, onCancel }) => (
-  <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+  <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: Z.modal }}>
     <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: "12px", padding: "28px 32px", maxWidth: "380px", width: "90%" }}>
       <div style={{ fontWeight: "700", fontSize: "15px", marginBottom: "10px", color: theme.text }}>Confirm Delete</div>
       <div style={{ fontSize: "13px", color: theme.textMuted, marginBottom: "24px", lineHeight: "1.5" }}>{msg}</div>
@@ -517,7 +521,7 @@ const Dashboard = ({ onNavigate, onOpenSite, userProfile }) => {
   if (isDriver) {
     return (
       <div>
-        <div style={styles.header}>
+        <div className="m-header" style={styles.header}>
           <div>
             <div style={styles.pageTitle}>{greeting}, {firstName} 👋</div>
             <div style={styles.pageSubtitle}>Business overview — Abuja Precast Concrete Limited</div>
@@ -526,7 +530,7 @@ const Dashboard = ({ onNavigate, onOpenSite, userProfile }) => {
         </div>
         {loading ? <Spinner /> : (
           <>
-            <div style={styles.grid(1)}>
+            <div className="m-grid" style={styles.grid(1)}>
               <StatCard label="My Waybills Today" value={myWaybillsToday} sub="Deliveries assigned today" accent={theme.blue} />
             </div>
             <div style={{ ...styles.card, color: theme.textMuted, fontSize: '14px' }}>
@@ -573,7 +577,7 @@ const Dashboard = ({ onNavigate, onOpenSite, userProfile }) => {
 
   return (
     <div>
-      <div style={styles.header}>
+      <div className="m-header" style={styles.header}>
         <div>
           <div style={styles.pageTitle}>{greeting}, {firstName} 👋</div>
           <div style={styles.pageSubtitle}>Business overview — Abuja Precast Concrete Limited</div>
@@ -604,12 +608,12 @@ const Dashboard = ({ onNavigate, onOpenSite, userProfile }) => {
       )}
       {loading ? <Spinner /> : (
         <>
-          {row1.length > 0 && <div style={styles.grid(row1.length)}>{row1}</div>}
-          {row2.length > 0 && <div style={styles.grid(row2.length)}>{row2}</div>}
+          {row1.length > 0 && <div className="m-grid" style={styles.grid(row1.length)}>{row1}</div>}
+          {row2.length > 0 && <div className="m-grid" style={styles.grid(row2.length)}>{row2}</div>}
           {row3.length > 0 && (
             <>
               <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em', marginTop: '8px', marginBottom: '8px' }}>Labour &amp; Loading</div>
-              <div style={styles.grid(row3.length)}>{row3}</div>
+              <div className="m-grid" style={styles.grid(row3.length)}>{row3}</div>
             </>
           )}
           {(showLpo || showSchedule || showPending) && (
@@ -656,13 +660,13 @@ const Dashboard = ({ onNavigate, onOpenSite, userProfile }) => {
                       <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
                         <span style={{ fontWeight: "700", color: theme.text, minWidth: "120px" }}>{v.vehicle_number}</span>
                         <span style={{ color: theme.textMuted, fontSize: "12px", flex: 1 }}>{v.vehicle_name || ""}</span>
-                        {insExpired  && <span style={{ fontSize: "11px", background: theme.red + "22", color: theme.red, padding: "2px 8px", borderRadius: "12px", fontWeight: "700" }}>Insurance EXPIRED {v.insurance_expiry_date}</span>}
-                        {insWarning  && <span style={{ fontSize: "11px", background: "#e67e2222", color: "#e67e22", padding: "2px 8px", borderRadius: "12px", fontWeight: "700" }}>Insurance WARNING — due {v.insurance_expiry_date}</span>}
-                        {insDue      && <span style={{ fontSize: "11px", background: theme.accent + "22", color: theme.accent, padding: "2px 8px", borderRadius: "12px", fontWeight: "600" }}>Insurance due {v.insurance_expiry_date}</span>}
-                        {rwExpired   && <span style={{ fontSize: "11px", background: theme.red + "22", color: theme.red, padding: "2px 8px", borderRadius: "12px", fontWeight: "700" }}>Road Worthiness EXPIRED {v.road_worthiness_expiry_date}</span>}
-                        {rwWarning   && <span style={{ fontSize: "11px", background: "#e67e2222", color: "#e67e22", padding: "2px 8px", borderRadius: "12px", fontWeight: "700" }}>Road Worthiness WARNING — due {v.road_worthiness_expiry_date}</span>}
-                        {rwDue       && <span style={{ fontSize: "11px", background: theme.accent + "22", color: theme.accent, padding: "2px 8px", borderRadius: "12px", fontWeight: "600" }}>Road Worthiness due {v.road_worthiness_expiry_date}</span>}
-                        {onNavigate  && <button onClick={() => onNavigate("vehicles")} style={{ fontSize: "11px", padding: "2px 10px", borderRadius: "12px", background: theme.blue + "22", color: theme.blue, border: `1px solid ${theme.blue}44`, cursor: "pointer", fontWeight: "600", marginLeft: "auto" }}>Update Documents →</button>}
+                        {insExpired  && <span style={{ fontSize: "12px", background: theme.red + "22", color: theme.red, padding: "2px 8px", borderRadius: "12px", fontWeight: "700" }}>Insurance EXPIRED {fmtDate(v.insurance_expiry_date)}</span>}
+                        {insWarning  && <span style={{ fontSize: "12px", background: "#e67e2222", color: "#e67e22", padding: "2px 8px", borderRadius: "12px", fontWeight: "700" }}>Insurance WARNING — due {fmtDate(v.insurance_expiry_date)}</span>}
+                        {insDue      && <span style={{ fontSize: "12px", background: theme.accent + "22", color: theme.accent, padding: "2px 8px", borderRadius: "12px", fontWeight: "600" }}>Insurance due {fmtDate(v.insurance_expiry_date)}</span>}
+                        {rwExpired   && <span style={{ fontSize: "12px", background: theme.red + "22", color: theme.red, padding: "2px 8px", borderRadius: "12px", fontWeight: "700" }}>Road Worthiness EXPIRED {fmtDate(v.road_worthiness_expiry_date)}</span>}
+                        {rwWarning   && <span style={{ fontSize: "12px", background: "#e67e2222", color: "#e67e22", padding: "2px 8px", borderRadius: "12px", fontWeight: "700" }}>Road Worthiness WARNING — due {fmtDate(v.road_worthiness_expiry_date)}</span>}
+                        {rwDue       && <span style={{ fontSize: "12px", background: theme.accent + "22", color: theme.accent, padding: "2px 8px", borderRadius: "12px", fontWeight: "600" }}>Road Worthiness due {fmtDate(v.road_worthiness_expiry_date)}</span>}
+                        {onNavigate  && <button onClick={() => onNavigate("vehicles")} style={{ fontSize: "12px", padding: "2px 10px", borderRadius: "12px", background: theme.blue + "22", color: theme.blue, border: `1px solid ${theme.blue}44`, cursor: "pointer", fontWeight: "600", marginLeft: "auto" }}>Update Documents →</button>}
                       </div>
                       {anyExpired && (
                         <div style={{ marginTop: "8px", fontSize: "12px", color: theme.red, fontWeight: "600", display: "flex", alignItems: "center", gap: "6px" }}>
@@ -685,7 +689,7 @@ const Dashboard = ({ onNavigate, onOpenSite, userProfile }) => {
                     <span style={{ color: theme.textMuted, fontSize: "12px" }}>{v.vehicle_number}</span>
                     <span style={{ fontWeight: "700", color: theme.accent }}>{naira(Number(v.monthly_rental_amount) || 0)}</span>
                     {v.owner_name && <span style={{ fontSize: "12px", color: theme.textMuted }}>→ {v.owner_name}</span>}
-                    <span style={{ fontSize: "11px", color: theme.textMuted, marginLeft: "auto" }}>Monthly rental — see Labour → Monthly tab</span>
+                    <span style={{ fontSize: "12px", color: theme.textMuted, marginLeft: "auto" }}>Monthly rental — see Labour → Monthly tab</span>
                   </div>
                 ))}
               </div>
@@ -697,9 +701,9 @@ const Dashboard = ({ onNavigate, onOpenSite, userProfile }) => {
               <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
                 {finishedGoods.map(fg => (
                   <div key={fg.id} style={{ background: theme.surface, borderRadius: "8px", padding: "12px 18px", flex: 1, minWidth: "120px", textAlign: "center" }}>
-                    <div style={{ fontSize: "11px", color: theme.textMuted, marginBottom: "4px" }}>{fg.block_type}</div>
+                    <div style={{ fontSize: "12px", color: theme.textMuted, marginBottom: "4px" }}>{fg.block_type}</div>
                     <div style={{ fontSize: "24px", fontWeight: "700", color: theme.accent }}>{Number(fg.quantity_in_yard || 0).toLocaleString()}</div>
-                    <div style={{ fontSize: "11px", color: theme.textMuted }}>{fg.unit || 'pieces'}</div>
+                    <div style={{ fontSize: "12px", color: theme.textMuted }}>{fg.unit || 'pieces'}</div>
                   </div>
                 ))}
               </div>
@@ -721,7 +725,7 @@ const Dashboard = ({ onNavigate, onOpenSite, userProfile }) => {
                         <td style={styles.td}><strong>{o.customer?.name || "—"}</strong></td>
                         <td style={styles.td}>{o.customer?.location || "—"}</td>
                         <td style={styles.td}><span style={styles.badge(statusColor)}>{o.status}</span></td>
-                        <td style={styles.td}><strong style={{ color: theme.accent }}>{naira(total)}</strong></td>
+                        <td className="m-key" style={styles.td}><strong style={{ color: theme.accent }}>{naira(total)}</strong></td>
                       </tr>
                     );
                   })}
@@ -770,20 +774,27 @@ const Production = ({ userProfile }) => {
   const [siteFilter, setSiteFilter] = useState("");
   const [machines, setMachines] = useState([]);
   const [machinesError, setMachinesError] = useState(null);
+  // Site the loaded `machines` list belongs to (null while loading).
+  const [machinesSite, setMachinesSite] = useState(null);
   const [stockWarning, setStockWarning] = useState(null);
 
-  // Machines at the form's site. Auto-pick when the site has exactly one.
+  // Machines at the form's site. Auto-pick when the site has exactly one;
+  // with several, the user must choose (resolveMachine blocks the save).
   useEffect(() => {
     if (!showForm) return;
     let alive = true;
+    const siteId = form.siteId || DUTSE_SITE_ID;
     setMachinesError(null);
-    sitesService.getMachines(form.siteId || DUTSE_SITE_ID)
+    setMachinesSite(null);
+    sitesService.getMachines(siteId)
       .then(ms => {
         if (!alive) return;
         setMachines(ms);
-        if (ms.length === 1) setForm(f => (f.assetId ? f : { ...f, assetId: ms[0].id }));
+        setMachinesSite(siteId);
+        const only = defaultMachineId(ms);
+        if (only) setForm(f => (f.assetId ? f : { ...f, assetId: only }));
       })
-      .catch(e => { console.error("Could not load machines:", e); if (alive) { setMachines([]); setMachinesError(e.message || "unknown error"); } });
+      .catch(e => { console.error("Could not load machines:", e); if (alive) { setMachines([]); setMachinesSite(siteId); setMachinesError(e.message || "unknown error"); } });
     return () => { alive = false; };
   }, [showForm, form.siteId]);
 
@@ -875,6 +886,9 @@ const Production = ({ userProfile }) => {
 
   const handleSave = async (skipDupCheck = false) => {
     if (!form.date || !form.produced) return setAlert({ type: "error", msg: "Date and quantity produced are required." });
+    if (machinesSite !== (form.siteId || DUTSE_SITE_ID)) return setAlert({ type: "error", msg: "The machines for this site are still loading. Try again in a moment." });
+    const machine = resolveMachine({ machines, selectedId: form.assetId, originalId: editTarget?.asset_id || null });
+    if (machine.error) return setAlert({ type: "error", msg: machine.error });
     // Create path only: warn (non-blocking) if a same-date + block-type entry
     // already exists. Fail open — a check error must never block a valid save.
     if (!editTarget && !skipDupCheck) {
@@ -893,8 +907,8 @@ const Production = ({ userProfile }) => {
       const entryData = {
         date: form.date, block_type: form.blockType,
         site_id: siteId,
-        // null lets the DB trigger pick the site's active machine
-        asset_id: form.assetId || null,
+        // null only when the site has no active machine (resolveMachine)
+        asset_id: machine.assetId,
         quantity_produced: parseInt(form.produced) || 0,
         cement_bags: parseFloat(form.cement) || 0,
         granite_dust_kg: parseFloat(form.granite) || 0,
@@ -971,13 +985,13 @@ const Production = ({ userProfile }) => {
             {(confirmDelete.diesel_litres > 0) && <li>Restore <strong style={{ color: theme.text }}>{confirmDelete.diesel_litres} L</strong> of diesel to inventory</li>}
             {((confirmDelete.damaged?.production || 0) + (confirmDelete.damaged?.stacking || 0) > 0) && <li>Reverse <strong style={{ color: theme.red }}>{(confirmDelete.damaged?.production || 0) + (confirmDelete.damaged?.stacking || 0)}</strong> damage records</li>}
           </ul>
-          <div style={{ fontSize: "11px", color: theme.red, marginTop: "10px" }}>This action cannot be undone.</div>
+          <div style={{ fontSize: "12px", color: theme.red, marginTop: "10px" }}>This action cannot be undone.</div>
         </div>}
         onConfirm={() => handleDelete(confirmDelete)}
         onCancel={() => setConfirmDelete(null)}
       />}
       {dupWarning && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: Z.modal }}>
           <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: "12px", padding: "28px 32px", maxWidth: "440px", width: "90%" }}>
             <div style={{ fontWeight: "700", fontSize: "15px", marginBottom: "10px", color: theme.text }}>Possible duplicate entry</div>
             <div style={{ fontSize: "13px", color: theme.textMuted, marginBottom: "24px", lineHeight: "1.5" }}>
@@ -990,7 +1004,7 @@ const Production = ({ userProfile }) => {
           </div>
         </div>
       )}
-      <div style={styles.header}>
+      <div className="m-header" style={styles.header}>
         <div>
           <div style={styles.pageTitle}>Production Log</div>
           <div style={styles.pageSubtitle}>Daily block production, material usage, and damage tracking</div>
@@ -1015,12 +1029,12 @@ const Production = ({ userProfile }) => {
       {showTargetForm && (
         <div style={{ ...styles.card, marginBottom: "20px", borderColor: theme.blue + "44" }}>
           <div style={styles.sectionTitle}>Set Daily Production Target</div>
-          <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", marginBottom: "14px" }}>
+          <div className="m-form" style={{ display: "flex", gap: "12px", flexWrap: "wrap", marginBottom: "14px" }}>
             <div style={styles.formGroup}><label style={styles.label}>Date</label><input style={{ ...styles.input, width: "160px" }} type="date" value={targetForm.date} onChange={e => setTargetForm({ ...targetForm, date: e.target.value })} /></div>
             <div style={styles.formGroup}><label style={styles.label}>Block Type</label><ProductSelect value={targetForm.blockType} onChange={v => setTargetForm({ ...targetForm, blockType: v })} style={{ ...styles.input, width: "240px" }} /></div>
-            <div style={styles.formGroup}><label style={styles.label}>Target Quantity</label><input style={{ ...styles.input, width: "140px" }} type="number" placeholder="e.g. 1000" value={targetForm.quantity} onChange={e => setTargetForm({ ...targetForm, quantity: e.target.value })} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Target Quantity</label><input style={{ ...styles.input, width: "140px" }} type="number" inputMode="numeric" placeholder="e.g. 1000" value={targetForm.quantity} onChange={e => setTargetForm({ ...targetForm, quantity: e.target.value })} /></div>
           </div>
-          <div style={styles.row}>
+          <div className="m-buttons" style={styles.row}>
             <button style={styles.btn("primary")} onClick={handleSaveTarget} disabled={savingTarget}>{savingTarget ? "Saving…" : "Save Target"}</button>
             <button style={styles.btn("secondary")} onClick={() => setShowTargetForm(false)}>Cancel</button>
           </div>
@@ -1038,13 +1052,13 @@ const Production = ({ userProfile }) => {
               const barColor = pct >= 100 ? theme.green : pct >= 70 ? theme.accent : theme.red;
               return (
                 <div key={t.id} style={{ background: theme.surface, borderRadius: "8px", padding: "12px 16px", flex: 1, minWidth: "200px", border: `1px solid ${theme.border}` }}>
-                  <div style={{ fontSize: "11px", color: theme.textMuted, marginBottom: "4px" }}>{t.block_type}</div>
+                  <div style={{ fontSize: "12px", color: theme.textMuted, marginBottom: "4px" }}>{t.block_type}</div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
                     <span style={{ fontSize: "20px", fontWeight: "700", color: barColor }}>{actualQty.toLocaleString()}</span>
                     <span style={{ fontSize: "12px", color: theme.textMuted }}>of {t.target_quantity.toLocaleString()}</span>
                   </div>
                   <div style={styles.progressBar()}><div style={styles.progressFill(pct, barColor)} /></div>
-                  <div style={{ fontSize: "11px", color: barColor, marginTop: "4px", fontWeight: "600" }}>{pct}% — {actualQty >= t.target_quantity ? "TARGET MET ✓" : `${(t.target_quantity - actualQty).toLocaleString()} remaining`}</div>
+                  <div style={{ fontSize: "12px", color: barColor, marginTop: "4px", fontWeight: "600" }}>{pct}% — {actualQty >= t.target_quantity ? "TARGET MET ✓" : `${(t.target_quantity - actualQty).toLocaleString()} remaining`}</div>
                 </div>
               );
             })}
@@ -1055,7 +1069,7 @@ const Production = ({ userProfile }) => {
       {showForm && (
         <div style={{ ...styles.card, marginBottom: "24px", borderColor: theme.accent + "44" }}>
           <div style={styles.sectionTitle}>{editTarget ? "Edit Production Entry" : "New Production Entry"}</div>
-          <div style={styles.grid(3)}>
+          <div className="m-form" style={styles.grid(3)}>
             <div style={styles.formGroup}>
               <label style={styles.label}>Site</label>
               <SitePicker value={form.siteId} onChange={v => setForm({ ...form, siteId: v, assetId: "" })} style={styles.input} />
@@ -1067,7 +1081,10 @@ const Production = ({ userProfile }) => {
                 {machines.map(m => <option key={m.id} value={m.id}>{m.code ? `${m.code} — ` : ""}{m.name}</option>)}
                 {form.assetId && !machines.some(m => m.id === form.assetId) && <option value={form.assetId}>Current machine (not active at this site)</option>}
               </select>
-              {machinesError && <div style={{ fontSize: "11px", color: theme.red, marginTop: "4px" }}>Could not load machines ({machinesError}).</div>}
+              {machinesError && <div style={{ fontSize: "12px", color: theme.red, marginTop: "4px" }}>Could not load machines ({machinesError}).</div>}
+              {!machinesError && machinesSite === (form.siteId || DUTSE_SITE_ID) && machines.length > 1 && !form.assetId && (
+                <div style={{ fontSize: "12px", color: theme.accent, marginTop: "4px" }}>This site has {machines.length} machines — choose one.</div>
+              )}
             </div>
             {[
               { label: "Date", key: "date", type: "date" },
@@ -1092,18 +1109,18 @@ const Production = ({ userProfile }) => {
             ].map(f => (
               <div key={f.key} style={styles.formGroup}>
                 <label style={styles.label}>{f.label}</label>
-                <input style={styles.input} type="number" placeholder={f.placeholder} value={form[f.key]} onChange={e => setForm({ ...form, [f.key]: e.target.value })} />
+                <input style={styles.input} type="number" inputMode={["produced", "dmgProd", "dmgStack"].includes(f.key) ? "numeric" : "decimal"} placeholder={f.placeholder} value={form[f.key]} onChange={e => setForm({ ...form, [f.key]: e.target.value })} />
               </div>
             ))}
           </div>
-          <div style={styles.row}>
+          <div className="m-buttons" style={styles.row}>
             <button style={styles.btn("primary")} onClick={() => handleSave()} disabled={saving}>{saving ? "Saving…" : editTarget ? "Update Entry" : "Save Entry"}</button>
             <button style={styles.btn("secondary")} onClick={() => { setShowForm(false); setForm(emptyForm); setEditTarget(null); }}>Cancel</button>
           </div>
         </div>
       )}
 
-      <div style={styles.grid(4)}>
+      <div className="m-grid" style={styles.grid(4)}>
         <StatCard label="Total Produced" value={fmt(totalProduced)} sub={`${shown.length} entries · ${scopeLabel}`} accent={theme.accent} />
         <StatCard label="Cement Used" value={`${fmt(totalCement)} bags`} sub={scopeLabel} accent={theme.blue} />
         <StatCard label="Diesel Used" value={`${fmt(totalDiesel)} L`} sub={scopeLabel} accent={theme.accentDim} />
@@ -1113,7 +1130,7 @@ const Production = ({ userProfile }) => {
       <div style={styles.card}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap", marginBottom: "14px" }}>
           <div style={{ ...styles.sectionTitle, marginBottom: 0 }}>Production Records</div>
-          <div style={{ width: "220px" }}><SitePicker allowAll value={siteFilter} onChange={setSiteFilter} style={styles.input} /></div>
+          <div className="m-full" style={{ width: "220px" }}><SitePicker allowAll value={siteFilter} onChange={setSiteFilter} style={styles.input} /></div>
         </div>
         {loading ? <Spinner /> : shown.length === 0 ? (
           <div style={{ textAlign: "center", padding: "40px", color: theme.textMuted, fontSize: "13px" }}>{records.length === 0 ? "No records yet. Log today's production to get started." : `No production records for ${scopeLabel}.`}</div>
@@ -1128,19 +1145,20 @@ const Production = ({ userProfile }) => {
                 return (
                   <tr key={p.id}>
                     <td style={styles.td}>
-                      {p.date}
+                      {fmtDate(p.date)}
+                      <div className="m-only" style={{ fontSize: "13px", fontWeight: "600", color: theme.blue }}>{p.block_type}</div>
                       {p.updated_at && (
-                        <div style={{ fontSize: "10px", color: theme.textMuted, marginTop: "2px", fontStyle: "italic" }} title={`Edited ${new Date(p.updated_at).toLocaleString()}`}>
+                        <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "2px", fontStyle: "italic" }} title={`Edited ${new Date(p.updated_at).toLocaleString()}`}>
                           (edited {fmtRelativeTime(p.updated_at)})
                         </div>
                       )}
                     </td>
                     <td style={styles.td}>
                       {siteName(p.site_id, sites)}
-                      {p.machine?.code && <div style={{ fontSize: "10px", color: theme.textMuted, marginTop: "2px" }}>{p.machine.code}</div>}
+                      {p.machine?.code && <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "2px" }}>{p.machine.code}</div>}
                     </td>
-                    <td style={styles.td}><span style={styles.badge(theme.blue)}>{p.block_type}</span></td>
-                    <td style={styles.td}>{fmt(p.quantity_produced)}</td>
+                    <td className="m-hide" style={styles.td}><span style={styles.badge(theme.blue)}>{p.block_type}</span></td>
+                    <td className="m-key" style={styles.td}>{fmt(p.quantity_produced)}</td>
                     <td style={styles.td}>{p.cement_bags}</td>
                     <td style={styles.td}>{fmt(p.granite_dust_kg)}</td>
                     <td style={styles.td}>{fmt(p.chippings_kg)}</td>
@@ -1148,10 +1166,10 @@ const Production = ({ userProfile }) => {
                     <td style={styles.td}><span style={styles.badge(p.damaged?.production > 0 ? theme.red : theme.green)}>{p.damaged?.production || 0}</span></td>
                     <td style={styles.td}><span style={styles.badge(p.damaged?.stacking > 0 ? theme.red : theme.green)}>{p.damaged?.stacking || 0}</span></td>
                     <td style={styles.td}><strong style={{ color: theme.green }}>{fmt(net)}</strong></td>
-                    <td style={styles.td}>
-                      <div style={{ display: "flex", gap: "6px" }}>
-                        <button style={{ ...styles.btn("secondary"), padding: "4px 10px", fontSize: "11px" }} onClick={() => startEdit(p)}>Edit</button>
-                        <button style={{ ...styles.btn("danger"), padding: "4px 10px", fontSize: "11px" }} onClick={() => setConfirmDelete(p)}>Delete</button>
+                    <td className="m-actions" style={styles.td}>
+                      <div style={{ display: "flex", gap: "8px" }}>
+                        <button style={{ ...styles.btn("secondary"), padding: "4px 10px", fontSize: "12px" }} onClick={() => startEdit(p)}>Edit</button>
+                        <button style={{ ...styles.btn("danger"), padding: "4px 10px", fontSize: "12px" }} onClick={() => setConfirmDelete(p)}>Delete</button>
                       </div>
                     </td>
                   </tr>
@@ -1668,7 +1686,7 @@ const Orders = ({ onNavigate, userProfile }) => {
       {confirmDelete && <ConfirmModal msg={confirmDelete.type === "payment" ? `Remove payment of ${naira(confirmDelete.amount_paid)} recorded on ${confirmDelete.payment_date}? This cannot be undone.` : `Delete order for ${confirmDelete.customer?.name}? This will also delete all invoices. This cannot be undone.`} onConfirm={() => confirmDelete.type === "payment" ? handleDeletePayment(confirmDelete.id) : handleDeleteOrder(confirmDelete.id)} onCancel={() => setConfirmDelete(null)} />}
       {confirmDeleteInvoice && <ConfirmModal msg={`Delete invoice ${confirmDeleteInvoice.invoice_number}? This cannot be undone.`} onConfirm={() => doDeleteInvoice(confirmDeleteInvoice)} onCancel={() => setConfirmDeleteInvoice(null)} />}
       {issueTarget && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: "16px" }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: Z.modal, padding: "16px" }}>
           <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: "12px", padding: "28px 32px", maxWidth: "440px", width: "100%" }}>
             <div style={{ fontWeight: "700", fontSize: "15px", marginBottom: "10px", color: theme.text }}>Issue invoice {issueTarget.invoice_number}?</div>
             <div style={{ fontSize: "13px", color: theme.textMuted, marginBottom: "24px", lineHeight: "1.55" }}>
@@ -1682,7 +1700,7 @@ const Orders = ({ onNavigate, userProfile }) => {
         </div>
       )}
       {cancelTarget && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: "16px" }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: Z.modal, padding: "16px" }}>
           <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: "12px", padding: "28px 32px", maxWidth: "440px", width: "100%" }}>
             <div style={{ fontWeight: "700", fontSize: "15px", marginBottom: "10px", color: theme.text }}>Cancel invoice {cancelTarget.invoice_number}</div>
             <div style={{ fontSize: "13px", color: theme.textMuted, marginBottom: "14px", lineHeight: "1.55" }}>
@@ -1697,7 +1715,7 @@ const Orders = ({ onNavigate, userProfile }) => {
         </div>
       )}
       <InvoiceEditorModal editor={invoiceEditor} setEditor={setInvoiceEditor} onSave={handleSaveInvoice} saving={invoicing} />
-      <div style={styles.header}>
+      <div className="m-header" style={styles.header}>
         <div>
           <div style={styles.pageTitle}>Orders & Invoicing</div>
           <div style={styles.pageSubtitle}>Customer orders, payment tracking, and delivery status</div>
@@ -2379,12 +2397,12 @@ const Waybills = ({ userProfile }) => {
             <li>Remove <strong style={{ color: theme.text }}>{Number(confirmDelete.quantity_received).toLocaleString()}</strong> blocks from {confirmDelete.receiver_name || "customer"}'s delivered count</li>
             {(confirmDelete.quantity_damaged > 0) && <li>Reverse <strong style={{ color: theme.red }}>{confirmDelete.quantity_damaged}</strong> transit damage record</li>}
           </ul>
-          <div style={{ fontSize: "11px", color: theme.red, marginTop: "10px" }}>This action cannot be undone.</div>
+          <div style={{ fontSize: "12px", color: theme.red, marginTop: "10px" }}>This action cannot be undone.</div>
         </div>}
         onConfirm={() => handleDeleteWaybill(confirmDelete)}
         onCancel={() => setConfirmDelete(null)}
       />}
-      <div style={styles.header}>
+      <div className="m-header" style={styles.header}>
         <div>
           <div style={styles.pageTitle}>Waybill Records</div>
           <div style={styles.pageSubtitle}>Track every delivery trip — loaded, received, and damaged quantities</div>
@@ -2403,7 +2421,7 @@ const Waybills = ({ userProfile }) => {
       {showForm && (
         <div style={{ ...styles.card, marginBottom: "24px", borderColor: theme.accent + "44" }}>
           <div style={styles.sectionTitle}>{editTarget ? `Edit Waybill — ${editTarget.waybill_number}` : "New Waybill Entry"}</div>
-          <div style={styles.grid(3)}>
+          <div className="m-form" style={styles.grid(3)}>
             <div style={styles.formGroup}>
               <label style={styles.label}>Date *</label>
               <input style={styles.input} type="date" value={form.waybillDate} onChange={e => setForm({ ...form, waybillDate: e.target.value })} />
@@ -2442,11 +2460,11 @@ const Waybills = ({ userProfile }) => {
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Quantity Loaded *</label>
-              <input style={styles.input} type="number" placeholder="e.g. 500" value={form.quantityLoaded} onChange={e => setForm({ ...form, quantityLoaded: e.target.value })} />
+              <input style={styles.input} type="number" inputMode="numeric" placeholder="e.g. 500" value={form.quantityLoaded} onChange={e => setForm({ ...form, quantityLoaded: e.target.value })} />
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Quantity Received</label>
-              <input style={styles.input} type="number" placeholder="e.g. 498" value={form.quantityReceived} onChange={e => setForm({ ...form, quantityReceived: e.target.value })} />
+              <input style={styles.input} type="number" inputMode="numeric" placeholder="e.g. 498" value={form.quantityReceived} onChange={e => setForm({ ...form, quantityReceived: e.target.value })} />
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Batch Number</label>
@@ -2455,7 +2473,7 @@ const Waybills = ({ userProfile }) => {
                 // existing waybill on a client-site batch is shown, not hidden.
                 <>
                   <div style={{ ...styles.input, color: theme.textMuted }}>{batchMap[form.batchId] || form.batchId} — {siteName(batchSiteMap[form.batchId], wbSites)}</div>
-                  <div style={{ fontSize: "11px", color: theme.red, marginTop: "4px" }}>This waybill references a client-site batch, which should not be on a Dutse waybill. Batch is read-only here; tell the MD.</div>
+                  <div style={{ fontSize: "12px", color: theme.red, marginTop: "4px" }}>This waybill references a client-site batch, which should not be on a Dutse waybill. Batch is read-only here; tell the MD.</div>
                 </>
               ) : (
                 <select style={styles.input} value={form.batchId} onChange={e => setForm({ ...form, batchId: e.target.value })}>
@@ -2466,7 +2484,7 @@ const Waybills = ({ userProfile }) => {
                   {form.batchId && !activeBatches.some(b => b.id === form.batchId) && <option value={form.batchId}>{batchMap[form.batchId] || "Current batch"} (not active)</option>}
                 </select>
               )}
-              {batchLoadError && <div style={{ fontSize: "11px", color: theme.red, marginTop: "4px" }}>Could not load batches ({batchLoadError}).</div>}
+              {batchLoadError && <div style={{ fontSize: "12px", color: theme.red, marginTop: "4px" }}>Could not load batches ({batchLoadError}).</div>}
             </div>
             {scheduleItems.length > 0 && (
               <div style={styles.formGroup}>
@@ -2482,7 +2500,7 @@ const Waybills = ({ userProfile }) => {
             )}
             <div style={styles.formGroup}>
               <label style={styles.label}>Quantity Damaged in Transit</label>
-              <input style={styles.input} type="number" placeholder="0" value={form.quantityDamaged} onChange={e => setForm({ ...form, quantityDamaged: e.target.value })} />
+              <input style={styles.input} type="number" inputMode="numeric" placeholder="0" value={form.quantityDamaged} onChange={e => setForm({ ...form, quantityDamaged: e.target.value })} />
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Store Officer</label>
@@ -2498,7 +2516,7 @@ const Waybills = ({ userProfile }) => {
             {form.vehicleId && (
               <div style={styles.formGroup}>
                 <label style={styles.label}>Diesel Given to Driver (litres)</label>
-                <input style={styles.input} type="number" placeholder="e.g. 80" value={form.dieselLitres} onChange={e => setForm({ ...form, dieselLitres: e.target.value })} />
+                <input style={styles.input} type="number" inputMode="decimal" placeholder="e.g. 80" value={form.dieselLitres} onChange={e => setForm({ ...form, dieselLitres: e.target.value })} />
               </div>
             )}
             {editTarget ? (
@@ -2517,7 +2535,7 @@ const Waybills = ({ userProfile }) => {
                     </option>
                   ))}
                 </select>
-                {activeOrders.length === 0 && <div style={{ fontSize: "11px", color: theme.red, marginTop: "4px" }}>No invoiced orders found. Contact your administrator if an order should appear here.</div>}
+                {activeOrders.length === 0 && <div style={{ fontSize: "12px", color: theme.red, marginTop: "4px" }}>No invoiced orders found. Contact your administrator if an order should appear here.</div>}
               </div>
             )}
             <div style={styles.formGroup}>
@@ -2552,7 +2570,7 @@ const Waybills = ({ userProfile }) => {
                       onChange={e => setLoaderSearch(e.target.value)}
                     />
                     {loaderSearch.trim() && (
-                      <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: theme.card, border: `1px solid ${theme.border}`, borderRadius: '6px', zIndex: 10, maxHeight: '180px', overflowY: 'auto' }}>
+                      <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: theme.card, border: `1px solid ${theme.border}`, borderRadius: '6px', zIndex: Z.overlay, maxHeight: '180px', overflowY: 'auto' }}>
                         {wbPool
                           .filter(p => !waybillLoaders.includes(p.id) && p.full_name.toLowerCase().includes(loaderSearch.toLowerCase()))
                           .slice(0, 8)
@@ -2595,14 +2613,14 @@ const Waybills = ({ userProfile }) => {
               <span>⚠️ {form.quantityDamaged} damaged blocks will be automatically logged to the damage register as transit damage.</span>
             </div>
           )}
-          <div style={styles.row}>
+          <div className="m-buttons" style={styles.row}>
             <button style={styles.btn("primary")} onClick={handleSave} disabled={saving}>{saving ? "Saving…" : editTarget ? "Update Waybill" : "Record Waybill"}</button>
             <button style={styles.btn("secondary")} onClick={() => { setShowForm(false); setForm(emptyForm); setSelectedOrderId(""); setEditTarget(null); setWaybillLoaders(null); setLoaderSearch(''); }}>Cancel</button>
           </div>
         </div>
       )}
 
-      <div style={styles.grid(3)}>
+      <div className="m-grid" style={styles.grid(3)}>
         <StatCard label="Total Waybills" value={waybills.length} sub="All trips" accent={theme.blue} />
         <StatCard label="Total Loaded" value={fmt(totalLoaded)} sub="Blocks dispatched" accent={theme.accent} />
         <StatCard label="Transit Damage" value={fmt(totalDamaged)} sub={`${damageRate}% damage rate`} accent={theme.red} />
@@ -2621,23 +2639,23 @@ const Waybills = ({ userProfile }) => {
               {waybills.map(w => (
                 <tr key={w.id}>
                   <td style={styles.td}><span style={{ color: theme.accent, fontWeight: "600" }}>{w.waybill_number}</span></td>
-                  <td style={styles.td}>{w.physical_waybill_number ? <span style={{ color: theme.textMuted, fontSize: "12px" }}>{w.physical_waybill_number}</span> : <span style={{ color: theme.textDim, fontSize: "11px" }}>—</span>}</td>
-                  <td style={styles.td}>{w.waybill_date}</td>
+                  <td style={styles.td}>{w.physical_waybill_number ? <span style={{ color: theme.textMuted, fontSize: "12px" }}>{w.physical_waybill_number}</span> : <span style={{ color: theme.textDim, fontSize: "12px" }}>—</span>}</td>
+                  <td style={styles.td}>{fmtDate(w.waybill_date)}</td>
                   <td style={styles.td}>{w.driver?.full_name || "—"}</td>
                   <td style={styles.td}>{w.truck_number || "—"}</td>
                   <td style={styles.td}><span style={styles.badge(theme.blue)}>{w.block_type}</span></td>
                   <td style={styles.td}>{fmt(w.quantity_loaded)}</td>
-                  <td style={styles.td}><strong style={{ color: theme.green }}>{fmt(w.quantity_received)}</strong></td>
+                  <td className="m-key" style={styles.td}><strong style={{ color: theme.green }}>{fmt(w.quantity_received)}</strong></td>
                   <td style={styles.td}><span style={styles.badge(w.quantity_damaged > 0 ? theme.red : theme.green)}>{w.quantity_damaged}</span></td>
-                  <td style={styles.td}>{w.receiver_name || "—"}{w.schedule_item_id && <div style={{ fontSize: "10px", color: theme.green, marginTop: "2px" }}>✓ Scheduled</div>}</td>
-                  <td style={styles.td}>
-                    <div style={{ display: "flex", gap: "6px" }}>
-                      <button style={{ ...styles.btn("secondary"), padding: "4px 10px", fontSize: "11px" }} onClick={() => {
+                  <td style={styles.td}>{w.receiver_name || "—"}{w.schedule_item_id && <div style={{ fontSize: "12px", color: theme.green, marginTop: "2px" }}>✓ Scheduled</div>}</td>
+                  <td className="m-actions" style={styles.td}>
+                    <div style={{ display: "flex", gap: "8px" }}>
+                      <button style={{ ...styles.btn("secondary"), padding: "4px 10px", fontSize: "12px" }} onClick={() => {
                         const driver = staff.find(s => s.id === w.driver_id);
                         generateWaybillPDF({ waybill_number: w.waybill_number, physical_waybill_number: w.physical_waybill_number || "", date: w.waybill_date, customer_name: w.receiver_name, customer_location: w.order?.customer?.location || "", block_type: w.block_type, quantity_loaded: w.quantity_loaded, batch_number: batchMap[w.batch_id] || "", driver_name: driver?.full_name || "", truck_number: w.truck_number || "", notes: w.notes || "" });
                       }}>PDF</button>
-                      <button style={{ ...styles.btn("secondary"), padding: "4px 10px", fontSize: "11px" }} onClick={() => startEditWaybill(w)}>Edit</button>
-                      <button style={{ ...styles.btn("danger"), padding: "4px 10px", fontSize: "11px" }} onClick={() => setConfirmDelete(w)}>Delete</button>
+                      <button style={{ ...styles.btn("secondary"), padding: "4px 10px", fontSize: "12px" }} onClick={() => startEditWaybill(w)}>Edit</button>
+                      <button style={{ ...styles.btn("danger"), padding: "4px 10px", fontSize: "12px" }} onClick={() => setConfirmDelete(w)}>Delete</button>
                     </div>
                   </td>
                 </tr>
@@ -2970,7 +2988,7 @@ const Customers = ({ userProfile }) => {
   return (
     <div>
       {confirmDelete && <ConfirmModal msg={`Delete ${confirmDelete.name}? This cannot be undone.`} onConfirm={handleDeleteCustomer} onCancel={() => setConfirmDelete(null)} />}
-      <div style={styles.header}>
+      <div className="m-header" style={styles.header}>
         <div>
           <div style={styles.pageTitle}>Customer Registry</div>
           <div style={styles.pageSubtitle}>All customers, order history, and account balances</div>
@@ -3497,7 +3515,7 @@ const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
     <div>
       {confirmDelete && <ConfirmModal msg={`Remove "${confirmDelete.name}" from inventory registry? All movement history for this item will also be deleted.`} onConfirm={handleDeleteItem} onCancel={() => setConfirmDelete(null)} />}
 
-      <div style={styles.header}>
+      <div className="m-header" style={styles.header}>
         <div>
           <div style={styles.pageTitle}>Inventory Management</div>
           <div style={styles.pageSubtitle}>Raw materials, consumables, and stock movements</div>
@@ -3524,7 +3542,7 @@ const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
       )}
 
       {/* Summary stats */}
-      <div style={styles.grid(4)}>
+      <div className="m-grid" style={styles.grid(4)}>
         <StatCard label="Total Items" value={shownItems.length} sub={itemSiteFilter ? siteName(itemSiteFilter, sites) : "In registry · all sites"} accent={theme.blue} />
         <StatCard label="Low Stock" value={shownLow.length} sub="Below reorder level" accent={shownLow.length > 0 ? theme.red : theme.green} />
         <StatCard label="APCL Stock Value" value={`₦${Math.round(totalValue).toLocaleString()}`} sub="At current unit cost · excludes client-owned" accent={theme.accent} />
@@ -3532,7 +3550,7 @@ const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
       </div>
 
       {/* Tabs */}
-      <div style={{ display: "flex", gap: "4px", marginBottom: "16px", borderBottom: `1px solid ${theme.border}`, paddingBottom: "0" }}>
+      <div className="m-wrap" style={{ display: "flex", gap: "4px", marginBottom: "16px", borderBottom: `1px solid ${theme.border}`, paddingBottom: "0" }}>
         {TABS.map(t => (
           <button key={t.id} onClick={() => setTab(t.id)} style={{ padding: "9px 18px", fontSize: "13px", fontWeight: tab === t.id ? "600" : "400", color: tab === t.id ? theme.accent : theme.textMuted, background: "transparent", border: "none", borderBottom: tab === t.id ? `2px solid ${theme.accent}` : "2px solid transparent", cursor: "pointer", transition: "all 0.15s" }}>
             {t.label}
@@ -3546,7 +3564,7 @@ const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
           {showItemForm && (
             <div style={{ ...styles.card, marginBottom: "20px", borderColor: theme.accent + "44" }}>
               <div style={styles.sectionTitle}>{editItem ? `Edit — ${editItem.name}` : "Add New Inventory Item"}</div>
-              <div style={styles.grid(3)}>
+              <div className="m-form" style={styles.grid(3)}>
                 <div style={styles.formGroup}>
                   <label style={styles.label}>Site *</label>
                   <SitePicker value={itemForm.site_id} onChange={v => setItemForm({ ...itemForm, site_id: v })} style={styles.input} />
@@ -3580,15 +3598,15 @@ const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
                 </div>
                 <div style={styles.formGroup}>
                   <label style={styles.label}>Current Stock</label>
-                  <input style={styles.input} type="number" placeholder="0" value={itemForm.current_stock} onChange={e => setItemForm({ ...itemForm, current_stock: e.target.value })} />
+                  <input style={styles.input} type="number" inputMode="decimal" placeholder="0" value={itemForm.current_stock} onChange={e => setItemForm({ ...itemForm, current_stock: e.target.value })} />
                 </div>
                 <div style={styles.formGroup}>
                   <label style={styles.label}>Reorder Level</label>
-                  <input style={styles.input} type="number" placeholder="e.g. 50" value={itemForm.reorder_level} onChange={e => setItemForm({ ...itemForm, reorder_level: e.target.value })} />
+                  <input style={styles.input} type="number" inputMode="decimal" placeholder="e.g. 50" value={itemForm.reorder_level} onChange={e => setItemForm({ ...itemForm, reorder_level: e.target.value })} />
                 </div>
                 <div style={styles.formGroup}>
                   <label style={styles.label}>Unit Cost (₦)</label>
-                  <input style={styles.input} type="number" placeholder="0.00" value={itemForm.unit_cost} onChange={e => setItemForm({ ...itemForm, unit_cost: e.target.value })} />
+                  <input style={styles.input} type="number" inputMode="decimal" placeholder="0.00" value={itemForm.unit_cost} onChange={e => setItemForm({ ...itemForm, unit_cost: e.target.value })} />
                 </div>
                 <div style={styles.formGroup}>
                   <label style={styles.label}>Supplier Name</label>
@@ -3599,7 +3617,7 @@ const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
                   <input style={styles.input} type="date" value={itemForm.date_added} onChange={e => setItemForm({ ...itemForm, date_added: e.target.value })} />
                 </div>
               </div>
-              <div style={styles.row}>
+              <div className="m-buttons" style={styles.row}>
                 <button style={styles.btn("primary")} onClick={handleSaveItem} disabled={saving}>{saving ? "Saving…" : editItem ? "Update Item" : "Add to Registry"}</button>
                 <button style={styles.btn("secondary")} onClick={() => { setShowItemForm(false); setEditItem(null); setItemForm(emptyItem); }}>Cancel</button>
               </div>
@@ -3609,7 +3627,7 @@ const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
           <div style={styles.card}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap", marginBottom: "14px" }}>
               <div style={{ ...styles.sectionTitle, marginBottom: 0 }}>Inventory Registry ({shownItems.length} items)</div>
-              <div style={{ width: "220px" }}><SitePicker allowAll value={itemSiteFilter} onChange={setItemSiteFilter} style={styles.input} /></div>
+              <div className="m-full" style={{ width: "220px" }}><SitePicker allowAll value={itemSiteFilter} onChange={setItemSiteFilter} style={styles.input} /></div>
             </div>
             {loading ? <Spinner /> : shownItems.length === 0 ? (
               <div style={{ textAlign: "center", padding: "40px", color: theme.textMuted, fontSize: "13px" }}>{items.length === 0 ? "No items registered yet. Add your first inventory item." : "No items at this site."}</div>
@@ -3626,23 +3644,23 @@ const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
                       <tr key={item.id} style={{ background: isLow ? "rgba(240,107,107,0.05)" : "transparent" }}>
                         <td style={styles.td}>
                           <strong style={{ color: isLow ? theme.red : theme.text }}>{item.name}</strong>
-                          {isLow && <span style={{ ...styles.badge(theme.red), marginLeft: "6px", fontSize: "10px" }}>LOW</span>}
-                          {item.owner === "client" && <span style={{ ...styles.badge(theme.blue), marginLeft: "6px", fontSize: "10px" }}>Client-owned</span>}
+                          {isLow && <span style={{ ...styles.badge(theme.red), marginLeft: "6px", fontSize: "12px" }}>LOW</span>}
+                          {item.owner === "client" && <span style={{ ...styles.badge(theme.blue), marginLeft: "6px", fontSize: "12px" }}>Client-owned</span>}
                         </td>
                         <td style={styles.td}>{itemSiteLabel(item)}</td>
                         <td style={styles.td}>{item.material || "—"}</td>
                         <td style={styles.td}>{item.unit}</td>
-                        <td style={styles.td}><strong style={{ color: isLow ? theme.red : theme.accent }}>{Number(item.current_stock).toLocaleString()}</strong></td>
+                        <td className="m-key" style={styles.td}><strong style={{ color: isLow ? theme.red : theme.accent }}>{Number(item.current_stock).toLocaleString()}</strong></td>
                         <td style={styles.td}>{Number(item.reorder_level).toLocaleString()}</td>
                         <td style={styles.td}>₦{Number(item.unit_cost || 0).toLocaleString()}</td>
                         <td style={styles.td}>{item.owner === "client" ? <span style={{ color: theme.textMuted }}>Client's stock</span> : <strong style={{ color: theme.accent }}>₦{Math.round(value).toLocaleString()}</strong>}</td>
                         <td style={styles.td}>{item.supplier || "—"}</td>
-                        <td style={styles.td}>{item.date_added || item.created_at?.split("T")[0] || "—"}</td>
-                        <td style={styles.td}>{item.updated_at ? item.updated_at.split("T")[0] : "—"}</td>
-                        <td style={styles.td}>
-                          <div style={{ display: "flex", gap: "6px" }}>
-                            <button style={{ ...styles.btn("secondary"), padding: "4px 10px", fontSize: "11px" }} onClick={() => startEditItem(item)}>Edit</button>
-                            <button style={{ ...styles.btn("danger"), padding: "4px 10px", fontSize: "11px" }} onClick={() => setConfirmDelete(item)}>Delete</button>
+                        <td style={styles.td}>{fmtDate(item.date_added || item.created_at?.split("T")[0])}</td>
+                        <td style={styles.td}>{fmtDate(item.updated_at?.split("T")[0])}</td>
+                        <td className="m-actions" style={styles.td}>
+                          <div style={{ display: "flex", gap: "8px" }}>
+                            <button style={{ ...styles.btn("secondary"), padding: "4px 10px", fontSize: "12px" }} onClick={() => startEditItem(item)}>Edit</button>
+                            <button style={{ ...styles.btn("danger"), padding: "4px 10px", fontSize: "12px" }} onClick={() => setConfirmDelete(item)}>Delete</button>
                           </div>
                         </td>
                       </tr>
@@ -3659,7 +3677,7 @@ const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
       {tab === "stockin" && (
         <div style={styles.card}>
           <div style={styles.sectionTitle}>Record Stock Received</div>
-          <div style={styles.grid(3)}>
+          <div className="m-form" style={styles.grid(3)}>
             <div style={styles.formGroup}>
               <label style={styles.label}>Item *</label>
               <select style={styles.input} value={inForm.itemId} onChange={e => setInForm({ ...inForm, itemId: e.target.value })}>
@@ -3673,8 +3691,8 @@ const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Quantity Received *</label>
-              <div style={{ display: "flex", gap: "6px" }}>
-                <input style={{ ...styles.input, flex: 1 }} type="number" placeholder="e.g. 100" value={inForm.quantity} onChange={e => setInForm({ ...inForm, quantity: e.target.value })} />
+              <div style={{ display: "flex", gap: "8px" }}>
+                <input style={{ ...styles.input, flex: 1 }} type="number" inputMode="decimal" placeholder="e.g. 100" value={inForm.quantity} onChange={e => setInForm({ ...inForm, quantity: e.target.value })} />
                 {inIsKg ? (
                   <select style={{ ...styles.input, width: "100px" }} value={inForm.unit} onChange={e => setInForm({ ...inForm, unit: e.target.value })}>
                     <option value="kg">kg</option>
@@ -3685,7 +3703,7 @@ const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
                 )}
               </div>
               {inIsKg && inForm.unit === "tonnes" && inForm.quantity !== "" && (
-                <div style={{ fontSize: "11px", color: theme.accent, marginTop: "4px", fontWeight: "600" }}>{kgPreview(inForm.quantity)} will be stored</div>
+                <div style={{ fontSize: "12px", color: theme.accent, marginTop: "4px", fontWeight: "600" }}>{kgPreview(inForm.quantity)} will be stored</div>
               )}
             </div>
             {inItemSel && !isFactorySite(inItemSel.site_id, sites) && (
@@ -3696,7 +3714,7 @@ const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
             )}
             <div style={styles.formGroup}>
               <label style={styles.label}>Unit Cost at Purchase (₦)</label>
-              <input style={styles.input} type="number" placeholder="0.00" value={inForm.unitCost} onChange={e => setInForm({ ...inForm, unitCost: e.target.value })} />
+              <input style={styles.input} type="number" inputMode="decimal" placeholder="0.00" value={inForm.unitCost} onChange={e => setInForm({ ...inForm, unitCost: e.target.value })} />
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Total Cost (auto)</label>
@@ -3725,7 +3743,7 @@ const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
               <input style={styles.input} placeholder="Optional notes" value={inForm.notes} onChange={e => setInForm({ ...inForm, notes: e.target.value })} />
             </div>
           </div>
-          <div style={styles.row}>
+          <div className="m-buttons" style={styles.row}>
             <button style={styles.btn("primary")} onClick={handleStockIn} disabled={saving}>{saving ? "Recording…" : "Record Stock In"}</button>
             <button style={styles.btn("secondary")} onClick={() => setInForm(emptyIn)}>Clear</button>
           </div>
@@ -3736,7 +3754,7 @@ const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
       {tab === "stockout" && (
         <div style={styles.card}>
           <div style={styles.sectionTitle}>Issue Stock</div>
-          <div style={styles.grid(3)}>
+          <div className="m-form" style={styles.grid(3)}>
             <div style={styles.formGroup}>
               <label style={styles.label}>Item *</label>
               <select style={styles.input} value={outForm.itemId} onChange={e => setOutForm({ ...outForm, itemId: e.target.value })}>
@@ -3750,8 +3768,8 @@ const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Quantity Issued *</label>
-              <div style={{ display: "flex", gap: "6px" }}>
-                <input style={{ ...styles.input, flex: 1 }} type="number" placeholder="e.g. 20" value={outForm.quantity} onChange={e => setOutForm({ ...outForm, quantity: e.target.value })} />
+              <div style={{ display: "flex", gap: "8px" }}>
+                <input style={{ ...styles.input, flex: 1 }} type="number" inputMode="decimal" placeholder="e.g. 20" value={outForm.quantity} onChange={e => setOutForm({ ...outForm, quantity: e.target.value })} />
                 {outIsKg ? (
                   <select style={{ ...styles.input, width: "100px" }} value={outForm.unit} onChange={e => setOutForm({ ...outForm, unit: e.target.value })}>
                     <option value="kg">kg</option>
@@ -3762,7 +3780,7 @@ const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
                 )}
               </div>
               {outIsKg && outForm.unit === "tonnes" && outForm.quantity !== "" && (
-                <div style={{ fontSize: "11px", color: theme.accent, marginTop: "4px", fontWeight: "600" }}>{kgPreview(outForm.quantity)} will be stored</div>
+                <div style={{ fontSize: "12px", color: theme.accent, marginTop: "4px", fontWeight: "600" }}>{kgPreview(outForm.quantity)} will be stored</div>
               )}
             </div>
             <div style={styles.formGroup}>
@@ -3784,7 +3802,7 @@ const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
               <input style={styles.input} placeholder="Optional notes" value={outForm.notes} onChange={e => setOutForm({ ...outForm, notes: e.target.value })} />
             </div>
           </div>
-          <div style={styles.row}>
+          <div className="m-buttons" style={styles.row}>
             <button style={styles.btn("primary")} onClick={handleStockOut} disabled={saving}>{saving ? "Recording…" : "Record Stock Out"}</button>
             <button style={styles.btn("secondary")} onClick={() => setOutForm(emptyOut)}>Clear</button>
           </div>
@@ -3795,7 +3813,7 @@ const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
       {tab === "movements" && (
         <div>
           <div style={{ ...styles.card, marginBottom: "16px" }}>
-            <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "flex-end" }}>
+            <div className="m-form" style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "flex-end" }}>
               <div>
                 <label style={styles.label}>Filter by Item</label>
                 <select style={{ ...styles.input, width: "220px" }} value={movFilter.itemId} onChange={e => setMovFilter({ ...movFilter, itemId: e.target.value })}>
@@ -3825,20 +3843,20 @@ const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
           {movEditTarget && (
             <div style={{ ...styles.card, marginBottom: "16px", borderLeft: `4px solid ${theme.accent}` }}>
               <div style={styles.sectionTitle}>Edit Movement — {movEditTarget.item?.name} ({movEditTarget.movement_type === "in" ? "Stock In" : "Stock Out"})</div>
-              <div style={styles.grid(3)}>
+              <div className="m-form" style={styles.grid(3)}>
                 <div style={styles.formGroup}>
                   <label style={styles.label}>Date</label>
                   <input style={styles.input} type="date" value={movEditForm.date} onChange={e => setMovEditForm({ ...movEditForm, date: e.target.value })} />
                 </div>
                 <div style={styles.formGroup}>
                   <label style={styles.label}>Quantity</label>
-                  <input style={styles.input} type="number" value={movEditForm.quantity} onChange={e => setMovEditForm({ ...movEditForm, quantity: e.target.value })} />
+                  <input style={styles.input} type="number" inputMode="decimal" value={movEditForm.quantity} onChange={e => setMovEditForm({ ...movEditForm, quantity: e.target.value })} />
                 </div>
                 {movEditTarget.movement_type === "in" ? (
                   <>
                     <div style={styles.formGroup}>
                       <label style={styles.label}>Unit Cost (₦)</label>
-                      <input style={styles.input} type="number" value={movEditForm.unitCost} onChange={e => setMovEditForm({ ...movEditForm, unitCost: e.target.value })} />
+                      <input style={styles.input} type="number" inputMode="decimal" value={movEditForm.unitCost} onChange={e => setMovEditForm({ ...movEditForm, unitCost: e.target.value })} />
                     </div>
                     <div style={styles.formGroup}>
                       <label style={styles.label}>Supplier</label>
@@ -3860,7 +3878,7 @@ const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
                   <input style={styles.input} value={movEditForm.notes} onChange={e => setMovEditForm({ ...movEditForm, notes: e.target.value })} />
                 </div>
               </div>
-              <div style={styles.row}>
+              <div className="m-buttons" style={styles.row}>
                 <button style={styles.btn("primary")} onClick={handleSaveMovementEdit} disabled={saving}>{saving ? "Saving…" : "Save Changes"}</button>
                 <button style={styles.btn("secondary")} onClick={() => setMovEditTarget(null)}>Cancel</button>
               </div>
@@ -3872,9 +3890,9 @@ const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
             <div style={{ ...styles.card, marginBottom: "16px", borderLeft: `4px solid ${theme.red}` }}>
               <div style={{ fontWeight: "700", marginBottom: "8px" }}>Delete this movement?</div>
               <div style={{ fontSize: "13px", color: theme.textMuted, marginBottom: "14px" }}>
-                {movConfirmDelete.movement_type === "in" ? "+" : "-"}{Number(movConfirmDelete.quantity).toLocaleString()} {movConfirmDelete.item?.name} on {movConfirmDelete.date} will be reversed from current stock.
+                {movConfirmDelete.movement_type === "in" ? "+" : "-"}{Number(movConfirmDelete.quantity).toLocaleString()} {movConfirmDelete.item?.name} on {fmtDate(movConfirmDelete.date)} will be reversed from current stock.
               </div>
-              <div style={styles.row}>
+              <div className="m-buttons" style={styles.row}>
                 <button style={styles.btn("danger")} onClick={handleDeleteMovement}>Yes, Delete & Reverse Stock</button>
                 <button style={styles.btn("secondary")} onClick={() => setMovConfirmDelete(null)}>Cancel</button>
               </div>
@@ -3895,28 +3913,28 @@ const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
                     const isAuto = m.reference?.startsWith("PROD-") || m.staff_name === "Auto";
                     return (
                       <tr key={m.id}>
-                        <td style={styles.td}>{m.date}</td>
+                        <td style={styles.td}>{fmtDate(m.date)}<div className="m-only" style={{ fontSize: "13px" }}>{m.item?.name || "—"}</div></td>
                         <td style={styles.td}>
                           <span style={styles.badge(m.movement_type === "in" ? theme.green : theme.red)}>
                             {m.movement_type === "in" ? "IN" : "OUT"}
                           </span>
                         </td>
-                        <td style={styles.td}><strong>{m.item?.name || "—"}</strong></td>
+                        <td className="m-hide" style={styles.td}><strong>{m.item?.name || "—"}</strong></td>
                         <td style={styles.td}>{m.site?.name || siteName(m.site_id, sites)}</td>
-                        <td style={styles.td}><strong style={{ color: m.movement_type === "in" ? theme.green : theme.red }}>{m.movement_type === "in" ? "+" : "-"}{Number(m.quantity).toLocaleString()}</strong></td>
+                        <td className="m-key" style={styles.td}><strong style={{ color: m.movement_type === "in" ? theme.green : theme.red }}>{m.movement_type === "in" ? "+" : "-"}{Number(m.quantity).toLocaleString()}</strong></td>
                         <td style={styles.td}>{m.item?.unit || "—"}</td>
                         <td style={styles.td}>{m.unit_cost ? `₦${Number(m.unit_cost).toLocaleString()}` : "—"}</td>
                         <td style={styles.td}>{m.total_cost ? <strong style={{ color: theme.accent }}>₦{Math.round(m.total_cost).toLocaleString()}</strong> : "—"}</td>
                         <td style={styles.td}>{m.movement_type === "in" ? (m.supplier || "—") : (m.issued_to || "—")}</td>
                         <td style={styles.td}>{m.staff_name || "—"}</td>
-                        <td style={styles.td}><span style={{ fontSize: "11px", color: theme.textMuted }}>{m.notes || ""}</span></td>
-                        <td style={styles.td}>
+                        <td style={styles.td}><span style={{ fontSize: "12px", color: theme.textMuted }}>{m.notes || ""}</span></td>
+                        <td className="m-actions" style={styles.td}>
                           {isAuto ? (
-                            <span style={{ fontSize: "10px", color: theme.textMuted, fontStyle: "italic" }}>Auto — edit via Production Log</span>
+                            <span style={{ fontSize: "12px", color: theme.textMuted, fontStyle: "italic" }}>Auto — edit via Production Log</span>
                           ) : canWriteMovement ? (
-                            <div style={{ display: "flex", gap: "4px" }}>
-                              <button style={{ ...styles.btn("secondary"), padding: "3px 8px", fontSize: "11px" }} onClick={() => startEditMovement(m)}>Edit</button>
-                              <button style={{ ...styles.btn("danger"), padding: "3px 8px", fontSize: "11px" }} onClick={() => setMovConfirmDelete(m)}>Delete</button>
+                            <div style={{ display: "flex", gap: "8px" }}>
+                              <button style={{ ...styles.btn("secondary"), padding: "3px 8px", fontSize: "12px" }} onClick={() => startEditMovement(m)}>Edit</button>
+                              <button style={{ ...styles.btn("danger"), padding: "3px 8px", fontSize: "12px" }} onClick={() => setMovConfirmDelete(m)}>Delete</button>
                             </div>
                           ) : null}
                         </td>
@@ -3937,7 +3955,7 @@ const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
           <div style={{ fontSize: "13px", color: theme.textMuted, marginBottom: "20px" }}>
             The report includes current stock levels, total stock value, items below reorder level (highlighted), and movement history for the selected date range.
           </div>
-          <div style={{ display: "flex", gap: "14px", alignItems: "flex-end", flexWrap: "wrap", marginBottom: "20px" }}>
+          <div className="m-form" style={{ display: "flex", gap: "14px", alignItems: "flex-end", flexWrap: "wrap", marginBottom: "20px" }}>
             <div>
               <label style={styles.label}>Movement History From</label>
               <input style={{ ...styles.input, width: "160px" }} type="date" value={reportDates.from} onChange={e => setReportDates({ ...reportDates, from: e.target.value })} />
@@ -4045,7 +4063,7 @@ const LPOApprovals = () => {
 
   return (
     <div>
-      <div style={styles.header}>
+      <div className="m-header" style={styles.header}>
         <div>
           <div style={styles.pageTitle}>LPO Approvals</div>
           <div style={styles.pageSubtitle}>Orders submitted as LPO awaiting MD approval</div>
@@ -4175,14 +4193,14 @@ const PendingDeliveryRegister = () => {
 
   return (
     <div>
-      <div style={styles.header}>
+      <div className="m-header" style={styles.header}>
         <div>
           <div style={styles.pageTitle}>Pending Delivery Register</div>
           <div style={styles.pageSubtitle}>All customers currently awaiting delivery</div>
         </div>
       </div>
       {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
-      <div style={styles.grid(3)}>
+      <div className="m-grid" style={styles.grid(3)}>
         <StatCard label="Customers Waiting" value={Object.keys(grouped).length} sub="Unique customers" accent={theme.blue} />
         <StatCard label="Total Blocks Remaining" value={fmt(totalRemaining)} sub="Still to be delivered" accent={theme.accent} />
         <StatCard label="Longest Wait" value={entries.length > 0 ? `${Math.max(...entries.map(e => daysSince(e.added_at)))} days` : "—"} sub="Days in register" accent={theme.red} />
@@ -4202,7 +4220,7 @@ const PendingDeliveryRegister = () => {
                     <tr key={`hdr-${customer?.id}`} style={{ background: "rgba(255,255,255,0.04)" }}>
                       <td colSpan={9} style={{ ...styles.td, fontWeight: "700", fontSize: "13px", color: theme.accent, paddingTop: "10px", paddingBottom: "4px" }}>
                         {customer?.name || "—"}{customer?.company_name ? ` — ${customer.company_name}` : ""}
-                        <span style={{ fontSize: "11px", color: theme.textMuted, fontWeight: "400", marginLeft: "8px" }}>
+                        <span style={{ fontSize: "12px", color: theme.textMuted, fontWeight: "400", marginLeft: "8px" }}>
                           ({custEntries.length} pending orders)
                         </span>
                       </td>
@@ -4218,43 +4236,43 @@ const PendingDeliveryRegister = () => {
                         <td style={styles.td}>
                           <div style={{ paddingLeft: indent ? "16px" : "0" }}>
                             {!indent && <strong>{e.customer?.name || "—"}</strong>}
-                            {indent && <span style={{ color: theme.textMuted, fontSize: "11px" }}>↳ </span>}
+                            {indent && <span style={{ color: theme.textMuted, fontSize: "12px" }}>↳ </span>}
                             <span style={styles.badge(theme.blue)}>{e.block_type}</span>
-                            {indent && e.customer?.company_name && <div style={{ fontSize: "11px", color: theme.textMuted }}>{e.customer.company_name}</div>}
-                            {!indent && e.customer?.company_name && <div style={{ fontSize: "11px", color: theme.textMuted }}>{e.customer.company_name}</div>}
+                            {indent && e.customer?.company_name && <div style={{ fontSize: "12px", color: theme.textMuted }}>{e.customer.company_name}</div>}
+                            {!indent && e.customer?.company_name && <div style={{ fontSize: "12px", color: theme.textMuted }}>{e.customer.company_name}</div>}
                           </div>
                         </td>
                         <td style={styles.td}>{e.customer?.location || "—"}</td>
                         <td style={styles.td}>{Number(e.total_qty).toLocaleString()}</td>
                         <td style={styles.td}>
                           {isEditing ? (
-                            <input type="number" value={editDelivered} onChange={ev => setEditDelivered(ev.target.value)}
+                            <input className="m-full" type="number" inputMode="numeric" value={editDelivered} onChange={ev => setEditDelivered(ev.target.value)}
                               style={{ ...styles.input, width: "80px", padding: "4px 6px", fontSize: "12px" }}
                               min="0" max={e.total_qty} autoFocus />
                           ) : (
                             <span style={{ color: theme.green }}>{Number(e.delivered_qty).toLocaleString()}</span>
                           )}
                         </td>
-                        <td style={styles.td}><strong style={{ color: Number(e.remaining_qty) > 0 ? theme.accent : theme.green }}>{Number(e.remaining_qty).toLocaleString()}</strong></td>
+                        <td className="m-key" style={styles.td}><strong style={{ color: Number(e.remaining_qty) > 0 ? theme.accent : theme.green }}>{Number(e.remaining_qty).toLocaleString()}</strong></td>
                         <td style={styles.td}><span style={{ color: days > 14 ? theme.red : theme.textMuted, fontWeight: days > 14 ? "700" : "400" }}>{days}d</span></td>
-                        <td style={styles.td}>{e.added_at?.split("T")[0]}</td>
+                        <td style={styles.td}>{fmtDate(e.added_at?.split("T")[0])}</td>
                         <td style={styles.td}>
                           <div>
                             <span style={styles.badge(statusColor(e.status))}>{e.status?.replace(/_/g, " ")}</span>
                             <div style={{ ...styles.progressBar(), marginTop: "4px" }}><div style={styles.progressFill(pct, theme.green)} /></div>
-                            <div style={{ fontSize: "10px", color: theme.textMuted, marginTop: "2px" }}>{pct}%</div>
+                            <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "2px" }}>{pct}%</div>
                           </div>
                         </td>
-                        <td style={styles.td}>
+                        <td className="m-actions" style={styles.td}>
                           {isEditing ? (
-                            <div style={{ display: "flex", gap: "4px" }}>
-                              <button style={{ ...styles.btn("primary"), padding: "4px 8px", fontSize: "11px" }} onClick={() => saveDelivered(e.id)} disabled={saving}>Save</button>
-                              <button style={{ ...styles.btn("secondary"), padding: "4px 8px", fontSize: "11px" }} onClick={cancelEdit}>Cancel</button>
+                            <div style={{ display: "flex", gap: "8px" }}>
+                              <button style={{ ...styles.btn("primary"), padding: "4px 8px", fontSize: "12px" }} onClick={() => saveDelivered(e.id)} disabled={saving}>Save</button>
+                              <button style={{ ...styles.btn("secondary"), padding: "4px 8px", fontSize: "12px" }} onClick={cancelEdit}>Cancel</button>
                             </div>
                           ) : (
-                            <div style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>
-                              <button style={{ ...styles.btn("secondary"), padding: "4px 8px", fontSize: "11px" }} onClick={() => startEdit(e)}>Edit Delivered</button>
-                              <button style={{ ...styles.btn("danger"), padding: "4px 8px", fontSize: "11px" }} onClick={() => handleMarkDone(e.id)} disabled={saving}>Mark Done</button>
+                            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                              <button style={{ ...styles.btn("secondary"), padding: "4px 8px", fontSize: "12px" }} onClick={() => startEdit(e)}>Edit Delivered</button>
+                              <button style={{ ...styles.btn("danger"), padding: "4px 8px", fontSize: "12px" }} onClick={() => handleMarkDone(e.id)} disabled={saving}>Mark Done</button>
                             </div>
                           )}
                         </td>
@@ -4380,7 +4398,7 @@ const DailySchedule = () => {
 
   return (
     <div>
-      <div style={styles.header}>
+      <div className="m-header" style={styles.header}>
         <div><div style={styles.pageTitle}>Daily Delivery Schedule</div><div style={styles.pageSubtitle}>Plan and track daily deliveries</div></div>
         <button style={styles.btn("primary")} onClick={() => { setShowForm(!showForm); setSelectedEntries([]); }}>+ Create Schedule</button>
       </div>
@@ -4602,7 +4620,7 @@ const ScheduleApprovals = () => {
 
   return (
     <div>
-      <div style={styles.header}>
+      <div className="m-header" style={styles.header}>
         <div><div style={styles.pageTitle}>Schedule Approvals</div><div style={styles.pageSubtitle}>ICO review queue for submitted delivery schedules</div></div>
         {submitted.length > 0 && <span style={{ ...styles.badge(theme.red), fontSize: "13px", padding: "6px 14px" }}>{submitted.length} pending</span>}
       </div>
@@ -4677,6 +4695,7 @@ const Batches = ({ userProfile }) => {
   const [editTarget, setEditTarget] = useState(null);
   const [editForm, setEditForm] = useState({});
   const [deleting, setDeleting] = useState(null);
+  const [confirmDel, setConfirmDel] = useState(null);
   const [dmgTarget, setDmgTarget] = useState(null);
   const [dmgForm, setDmgForm] = useState({ qty: '', date: '', notes: '' });
   const [dmgSaving, setDmgSaving] = useState(false);
@@ -4791,7 +4810,7 @@ const Batches = ({ userProfile }) => {
   };
 
   const handleDelete = async (b) => {
-    if (!window.confirm(`Delete batch ${b.batch_number}? This cannot be undone.`)) return;
+    // Confirmed in-app first (ConfirmDialog below, opened via setConfirmDel).
     setDeleting(b.id);
     try {
       try { await batchesService.adjustYardStock(b.site_id, sites, b.block_type, -Number(b.qty_remaining)); }
@@ -4865,31 +4884,41 @@ const Batches = ({ userProfile }) => {
 
   return (
     <div>
-      <div style={styles.header}>
+      <div className="m-header" style={styles.header}>
         <div><div style={styles.pageTitle}>Batch Management</div><div style={styles.pageSubtitle}>Finished goods batches after curing — link to production logs</div></div>
         {canWriteBatch && <button style={styles.btn("primary")} onClick={() => setShowForm(!showForm)}>+ Create Batch</button>}
       </div>
       {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
 
+      {confirmDel && (
+        <ConfirmDialog
+          title={`Delete batch ${confirmDel.batch_number}?`}
+          body={`${Number(confirmDel.qty_accepted || 0).toLocaleString()} ${confirmDel.block_type} at ${siteName(confirmDel.site_id, sites)}. This cannot be undone.`}
+          confirmLabel="Delete batch" danger
+          onCancel={() => setConfirmDel(null)}
+          onConfirm={() => { const b = confirmDel; setConfirmDel(null); handleDelete(b); }}
+        />
+      )}
+
       {/* Edit Modal */}
       {editTarget && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: Z.modal, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
           <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: "12px", padding: "24px", width: "100%", maxWidth: "540px" }}>
             <div style={{ fontWeight: "700", fontSize: "15px", marginBottom: "4px" }}>Edit Batch — {editTarget.batch_number}</div>
             <div style={{ fontSize: "12px", color: theme.textMuted, marginBottom: "18px" }}>Site: {siteName(editTarget.site_id, sites)}{isFactorySite(editTarget.site_id, sites) ? "" : " · not in Dutse yard stock"}</div>
-            <div style={styles.grid(2)}>
+            <div className="m-form" style={styles.grid(2)}>
               <div style={styles.formGroup}><label style={styles.label}>Block Type</label><ProductSelect value={editForm.blockType} onChange={(name) => setEditForm(f => ({ ...f, blockType: name }))} style={styles.input} /></div>
               <div style={styles.formGroup}><label style={styles.label}>Batch Date *</label><input style={styles.input} type="date" value={editForm.dateCured} onChange={e => setEditForm(f => ({ ...f, dateCured: e.target.value }))} /></div>
-              <div style={styles.formGroup}><label style={styles.label}>Qty Accepted *</label><input style={styles.input} type="number" value={editForm.qtyAccepted} onChange={e => setEditForm(f => ({ ...f, qtyAccepted: e.target.value }))} /></div>
+              <div style={styles.formGroup}><label style={styles.label}>Qty Accepted *</label><input style={styles.input} type="number" inputMode="numeric" value={editForm.qtyAccepted} onChange={e => setEditForm(f => ({ ...f, qtyAccepted: e.target.value }))} /></div>
               <div style={styles.formGroup}><label style={styles.label}>Created By</label><input style={styles.input} value={editForm.createdBy} onChange={e => setEditForm(f => ({ ...f, createdBy: e.target.value }))} /></div>
               <div style={{ ...styles.formGroup, gridColumn: "span 2" }}><label style={styles.label}>Notes</label><input style={styles.input} value={editForm.notes} onChange={e => setEditForm(f => ({ ...f, notes: e.target.value }))} /></div>
             </div>
             {parseInt(editForm.qtyAccepted) !== editTarget.qty_accepted && (
-              <div style={{ padding: "8px 12px", background: theme.accent + "22", border: `1px solid ${theme.accent}44`, borderRadius: "6px", fontSize: "11px", color: theme.accent, marginBottom: "12px" }}>
+              <div style={{ padding: "8px 12px", background: theme.accent + "22", border: `1px solid ${theme.accent}44`, borderRadius: "6px", fontSize: "12px", color: theme.accent, marginBottom: "12px" }}>
                 Qty changing by {parseInt(editForm.qtyAccepted) - editTarget.qty_accepted > 0 ? "+" : ""}{parseInt(editForm.qtyAccepted) - editTarget.qty_accepted} — {isFactorySite(editTarget.site_id, sites) ? "finished goods stock will be adjusted automatically." : "client-site batch, Dutse yard stock is not changed."}
               </div>
             )}
-            <div style={styles.row}>
+            <div className="m-buttons" style={styles.row}>
               <button style={styles.btn("primary")} onClick={handleSaveEdit} disabled={saving}>{saving ? "Saving…" : "Save Changes"}</button>
               <button style={styles.btn("secondary")} onClick={() => setEditTarget(null)}>Cancel</button>
             </div>
@@ -4899,20 +4928,20 @@ const Batches = ({ userProfile }) => {
 
       {/* Damage modal */}
       {dmgTarget && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: Z.modal, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
           <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: "12px", padding: "24px", width: "100%", maxWidth: "460px" }}>
             <div style={{ fontWeight: "700", fontSize: "15px", marginBottom: "4px" }}>Log Curing/Yard Damage</div>
             <div style={{ fontSize: "12px", color: theme.textMuted, marginBottom: "18px" }}>Batch {dmgTarget.batch_number} · {dmgTarget.block_type} · {Number(dmgTarget.qty_remaining).toLocaleString()} remaining</div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Quantity Damaged *</label>
-              <input style={styles.input} type="number" min="1" placeholder="e.g. 30" value={dmgForm.qty} onChange={e => setDmgForm(f => ({ ...f, qty: e.target.value }))} />
+              <input style={styles.input} type="number" inputMode="numeric" min="1" placeholder="e.g. 30" value={dmgForm.qty} onChange={e => setDmgForm(f => ({ ...f, qty: e.target.value }))} />
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Date *</label>
               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                 <input style={styles.input} type="date" value={dmgForm.date} onChange={e => setDmgForm(f => ({ ...f, date: e.target.value }))} />
                 {dmgForm.date && dmgForm.date < today && (
-                  <span style={{ fontSize: "10px", padding: "1px 6px", borderRadius: "4px", background: "#f59e0b22", color: "#f59e0b", border: "1px solid #f59e0b44", fontWeight: "700", whiteSpace: "nowrap" }}>Historical</span>
+                  <span style={{ fontSize: "12px", padding: "1px 6px", borderRadius: "4px", background: "#f59e0b22", color: "#f59e0b", border: "1px solid #f59e0b44", fontWeight: "700", whiteSpace: "nowrap" }}>Historical</span>
                 )}
               </div>
             </div>
@@ -4920,7 +4949,7 @@ const Batches = ({ userProfile }) => {
               <label style={styles.label}>Notes (optional)</label>
               <input style={styles.input} placeholder="e.g. cracks found during picking" value={dmgForm.notes} onChange={e => setDmgForm(f => ({ ...f, notes: e.target.value }))} />
             </div>
-            <div style={styles.row}>
+            <div className="m-buttons" style={styles.row}>
               <button style={styles.btn("danger")} onClick={handleLogDamage} disabled={dmgSaving}>{dmgSaving ? "Logging…" : "Log Damage"}</button>
               <button style={styles.btn("secondary")} onClick={() => setDmgTarget(null)}>Cancel</button>
             </div>
@@ -4928,7 +4957,7 @@ const Batches = ({ userProfile }) => {
         </div>
       )}
 
-      <div style={styles.grid(3)}>
+      <div className="m-grid" style={styles.grid(3)}>
         <StatCard label="Active Batches" value={shownBatches.filter(b => b.status === "active").length} sub={`With stock remaining · ${scopeLabel}`} accent={theme.green} />
         <StatCard label="Blocks Remaining" value={fmt(totalInYard)} sub={`Across active batches · ${scopeLabel}`} accent={theme.accent} />
         <StatCard label="Exhausted Batches" value={shownBatches.filter(b => b.status === "exhausted").length} sub={`Fully delivered · ${scopeLabel}`} accent={theme.textMuted} />
@@ -4937,11 +4966,11 @@ const Batches = ({ userProfile }) => {
       {showForm && (
         <div style={{ ...styles.card, marginBottom: "20px", borderColor: theme.accent + "44" }}>
           <div style={styles.sectionTitle}>Create New Batch</div>
-          <div style={styles.grid(3)}>
+          <div className="m-form" style={styles.grid(3)}>
             <div style={styles.formGroup}>
               <label style={styles.label}>Site *</label>
               <SitePicker value={form.siteId} onChange={v => setForm({ ...form, siteId: v, linkedProds: [] })} style={styles.input} />
-              {!isFactorySite(form.siteId || DUTSE_SITE_ID, sites) && <div style={{ fontSize: "11px", color: theme.accent, marginTop: "4px" }}>Client site — will not be added to Dutse yard stock.</div>}
+              {!isFactorySite(form.siteId || DUTSE_SITE_ID, sites) && <div style={{ fontSize: "12px", color: theme.accent, marginTop: "4px" }}>Client site — will not be added to Dutse yard stock.</div>}
             </div>
             {productsLoadFailed ? (
               // Degraded: products couldn't load (network hiccup) — fall back to
@@ -4966,28 +4995,28 @@ const Batches = ({ userProfile }) => {
             <div style={styles.formGroup}>
               <label style={styles.label}>Batch Date *</label>
               <input style={styles.input} type="date" value={form.dateCured} onChange={e => setForm({ ...form, dateCured: e.target.value })} />
-              <div style={{ fontSize: "11px", color: theme.textMuted, marginTop: "4px" }}>Date this batch was logged / cast</div>
+              <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "4px" }}>Date this batch was logged / cast</div>
             </div>
-            <div style={styles.formGroup}><label style={styles.label}>Qty Accepted (Good Blocks) *</label><input style={styles.input} type="number" placeholder="e.g. 2500" value={form.qtyAccepted} onChange={e => setForm({ ...form, qtyAccepted: e.target.value })} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Qty Accepted (Good Blocks) *</label><input style={styles.input} type="number" inputMode="numeric" placeholder="e.g. 2500" value={form.qtyAccepted} onChange={e => setForm({ ...form, qtyAccepted: e.target.value })} /></div>
             <div style={styles.formGroup}><label style={styles.label}>Created By</label><input style={styles.input} placeholder="Store Officer name" value={form.createdBy} onChange={e => setForm({ ...form, createdBy: e.target.value })} /></div>
             <div style={{ ...styles.formGroup, gridColumn: "span 2" }}><label style={styles.label}>Notes</label><input style={styles.input} placeholder="Optional" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></div>
           </div>
           {filteredProds.length > 0 && (
             <div style={{ marginBottom: "14px" }}>
               <div style={{ fontSize: "11px", fontWeight: "700", color: theme.textMuted, marginBottom: "8px", textTransform: "uppercase", letterSpacing: "0.05em" }}>Link Production Log Entries (optional)</div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
                 {filteredProds.map(p => {
                   const linked = form.linkedProds.includes(p.id);
                   return (
                     <div key={p.id} onClick={() => toggleProdLink(p.id)} style={{ padding: "5px 10px", borderRadius: "6px", fontSize: "12px", cursor: "pointer", border: `1px solid ${linked ? theme.accent : theme.border}`, background: linked ? "rgba(245,166,35,0.08)" : "transparent", color: linked ? theme.accent : theme.textMuted }}>
-                      {p.date} · {p.block_type} · {p.quantity_produced?.toLocaleString()} blocks
+                      {fmtDate(p.date)} · {p.block_type} · {p.quantity_produced?.toLocaleString()} blocks
                     </div>
                   );
                 })}
               </div>
             </div>
           )}
-          <div style={styles.row}>
+          <div className="m-buttons" style={styles.row}>
             <button style={styles.btn("primary")} onClick={handleCreate} disabled={saving}>{saving ? "Creating…" : isFactorySite(form.siteId || DUTSE_SITE_ID, sites) ? "Create Batch & Update Stock" : "Create Batch"}</button>
             <button style={styles.btn("secondary")} onClick={() => { setShowForm(false); setForm(emptyForm); }}>Cancel</button>
           </div>
@@ -4997,7 +5026,7 @@ const Batches = ({ userProfile }) => {
       <div style={styles.card}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap", marginBottom: "14px" }}>
           <div style={{ ...styles.sectionTitle, marginBottom: 0 }}>{siteFilter ? `Batches at ${scopeLabel}` : "All Batches"} ({shownBatches.length})</div>
-          <div style={{ width: "220px" }}><SitePicker allowAll value={siteFilter} onChange={setSiteFilter} style={styles.input} /></div>
+          <div className="m-full" style={{ width: "220px" }}><SitePicker allowAll value={siteFilter} onChange={setSiteFilter} style={styles.input} /></div>
         </div>
         {loading ? <Spinner /> : shownBatches.length === 0 ? (
           <div style={{ textAlign: "center", padding: "40px", color: theme.textMuted }}>{batches.length === 0 ? "No batches created yet." : `No batches at ${scopeLabel}.`}</div>
@@ -5008,7 +5037,7 @@ const Batches = ({ userProfile }) => {
           const ci = curingInfo(b);
           return (
             <div key={b.id} style={{ borderRadius: "8px", border: `1px solid ${b.status === "exhausted" ? theme.border : theme.accent + "44"}`, marginBottom: "10px", overflow: "hidden" }}>
-              <div style={{ padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }} onClick={() => setExpandedId(isOpen ? null : b.id)}>
+              <div className="m-col" style={{ padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }} onClick={() => setExpandedId(isOpen ? null : b.id)}>
                 <div>
                   <strong style={{ fontSize: "14px" }}>{b.batch_number}</strong>
                   <span style={{ ...styles.badge(theme.blue), marginLeft: "8px" }}>{b.block_type}</span>
@@ -5018,17 +5047,17 @@ const Batches = ({ userProfile }) => {
                     : ci.state === "cured"
                       ? <span style={styles.badge(theme.green)}>✓ Cured</span>
                       : <span style={styles.badge(theme.accent)}>Curing</span>}
-                  <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "3px" }}>Site: <span style={{ color: theme.text }}>{siteName(b.site_id, sites)}</span> · Batch date: {b.date_cured} · Created by: {b.created_by || "—"}</div>
+                  <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "3px" }}>Site: <span style={{ color: theme.text }}>{siteName(b.site_id, sites)}</span> · Batch date: {fmtDate(b.date_cured)} · Created by: {b.created_by || "—"}</div>
                   {ci && ci.state === "curing" && !ci.ready && ci.daysRemaining != null && (
-                    <div style={{ fontSize: "11px", color: theme.accent, marginTop: "3px" }}>Curing — ready in {ci.daysRemaining} day{ci.daysRemaining === 1 ? "" : "s"}</div>
+                    <div style={{ fontSize: "12px", color: theme.accent, marginTop: "3px" }}>Curing — ready in {ci.daysRemaining} day{ci.daysRemaining === 1 ? "" : "s"}</div>
                   )}
                 </div>
-                <div style={{ textAlign: "right", display: "flex", gap: "8px", alignItems: "center" }}>
+                <div className="m-col" style={{ textAlign: "right", display: "flex", gap: "8px", alignItems: "center" }}>
                   <div>
                     <div style={{ fontSize: "13px" }}>Accepted: <strong style={{ color: theme.accent }}>{Number(b.qty_accepted).toLocaleString()}</strong></div>
                     <div style={{ fontSize: "13px" }}>Remaining: <strong style={{ color: b.status === "active" ? theme.green : theme.textMuted }}>{Number(b.qty_remaining).toLocaleString()}</strong></div>
                   </div>
-                  <div style={{ display: "flex", gap: "6px" }} onClick={e => e.stopPropagation()}>
+                  <div className="m-buttons" style={{ display: "flex", gap: "8px" }} onClick={e => e.stopPropagation()}>
                     {canWriteBatch && ci && ci.state === "curing" && ci.ready && (
                       <button style={{ ...styles.btn("primary"), padding: "5px 12px", fontSize: "12px", background: theme.green, color: "#000" }} onClick={() => handleMarkCured(b)} disabled={curingId === b.id}>{curingId === b.id ? "…" : "Mark Cured"}</button>
                     )}
@@ -5036,23 +5065,23 @@ const Batches = ({ userProfile }) => {
                       <button style={{ ...styles.btn("danger"), padding: "5px 12px", fontSize: "12px" }} onClick={() => openDmgModal(b)}>Log Damage</button>
                     )}
                     {canWriteBatch && <button style={{ ...styles.btn("secondary"), padding: "5px 12px", fontSize: "12px" }} onClick={() => startEdit(b)}>Edit</button>}
-                    {canDeleteBatch && <button style={{ ...styles.btn("danger"), padding: "5px 12px", fontSize: "12px" }} onClick={() => handleDelete(b)} disabled={deleting === b.id}>{deleting === b.id ? "…" : "Delete"}</button>}
+                    {canDeleteBatch && <button style={{ ...styles.btn("danger"), padding: "5px 12px", fontSize: "12px" }} onClick={() => setConfirmDel(b)} disabled={deleting === b.id}>{deleting === b.id ? "…" : "Delete"}</button>}
                   </div>
                 </div>
               </div>
               {isOpen && (
                 <div style={{ padding: "12px 16px", borderTop: `1px solid ${theme.border}`, background: theme.surface }}>
                   <div style={{ fontSize: "12px", fontWeight: "700", color: theme.textMuted, marginBottom: "10px", textTransform: "uppercase", letterSpacing: "0.05em" }}>Batch Reconciliation</div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: "10px", marginBottom: "12px" }}>
+                  <div className="m-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: "10px", marginBottom: "12px" }}>
                     {[["Total Accepted", b.qty_accepted, theme.accent], ["Total Delivered", delivered, theme.green], ["Remaining in Batch", b.qty_remaining, b.status === "active" ? theme.blue : theme.textMuted], ["Delivery Rate", pct + "%", theme.green]].map(([label, val, color]) => (
                       <div key={label} style={{ background: theme.card, borderRadius: "6px", padding: "10px 12px" }}>
-                        <div style={{ fontSize: "11px", color: theme.textMuted }}>{label}</div>
+                        <div style={{ fontSize: "12px", color: theme.textMuted }}>{label}</div>
                         <div style={{ fontSize: "18px", fontWeight: "700", color }}>{Number(val).toLocaleString()}</div>
                       </div>
                     ))}
                   </div>
                   <div style={styles.progressBar()}><div style={styles.progressFill(pct, theme.green)} /></div>
-                  <div style={{ fontSize: "11px", color: theme.textMuted, marginTop: "4px" }}>{pct}% of batch delivered</div>
+                  <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "4px" }}>{pct}% of batch delivered</div>
                   {(b.links || []).length > 0 && (
                     <div style={{ marginTop: "12px" }}>
                       <div style={{ fontSize: "11px", fontWeight: "700", color: theme.textMuted, marginBottom: "6px", textTransform: "uppercase" }}>Linked Production Entries ({b.links.length})</div>
@@ -5134,7 +5163,7 @@ const Products = () => {
 
   return (
     <div>
-      <div style={styles.header}>
+      <div className="m-header" style={styles.header}>
         <div>
           <div style={styles.pageTitle}>Product Catalogue</div>
           <div style={styles.pageSubtitle}>Manage all product types, units of measure, and default pricing</div>
@@ -6447,7 +6476,7 @@ const BankAccountsTab = ({ userProfile }) => {
 
       {/* Import Modal */}
       {importStep && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: Z.modal, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
           <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '12px', padding: '24px', width: '100%', maxWidth: '700px', maxHeight: '85vh', overflowY: 'auto' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
               <div style={{ fontWeight: '700', fontSize: '15px' }}>
@@ -6562,7 +6591,7 @@ const BankAccountsTab = ({ userProfile }) => {
 
       {/* Match Modal */}
       {matchModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1001, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: Z.modal + 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '10px', padding: '20px', width: '360px' }}>
             <div style={{ fontWeight: '700', marginBottom: '14px' }}>Classify Transaction</div>
             <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '12px' }}>{matchModal.description} · {matchModal.debit > 0 ? naira(matchModal.debit) + ' debit' : naira(matchModal.credit) + ' credit'}</div>
@@ -6589,7 +6618,7 @@ const BankAccountsTab = ({ userProfile }) => {
 
       {/* Reject Match Modal */}
       {rejectModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1002, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: Z.modal + 2, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '10px', padding: '20px', width: '380px' }}>
             <div style={{ fontWeight: '700', marginBottom: '10px' }}>Reject Suggested Match</div>
             <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '14px' }}>{rejectModal.description} · {naira(rejectModal.debit)}</div>
@@ -6610,7 +6639,7 @@ const BankAccountsTab = ({ userProfile }) => {
 
       {/* Link to Payment Request Modal */}
       {suggestModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1002, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: Z.modal + 2, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '10px', padding: '20px', width: '460px', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
             <div style={{ fontWeight: '700', marginBottom: '4px' }}>Link to Payment Request</div>
             <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '12px' }}>{suggestModal.description} · {naira(suggestModal.debit)} · {suggestModal.transaction_date}</div>
@@ -6657,7 +6686,7 @@ const BankAccountsTab = ({ userProfile }) => {
 
       {/* Edit Account Modal */}
       {editAcct && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 1002, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: Z.modal + 2, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '12px', padding: '24px', width: '380px' }}>
             <div style={{ fontWeight: '700', fontSize: '15px', marginBottom: '16px' }}>Edit Account</div>
             {modalErr && <div style={{ background: theme.red + '22', border: `1px solid ${theme.red}`, borderRadius: '6px', padding: '8px 12px', fontSize: '12px', color: theme.red, marginBottom: '12px' }}>{modalErr}</div>}
@@ -6685,7 +6714,7 @@ const BankAccountsTab = ({ userProfile }) => {
 
       {/* Add Account Modal */}
       {addAcctModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 1002, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: Z.modal + 2, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '12px', padding: '24px', width: '380px' }}>
             <div style={{ fontWeight: '700', fontSize: '15px', marginBottom: '16px' }}>Add Bank Account</div>
             {modalErr && <div style={{ background: theme.red + '22', border: `1px solid ${theme.red}`, borderRadius: '6px', padding: '8px 12px', fontSize: '12px', color: theme.red, marginBottom: '12px' }}>{modalErr}</div>}
@@ -6713,7 +6742,7 @@ const BankAccountsTab = ({ userProfile }) => {
 
       {/* Create Expense from Transaction Modal */}
       {createExpModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1003, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: Z.modal + 3, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '12px', padding: '24px', width: '420px' }}>
             <div style={{ fontWeight: '700', fontSize: '15px', marginBottom: '4px' }}>Create Expense Record</div>
             <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '16px' }}>From bank transaction: {createExpModal.transaction_date} · {naira(createExpModal.debit)}</div>
@@ -6773,7 +6802,7 @@ const BankAccountsTab = ({ userProfile }) => {
         const willComplete = selInv && Math.abs(selInvRemaining - amount) < 1;
 
         return (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 1003, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: Z.modal + 3, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
             <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '12px', padding: '24px', width: '500px', maxHeight: '92vh', overflowY: 'auto' }}>
 
               {/* Header */}
@@ -6815,7 +6844,7 @@ const BankAccountsTab = ({ userProfile }) => {
                       value={createPaymentForm.customerSearch}
                       onChange={e => setCreatePaymentForm(f => ({ ...f, customerSearch: e.target.value, customer_id: '', invoice_id: '' }))} />
                     {showCustDropdown && (
-                      <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '6px', zIndex: 20, boxShadow: '0 4px 16px rgba(0,0,0,0.3)' }}>
+                      <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '6px', zIndex: Z.overlay, boxShadow: '0 4px 16px rgba(0,0,0,0.3)' }}>
                         {custMatches.map(c => (
                           <div key={c.id} style={{ padding: '9px 12px', cursor: 'pointer', fontSize: '13px', borderBottom: `1px solid ${theme.border}40` }}
                             onMouseDown={() => setCreatePaymentForm(f => ({ ...f, customer_id: c.id, customerSearch: c.name, invoice_id: '' }))}>
@@ -7459,7 +7488,7 @@ const ReceiptsTab = () => {
 
       {/* Image viewer */}
       {viewUrl && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', zIndex: Z.modal, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
           onClick={() => setViewUrl(null)}>
           {viewIsPdf
             ? <iframe src={viewUrl} style={{ width: '80vw', height: '80vh', border: 'none' }} onClick={e => e.stopPropagation()} />
@@ -7568,7 +7597,7 @@ const Accounting = ({ userProfile }) => {
   ];
   return (
     <div>
-      <div style={styles.header}>
+      <div className="m-header" style={styles.header}>
         <div>
           <div style={styles.pageTitle}>Accounting</div>
           <div style={styles.pageSubtitle}>Financial records, P&L, cost analysis and management accounts</div>
@@ -7622,7 +7651,7 @@ const ChangePasswordModal = ({ onClose }) => {
   };
 
   return (
-    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center' }}>
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', zIndex:Z.modal, display:'flex', alignItems:'center', justifyContent:'center' }}>
       <div style={{ background:theme.surface, borderRadius:'12px', padding:'28px', width:'100%', maxWidth:'360px', boxShadow:'0 16px 48px rgba(0,0,0,0.5)' }}>
         <div style={{ fontWeight:'700', fontSize:'15px', marginBottom:'18px' }}>Change Password</div>
         {err && <Alert msg={err} onClose={() => setErr('')} />}
@@ -7747,7 +7776,7 @@ const MyProfile = ({ userProfile }) => {
 
   return (
     <div>
-      <div style={styles.header}>
+      <div className="m-header" style={styles.header}>
         <div>
           <div style={styles.pageTitle}>My Profile</div>
           <div style={styles.pageSubtitle}>View your account details, upload documents, and change your password</div>
@@ -7917,7 +7946,7 @@ const AdvancesPage = ({ userProfile }) => {
   return (
     <div>
       {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
-      <div style={styles.header}>
+      <div className="m-header" style={styles.header}>
         <div>
           <div style={styles.pageTitle}>Salary Advances</div>
           <div style={styles.pageSubtitle}>Track and approve staff advance requests</div>
@@ -7958,7 +7987,7 @@ const AdvancesPage = ({ userProfile }) => {
       )}
 
       {rejectTarget && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: Z.modal }}>
           <div style={{ ...styles.card, width: '420px' }}>
             <div style={{ ...styles.sectionTitle, marginBottom: '12px' }}>
               {rejectTarget.action === 'reject' ? 'Reject' : 'Cancel'} Advance — Reason Required
@@ -8446,7 +8475,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
     <div>
       {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
 
-      <div style={styles.header}>
+      <div className="m-header" style={styles.header}>
         <div>
           <div style={styles.pageTitle}>Payment Requests</div>
           <div style={styles.pageSubtitle}>
@@ -8784,7 +8813,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
       )}
 
       {recallTarget && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: Z.modal }}>
           <div style={{ ...styles.card, width: '420px' }}>
             <div style={{ ...styles.sectionTitle, marginBottom: '12px' }}>Recall Request — Reason Required</div>
             <textarea
@@ -8805,7 +8834,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
       )}
 
       {overrideCloseTarget && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: Z.modal }}>
           <div style={{ ...styles.card, width: '420px' }}>
             <div style={{ ...styles.sectionTitle, marginBottom: '12px' }}>Override Close — Reason Required</div>
             <textarea
@@ -8826,7 +8855,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
       )}
 
       {disburseTarget && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: Z.modal }}>
           <div style={{ ...styles.card, width: '420px' }}>
             <div style={{ ...styles.sectionTitle, marginBottom: '12px' }}>Mark Disbursed — Select Source Account</div>
             <select style={styles.input} value={disburseAccountId} onChange={e => setDisburseAccountId(e.target.value)}>
@@ -8844,7 +8873,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
       )}
 
       {queryTarget && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: Z.modal }}>
           <div style={{ ...styles.card, width: '420px' }}>
             <div style={{ ...styles.sectionTitle, marginBottom: '12px' }}>Query Entry — Reason Required</div>
             <textarea
@@ -8886,7 +8915,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
           </div>
         ) : null;
         return (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: Z.modal }}>
             <div style={{ ...styles.card, width: '500px', maxWidth: '94vw', maxHeight: '90vh', overflowY: 'auto' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '18px' }}>
                 <div>
@@ -9234,7 +9263,7 @@ const LeavePage = ({ userProfile }) => {
   return (
     <div>
       {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
-      <div style={styles.header}>
+      <div className="m-header" style={styles.header}>
         <div>
           <div style={styles.pageTitle}>Leave Requests</div>
           <div style={styles.pageSubtitle}>Record and approve staff leave</div>
@@ -9292,7 +9321,7 @@ const LeavePage = ({ userProfile }) => {
       )}
 
       {modalTarget && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: Z.modal }}>
           <div style={{ ...styles.card, width: '420px' }}>
             <div style={{ ...styles.sectionTitle, marginBottom: '12px' }}>
               {modalTarget.action === 'reject' ? 'Reject' : 'Cancel'} Leave — Reason Required
@@ -9530,7 +9559,7 @@ const MyHRPage = ({ userProfile }) => {
   return (
     <div>
       {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
-      <div style={styles.header}>
+      <div className="m-header" style={styles.header}>
         <div><div style={styles.pageTitle}>My HR</div><div style={styles.pageSubtitle}>Your leave and advance requests</div></div>
       </div>
 
@@ -9870,7 +9899,7 @@ const AttendanceFlagsPage = ({ userProfile }) => {
   return (
     <div>
       {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
-      <div style={styles.header}>
+      <div className="m-header" style={styles.header}>
         <div>
           <div style={styles.pageTitle}>Attendance Flags</div>
           <div style={styles.pageSubtitle}>Flagged attendance records requiring HR review (last 60 days)</div>
@@ -10048,7 +10077,7 @@ const DisciplinaryPage = ({ userProfile }) => {
   return (
     <div>
       {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
-      <div style={styles.header}>
+      <div className="m-header" style={styles.header}>
         <div>
           <div style={styles.pageTitle}>Disciplinary</div>
           <div style={styles.pageSubtitle}>Manage formal queries and warnings</div>
@@ -10382,7 +10411,7 @@ const TruckLoadingPage = ({ userProfile }) => {
 
   return (
     <div>
-      <div style={styles.header}>
+      <div className="m-header" style={styles.header}>
         <div>
           <div style={styles.pageTitle}>Truck Loading</div>
           <div style={styles.pageSubtitle}>Log entries and loading rates</div>
@@ -10390,7 +10419,7 @@ const TruckLoadingPage = ({ userProfile }) => {
       </div>
 
       {/* Tabs */}
-      <div style={{ display: 'flex', gap: '4px', borderBottom: `1px solid ${theme.border}`, marginBottom: '20px' }}>
+      <div className="m-wrap" style={{ display: 'flex', gap: '4px', borderBottom: `1px solid ${theme.border}`, marginBottom: '20px' }}>
         {canLog && tabBtn('log', 'Log Entry')}
         {canManageRates && tabBtn('rates', 'Rates')}
       </div>
@@ -10402,7 +10431,7 @@ const TruckLoadingPage = ({ userProfile }) => {
           <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '14px' }}>
             Loading payroll (weekly scoping, ICO/MD approval, payment schedules) is prepared in <strong style={{ color: theme.textMuted }}>Labour → Payroll → Loading Payroll</strong>.
           </div>
-          <div style={{ marginBottom: '16px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <div className="m-buttons" style={{ marginBottom: '16px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             <button style={styles.btn('primary')} onClick={() => { setShowLogForm(f => !f); setLogAlert(null); setIsBackfill(false); setLogForm({ vehicle_id: '', product_id: '', date: '', quantity_loaded: '', waybill_id: '' }); setSelectedLoaders([]); }}>
               {showLogForm ? '✕ Cancel' : '+ New Log Entry'}
             </button>
@@ -10421,7 +10450,7 @@ const TruckLoadingPage = ({ userProfile }) => {
                 </div>
               )}
               <div style={styles.sectionTitle}>{isBackfill ? 'Backfill Log Entry' : 'New Log Entry'}</div>
-              <div style={styles.grid(2)}>
+              <div className="m-form" style={styles.grid(2)}>
                 <div style={styles.formGroup}>
                   <label style={styles.label}>Product</label>
                   <select style={styles.input} value={logForm.product_id} onChange={e => setLogForm(f => ({ ...f, product_id: e.target.value }))}>
@@ -10446,7 +10475,7 @@ const TruckLoadingPage = ({ userProfile }) => {
                 </div>
                 <div style={styles.formGroup}>
                   <label style={styles.label}>Quantity Loaded</label>
-                  <input type="number" style={styles.input} placeholder="e.g. 120" min="1" value={logForm.quantity_loaded} onChange={e => setLogForm(f => ({ ...f, quantity_loaded: e.target.value }))} />
+                  <input type="number" inputMode="numeric" style={styles.input} placeholder="e.g. 120" min="1" value={logForm.quantity_loaded} onChange={e => setLogForm(f => ({ ...f, quantity_loaded: e.target.value }))} />
                 </div>
                 <div style={styles.formGroup}>
                   <label style={styles.label}>Link to Waybill {isBackfill ? '' : '(optional)'}</label>
@@ -10459,9 +10488,9 @@ const TruckLoadingPage = ({ userProfile }) => {
                     }));
                   }}>
                     <option value="">— {isBackfill ? 'Select waybill' : 'None (standalone load)'} —</option>
-                    {waybillsForLog.map(w => <option key={w.id} value={w.id}>{w.waybill_number} · {w.waybill_date} · {w.block_type}</option>)}
+                    {waybillsForLog.map(w => <option key={w.id} value={w.id}>{w.waybill_number} · {fmtDate(w.waybill_date)} · {w.block_type}</option>)}
                   </select>
-                  {!isBackfill && waybillsForLog.length === 0 && <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '4px' }}>No unlinked waybills found. <button style={{ background: 'none', border: 'none', color: theme.blue, cursor: 'pointer', fontSize: '11px', padding: 0 }} onClick={() => loadWaybillsForLog(logs)}>Refresh</button></div>}
+                  {!isBackfill && waybillsForLog.length === 0 && <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '4px' }}>No unlinked waybills found. <button style={{ background: 'none', border: 'none', color: theme.blue, cursor: 'pointer', fontSize: '12px', padding: 0 }} onClick={() => loadWaybillsForLog(logs)}>Refresh</button></div>}
                 </div>
               </div>
               {assignments.length > 0 && (
@@ -10490,7 +10519,7 @@ const TruckLoadingPage = ({ userProfile }) => {
           {editingLogId && (
             <div style={{ ...styles.card, marginBottom: '16px', border: `1px solid ${theme.accent}44` }}>
               <div style={styles.sectionTitle}>Edit Log Entry</div>
-              <div style={styles.grid(2)}>
+              <div className="m-form" style={styles.grid(2)}>
                 <div style={styles.formGroup}>
                   <label style={styles.label}>Product</label>
                   <select style={styles.input} value={editLogForm.product_id} onChange={e => setEditLogForm(f => ({ ...f, product_id: e.target.value }))}>
@@ -10510,7 +10539,7 @@ const TruckLoadingPage = ({ userProfile }) => {
                 </div>
                 <div style={styles.formGroup}>
                   <label style={styles.label}>Quantity Loaded</label>
-                  <input type="number" style={styles.input} value={editLogForm.quantity_loaded} onChange={e => setEditLogForm(f => ({ ...f, quantity_loaded: e.target.value }))} />
+                  <input type="number" inputMode="numeric" style={styles.input} value={editLogForm.quantity_loaded} onChange={e => setEditLogForm(f => ({ ...f, quantity_loaded: e.target.value }))} />
                 </div>
               </div>
               {assignments.length > 0 && (
@@ -10530,7 +10559,7 @@ const TruckLoadingPage = ({ userProfile }) => {
                   </div>
                 </div>
               )}
-              <div style={styles.row}>
+              <div className="m-buttons" style={styles.row}>
                 <button style={styles.btn('primary')} onClick={handleEditLogSave} disabled={editLogSaving}>{editLogSaving ? 'Saving…' : 'Save'}</button>
                 <button style={styles.btn('secondary')} onClick={() => setEditingLogId(null)}>Cancel</button>
               </div>
@@ -10540,7 +10569,7 @@ const TruckLoadingPage = ({ userProfile }) => {
           {deleteTarget && (
             <div style={{ ...styles.card, marginBottom: '12px', border: `1px solid ${theme.red}` }}>
               <div style={{ fontSize: '13px', marginBottom: '10px' }}>Delete this log entry? This cannot be undone.</div>
-              <div style={{ display: 'flex', gap: '8px' }}>
+              <div className="m-buttons" style={{ display: 'flex', gap: '8px' }}>
                 <button style={{ ...styles.btn('danger'), fontSize: '12px' }} onClick={() => handleDeleteLog(deleteTarget)} disabled={deleteSaving}>
                   {deleteSaving ? 'Deleting…' : 'Confirm Delete'}
                 </button>
@@ -10559,7 +10588,7 @@ const TruckLoadingPage = ({ userProfile }) => {
               <label style={styles.label}>To</label>
               <input type="date" style={{ ...styles.input, width: '148px' }} value={rangeTo} onChange={e => setRangeTo(e.target.value)} />
             </div>
-            <div style={{ display: 'flex', gap: '4px', paddingBottom: '1px' }}>
+            <div style={{ display: 'flex', gap: '8px', paddingBottom: '1px' }}>
               <button style={{ ...styles.btn('secondary'), padding: '6px 10px' }} onClick={() => shiftRange(-1)}>‹</button>
               <button style={{ ...styles.btn('secondary'), padding: '6px 10px' }} onClick={() => shiftRange(1)}>›</button>
             </div>
@@ -10612,34 +10641,35 @@ const TruckLoadingPage = ({ userProfile }) => {
                       return (
                         <tr key={log.id}>
                           <td style={styles.td}>
-                            {log.date || <span style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '4px', background: theme.red + '22', color: theme.red, border: `1px solid ${theme.red}44`, fontWeight: '700' }}>no date</span>}
-                            {isHistorical && <span style={{ marginLeft: '6px', fontSize: '10px', padding: '1px 6px', borderRadius: '4px', background: '#f59e0b22', color: '#f59e0b', border: '1px solid #f59e0b44', fontWeight: '700' }}>Historical</span>}
+                            {log.date ? fmtDate(log.date) : <span style={{ fontSize: '12px', padding: '1px 6px', borderRadius: '4px', background: theme.red + '22', color: theme.red, border: `1px solid ${theme.red}44`, fontWeight: '700' }}>no date</span>}
+                            {isHistorical && <span style={{ marginLeft: '6px', fontSize: '12px', padding: '1px 6px', borderRadius: '4px', background: '#f59e0b22', color: '#f59e0b', border: '1px solid #f59e0b44', fontWeight: '700' }}>Historical</span>}
+                            <div className="m-only" style={{ fontSize: '13px' }}>{log.product?.name || '—'}</div>
                           </td>
-                          <td style={styles.td}>{log.product?.name || '—'}</td>
+                          <td className="m-hide" style={styles.td}>{log.product?.name || '—'}</td>
                           <td style={styles.td}>{log.vehicle?.vehicle_number || '—'}</td>
                           <td style={styles.td}>{log.trip_number_for_day ?? '—'}</td>
-                          <td style={styles.td}>{fmt(log.quantity_loaded)}</td>
+                          <td className="m-key" style={styles.td}>{fmt(log.quantity_loaded)}</td>
                           <td style={styles.td}>{log.computed_rate_used != null ? naira(log.computed_rate_used) : '—'}</td>
                           <td style={styles.td}>{log.total_amount != null ? naira(log.total_amount) : '—'}</td>
                           <td style={styles.td}>
                             {logLoaderNames.length > 0
-                              ? <span style={{ fontSize: '11px', color: theme.textMuted }}>{logLoaderNames.join(', ')}</span>
-                              : <span style={{ fontSize: '11px', color: theme.textDim }}>—</span>}
+                              ? <span style={{ fontSize: '12px', color: theme.textMuted }}>{logLoaderNames.join(', ')}</span>
+                              : <span style={{ fontSize: '12px', color: theme.textDim }}>—</span>}
                           </td>
                           {canDelete && (
-                            <td style={styles.td}>
-                              <div style={{ display: 'flex', gap: '6px' }}>
+                            <td className="m-actions" style={styles.td}>
+                              <div style={{ display: 'flex', gap: '8px' }}>
                                 {payrollEditable ? (
-                                  <button style={{ ...styles.btn('secondary'), fontSize: '11px', padding: '3px 10px' }} onClick={() => {
+                                  <button style={{ ...styles.btn('secondary'), fontSize: '12px', padding: '3px 10px' }} onClick={() => {
                                     setEditingLogId(log.id);
                                     setEditLogForm({ vehicle_id: log.vehicle_id || '', product_id: log.product_id || '', date: log.date || '', quantity_loaded: String(log.quantity_loaded || '') });
                                     setEditLogLoaders(logLoaderIds);
                                     setShowLogForm(false);
                                   }}>Edit</button>
                                 ) : (
-                                  <span title="Locked: linked to an approved/paid payroll" style={{ fontSize: '11px', color: theme.textMuted, padding: '3px 6px' }}>{isPaid ? 'Paid' : 'Locked'}</span>
+                                  <span title="Locked: linked to an approved/paid payroll" style={{ fontSize: '12px', color: theme.textMuted, padding: '3px 6px' }}>{isPaid ? 'Paid' : 'Locked'}</span>
                                 )}
-                                <button style={{ ...styles.btn('danger'), fontSize: '11px', padding: '3px 10px' }} onClick={() => setDeleteTarget(log.id)} disabled={!payrollEditable}>Delete</button>
+                                <button style={{ ...styles.btn('danger'), fontSize: '12px', padding: '3px 10px' }} onClick={() => setDeleteTarget(log.id)} disabled={!payrollEditable}>Delete</button>
                               </div>
                             </td>
                           )}
@@ -10679,24 +10709,24 @@ const TruckLoadingPage = ({ userProfile }) => {
                         <td style={styles.td}>{r.product?.name || '—'}</td>
                         {editingRate === r.id ? (
                           <>
-                            <td style={styles.td}><input type="number" style={{ ...styles.input, width: '110px' }} value={rateForm.base_rate ?? ''} onChange={e => setRateForm(f => ({ ...f, base_rate: e.target.value }))} /></td>
-                            <td style={styles.td}><input type="number" style={{ ...styles.input, width: '80px' }} value={rateForm.trip_threshold ?? ''} onChange={e => setRateForm(f => ({ ...f, trip_threshold: e.target.value }))} /></td>
-                            <td style={styles.td}><input type="number" style={{ ...styles.input, width: '110px' }} value={rateForm.incentive_rate ?? ''} onChange={e => setRateForm(f => ({ ...f, incentive_rate: e.target.value }))} /></td>
-                            <td style={styles.td}>
-                              <div style={{ display: 'flex', gap: '6px' }}>
-                                <button style={{ ...styles.btn('primary'), fontSize: '11px', padding: '4px 10px' }} onClick={handleRateSave} disabled={rateSaving}>{rateSaving ? '…' : 'Save'}</button>
-                                <button style={{ ...styles.btn('secondary'), fontSize: '11px', padding: '4px 10px' }} onClick={() => setEditingRate(null)}>Cancel</button>
+                            <td style={styles.td}><input className="m-full" type="number" inputMode="decimal" style={{ ...styles.input, width: '110px' }} value={rateForm.base_rate ?? ''} onChange={e => setRateForm(f => ({ ...f, base_rate: e.target.value }))} /></td>
+                            <td style={styles.td}><input className="m-full" type="number" inputMode="numeric" style={{ ...styles.input, width: '80px' }} value={rateForm.trip_threshold ?? ''} onChange={e => setRateForm(f => ({ ...f, trip_threshold: e.target.value }))} /></td>
+                            <td style={styles.td}><input className="m-full" type="number" inputMode="decimal" style={{ ...styles.input, width: '110px' }} value={rateForm.incentive_rate ?? ''} onChange={e => setRateForm(f => ({ ...f, incentive_rate: e.target.value }))} /></td>
+                            <td className="m-actions" style={styles.td}>
+                              <div style={{ display: 'flex', gap: '8px' }}>
+                                <button style={{ ...styles.btn('primary'), fontSize: '12px', padding: '4px 10px' }} onClick={handleRateSave} disabled={rateSaving}>{rateSaving ? '…' : 'Save'}</button>
+                                <button style={{ ...styles.btn('secondary'), fontSize: '12px', padding: '4px 10px' }} onClick={() => setEditingRate(null)}>Cancel</button>
                               </div>
                             </td>
                           </>
                         ) : (
                           <>
-                            <td style={styles.td}>{naira(r.base_rate)}</td>
+                            <td className="m-key" style={styles.td}>{naira(r.base_rate)}</td>
                             <td style={styles.td}>{r.trip_threshold ?? '—'}</td>
                             <td style={styles.td}>{r.incentive_rate != null ? naira(r.incentive_rate) : '—'}</td>
                             {canManageRates && (
-                              <td style={styles.td}>
-                                <button style={{ ...styles.btn('secondary'), fontSize: '11px', padding: '4px 10px' }}
+                              <td className="m-actions" style={styles.td}>
+                                <button style={{ ...styles.btn('secondary'), fontSize: '12px', padding: '4px 10px' }}
                                   onClick={() => { setEditingRate(r.id); setRateForm({ base_rate: r.base_rate ?? '', trip_threshold: r.trip_threshold ?? '', incentive_rate: r.incentive_rate ?? '' }); }}>
                                   Edit
                                 </button>
@@ -10770,7 +10800,7 @@ const TradingMarginReport = () => {
 
   return (
     <div>
-      <div style={styles.header}>
+      <div className="m-header" style={styles.header}>
         <div>
           <div style={styles.pageTitle}>Trading Margin Report</div>
           <div style={styles.pageSubtitle}>Per-order gross margin vs. true margin after delivery costs</div>
@@ -11179,7 +11209,7 @@ const UserManagement = ({ userProfile }) => {
 
   return (
     <div>
-      <div style={styles.header}>
+      <div className="m-header" style={styles.header}>
         <div><div style={styles.pageTitle}>User Management</div><div style={styles.pageSubtitle}>Manage system users and roles — MD access only</div></div>
         {isMD && <button style={styles.btn('primary')} onClick={() => { setShowCreate(s => !s); setErr(''); if (showCreate) resetForm(); }}>{showCreate ? '✕ Cancel' : '+ Add User'}</button>}
       </div>
@@ -11208,7 +11238,7 @@ const UserManagement = ({ userProfile }) => {
                       autoComplete="off"
                     />
                     {showStaffDrop && (
-                      <div style={{ position:'absolute', top:'100%', left:0, right:0, background:theme.surface, border:`1px solid ${theme.border}`, borderRadius:'8px', zIndex:100, maxHeight:'220px', overflowY:'auto', boxShadow:'0 8px 24px rgba(0,0,0,0.4)', marginTop:'2px' }}>
+                      <div style={{ position:'absolute', top:'100%', left:0, right:0, background:theme.surface, border:`1px solid ${theme.border}`, borderRadius:'8px', zIndex:Z.overlay, maxHeight:'220px', overflowY:'auto', boxShadow:'0 8px 24px rgba(0,0,0,0.4)', marginTop:'2px' }}>
                         {filteredStaff.length === 0 && staffSearch && (
                           <div style={{ padding:'10px 12px', color:theme.textMuted, fontSize:'12px' }}>No staff match "{staffSearch}"</div>
                         )}
@@ -11586,20 +11616,20 @@ export default function App() {
   const pages = {
     dashboard: isBoard
       ? <><SiteDashboardCards userProfile={userProfile} onOpenSite={openSiteContracts} /><BoardDashboard userProfile={userProfile} /></>
-      : <Dashboard onNavigate={setActive} onOpenSite={openSiteContracts} userProfile={userProfile} />,
-    production: <Production userProfile={userProfile} />,
-    inventory: <Inventory onLowStockChange={setLowStockCount} userProfile={userProfile} onNavigate={setActive} />,
+      : <MobileScope><Dashboard onNavigate={setActive} onOpenSite={openSiteContracts} userProfile={userProfile} /></MobileScope>,
+    production: <MobileScope><Production userProfile={userProfile} /></MobileScope>,
+    inventory: <MobileScope><Inventory onLowStockChange={setLowStockCount} userProfile={userProfile} onNavigate={setActive} /></MobileScope>,
     site_contracts: <SiteContracts userProfile={userProfile} initialSiteId={contractsSite} initialReport={contractsReport} />,
     asset_register: <AssetRegister userProfile={userProfile} />,
     material_receiving: <MaterialReceiving userProfile={userProfile} />,
     handovers: <Handovers userProfile={userProfile} />,
-    batches: <Batches userProfile={userProfile} />,
-    waybills: <Waybills userProfile={userProfile} />,
+    batches: <MobileScope><Batches userProfile={userProfile} /></MobileScope>,
+    waybills: <MobileScope><Waybills userProfile={userProfile} /></MobileScope>,
     vehicles: <VehicleRegistry />,
     staff: <Staff userProfile={userProfile} />,
     customers: <Customers userProfile={userProfile} />,
     orders: <Orders onNavigate={setActive} userProfile={userProfile} />,
-    pending_register: <PendingDeliveryRegister />,
+    pending_register: <MobileScope><PendingDeliveryRegister /></MobileScope>,
     daily_schedule: <DailySchedule />,
     lpo_approvals: <LPOApprovals />,
     schedule_approvals: <ScheduleApprovals />,
@@ -11611,9 +11641,9 @@ export default function App() {
     accounting: <Accounting userProfile={userProfile} />,
     data_import: <DataImport />,
     user_management: <UserManagement userProfile={userProfile} />,
-    labour: <Labour userProfile={userProfile} />,
+    labour: <MobileScope><Labour userProfile={userProfile} /></MobileScope>,
     maintenance: <Maintenance userProfile={userProfile} />,
-    truck_loading: <TruckLoadingPage userProfile={userProfile} />,
+    truck_loading: <MobileScope><TruckLoadingPage userProfile={userProfile} /></MobileScope>,
     advances: <AdvancesPage userProfile={userProfile} />,
     payment_requests: <PaymentRequestsPage userProfile={userProfile} />,
     leave: <LeavePage userProfile={userProfile} />,
@@ -11654,9 +11684,9 @@ export default function App() {
     <div style={styles.app}>
       {/* Mobile overlay */}
       {isMobile && sidebarOpen && (
-        <div onClick={() => setSidebarOpen(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 200 }} />
+        <div onClick={() => setSidebarOpen(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: Z.sidebarBackdrop }} />
       )}
-      <div style={{ ...styles.sidebar, overflowY: "auto", ...(isMobile ? { transform: sidebarOpen ? 'translateX(0)' : 'translateX(-240px)', transition: 'transform 0.25s ease', zIndex: 300 } : {}) }}>
+      <div style={{ ...styles.sidebar, overflowY: "auto", ...(isMobile ? { transform: sidebarOpen ? 'translateX(0)' : 'translateX(-240px)', transition: 'transform 0.25s ease', zIndex: Z.sidebar } : {}) }}>
         <div style={styles.logo}>
           <img src="/logo.png" alt="Abuja Precast Concrete Limited" style={{ width: "100%", maxWidth: "180px", marginBottom: "10px", display: "block" }} />
           <div style={styles.logoSub}>Quality Precast products. Reliable Delivery.</div>
@@ -11668,7 +11698,7 @@ export default function App() {
               {section.items.map(item => {
                 const badge = getBadge(item.id);
                 return (
-                  <div key={item.id} style={styles.navItem(active === item.id)} onClick={() => { setActive(item.id); setContractsReport(false); if (isMobile) setSidebarOpen(false); }}>
+                  <div key={item.id} style={{ ...styles.navItem(active === item.id), ...(isMobile ? { minHeight: '44px' } : {}) }} onClick={() => { setActive(item.id); setContractsReport(false); if (isMobile) setSidebarOpen(false); }}>
                     <Icon name={item.icon} size={14} />
                     <span style={{ flex: 1 }}>{item.label}</span>
                     {badge > 0 && (
@@ -11686,9 +11716,9 @@ export default function App() {
           <div>📍 1, Dutse Alhaji, Behind Tipper Garage, Off Bwari Expressway, Abuja.</div>
           <div>📞 +234 905 554 4433</div>
           <div style={{ wordBreak: "break-all" }}>✉️ abujaprecastconcreteltd@gmail.com</div>
-          <div style={{ display:"flex", gap:"6px", marginTop:"10px" }}>
-            <button onClick={() => setShowChangePwd(true)} style={{ flex:1, padding:"6px", background:"transparent", border:`1px solid ${theme.border}`, borderRadius:"6px", color:theme.textMuted, fontSize:"11px", cursor:"pointer", fontWeight:"600" }}>Change Password</button>
-            <button onClick={handleLogout} style={{ flex:1, padding:"6px", background:"transparent", border:`1px solid ${theme.border}`, borderRadius:"6px", color:theme.textMuted, fontSize:"11px", cursor:"pointer", fontWeight:"600" }}>Sign Out</button>
+          <div style={{ display:"flex", gap:"8px", marginTop:"10px" }}>
+            <button onClick={() => setShowChangePwd(true)} style={{ flex:1, padding:"6px", minHeight: isMobile ? '44px' : undefined, background:"transparent", border:`1px solid ${theme.border}`, borderRadius:"6px", color:theme.textMuted, fontSize:"11px", cursor:"pointer", fontWeight:"600" }}>Change Password</button>
+            <button onClick={handleLogout} style={{ flex:1, padding:"6px", minHeight: isMobile ? '44px' : undefined, background:"transparent", border:`1px solid ${theme.border}`, borderRadius:"6px", color:theme.textMuted, fontSize:"11px", cursor:"pointer", fontWeight:"600" }}>Sign Out</button>
           </div>
         </div>
       </div>
@@ -11703,10 +11733,10 @@ export default function App() {
         onNavigate={(page) => { setActive(page); if (isMobile) setSidebarOpen(false); }}
         isMobile={isMobile}
       />}
-      <main style={{ ...styles.main, ...(isMobile ? { marginLeft: 0, padding: '16px 14px', paddingTop: '58px' } : {}) }} {...(boardMasked ? { 'data-board-view': 'true' } : {})} {...(icoMasked ? { 'data-ico-view': 'true' } : {})}>
+      <main style={{ ...styles.main, ...(isMobile ? { marginLeft: 0, minWidth: 0, padding: '16px 14px', paddingTop: '68px' } : {}) }} {...(boardMasked ? { 'data-board-view': 'true' } : {})} {...(icoMasked ? { 'data-ico-view': 'true' } : {})}>
         {/* Mobile hamburger */}
         {isMobile && (
-          <button data-board-allow data-ico-allow onClick={() => setSidebarOpen(s => !s)} style={{ position: 'fixed', top: '12px', left: '12px', zIndex: 250, background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '8px', padding: '8px 12px', cursor: 'pointer', fontSize: '18px', color: theme.text, lineHeight: 1, boxShadow: '0 2px 8px rgba(0,0,0,0.3)' }}>☰</button>
+          <button data-board-allow data-ico-allow aria-label="Menu" onClick={() => setSidebarOpen(s => !s)} style={{ position: 'fixed', top: '10px', left: '12px', zIndex: Z.floating, width: '44px', height: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '8px', padding: 0, cursor: 'pointer', fontSize: '20px', color: theme.text, lineHeight: 1, boxShadow: '0 2px 8px rgba(0,0,0,0.3)' }}>☰</button>
         )}
         {sessionWarning && (
           <div style={{ background: "#7c3a0022", border: "1px solid #c47d0e88", borderRadius: "8px", padding: "10px 16px", marginBottom: "16px", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "13px", color: theme.accent }}>

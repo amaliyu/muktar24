@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { authService } from '../services/authService'
 import { supabase } from '../lib/supabase'
 import { checkProfileAccess } from '../lib/profileAccess'
+import { Z } from '../lib/zIndex'
 
 const theme = {
   bg: '#0f1117',
@@ -13,7 +14,7 @@ const theme = {
   red: '#f06b6b',
   blue: '#5b8dee',
   text: '#e8eaf0',
-  textMuted: '#7c839e',
+  textMuted: '#a0a7bf',
 }
 
 export default function LoginScreen({ onLogin, initialError }) {
@@ -275,7 +276,7 @@ export default function LoginScreen({ onLogin, initialError }) {
 
       {/* ── Forgot Password Modal ────────────────────────────── */}
       {showReset && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '24px' }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: Z.modal, padding: '24px' }}>
           <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: '14px', padding: '32px', width: '100%', maxWidth: '400px', boxShadow: '0 8px 40px rgba(0,0,0,0.6)' }}>
             <div style={{ fontSize: '16px', fontWeight: '700', color: theme.text, marginBottom: '6px' }}>Reset Password</div>
             <div style={{ fontSize: '13px', color: theme.textMuted, marginBottom: '24px' }}>Enter your email and we'll send a reset link.</div>

@@ -1,6 +1,8 @@
+import { Z } from '../lib/zIndex'
+
 const theme = {
   surface: "#1a1d27", border: "#2e3452",
-  text: "#e8eaf0", textMuted: "#6b7280", accent: "#f5a623", red: "#f06b6b",
+  text: "#e8eaf0", textMuted: "#a0a7bf", accent: "#f5a623", red: "#f06b6b",
 }
 
 function ChatIcon() {
@@ -15,8 +17,8 @@ export default function MessagesBell({ unreadMsgCount, onNavigate, isMobile }) {
   const containerStyle = {
     position: 'fixed',
     top: isMobile ? '10px' : '14px',
-    right: isMobile ? '56px' : '74px',
-    zIndex: 400,
+    right: isMobile ? '64px' : '74px',
+    zIndex: Z.floating,
   }
 
   const buttonStyle = {
@@ -24,8 +26,9 @@ export default function MessagesBell({ unreadMsgCount, onNavigate, isMobile }) {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    width: '36px',
-    height: '36px',
+    // 44×44 on phones (touch target); compact on desktop.
+    width: isMobile ? '44px' : '36px',
+    height: isMobile ? '44px' : '36px',
     background: theme.surface,
     border: `1px solid ${theme.border}`,
     borderRadius: '8px',
