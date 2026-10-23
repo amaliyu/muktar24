@@ -5,6 +5,7 @@ import { siteContractsService, lagosToday, isCycleFunded } from '../../services/
 import { hasRole } from '../../lib/roles'
 import { buildAdvanceNoticeText, buildCompletionNoticeText } from '../../utils/siteNotices'
 import WeeklyReportPanel, { WEEKLY_REPORT_ROLES } from './WeeklyReportPanel'
+import SiteReceipts from './SiteReceipts'
 import { theme, ui, Pill, fmtQty, fmtNaira, fmtDate, fmtDateTime, countdown, ErrorBox, SkeletonRows, CopyButton, ConfirmDialog, StackTable } from './siteUi'
 
 // Phase 7B-1 — client contracts and their prepaid cycles. The cycle is the
@@ -305,6 +306,10 @@ function ContractBlock({ contract: c, sites, cycles, forecasts, isMD, canEditCyc
         {isMD && <button type="button" style={ui.btn('ghost')} onClick={() => setShowSettings(s => !s)}>{showSettings ? 'Hide' : 'Contract'} settings</button>}
         {canReport && <button type="button" data-board-allow data-ico-allow style={ui.btn('secondary')} onClick={() => setShowReport(s => !s)}>{showReport ? 'Hide weekly report' : 'Weekly report'}</button>}
       </div>
+      {seeMoney && (
+        <SiteReceipts siteId={c.site_id} siteLabel={site} cycles={cycles} currentCycleId={current?.id}
+          canWrite={canEditCycle} onChanged={onChanged} />
+      )}
       {showReport && canReport && <WeeklyReportPanel contract={c} site={{ id: c.site_id, name: site }} userProfile={userProfile} />}
       {showHistory && <CycleHistory cycles={cycles} seeMoney={seeMoney} />}
       {showSettings && isMD && <ContractSettings contract={c} onSaved={onChanged} />}
@@ -376,7 +381,7 @@ function CycleForm({ contract: c, form, setForm, seeMoney, onClose, onSaved }) {
     ? Number(form.qty_9in || 0) * Number(form.rate_9in) + Number(form.qty_6in || 0) * Number(form.rate_6in) : null
 
   const problem = (() => {
-    const nums = ['qty_9in', 'qty_6in', 'qty_total', 'rate_9in', 'rate_6in', 'amount_due', 'amount_received']
+    const nums = ['qty_9in', 'qty_6in', 'qty_total', 'rate_9in', 'rate_6in', 'amount_due']
     if (nums.some(k => form[k] !== '' && form[k] != null && !(Number(form[k]) >= 0))) return 'Quantities and amounts cannot be negative.'
     if (form.mode === 'new' && !(full ? split > 0 : Number(form.qty_total) > 0)) return 'Enter the cycle quantity.'
     return null
@@ -385,10 +390,10 @@ function CycleForm({ contract: c, form, setForm, seeMoney, onClose, onSaved }) {
   const save = async () => {
     setBusy(true); setErr(null)
     try {
+      // amount_received and paid_on are kept equal to the cycle's site
+      // receipts by the DB (7C) — record or void a receipt instead.
       const patch = {
-        amount_received: n(form.amount_received) ?? 0,
         payment_ref: form.payment_ref.trim() || null,
-        paid_on: form.paid_on || null,
         notes: form.notes.trim() || null,
       }
       if (full) {
@@ -447,12 +452,19 @@ function CycleForm({ contract: c, form, setForm, seeMoney, onClose, onSaved }) {
               hint={c.fee_per_block && Number(form.qty_total) > 0 ? `At ${fmtNaira(c.fee_per_block)}/block: ${fmtNaira(Number(form.qty_total) * Number(c.fee_per_block))}` : null} />}
           </>
         )}
-        {seeMoney && <Num label="Amount received (₦)" value={form.amount_received} onChange={set('amount_received')} />}
+        {seeMoney && (
+          <div style={ui.field}>
+            <div style={ui.label}>Amount received</div>
+            <div style={{ ...ui.input, display: 'flex', alignItems: 'center', background: 'transparent', fontWeight: 700 }}>
+              {form.mode === 'edit' ? fmtNaira(form.amount_received) : fmtNaira(0)}
+            </div>
+            <div style={ui.hint}>The sum of this cycle's receipts{form.mode === 'edit' && form.paid_on ? `, last received ${fmtDate(form.paid_on)}` : ''}. Use Record receipt / Void under Receipts to change it.</div>
+          </div>
+        )}
         <div style={ui.field}>
           <label style={ui.label} htmlFor="cy-ref">Payment ref</label>
           <input id="cy-ref" style={ui.input} value={form.payment_ref} onChange={set('payment_ref')} />
         </div>
-        <DateField label="Paid on" value={form.paid_on} onChange={set('paid_on')} />
         <div style={ui.field}>
           <label style={ui.label} htmlFor="cy-notes">Notes</label>
           <textarea id="cy-notes" style={ui.textarea} value={form.notes} onChange={set('notes')} />

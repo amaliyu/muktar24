@@ -27,6 +27,14 @@ vi.mock('../../services/siteContracts', async () => {
   }
 })
 
+const invMock = vi.hoisted(() => ({
+  listSiteReceipts: vi.fn(async () => []),
+  listBankAccounts: vi.fn(async () => [{ id: 'b1', bank_name: 'Taj Bank', account_name: 'APCL Collections', is_active: true }]),
+  recordSiteReceipt: vi.fn(async () => ({ id: 'r1' })),
+  voidSiteReceipt: vi.fn(async () => ({ id: 'r1' })),
+}))
+vi.mock('../../services/investors', () => ({ investorsService: invMock }))
+
 import SiteContracts from './SiteContracts'
 
 describe('SiteContracts', () => {
@@ -46,6 +54,30 @@ describe('SiteContracts', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(GUARD)
   })
 
+  it('cycle form shows amount received read-only and never sends it; receipts replace the edit', async () => {
+    const user = userEvent.setup()
+    render(<SiteContracts userProfile={{ id: 'a', role: 'accountant', effectiveRoles: ['accountant'] }} />)
+    await screen.findByText('Sequoia Projects Limited')
+    await user.click(screen.getByRole('button', { name: /Payment \/ scope/ }))
+    expect(screen.queryByLabelText(/Amount received/)).toBeNull()
+    expect(screen.getByText(/sum of this cycle's receipts/)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    await user.click(await screen.findByRole('button', { name: 'Record receipt' }))
+    const bank = screen.getByLabelText('Bank account')
+    expect(within(bank).getByRole('option', { name: 'Taj Bank — APCL Collections' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Cycle')).toHaveValue('c1')
+    await user.type(screen.getByLabelText('Amount (₦) *'), '1')
+    await user.type(screen.getByLabelText('Reference'), 'TEST')
+    await user.selectOptions(bank, 'b1')
+    const buttons = screen.getAllByRole('button', { name: 'Record receipt' })
+    await user.click(buttons[buttons.length - 1])
+    await waitFor(() => expect(invMock.recordSiteReceipt).toHaveBeenCalled())
+    const sent = invMock.recordSiteReceipt.mock.calls[0][0]
+    expect(sent).toMatchObject({ site_id: 'kado', cycle_id: 'c1', amount: 1, reference: 'TEST', bank_account_id: 'b1' })
+    expect(JSON.stringify(sent)).not.toMatch(/account_number/)
+  })
+
   it('accountant sees no status actions; store officer sees no money', async () => {
     const { unmount } = render(<SiteContracts userProfile={{ id: 'a', role: 'accountant', effectiveRoles: ['accountant'] }} />)
     await screen.findByText('Sequoia Projects Limited')
@@ -53,8 +85,11 @@ describe('SiteContracts', () => {
     expect(screen.getByRole('button', { name: /Payment \/ scope/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Weekly report' })).toBeInTheDocument()
     unmount()
+    invMock.listSiteReceipts.mockClear()
     render(<SiteContracts userProfile={{ id: 's', role: 'store_officer', effectiveRoles: ['store_officer'] }} />)
     await screen.findByText('Sequoia Projects Limited')
     await waitFor(() => expect(screen.queryByText(/₦/)).toBeNull())
+    expect(screen.queryByText('Receipts')).toBeNull()
+    expect(invMock.listSiteReceipts).not.toHaveBeenCalled()
   })
 })
