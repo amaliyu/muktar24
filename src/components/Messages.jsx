@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { messagesService } from '../services/messages'
+import { Z } from '../lib/zIndex'
 
 const theme = {
   bg: "#0f1117", surface: "#1a1d27", card: "#21263a", border: "#2e3452",
   accent: "#f5a623", green: "#2dd4a0", red: "#f06b6b",
-  blue: "#5b8dee", text: "#e8eaf0", textMuted: "#7c839e",
+  blue: "#5b8dee", text: "#e8eaf0", textMuted: "#a0a7bf",
 }
 
 function formatMsgTime(iso) {
@@ -342,7 +343,7 @@ const Messages = ({ userProfile, onUnreadChange }) => {
 
       {/* ── NEW CONVERSATION MODAL ─────────────────────── */}
       {showNewConv && (
-        <div style={{ position: 'fixed', inset: 0, background: '#000000bb', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
+        <div style={{ position: 'fixed', inset: 0, background: '#000000bb', zIndex: Z.modal, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
           <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: '12px', padding: '24px', width: '100%', maxWidth: '480px', maxHeight: '90vh', overflowY: 'auto' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
               <div style={{ fontSize: '16px', fontWeight: '700', color: theme.text }}>New Conversation</div>

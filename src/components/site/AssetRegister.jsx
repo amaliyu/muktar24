@@ -7,6 +7,7 @@ import { investorsService } from '../../services/investors'
 import { generatePlantOnSitePDF } from '../../utils/generatePlantOnSitePDF'
 import { hasRole } from '../../lib/roles'
 import { theme, ui, Pill, fmtQty, fmtNaira, fmtDate, fmtDateTime, ErrorBox, SkeletonRows, ConfirmDialog, StackTable, useIsMobile } from './siteUi'
+import { Z } from '../../lib/zIndex'
 
 // Phase 7B-2 — capital asset register. Reads v_site_asset_register; moves go
 // through the move_asset RPC only (a direct site change is blocked by
@@ -439,7 +440,7 @@ function DetailDrawer({ asset: a, rows, sites, seeMoney, isMobile, investorOf, o
   const where = (id) => (id ? siteName(id, sites) : 'No fixed site')
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 1000 }} onClick={onClose}>
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: Z.modal }} onClick={onClose}>
       <div role="dialog" aria-label={`${a.name} details`} onClick={e => e.stopPropagation()}
         style={{ position: 'absolute', top: 0, right: 0, bottom: 0, width: isMobile ? '100%' : '440px', background: theme.card, borderLeft: `1px solid ${theme.border}`, padding: '16px', overflowY: 'auto', boxSizing: 'border-box', boxShadow: '0 8px 24px rgba(0,0,0,.4)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'flex-start', marginBottom: '12px' }}>

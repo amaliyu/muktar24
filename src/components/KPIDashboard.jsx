@@ -3,11 +3,12 @@ import { supabase } from '../lib/supabase'
 import SitePicker from './SitePicker'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
+import { Z } from '../lib/zIndex'
 
 const theme = {
   bg: '#0f1117', surface: '#1a1d27', card: '#21263a', border: '#2e3452',
   accent: '#f5a623', green: '#2dd4a0', red: '#f06b6b', blue: '#5b8dee',
-  purple: '#9b59b6', text: '#e8eaf0', textMuted: '#7c839e', textDim: '#4a5175',
+  purple: '#9b59b6', text: '#e8eaf0', textMuted: '#a0a7bf', textDim: '#8a91ac',
 }
 
 const naira = n => `₦${Math.round(Number(n) || 0).toLocaleString()}`
@@ -830,7 +831,7 @@ export default function KPIDashboard() {
 
       {/* ── TARGETS MODAL ────────────────────────────────────────── */}
       {showTargets && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: Z.modal, padding: '20px' }}>
           <div style={{ ...s.card, width: '100%', maxWidth: '480px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <div style={{ fontWeight: '700', color: theme.text, fontSize: '15px' }}>Set KPI Targets</div>

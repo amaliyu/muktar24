@@ -3,7 +3,7 @@ import { sitesService, DUTSE_SITE_ID } from '../services/sites'
 
 const theme = {
   surface: '#1a1d27', border: '#2e3452', red: '#f06b6b',
-  text: '#e8eaf0', textMuted: '#7c839e',
+  text: '#e8eaf0', textMuted: '#a0a7bf',
 }
 
 const baseInput = {

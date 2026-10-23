@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import { openingBalancesService } from '../services/financialService'
+import { Z } from '../lib/zIndex'
+import { ConfirmDialog, ui } from './site/siteUi'
 
 // ── Theme ─────────────────────────────────────────────────────────────
 const theme = {
   bg: '#0f1117', surface: '#1a1d27', card: '#21263a', border: '#2e3452',
   accent: '#f5a623', green: '#2dd4a0', red: '#f06b6b', blue: '#5b8dee',
-  text: '#e8eaf0', textMuted: '#7c839e',
+  text: '#e8eaf0', textMuted: '#a0a7bf',
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────
@@ -111,7 +113,7 @@ const Toast = ({ msg, type }) => {
   const isSuccess = type === 'success'
   return (
     <div style={{
-      position: 'fixed', top: '20px', right: '24px', zIndex: 9999,
+      position: 'fixed', top: '20px', right: '24px', zIndex: Z.toast,
       padding: '12px 18px', borderRadius: '8px', maxWidth: '380px',
       background: (isSuccess ? theme.green : theme.red) + '22',
       border: `1px solid ${(isSuccess ? theme.green : theme.red)}55`,
@@ -330,6 +332,8 @@ export default function OpeningBalances({ userProfile }) {
   const [editingId, setEditingId] = useState(null)
   const [editForm, setEditForm]   = useState({ amount: '', depreciation_amount: '', notes: '', account_name: '' })
   const [toast, setToast]         = useState({ msg: '', type: '' })
+  const [confirmDelId, setConfirmDelId] = useState(null)   // in-app delete confirm
+  const [newRow, setNewRow]       = useState(null)         // { category, sub_category, name } for the add-row dialog
 
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type })
@@ -479,7 +483,6 @@ export default function OpeningBalances({ userProfile }) {
   }
 
   const deleteRow = async (id) => {
-    if (!window.confirm('Delete this entry?')) return
     try {
       await openingBalancesService.delete(id)
       showToast('Entry deleted', 'success')
@@ -490,8 +493,10 @@ export default function OpeningBalances({ userProfile }) {
   }
 
   // ── Add a new custom row ─────────────────────────────────────────
-  const addRow = async (category, sub_category, defaultName = '') => {
-    const name = window.prompt('Account name:', defaultName)
+  // Opens the in-app "Account name" dialog; saveNewRow does the insert.
+  const addRow = (category, sub_category, defaultName = '') => setNewRow({ category, sub_category, name: defaultName })
+
+  const saveNewRow = async ({ category, sub_category, name }) => {
     if (!name || !name.trim()) return
     try {
       const { data, error } = await supabase
@@ -510,7 +515,7 @@ export default function OpeningBalances({ userProfile }) {
   // ── Common table props ────────────────────────────────────────────
   const tableProps = {
     editingId, editForm, setEditForm,
-    onEdit: startEdit, onSave: saveEdit, onCancel: cancelEdit, onDelete: deleteRow,
+    onEdit: startEdit, onSave: saveEdit, onCancel: cancelEdit, onDelete: setConfirmDelId,
     saving, userProfile,
   }
 
@@ -538,6 +543,30 @@ export default function OpeningBalances({ userProfile }) {
   return (
     <div style={{ padding: '24px 28px', fontFamily: "'DM Sans','Segoe UI',sans-serif", color: theme.text, maxWidth: '1200px', margin: '0 auto' }}>
       <Toast msg={toast.msg} type={toast.type} />
+      {confirmDelId && (() => {
+        const row = balances.find(b => b.id === confirmDelId)
+        return (
+          <ConfirmDialog
+            title={`Delete the opening balance "${row?.account_name || 'this entry'}"?`}
+            body="This cannot be undone."
+            confirmLabel="Delete entry" danger
+            onCancel={() => setConfirmDelId(null)}
+            onConfirm={() => { const id = confirmDelId; setConfirmDelId(null); deleteRow(id) }}
+          />
+        )
+      })()}
+      {newRow && (
+        <ConfirmDialog
+          title="Add an account row"
+          confirmLabel="Add row" confirmDisabled={!newRow.name.trim()}
+          onCancel={() => setNewRow(null)}
+          onConfirm={() => { const r = newRow; setNewRow(null); saveNewRow(r) }}
+        >
+          <label style={ui.label} htmlFor="ob-new-name">Account name</label>
+          <input id="ob-new-name" style={ui.input} value={newRow.name} autoFocus
+            onChange={e => setNewRow(r => ({ ...r, name: e.target.value }))} />
+        </ConfirmDialog>
+      )}
 
       {/* ── Header ─────────────────────────────────────────────── */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px', flexWrap: 'wrap', gap: '12px' }}>

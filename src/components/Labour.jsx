@@ -6,11 +6,12 @@ import { DUTSE_SITE_ID, siteName } from '../services/sites'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import * as XLSX from 'xlsx'
+import { Z } from '../lib/zIndex'
 
 const theme = {
   bg: '#0f1117', surface: '#1a1d27', card: '#21263a', border: '#2e3452',
   accent: '#f5a623', green: '#2dd4a0', red: '#f06b6b', blue: '#5b8dee',
-  text: '#e8eaf0', textMuted: '#7c839e',
+  text: '#e8eaf0', textMuted: '#a0a7bf',
 }
 
 const naira = (n) => `₦${Math.round(Number(n) || 0).toLocaleString()}`
@@ -89,14 +90,14 @@ const styles = {
     background: v === 'primary' ? theme.accent : v === 'danger' ? '#3d1515' : v === 'success' ? '#0d3028' : v === 'blue' ? '#1a2a4a' : theme.surface,
     color: v === 'primary' ? '#1a0e00' : v === 'danger' ? theme.red : v === 'success' ? theme.green : v === 'blue' ? theme.blue : theme.text,
   }),
-  badge: (color) => ({ display: 'inline-block', padding: '2px 8px', borderRadius: '4px', fontSize: '10px', fontWeight: '700', background: color + '22', color, border: `1px solid ${color}44`, textTransform: 'uppercase' }),
+  badge: (color) => ({ display: 'inline-block', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', background: color + '22', color, border: `1px solid ${color}44`, textTransform: 'uppercase' }),
   th: { padding: '10px 12px', textAlign: 'left', fontSize: '11px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase', borderBottom: `1px solid ${theme.border}` },
   td: { padding: '10px 12px', fontSize: '13px', borderBottom: `1px solid ${theme.border}22` },
   tab: (active) => ({ padding: '8px 18px', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: active ? '700' : '400', background: active ? theme.accent + '22' : 'transparent', color: active ? theme.accent : theme.textMuted }),
   formGroup: { marginBottom: '14px' },
   grid2: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' },
   grid3: { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '14px' },
-  modal: { position: 'fixed', inset: 0, background: '#000000bb', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' },
+  modal: { position: 'fixed', inset: 0, background: '#000000bb', zIndex: Z.modal, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' },
   modalBox: { background: theme.card, border: `1px solid ${theme.border}`, borderRadius: '12px', padding: '24px', width: '100%', maxWidth: '680px', maxHeight: '90vh', overflowY: 'auto' },
 }
 
@@ -193,8 +194,8 @@ function LabourPoolTab({ pool, roles, userProfile, onRefresh }) {
 
   return (
     <div>
-      <div style={{ ...styles.row, justifyContent: 'space-between', marginBottom: '16px' }}>
-        <div style={{ ...styles.row, gap: '10px', flexWrap: 'wrap' }}>
+      <div className="m-col" style={{ ...styles.row, justifyContent: 'space-between', marginBottom: '16px' }}>
+        <div className="m-form" style={{ ...styles.row, gap: '10px', flexWrap: 'wrap' }}>
           <input placeholder="Search name or number…" value={search} onChange={e => setSearch(e.target.value)} style={{ ...styles.input, width: '220px' }} />
           <select value={filterCat} onChange={e => setFilterCat(e.target.value)} style={{ ...styles.input, width: '160px' }}>
             <option value="all">All Categories</option>
@@ -210,7 +211,7 @@ function LabourPoolTab({ pool, roles, userProfile, onRefresh }) {
 
       {alert && <AlertBar msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
 
-      <div style={{ ...styles.card, padding: 0, overflow: 'hidden' }}>
+      <div className="m-pad" style={{ ...styles.card, padding: 0, overflow: 'hidden' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead style={{ background: theme.surface }}>
             <tr>
@@ -228,13 +229,13 @@ function LabourPoolTab({ pool, roles, userProfile, onRefresh }) {
               return (
                 <tr key={w.id} style={{ cursor: 'pointer' }} onClick={() => setSelectedWorker(w)}>
                   <td style={styles.td}><span style={{ fontFamily: 'monospace', color: theme.blue }}>{w.labour_number}</span></td>
-                  <td style={styles.td}>{w.full_name}</td>
+                  <td className="m-title" style={styles.td}>{w.full_name}</td>
                   <td style={styles.td}>{w.phone || '—'}</td>
                   <td style={styles.td}><span style={styles.badge(theme.blue)}>{(w.category || '').replace('_', ' ')}</span></td>
                   <td style={styles.td}>{role?.role_name || '—'}</td>
                   <td style={styles.td}>{w.bank_name || '—'}</td>
                   <td style={styles.td}><span style={styles.badge(w.is_active ? theme.green : theme.red)}>{w.is_active ? 'Active' : 'Inactive'}</span></td>
-                  <td style={styles.td} onClick={e => e.stopPropagation()}>
+                  <td className="m-actions" style={styles.td} onClick={e => e.stopPropagation()}>
                     <div style={styles.row}>
                       <button style={{ ...styles.btn('ghost'), padding: '5px 10px', fontSize: '12px' }} onClick={() => { setEditWorker(w); setShowForm(true) }}>Edit</button>
                       <button style={{ ...styles.btn('danger'), padding: '5px 10px', fontSize: '12px' }} onClick={() => handleDeactivate(w)}>{w.is_active ? 'Deactivate' : 'Activate'}</button>
@@ -259,7 +260,7 @@ function WorkerProfile({ worker, roles, onBack, onEdit, onDeactivate }) {
         <h2 style={{ margin: 0, fontSize: '18px', color: theme.text }}>{worker.full_name}</h2>
         <span style={styles.badge(worker.is_active ? theme.green : theme.red)}>{worker.is_active ? 'Active' : 'Inactive'}</span>
       </div>
-      <div style={styles.grid2}>
+      <div className="m-form" style={styles.grid2}>
         <div style={styles.card}>
           <div style={{ fontSize: '12px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase', marginBottom: '14px' }}>Personal Details</div>
           {[
@@ -334,7 +335,7 @@ function WorkerForm({ worker, roles, userProfile, onSave, onCancel }) {
         <button style={styles.btn('ghost')} onClick={onCancel}>Cancel</button>
       </div>
       {err && <AlertBar msg={err} type="error" onClose={() => setErr('')} />}
-      <div style={styles.grid2}>
+      <div className="m-form" style={styles.grid2}>
         <div style={styles.formGroup}>
           <label style={styles.label}>Full Name *</label>
           <input style={styles.input} value={form.full_name} onChange={set('full_name')} />
@@ -482,13 +483,13 @@ function DailyRosterTab({ pool, roles, userProfile }) {
               {isApproved ? (
                 <>
                   <div style={{ fontSize: '13px', color: theme.textMuted, marginBottom: '16px' }}>
-                    This roster for <strong style={{ color: theme.text }}>{siteName(deleteTarget.site_id, sites)}, {deleteTarget.roster_date}</strong> has been approved by ICO. Enter a reason for deletion:
+                    This roster for <strong style={{ color: theme.text }}>{siteName(deleteTarget.site_id, sites)}, {fmtDate(deleteTarget.roster_date)}</strong> has been approved by ICO. Enter a reason for deletion:
                   </div>
                   <input style={styles.input} value={deleteReason} onChange={e => setDeleteReason(e.target.value)} placeholder="Reason for deletion…" autoFocus />
                 </>
               ) : (
                 <div style={{ fontSize: '13px', color: theme.textMuted, marginBottom: '8px' }}>
-                  Delete roster for <strong style={{ color: theme.text }}>{siteName(deleteTarget.site_id, sites)}, {deleteTarget.roster_date}</strong>? This cannot be undone.
+                  Delete roster for <strong style={{ color: theme.text }}>{siteName(deleteTarget.site_id, sites)}, {fmtDate(deleteTarget.roster_date)}</strong>? This cannot be undone.
                 </div>
               )}
               {alert && <div style={{ marginTop: '10px' }}><AlertBar msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} /></div>}
@@ -503,11 +504,11 @@ function DailyRosterTab({ pool, roles, userProfile }) {
         )
       })()}
 
-      <div style={{ ...styles.row, justifyContent: 'space-between', marginBottom: '16px' }}>
-        <div style={styles.row}>
+      <div className="m-col" style={{ ...styles.row, justifyContent: 'space-between', marginBottom: '16px' }}>
+        <div className="m-wrap" style={styles.row}>
           <button style={styles.tab(true)}>Roster List</button>
           <button style={styles.tab(false)} onClick={() => setViewMode('weekly')}>Weekly Summary</button>
-          <div style={{ width: '200px' }}><SitePicker allowAll value={siteFilter} onChange={setSiteFilter} style={styles.input} /></div>
+          <div className="m-full" style={{ width: '200px' }}><SitePicker allowAll value={siteFilter} onChange={setSiteFilter} style={styles.input} /></div>
         </div>
         {hasRole(userProfile, ...ROSTER_WRITE_ROLES) && (
           <button style={styles.btn('primary')} onClick={() => setViewMode('create')}>+ Create Roster</button>
@@ -515,7 +516,7 @@ function DailyRosterTab({ pool, roles, userProfile }) {
       </div>
       {alert && !deleteTarget && <AlertBar msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
       {loading ? <Spinner /> : (
-        <div style={{ ...styles.card, padding: 0, overflow: 'hidden' }}>
+        <div className="m-pad" style={{ ...styles.card, padding: 0, overflow: 'hidden' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead style={{ background: theme.surface }}>
               <tr>
@@ -551,16 +552,16 @@ function DailyRosterTab({ pool, roles, userProfile }) {
                                   && (isPrimaryMD || icoDeletable)
                 return (
                   <tr key={r.id} style={{ cursor: 'pointer' }} onClick={() => { setSelectedRoster(r); setViewMode('detail') }}>
-                    <td style={styles.td}>{r.roster_date}</td>
+                    <td style={styles.td}>{fmtDate(r.roster_date)}</td>
                     <td style={styles.td}>{siteName(r.site_id, sites)}</td>
                     <td style={styles.td}>{r.worker_count ?? '—'}</td>
-                    <td style={styles.td}>{naira(r.total_daily_cost)}</td>
+                    <td className="m-key" style={styles.td}>{naira(r.total_daily_cost)}</td>
                     <td style={styles.td}><span style={styles.badge(r.target_met ? theme.green : theme.red)}>{r.target_met ? 'Yes' : 'No'}</span></td>
                     <td style={styles.td}><span style={styles.badge(statusColor(icoSt))}>{icoSt.replace('_', ' ')}</span></td>
                     <td style={styles.td}><span style={styles.badge(statusColor(mdSt))}>{mdSt}</span></td>
                     <td style={styles.td}><span style={styles.badge(statusColor(paySt))}>{paySt}</span></td>
-                    <td style={styles.td} onClick={e => e.stopPropagation()}>
-                      <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
+                    <td className="m-actions" style={styles.td} onClick={e => e.stopPropagation()}>
+                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                         <button style={{ ...styles.btn('ghost'), padding: '4px 10px', fontSize: '12px' }} onClick={() => { setSelectedRoster(r); setViewMode('detail') }}>View</button>
                         {canEdit && (
                           <button style={{ ...styles.btn('blue'), padding: '4px 10px', fontSize: '12px' }} onClick={() => { setEditingRoster(r); setViewMode('edit') }}>Edit</button>
@@ -806,12 +807,12 @@ function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCanc
 
   return (
     <div style={styles.card}>
-      <div style={{ ...styles.row, justifyContent: 'space-between', marginBottom: '18px' }}>
-        <h3 style={{ margin: 0 }}>{isEdit ? `Edit Roster — ${siteName(editRoster.site_id, sites)}, ${editRoster.roster_date}` : 'Create Daily Roster'}</h3>
+      <div className="m-header" style={{ ...styles.row, justifyContent: 'space-between', marginBottom: '18px' }}>
+        <h3 style={{ margin: 0 }}>{isEdit ? `Edit Roster — ${siteName(editRoster.site_id, sites)}, ${fmtDate(editRoster.roster_date)}` : 'Create Daily Roster'}</h3>
         <button style={styles.btn('ghost')} onClick={onCancel}>Cancel</button>
       </div>
       {err && <AlertBar msg={err} type="error" onClose={() => setErr('')} />}
-      <div style={{ ...styles.row, gap: '20px', marginBottom: '18px', alignItems: 'center', flexWrap: 'wrap' }}>
+      <div className="m-form" style={{ ...styles.row, gap: '20px', marginBottom: '18px', alignItems: 'center', flexWrap: 'wrap' }}>
         <div style={{ ...styles.formGroup, minWidth: '220px' }}>
           <label style={styles.label}>Site</label>
           <SitePicker value={siteId} onChange={setSiteId} style={styles.input} />
@@ -821,7 +822,7 @@ function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCanc
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <input type="date" style={styles.input} value={date} onChange={e => setDate(e.target.value)} />
             {date < todayStr() && (
-              <span style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '4px', background: '#f59e0b22', color: '#f59e0b', border: '1px solid #f59e0b44', fontWeight: '700', whiteSpace: 'nowrap' }}>Historical</span>
+              <span style={{ fontSize: '12px', padding: '1px 6px', borderRadius: '4px', background: '#f59e0b22', color: '#f59e0b', border: '1px solid #f59e0b44', fontWeight: '700', whiteSpace: 'nowrap' }}>Historical</span>
             )}
           </div>
         </div>
@@ -865,31 +866,31 @@ function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCanc
                     </select>
                   </td>
                   <td style={styles.td}>
-                    <div style={{ display: 'flex', gap: '4px' }}>
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                       {['full_day', 'half_day', 'absent'].map(at => (
-                        <button key={at} type="button" onClick={() => updateRow(i, 'attendance_type', at)} style={{ padding: '4px 8px', fontSize: '11px', fontWeight: row.attendance_type === at ? '700' : '400', borderRadius: '5px', border: `1px solid ${row.attendance_type === at ? (at === 'absent' ? theme.red : at === 'half_day' ? theme.accent : theme.green) : theme.border}`, background: row.attendance_type === at ? (at === 'absent' ? theme.red + '22' : at === 'half_day' ? theme.accent + '22' : theme.green + '22') : theme.surface, color: row.attendance_type === at ? (at === 'absent' ? theme.red : at === 'half_day' ? theme.accent : theme.green) : theme.textMuted, cursor: 'pointer' }}>
+                        <button key={at} type="button" onClick={() => updateRow(i, 'attendance_type', at)} style={{ padding: '4px 8px', fontSize: '12px', fontWeight: row.attendance_type === at ? '700' : '400', borderRadius: '5px', border: `1px solid ${row.attendance_type === at ? (at === 'absent' ? theme.red : at === 'half_day' ? theme.accent : theme.green) : theme.border}`, background: row.attendance_type === at ? (at === 'absent' ? theme.red + '22' : at === 'half_day' ? theme.accent + '22' : theme.green + '22') : theme.surface, color: row.attendance_type === at ? (at === 'absent' ? theme.red : at === 'half_day' ? theme.accent : theme.green) : theme.textMuted, cursor: 'pointer' }}>
                           {at === 'full_day' ? 'Full' : at === 'half_day' ? 'Half' : 'Absent'}
                         </button>
                       ))}
                     </div>
-                    <div style={{ fontSize: '10px', color: theme.textMuted, marginTop: '2px' }}>{naira(baseForDisplay)}</div>
-                    <input style={{ ...styles.input, width: '90px', marginTop: '4px', fontSize: '12px' }} placeholder="Override ₦" value={row.manual_amount} onChange={e => updateRow(i, 'manual_amount', e.target.value)} />
+                    <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '2px' }}>{naira(baseForDisplay)}</div>
+                    <input style={{ ...styles.input, width: '90px', marginTop: '4px', fontSize: '12px' }} inputMode="decimal" placeholder="Override ₦" value={row.manual_amount} onChange={e => updateRow(i, 'manual_amount', e.target.value)} />
                   </td>
                   <td style={{ ...styles.td, color: theme.textMuted, fontSize: '12px' }}>{naira(baseForDisplay)}</td>
                   <td style={styles.td}>
-                    <input style={{ ...styles.input, width: '80px', fontSize: '12px' }} placeholder="₦0" value={row.bonus_amount || ''} onChange={e => updateRow(i, 'bonus_amount', e.target.value)} />
-                    <input style={{ ...styles.input, width: '100px', marginTop: '3px', fontSize: '11px' }} placeholder="Description" value={row.bonus_description} onChange={e => updateRow(i, 'bonus_description', e.target.value)} />
+                    <input style={{ ...styles.input, width: '80px', fontSize: '12px' }} inputMode="decimal" placeholder="₦0" value={row.bonus_amount || ''} onChange={e => updateRow(i, 'bonus_amount', e.target.value)} />
+                    <input style={{ ...styles.input, width: '100px', marginTop: '3px', fontSize: '12px' }} placeholder="Description" value={row.bonus_description} onChange={e => updateRow(i, 'bonus_description', e.target.value)} />
                   </td>
                   <td style={styles.td}>
-                    <input style={{ ...styles.input, width: '80px', fontSize: '12px', color: theme.red }} placeholder="₦0" value={row.advance_amount || ''} onChange={e => updateRow(i, 'advance_amount', e.target.value)} />
+                    <input style={{ ...styles.input, width: '80px', fontSize: '12px', color: theme.red }} inputMode="decimal" placeholder="₦0" value={row.advance_amount || ''} onChange={e => updateRow(i, 'advance_amount', e.target.value)} />
                   </td>
                   <td style={styles.td}>
-                    <input style={{ ...styles.input, width: '80px', fontSize: '12px', color: theme.red }} placeholder="₦0" value={row.deduction_amount || ''} onChange={e => updateRow(i, 'deduction_amount', e.target.value)} />
-                    <input style={{ ...styles.input, width: '100px', marginTop: '3px', fontSize: '11px' }} placeholder="Reason" value={row.deduction_reason} onChange={e => updateRow(i, 'deduction_reason', e.target.value)} />
+                    <input style={{ ...styles.input, width: '80px', fontSize: '12px', color: theme.red }} inputMode="decimal" placeholder="₦0" value={row.deduction_amount || ''} onChange={e => updateRow(i, 'deduction_amount', e.target.value)} />
+                    <input style={{ ...styles.input, width: '100px', marginTop: '3px', fontSize: '12px' }} placeholder="Reason" value={row.deduction_reason} onChange={e => updateRow(i, 'deduction_reason', e.target.value)} />
                   </td>
-                  <td style={styles.td}><strong style={{ color: theme.green }}>{naira(netPay)}</strong></td>
+                  <td className="m-key" style={styles.td}><strong style={{ color: theme.green }}>{naira(netPay)}</strong></td>
                   <td style={styles.td}><input style={{ ...styles.input, width: '100px' }} value={row.notes} onChange={e => updateRow(i, 'notes', e.target.value)} /></td>
-                  <td style={styles.td}><button style={{ ...styles.btn('danger'), padding: '4px 8px' }} onClick={() => removeRow(i)}>×</button></td>
+                  <td className="m-actions" style={styles.td}><button style={{ ...styles.btn('danger'), padding: '4px 8px' }} onClick={() => removeRow(i)} aria-label="Remove worker">×</button></td>
                 </tr>
               )
             })}
@@ -917,12 +918,12 @@ function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCanc
               { label: 'Deferred (Monthly Fixed)', value: naira(deferred), color: theme.textMuted },
             ].map(({ label, value, color }) => (
               <div key={label} style={{ flex: '1', minWidth: '130px', background: theme.card, borderRadius: '8px', padding: '10px 12px' }}>
-                <div style={{ fontSize: '10px', color: theme.textMuted, fontWeight: '600', marginBottom: '4px' }}>{label}</div>
+                <div style={{ fontSize: '12px', color: theme.textMuted, fontWeight: '600', marginBottom: '4px' }}>{label}</div>
                 <div style={{ fontSize: '15px', fontWeight: '700', color }}>{value}</div>
               </div>
             ))}
             <div style={{ flex: '1', minWidth: '160px', background: theme.accent + '18', border: `1px solid ${theme.accent}55`, borderRadius: '8px', padding: '10px 12px' }}>
-              <div style={{ fontSize: '10px', color: theme.accent, fontWeight: '700', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>TO BE PAID THIS WEEK</div>
+              <div style={{ fontSize: '11px', color: theme.accent, fontWeight: '700', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>TO BE PAID THIS WEEK</div>
               <div style={{ fontSize: '20px', fontWeight: '700', color: theme.accent }}>{naira(toBePaidThisWeek)}</div>
             </div>
           </div>
@@ -998,7 +999,7 @@ function RosterDetail({ roster, sites = [], roles, pool, userProfile, onBack, on
         <div style={styles.card}>
           <div style={{ fontSize: '11px', color: theme.textMuted, fontWeight: '700', textTransform: 'uppercase' }}>Payment</div>
           <span style={styles.badge(statusColor(payStatus))}>{payStatus}</span>
-          {payStatus === 'paid' && roster.payment_date && <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '4px' }}>{fmtDate(roster.payment_date)}</div>}
+          {payStatus === 'paid' && roster.payment_date && <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '4px' }}>{fmtDate(roster.payment_date)}</div>}
         </div>
       </div>
 
@@ -1023,7 +1024,7 @@ function RosterDetail({ roster, sites = [], roles, pool, userProfile, onBack, on
                       <div style={{ width: '30px', height: '30px', borderRadius: '50%', background: color + '20', border: `2px solid ${color}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', color, fontWeight: '700' }}>
                         {step.rejected ? '✕' : step.done ? '✓' : String(i + 1)}
                       </div>
-                      <div style={{ fontSize: '10px', fontWeight: '700', color, marginTop: '5px', textAlign: 'center', lineHeight: 1.3 }}>{step.label}</div>
+                      <div style={{ fontSize: '12px', fontWeight: '700', color, marginTop: '5px', textAlign: 'center', lineHeight: 1.3 }}>{step.label}</div>
                       <div style={{ fontSize: '9px', color: theme.textMuted, textAlign: 'center', marginTop: '2px' }}>{step.sub}</div>
                     </div>
                     {i < steps.length - 1 && (
@@ -1038,7 +1039,7 @@ function RosterDetail({ roster, sites = [], roles, pool, userProfile, onBack, on
       })()}
 
       {loading ? <Spinner /> : (
-        <div style={{ ...styles.card, padding: 0, overflow: 'hidden', marginBottom: '16px' }}>
+        <div className="m-pad" style={{ ...styles.card, padding: 0, overflow: 'hidden', marginBottom: '16px' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead style={{ background: theme.surface }}>
               <tr>{['Worker', 'Role', 'Base Rate', 'Bonus', 'Bonus Applicable', 'Total Pay', 'Notes'].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
@@ -1054,7 +1055,7 @@ function RosterDetail({ roster, sites = [], roles, pool, userProfile, onBack, on
                     <td style={styles.td}>{naira(e.base_rate)}</td>
                     <td style={styles.td}>{naira(e.target_bonus)}</td>
                     <td style={styles.td}><span style={styles.badge(e.bonus_applicable ? theme.green : theme.textMuted)}>{e.bonus_applicable ? 'Yes' : 'No'}</span></td>
-                    <td style={{ ...styles.td, fontWeight: '700', color: theme.accent }}>{naira(e.total_pay)}</td>
+                    <td className="m-key" style={{ ...styles.td, fontWeight: '700', color: theme.accent }}>{naira(e.total_pay)}</td>
                     <td style={styles.td}>{e.notes || '—'}</td>
                   </tr>
                 )
@@ -1128,10 +1129,10 @@ function WeeklySummary({ rosters, sites = [], onBack }) {
               <tbody>
                 {weekRosters.map(r => (
                   <tr key={r.id} style={{ background: r.target_met ? theme.green + '08' : 'transparent' }}>
-                    <td style={styles.td}>{r.roster_date}</td>
+                    <td style={styles.td}>{fmtDate(r.roster_date)}</td>
                     <td style={styles.td}>{siteName(r.site_id, sites)}</td>
                     <td style={styles.td}>{r.worker_count || '—'}</td>
-                    <td style={{ ...styles.td, color: theme.accent, fontWeight: '600' }}>{naira(r.total_daily_cost)}</td>
+                    <td className="m-key" style={{ ...styles.td, color: theme.accent, fontWeight: '600' }}>{naira(r.total_daily_cost)}</td>
                     <td style={styles.td}><span style={styles.badge(r.target_met ? theme.green : theme.textMuted)}>{r.target_met ? 'Yes' : 'No'}</span></td>
                     <td style={styles.td}><span style={styles.badge(statusColor(r.ico_status))}>{r.ico_status || 'draft'}</span></td>
                   </tr>
@@ -1537,7 +1538,7 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
   return (
     <div>
       {/* Recent Payrolls */}
-      <div style={{ ...styles.card, padding: 0, overflow: 'hidden', marginBottom: '16px' }}>
+      <div className="m-pad" style={{ ...styles.card, padding: 0, overflow: 'hidden', marginBottom: '16px' }}>
         <div style={{ ...styles.row, justifyContent: 'space-between', padding: '12px 16px', borderBottom: `1px solid ${theme.border}` }}>
           <div style={{ fontWeight: '700', fontSize: '14px' }}>Recent Payrolls</div>
           <button style={{ ...styles.btn('ghost'), padding: '4px 12px', fontSize: '12px' }} onClick={loadRecentPayrolls} disabled={recentLoading}>{recentLoading ? 'Loading…' : 'Refresh'}</button>
@@ -1560,9 +1561,9 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
                     <td style={styles.td}>{periodLabel}</td>
                     <td style={styles.td}>{p.payroll_type === 'production' ? 'Production' : 'Loading'}</td>
                     <td style={styles.td}>{p.worker_count ?? '—'}</td>
-                    <td style={{ ...styles.td, color: theme.accent, fontWeight: '600' }}>{naira(p.total_amount)}</td>
+                    <td className="m-key" style={{ ...styles.td, color: theme.accent, fontWeight: '600' }}>{naira(p.total_amount)}</td>
                     <td style={styles.td}><span style={styles.badge(statusColor(p.status))}>{(p.status || 'draft').replace('_', ' ')}</span></td>
-                    <td style={styles.td}>
+                    <td className="m-actions" style={styles.td}>
                       <button style={{ ...styles.btn(isOpen ? 'primary' : 'ghost'), padding: '4px 12px', fontSize: '12px' }} onClick={() => openPayroll(p)}>{isOpen ? 'Open' : 'View'}</button>
                     </td>
                   </tr>
@@ -1574,7 +1575,7 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
       </div>
 
       {/* Sub-tab switcher */}
-      <div style={{ ...styles.row, gap: '4px', marginBottom: '16px' }}>
+      <div className="m-wrap" style={{ ...styles.row, gap: '8px', marginBottom: '16px' }}>
         {['production', 'loading'].map(t => (
           <button key={t} style={styles.tab(subTab === t)} onClick={() => setSubTab(t)}>
             {t === 'production' ? 'Production Payroll' : 'Loading Payroll'}
@@ -1592,7 +1593,7 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
           <label style={styles.label}>To</label>
           <input type="date" style={{ ...styles.input, width: '148px' }} value={rangeTo} onChange={e => setRangeTo(e.target.value)} />
         </div>
-        <div style={{ display: 'flex', gap: '4px', paddingBottom: '1px' }}>
+        <div style={{ display: 'flex', gap: '8px', paddingBottom: '1px' }}>
           <button style={{ ...styles.btn('ghost'), padding: '6px 10px' }} onClick={() => shiftRange(-1)}>‹</button>
           <button style={{ ...styles.btn('ghost'), padding: '6px 10px' }} onClick={() => shiftRange(1)}>›</button>
         </div>
@@ -1631,7 +1632,7 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
           </div>
 
           {/* Source rows with checkboxes */}
-          <div style={{ ...styles.card, padding: 0, overflow: 'hidden', marginBottom: '12px' }}>
+          <div className="m-pad" style={{ ...styles.card, padding: 0, overflow: 'hidden', marginBottom: '12px' }}>
             <div style={{ padding: '10px 14px', borderBottom: `1px solid ${theme.border}`, fontSize: '11px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase' }}>
               {subTab === 'production' ? 'Daily Roster Rows' : 'Truck Loading Logs'} — select rows to include
             </div>
@@ -1656,10 +1657,10 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
                           <td style={{ ...styles.td, paddingRight: '4px' }}>
                             <input type="checkbox" checked={checkedRosterIds.has(r.id)} disabled={isOtherPayroll} onChange={() => !isOtherPayroll && toggleRow(r.id)} />
                           </td>
-                          <td style={styles.td}>{r.roster_date}</td>
+                          <td className="m-title" style={styles.td}>{fmtDate(r.roster_date)}</td>
                           <td style={styles.td}>{r.site?.name || '—'}</td>
                           <td style={styles.td}>{r.worker_count ?? '—'}</td>
-                          <td style={styles.td}>{naira(r.total_daily_cost)}</td>
+                          <td className="m-key" style={styles.td}>{naira(r.total_daily_cost)}</td>
                           <td style={styles.td}><span style={styles.badge(statusColor(r.ico_status || 'draft'))}>{(r.ico_status || 'draft').replace('_', ' ')}</span></td>
                           <td style={styles.td}><span style={styles.badge(statusColor(r.md_status || 'pending'))}>{r.md_status || 'pending'}</span></td>
                           <td style={styles.td}><span style={styles.badge(statusColor(r.payment_status || 'unpaid'))}>{r.payment_status || 'unpaid'}</span></td>
@@ -1668,7 +1669,7 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
                               ? <span style={{ ...styles.badge('#f59e0b'), fontSize: '9px' }}>This Draft</span>
                               : r.payroll_id != null
                                 ? <span style={{ ...styles.badge(theme.textMuted), fontSize: '9px' }}>Other</span>
-                                : <span style={{ color: theme.textMuted, fontSize: '11px' }}>—</span>}
+                                : <span style={{ color: theme.textMuted, fontSize: '12px' }}>—</span>}
                           </td>
                         </tr>
                       )
@@ -1695,17 +1696,17 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
                           <td style={{ ...styles.td, paddingRight: '4px' }}>
                             <input type="checkbox" checked={checkedLogIds.has(l.id)} disabled={isOtherPayroll} onChange={() => !isOtherPayroll && toggleRow(l.id)} />
                           </td>
-                          <td style={styles.td}>{l.date}</td>
+                          <td className="m-title" style={styles.td}>{fmtDate(l.date)}</td>
                           <td style={styles.td}>{l.waybill_number || '—'}</td>
                           <td style={styles.td}>{l.loaders?.length ?? 0}</td>
-                          <td style={{ ...styles.td, color: theme.accent }}>{naira(l.total_amount)}</td>
+                          <td className="m-key" style={{ ...styles.td, color: theme.accent }}>{naira(l.total_amount)}</td>
                           <td style={styles.td}><span style={styles.badge(statusColor(l.payment_status || 'unpaid'))}>{l.payment_status || 'unpaid'}</span></td>
                           <td style={styles.td}>
                             {isThisDraft
                               ? <span style={{ ...styles.badge('#f59e0b'), fontSize: '9px' }}>This Draft</span>
                               : l.payroll_id != null
                                 ? <span style={{ ...styles.badge(theme.textMuted), fontSize: '9px' }}>Other</span>
-                                : <span style={{ color: theme.textMuted, fontSize: '11px' }}>—</span>}
+                                : <span style={{ color: theme.textMuted, fontSize: '12px' }}>—</span>}
                           </td>
                         </tr>
                       )
@@ -1717,7 +1718,7 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
           </div>
 
           {/* Worker aggregate table */}
-          <div style={{ ...styles.card, padding: 0, overflow: 'hidden', marginBottom: '16px' }}>
+          <div className="m-pad" style={{ ...styles.card, padding: 0, overflow: 'hidden', marginBottom: '16px' }}>
             <div style={{ padding: '10px 14px', borderBottom: `1px solid ${theme.border}`, fontSize: '11px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase' }}>
               Worker Summary (from checked rows)
             </div>
@@ -1734,7 +1735,7 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
                     <td style={styles.td}>{subTab === 'production' ? w.days : Math.round(w.days_or_blocks || 0)}</td>
                     <td style={styles.td}>{naira(w.base_rate)}</td>
                     <td style={styles.td}>{naira(w.bonus || 0)}</td>
-                    <td style={{ ...styles.td, fontWeight: '700', color: theme.accent }}>{naira(w.total_pay)}</td>
+                    <td className="m-key" style={{ ...styles.td, fontWeight: '700', color: theme.accent }}>{naira(w.total_pay)}</td>
                     <td style={styles.td}>{w.bank}</td>
                     <td style={styles.td}>{w.account}</td>
                   </tr>
@@ -1925,9 +1926,9 @@ function MonthlyFixedTab({ pool, roles, userProfile }) {
             {fixedWorkers.map(w => (
               <div key={w.id} style={{ ...styles.card, flex: '1', minWidth: '200px', marginBottom: 0, borderLeft: `4px solid ${theme.blue}` }}>
                 <div style={{ fontSize: '13px', fontWeight: '700' }}>{w.label}</div>
-                <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '2px' }}>{w.roleName}</div>
+                <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '2px' }}>{w.roleName}</div>
                 <div style={{ fontSize: '22px', fontWeight: '700', color: theme.accent, marginTop: '6px' }}>{naira(w.amount)}</div>
-                <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '4px' }}>Monthly Fixed</div>
+                <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '4px' }}>Monthly Fixed</div>
                 {existingPayroll && <span style={{ ...styles.badge(statusColor(existingPayroll.status)), marginTop: '8px', display: 'inline-block' }}>{existingPayroll.status}</span>}
               </div>
             ))}
@@ -1942,10 +1943,10 @@ function MonthlyFixedTab({ pool, roles, userProfile }) {
             {rentalVehicles.map(v => (
               <div key={v.id} style={{ ...styles.card, flex: '1', minWidth: '200px', marginBottom: 0, borderLeft: `4px solid ${theme.accent}` }}>
                 <div style={{ fontSize: '13px', fontWeight: '700' }}>{v.vehicle_name || v.vehicle_number}</div>
-                <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '2px' }}>{v.vehicle_number} • Rental Vehicle</div>
+                <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '2px' }}>{v.vehicle_number} • Rental Vehicle</div>
                 <div style={{ fontSize: '22px', fontWeight: '700', color: theme.accent, marginTop: '6px' }}>{naira(Number(v.monthly_rental_amount) || 0)}</div>
-                {v.owner_name && <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '4px' }}>Owner: {v.owner_name}{v.owner_phone ? ` • ${v.owner_phone}` : ''}</div>}
-                <div style={{ fontSize: '10px', color: theme.textMuted, marginTop: '2px' }}>Monthly Rental — Process separately via Accounting</div>
+                {v.owner_name && <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '4px' }}>Owner: {v.owner_name}{v.owner_phone ? ` • ${v.owner_phone}` : ''}</div>}
+                <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '2px' }}>Monthly Rental — Process separately via Accounting</div>
               </div>
             ))}
           </div>
@@ -2055,7 +2056,7 @@ function LabourRatesTab({ roles, userProfile, onRefresh }) {
         <ProposeRateForm roles={roles} userProfile={userProfile} onSave={() => { setShowProposeForm(false); loadRequests() }} onCancel={() => setShowProposeForm(false)} />
       )}
 
-      <div style={{ ...styles.card, padding: 0, overflow: 'hidden', marginBottom: '20px' }}>
+      <div className="m-pad" style={{ ...styles.card, padding: 0, overflow: 'hidden', marginBottom: '20px' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead style={{ background: theme.surface }}>
             <tr>{['Role Name', 'Payment Type', 'Base Rate', 'Target Bonus', 'Bonus Type', 'Effective Date', 'Approved By', 'Status'].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
@@ -2066,10 +2067,10 @@ function LabourRatesTab({ roles, userProfile, onRefresh }) {
               <tr key={r.id}>
                 <td style={styles.td}>{r.role_name}</td>
                 <td style={styles.td}><span style={styles.badge(theme.blue)}>{(r.payment_type || '').replace('_', ' ')}</span></td>
-                <td style={{ ...styles.td, color: theme.accent, fontWeight: '700' }}>{naira(r.base_rate)}</td>
+                <td className="m-key" style={{ ...styles.td, color: theme.accent, fontWeight: '700' }}>{naira(r.base_rate)}</td>
                 <td style={styles.td}>{r.target_bonus ? naira(r.target_bonus) : '—'}</td>
                 <td style={styles.td}>{r.bonus_type || '—'}</td>
-                <td style={styles.td}>{r.effective_date || '—'}</td>
+                <td style={styles.td}>{fmtDate(r.effective_date)}</td>
                 <td style={styles.td}>{r.approved_by || '—'}</td>
                 <td style={styles.td}><span style={styles.badge(r.is_active ? theme.green : theme.red)}>{r.is_active ? 'Active' : 'Inactive'}</span></td>
               </tr>
@@ -2088,11 +2089,11 @@ function LabourRatesTab({ roles, userProfile, onRefresh }) {
                 <div style={{ ...styles.row, justifyContent: 'space-between', marginBottom: '10px' }}>
                   <div>
                     <div style={{ fontWeight: '700' }}>{role?.role_name || `Role #${req.role_id}`}</div>
-                    <div style={{ fontSize: '12px', color: theme.textMuted }}>Requested by {req.requested_by} on {req.requested_date}</div>
+                    <div style={{ fontSize: '12px', color: theme.textMuted }}>Requested by {req.requested_by} on {fmtDate(req.requested_date)}</div>
                   </div>
                   <span style={styles.badge(statusColor(req.overall_status))}>{req.overall_status}</span>
                 </div>
-                <div style={styles.grid3}>
+                <div className="m-form" style={styles.grid3}>
                   <div style={{ fontSize: '13px' }}>Current Rate: <strong style={{ color: theme.red }}>{naira(req.current_rate)}</strong></div>
                   <div style={{ fontSize: '13px' }}>Proposed Rate: <strong style={{ color: theme.green }}>{naira(req.proposed_rate)}</strong></div>
                   <div style={{ fontSize: '13px' }}>Effective: <strong>{req.effective_date || '—'}</strong></div>
@@ -2134,7 +2135,7 @@ function LabourRatesTab({ roles, userProfile, onRefresh }) {
       {historyRequests.length > 0 && (
         <div>
           <div style={{ fontSize: '13px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase', marginBottom: '12px' }}>Rate Change History</div>
-          <div style={{ ...styles.card, padding: 0, overflow: 'hidden' }}>
+          <div className="m-pad" style={{ ...styles.card, padding: 0, overflow: 'hidden' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead style={{ background: theme.surface }}>
                 <tr>{['Role', 'Old Rate', 'New Rate', 'Old Bonus', 'New Bonus', 'Requested By', 'Date', 'Status', 'Effective Date'].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
@@ -2146,13 +2147,13 @@ function LabourRatesTab({ roles, userProfile, onRefresh }) {
                     <tr key={req.id}>
                       <td style={styles.td}>{role?.role_name || '—'}</td>
                       <td style={styles.td}>{naira(req.current_rate)}</td>
-                      <td style={styles.td}>{naira(req.proposed_rate)}</td>
+                      <td className="m-key" style={styles.td}>{naira(req.proposed_rate)}</td>
                       <td style={styles.td}>{naira(req.current_bonus)}</td>
                       <td style={styles.td}>{naira(req.proposed_bonus)}</td>
                       <td style={styles.td}>{req.requested_by}</td>
-                      <td style={styles.td}>{req.requested_date}</td>
+                      <td style={styles.td}>{fmtDate(req.requested_date)}</td>
                       <td style={styles.td}><span style={styles.badge(statusColor(req.overall_status))}>{req.overall_status}</span></td>
-                      <td style={styles.td}>{req.effective_date || '—'}</td>
+                      <td style={styles.td}>{fmtDate(req.effective_date)}</td>
                     </tr>
                   )
                 })}
@@ -2199,7 +2200,7 @@ function ProposeRateForm({ roles, userProfile, onSave, onCancel }) {
         <button style={styles.btn('ghost')} onClick={onCancel}>Cancel</button>
       </div>
       {err && <AlertBar msg={err} type="error" onClose={() => setErr('')} />}
-      <div style={styles.grid2}>
+      <div className="m-form" style={styles.grid2}>
         <div style={styles.formGroup}>
           <label style={styles.label}>Role</label>
           <select style={styles.input} value={roleId} onChange={e => setRoleId(e.target.value)}>
@@ -2213,7 +2214,7 @@ function ProposeRateForm({ roles, userProfile, onSave, onCancel }) {
         </div>
         <div style={styles.formGroup}>
           <label style={styles.label}>Proposed New Rate (₦)</label>
-          <input type="number" style={styles.input} value={proposedRate} onChange={e => setProposedRate(e.target.value)} />
+          <input type="number" inputMode="decimal" style={styles.input} value={proposedRate} onChange={e => setProposedRate(e.target.value)} />
         </div>
         <div style={styles.formGroup}>
           <label style={styles.label}>Current Bonus (read-only)</label>
@@ -2221,7 +2222,7 @@ function ProposeRateForm({ roles, userProfile, onSave, onCancel }) {
         </div>
         <div style={styles.formGroup}>
           <label style={styles.label}>Proposed New Bonus (₦)</label>
-          <input type="number" style={styles.input} value={proposedBonus} onChange={e => setProposedBonus(e.target.value)} placeholder="0" />
+          <input type="number" inputMode="decimal" style={styles.input} value={proposedBonus} onChange={e => setProposedBonus(e.target.value)} placeholder="0" />
         </div>
         <div style={styles.formGroup}>
           <label style={styles.label}>Effective Date</label>
@@ -2273,8 +2274,8 @@ export default function Labour({ userProfile }) {
     ]
 
   return (
-    <div style={styles.page}>
-      <div style={{ ...styles.row, justifyContent: 'space-between', marginBottom: '20px' }}>
+    <div className="m-page" style={styles.page}>
+      <div className="m-header" style={{ ...styles.row, justifyContent: 'space-between', marginBottom: '20px' }}>
         <div>
           <h1 style={{ margin: 0, fontSize: '22px', fontWeight: '700', color: theme.text }}>Labour Management</h1>
           <div style={{ fontSize: '13px', color: theme.textMuted, marginTop: '4px' }}>Abuja Precast Concrete Limited</div>
@@ -2286,7 +2287,7 @@ export default function Labour({ userProfile }) {
 
       {alert && <AlertBar msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
 
-      <div style={{ ...styles.row, gap: '4px', marginBottom: '20px', borderBottom: `1px solid ${theme.border}`, paddingBottom: '10px', flexWrap: 'wrap' }}>
+      <div className="m-wrap" style={{ ...styles.row, gap: '8px', marginBottom: '20px', borderBottom: `1px solid ${theme.border}`, paddingBottom: '10px', flexWrap: 'wrap' }}>
         {TABS.map(t => (
           <button key={t.key} style={styles.tab(activeTab === t.key)} onClick={() => setActiveTab(t.key)}>
             {t.label}

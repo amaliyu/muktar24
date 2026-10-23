@@ -6,6 +6,7 @@ import { supabase } from '../lib/supabase'
 import { effectiveRolesOf } from '../lib/roles'
 import SitePicker, { useSites } from './SitePicker'
 import { siteName } from '../services/sites'
+import { Z } from '../lib/zIndex'
 
 // ── THEME ────────────────────────────────────────────────────
 const theme = {
@@ -1198,7 +1199,7 @@ function GenerateModal({ report, userProfile, onClose, onGenerated }) {
   const lbl = { display:'block', fontSize:'11px', color:theme.textMuted, marginBottom:'4px', textTransform:'uppercase', letterSpacing:'0.06em' }
 
   return (
-    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.65)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center', padding:'20px' }}>
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.65)', zIndex:Z.modal, display:'flex', alignItems:'center', justifyContent:'center', padding:'20px' }}>
       <div style={{ background:theme.surface, borderRadius:'14px', padding:'28px', width:'100%', maxWidth:'480px', boxShadow:'0 20px 60px rgba(0,0,0,0.6)' }}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'20px' }}>
           <div>
@@ -1284,7 +1285,7 @@ function ScheduleModal({ report, onClose }) {
   const lbl = { display:'block', fontSize:'11px', color:theme.textMuted, marginBottom:'4px', textTransform:'uppercase', letterSpacing:'0.06em' }
 
   return (
-    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.65)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center', padding:'20px' }}>
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.65)', zIndex:Z.modal, display:'flex', alignItems:'center', justifyContent:'center', padding:'20px' }}>
       <div style={{ background:theme.surface, borderRadius:'14px', padding:'28px', width:'100%', maxWidth:'400px', boxShadow:'0 20px 60px rgba(0,0,0,0.6)' }}>
         <div style={{ fontWeight:'700', fontSize:'15px', marginBottom:'4px' }}>Schedule Report</div>
         <div style={{ fontSize:'12px', color:theme.textMuted, marginBottom:'20px' }}>{report.name}</div>

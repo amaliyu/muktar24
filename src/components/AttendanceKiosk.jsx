@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { kioskService } from '../services/kioskService';
 import { supabase } from '../lib/supabase';
+import { Z } from '../lib/zIndex'
 
 // ─── IndexedDB helpers ────────────────────────────────────────────────────────
 
@@ -557,7 +558,7 @@ export default function AttendanceKiosk({ userProfile }) {
           background: toast.ok ? '#15803d' : '#dc2626',
           color: '#fff', padding: '14px 28px', borderRadius: 12,
           fontSize: 16, fontWeight: 600, boxShadow: '0 8px 32px rgba(0,0,0,0.25)',
-          zIndex: 9999, pointerEvents: 'none', maxWidth: '90vw', textAlign: 'center',
+          zIndex: Z.toast, pointerEvents: 'none', maxWidth: '90vw', textAlign: 'center',
         }}>
           {toast.msg}
         </div>

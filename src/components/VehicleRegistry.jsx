@@ -4,11 +4,12 @@ import { staffService } from '../services/staff'
 import { expensesService } from '../services/accounting'
 import { suppliersService, supplierTransactionsService } from '../services/suppliers'
 import { supabase } from '../lib/supabase'
+import { ConfirmDialog, fmtDate } from './site/siteUi'
 
 const theme = {
   bg: '#0f1117', surface: '#1a1d27', card: '#21263a', border: '#2e3452',
   accent: '#f5a623', accentDim: '#c47d0e', green: '#2dd4a0', red: '#f06b6b',
-  blue: '#5b8dee', text: '#e8eaf0', textMuted: '#7c839e', textDim: '#4a5175',
+  blue: '#5b8dee', text: '#e8eaf0', textMuted: '#a0a7bf', textDim: '#8a91ac',
 }
 const naira = (n) => `₦${Math.round(Number(n) || 0).toLocaleString()}`
 const fmt = (n) => Number(n || 0).toLocaleString()
@@ -160,6 +161,7 @@ const MaintenanceTab = ({ vehicleId, vehicleNumber, vehicleName }) => {
   const [editTarget, setEditTarget] = useState(null)
   const [saving, setSaving] = useState(false)
   const [alert, setAlert] = useState(null)
+  const [confirmDel, setConfirmDel] = useState(null)
   const [suppliers, setSuppliers] = useState([])
   const today = todayStr()
   const emptyForm = { maintenance_date: today, maintenance_type: 'Routine', description: '', cost: '', supplierId: '', vendor_name: '', vendor_phone: '', downtime_days: '', next_maintenance_date: '', recorded_by: '', notes: '' }
@@ -259,7 +261,6 @@ const MaintenanceTab = ({ vehicleId, vehicleNumber, vehicleName }) => {
   }
 
   const handleDelete = async (r) => {
-    if (!window.confirm('Delete this maintenance record? This will also remove the linked P&L expense and supplier transaction.')) return
     try {
       if (r.linked_expense_id) {
         try { await supabase.from('supplier_transactions').delete().eq('linked_expense_id', r.linked_expense_id) } catch {}
@@ -288,6 +289,7 @@ const MaintenanceTab = ({ vehicleId, vehicleNumber, vehicleName }) => {
   return (
     <div>
       {alert && <AlertBar msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
+      {confirmDel && <ConfirmDialog title={`Delete the ${confirmDel.maintenance_type || 'maintenance'} record of ${fmtDate(confirmDel.maintenance_date)} for ${vehicleNumber || 'this vehicle'}?`} body="This also removes the linked P&L expense and supplier transaction. This cannot be undone." confirmLabel="Delete record" danger onCancel={() => setConfirmDel(null)} onConfirm={() => { const x = confirmDel; setConfirmDel(null); handleDelete(x) }} />}
       {overdueNext && <AlertBar msg={`Maintenance overdue! Next service was due ${overdueNext.next_maintenance_date} (${overdueNext.maintenance_type})`} type="warning" />}
       <div style={{ ...styles.row, justifyContent: 'space-between', marginBottom: '16px' }}>
         <div>
@@ -368,7 +370,7 @@ const MaintenanceTab = ({ vehicleId, vehicleNumber, vehicleName }) => {
                   <div style={styles.row}>
                     {r.receipt_url && recUrls[r.id] && <a href={recUrls[r.id]} target="_blank" rel="noreferrer" style={{ fontSize: '11px', color: theme.blue }}>Receipt</a>}
                     <button style={{ ...styles.btn(), padding: '3px 8px', fontSize: '11px' }} onClick={() => openEdit(r)}>Edit</button>
-                    <button style={{ ...styles.btn('danger'), padding: '3px 8px', fontSize: '11px' }} onClick={() => handleDelete(r)}>Delete</button>
+                    <button style={{ ...styles.btn('danger'), padding: '3px 8px', fontSize: '11px' }} onClick={() => setConfirmDel(r)}>Delete</button>
                   </div>
                 </td>
               </tr>
@@ -387,6 +389,7 @@ const FuelLogTab = ({ vehicleId }) => {
   const [showForm, setShowForm] = useState(false)
   const [saving, setSaving] = useState(false)
   const [alert, setAlert] = useState(null)
+  const [confirmDel, setConfirmDel] = useState(null)
   const today = todayStr()
   const emptyForm = { date: today, litres_dispensed: '', cost_per_litre: '', total_cost: '', odometer_reading: '', dispensed_by: '', purpose: 'delivery', notes: '' }
   const [form, setForm] = useState(emptyForm)
@@ -416,7 +419,6 @@ const FuelLogTab = ({ vehicleId }) => {
   }
 
   const handleDelete = async (id) => {
-    if (!window.confirm('Delete this fuel entry?')) return
     try { await fuelLogService.delete(id); await load(); setAlert({ type: 'success', msg: 'Entry deleted.' }) }
     catch (e) { setAlert({ type: 'error', msg: e.message }) }
   }
@@ -427,6 +429,7 @@ const FuelLogTab = ({ vehicleId }) => {
   return (
     <div>
       {alert && <AlertBar msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
+      {confirmDel && <ConfirmDialog title={`Delete the fuel entry of ${fmtDate(confirmDel.date)} (${fmt(confirmDel.litres_dispensed)} L, ${naira(confirmDel.total_cost)})?`} body="This cannot be undone." confirmLabel="Delete entry" danger onCancel={() => setConfirmDel(null)} onConfirm={() => { const x = confirmDel; setConfirmDel(null); handleDelete(x.id) }} />}
       <div style={{ ...styles.row, justifyContent: 'space-between', marginBottom: '16px' }}>
         <div style={styles.row}>
           <span style={{ fontSize: '13px', color: theme.textMuted }}>Total fuel cost: <strong style={{ color: theme.accent }}>{naira(totalFuelCost)}</strong></span>
@@ -472,7 +475,7 @@ const FuelLogTab = ({ vehicleId }) => {
                 <td style={styles.td}>{e.dispensed_by || '—'}</td>
                 <td style={styles.td}><span style={styles.badge(theme.blue)}>{e.purpose}</span></td>
                 <td style={styles.td}><span style={{ fontSize: '11px', color: theme.textMuted }}>{e.notes || ''}</span></td>
-                <td style={styles.td}><button style={{ ...styles.btn('danger'), padding: '3px 8px', fontSize: '11px' }} onClick={() => handleDelete(e.id)}>Delete</button></td>
+                <td style={styles.td}><button style={{ ...styles.btn('danger'), padding: '3px 8px', fontSize: '11px' }} onClick={() => setConfirmDel(e)}>Delete</button></td>
               </tr>
             ))}
           </tbody>
@@ -488,6 +491,7 @@ const DocumentsTab = ({ vehicleId }) => {
   const [docUrls, setDocUrls] = useState({})
   const [loading, setLoading] = useState(true)
   const [alert, setAlert] = useState(null)
+  const [confirmDel, setConfirmDel] = useState(null)
   const [uploading, setUploading] = useState(false)
   const [docLabel, setDocLabel] = useState(DOC_LABELS[0])
   const [expiry, setExpiry] = useState('')
@@ -518,7 +522,6 @@ const DocumentsTab = ({ vehicleId }) => {
   }
 
   const handleDelete = async (doc) => {
-    if (!window.confirm(`Delete "${doc.document_label}"?`)) return
     try { await vehicleDocumentsService.delete(doc.id, doc.file_url); await load() }
     catch (e) { setAlert({ type: 'error', msg: e.message }) }
   }
@@ -526,6 +529,7 @@ const DocumentsTab = ({ vehicleId }) => {
   return (
     <div>
       {alert && <AlertBar msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
+      {confirmDel && <ConfirmDialog title={`Delete the document "${confirmDel.document_label}"?`} body="The file is removed from storage. This cannot be undone." confirmLabel="Delete document" danger onCancel={() => setConfirmDel(null)} onConfirm={() => { const x = confirmDel; setConfirmDel(null); handleDelete(x) }} />}
       <div style={{ ...styles.card, borderLeft: `4px solid ${theme.blue}`, marginBottom: '16px' }}>
         <div style={styles.sectionTitle}>Upload Document</div>
         <div style={styles.grid(3)}>
@@ -559,7 +563,7 @@ const DocumentsTab = ({ vehicleId }) => {
                 </div>
                 <div style={styles.row}>
                   <a href={docUrls[d.id] || undefined} target="_blank" rel="noreferrer" style={{ ...styles.btn(), textDecoration: 'none', padding: '6px 12px', fontSize: '12px' }}>View</a>
-                  <button style={{ ...styles.btn('danger'), padding: '6px 12px', fontSize: '12px' }} onClick={() => handleDelete(d)}>Delete</button>
+                  <button style={{ ...styles.btn('danger'), padding: '6px 12px', fontSize: '12px' }} onClick={() => setConfirmDel(d)}>Delete</button>
                 </div>
               </div>
             )
