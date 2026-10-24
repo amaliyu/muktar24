@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import * as XLSX from 'xlsx'
 import { supabase } from '../lib/supabase'
+import { AlertTriangle, ArrowLeft, ArrowRight, Banknote, BarChart3, Check, CheckCircle2, ClipboardList, Factory, History, Package, Truck, Upload, Wallet, X, XCircle } from 'lucide-react'
+import { Ico, IconText, IconButton } from './Ico'
 
 const theme = {
   bg: '#0f1117', surface: '#1a1d27', card: '#21263a', border: '#2e3452',
@@ -58,7 +60,7 @@ function parseExcelDate(val) {
 const AlertBar = ({ msg, type = 'error', onClose }) => (
   <div style={{ padding: '12px 16px', borderRadius: '8px', marginBottom: '14px', background: type === 'success' ? theme.green + '22' : type === 'warning' ? theme.accent + '22' : theme.red + '22', color: type === 'success' ? theme.green : type === 'warning' ? theme.accent : theme.red, display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px' }}>
   <span>{msg}</span>
-  {onClose && <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '18px' }}>×</button>}
+  {onClose && <IconButton onClick={onClose} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '18px' }} aria-label="Close"><Ico icon={X} /></IconButton>}
 </div>
 )
 
@@ -68,7 +70,7 @@ const Steps = ({ current, steps }) => (
       <React.Fragment key={i}>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1 }}>
           <div style={{ width: '28px', height: '28px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: '700', background: i < current ? theme.green : i === current ? theme.accent : theme.surface, color: i < current ? '#0d3028' : i === current ? '#1a0e00' : theme.textMuted, border: `2px solid ${i < current ? theme.green : i === current ? theme.accent : theme.border}` }}>
-            {i < current ? '✓' : i + 1}
+            {i < current ? <Ico icon={Check} /> : i + 1}
           </div>
           <div style={{ fontSize: '10px', color: i === current ? theme.accent : i < current ? theme.green : theme.textMuted, marginTop: '4px', textAlign: 'center', fontWeight: i === current ? '700' : '400' }}>{s}</div>
         </div>
@@ -84,7 +86,7 @@ const IMPORT_TYPES = [
   {
     id: 'loading_log',
     label: 'Loading Log',
-    icon: '🚛',
+    icon: Truck,
     description: 'Historical truck loading records with waybill numbers, quantities and amounts',
     fields: {
       date: 'Date', customer_name: 'Customer Name', plate_number: 'Plate Number',
@@ -128,7 +130,7 @@ const IMPORT_TYPES = [
   {
     id: 'payroll',
     label: 'Weekly Labour Payroll',
-    icon: '📋',
+    icon: ClipboardList,
     description: 'Weekly payroll sheets with worker names, daily attendance and pay breakdown',
     fields: {
       name: 'Worker Name', week_ending: 'Week Ending',
@@ -166,7 +168,7 @@ const IMPORT_TYPES = [
   {
     id: 'production',
     label: 'Production Log',
-    icon: '🏭',
+    icon: Factory,
     description: 'Daily production records by block type, shift and quantity produced',
     fields: {
       date: 'Date', block_type: 'Block Type', quantity: 'Quantity Produced', shift: 'Shift', notes: 'Notes',
@@ -189,7 +191,7 @@ const IMPORT_TYPES = [
   {
     id: 'waybills',
     label: 'Waybill Delivery Records',
-    icon: '📦',
+    icon: Package,
     description: 'Delivery records including loaded, received and damage quantities',
     fields: {
       date: 'Date', waybill_no: 'Waybill No', customer_name: 'Customer Name', plate_number: 'Plate Number',
@@ -230,7 +232,7 @@ const IMPORT_TYPES = [
   {
     id: 'payments',
     label: 'Customer Payments',
-    icon: '💰',
+    icon: Wallet,
     description: 'Historical customer payment records with amounts and references',
     fields: {
       date: 'Date', customer_name: 'Customer Name', invoice_no: 'Invoice No',
@@ -266,7 +268,7 @@ const IMPORT_TYPES = [
   {
     id: 'inventory',
     label: 'Inventory Stock Movements',
-    icon: '📦',
+    icon: Package,
     description: 'Stock movements in and out of inventory with item names and quantities',
     fields: {
       date: 'Date', item_name: 'Item Name', movement_type: 'Type (in/out)', quantity: 'Quantity', notes: 'Notes',
@@ -292,7 +294,7 @@ const IMPORT_TYPES = [
   {
     id: 'expenses',
     label: 'Expenses',
-    icon: '💸',
+    icon: Banknote,
     description: 'Historical expense records with category, amount and vendor details',
     fields: {
       date: 'Date', category: 'Category', description: 'Description',
@@ -541,7 +543,7 @@ function ImportWizard({ typeConfig, onBack }) {
               </table>
             </div>
           </div>
-          <button style={styles.btn('primary')} onClick={handleValidate} disabled={working}>{working ? 'Validating…' : 'Validate Rows →'}</button>
+          <button style={styles.btn('primary')} onClick={handleValidate} disabled={working}>{working ? 'Validating…' : <IconText icon={ArrowRight} iconRight>Validate Rows</IconText>}</button>
         </div>
       )}
 
@@ -554,8 +556,8 @@ function ImportWizard({ typeConfig, onBack }) {
             <span style={styles.badge(theme.accent)}>{warnCount} warnings</span>
             <span style={{ fontSize: '12px', color: theme.textMuted }}>{validated.filter(r => r.skip).length} skipped</span>
             <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px' }}>
-              {step === 2 && <button style={styles.btn('ghost')} onClick={() => setStep(3)}>Review Flagged ({errorCount + warnCount}) →</button>}
-              {step === 3 && <button style={styles.btn('ghost')} onClick={() => setStep(2)}>← All Rows</button>}
+              {step === 2 && <button style={styles.btn('ghost')} onClick={() => setStep(3)}><IconText icon={ArrowRight} iconRight>Review Flagged ({errorCount + warnCount})</IconText></button>}
+              {step === 3 && <button style={styles.btn('ghost')} onClick={() => setStep(2)}><IconText icon={ArrowLeft}>All Rows</IconText></button>}
               <button style={styles.btn('primary')} onClick={handleStage} disabled={working || validCount === 0}>{working ? 'Staging…' : `Confirm & Stage (${validCount} rows)`}</button>
               <button style={{ ...styles.btn('blue'), fontSize: '11px' }} onClick={handleDirectMerge} disabled={working || validCount === 0} title="Skip staging tables — import directly">{working ? '…' : 'Direct Import'}</button>
             </div>
@@ -578,9 +580,9 @@ function ImportWizard({ typeConfig, onBack }) {
                       <td key={f} style={styles.td}>{r.mapped[f] || '—'}</td>
                     ))}
                     <td style={styles.td}>
-                      {r.errors.map((e, j) => <div key={j} style={{ color: theme.red, fontSize: '11px' }}>✗ {e}</div>)}
-                      {r.warnings.map((w, j) => <div key={j} style={{ color: theme.accent, fontSize: '11px' }}>⚠ {w}</div>)}
-                      {r.errors.length === 0 && r.warnings.length === 0 && <span style={{ color: theme.green }}>✓ OK</span>}
+                      {r.errors.map((e, j) => <div key={j} style={{ color: theme.red, fontSize: '11px' }}><IconText icon={XCircle} size={12}>Error: {e}</IconText></div>)}
+                      {r.warnings.map((w, j) => <div key={j} style={{ color: theme.accent, fontSize: '11px' }}><IconText icon={AlertTriangle} size={12}>Warning: {w}</IconText></div>)}
+                      {r.errors.length === 0 && r.warnings.length === 0 && <span style={{ color: theme.green }}><IconText icon={CheckCircle2}>OK</IconText></span>}
                     </td>
                     <td style={styles.td}><input type="checkbox" checked={r.skip} onChange={() => toggleSkip(i)} /></td>
                   </tr>
@@ -594,7 +596,7 @@ function ImportWizard({ typeConfig, onBack }) {
       {/* STEP 4 — Staged confirmation */}
       {step === 4 && (
         <div style={styles.card}>
-          <div style={{ fontSize: '18px', fontWeight: '700', marginBottom: '8px', color: theme.green }}>✓ Batch Staged Successfully</div>
+          <div style={{ fontSize: '18px', fontWeight: '700', marginBottom: '8px', color: theme.green }}><IconText icon={CheckCircle2} size={20}>Batch Staged Successfully</IconText></div>
           <div style={{ color: theme.textMuted, fontSize: '13px', marginBottom: '20px' }}>
             {validCount} rows are staged and ready to merge into <strong>{typeConfig.mergeTable}</strong>. Review the summary below before merging.
           </div>
@@ -612,7 +614,7 @@ function ImportWizard({ typeConfig, onBack }) {
             ))}
           </div>
           <div style={{ ...styles.btn('primary'), display: 'inline-block', cursor: 'pointer' }} onClick={handleMerge}>
-            {working ? 'Merging into live tables…' : `Merge ${validCount} rows into ${typeConfig.mergeTable} →`}
+            {working ? 'Merging into live tables…' : <IconText icon={ArrowRight} iconRight>Merge {validCount} rows into {typeConfig.mergeTable}</IconText>}
           </div>
         </div>
       )}
@@ -638,7 +640,7 @@ function ImportWizard({ typeConfig, onBack }) {
               </div>
             )}
           </div>
-          <button style={styles.btn('ghost')} onClick={onBack}>← Import Another Type</button>
+          <button style={styles.btn('ghost')} onClick={onBack}><IconText icon={ArrowLeft}>Import Another Type</IconText></button>
         </div>
       )}
     </div>
@@ -684,15 +686,15 @@ function ImportHistory() {
             <tbody>
               {batches.map(b => (
                 <tr key={b.id}>
-                  <td style={styles.td}>{IMPORT_TYPES.find(t => t.id === b.import_type)?.label || b.import_type}</td>
-                  <td style={styles.td}>{b.period_label || `${b.period_month}/${b.period_year}`}</td>
-                  <td style={styles.td}><span style={styles.badge(statusColor(b.status))}>{b.status}</span></td>
-                  <td style={styles.td}>{b.total_rows}</td>
-                  <td style={{ ...styles.td, color: theme.green }}>{b.valid_rows}</td>
-                  <td style={{ ...styles.td, color: b.error_rows > 0 ? theme.red : theme.textMuted }}>{b.error_rows}</td>
-                  <td style={{ ...styles.td, color: theme.textMuted }}>{b.skipped_rows}</td>
-                  <td style={styles.td}>{b.imported_at ? new Date(b.imported_at).toLocaleDateString() : '—'}</td>
-                  <td style={{ ...styles.td, color: b.merged_at ? theme.green : theme.textMuted }}>{b.merged_at ? new Date(b.merged_at).toLocaleDateString() : 'Pending'}</td>
+                  <td className="m-title" data-label="Type" style={styles.td}>{IMPORT_TYPES.find(t => t.id === b.import_type)?.label || b.import_type}</td>
+                  <td data-label="Period" style={styles.td}>{b.period_label || `${b.period_month}/${b.period_year}`}</td>
+                  <td data-label="Status" style={styles.td}><span style={styles.badge(statusColor(b.status))}>{b.status}</span></td>
+                  <td className="m-key" data-label="Total" style={styles.td}>{b.total_rows}</td>
+                  <td data-label="Valid" style={{ ...styles.td, color: theme.green }}>{b.valid_rows}</td>
+                  <td data-label="Errors" style={{ ...styles.td, color: b.error_rows > 0 ? theme.red : theme.textMuted }}>{b.error_rows}</td>
+                  <td data-label="Skipped" style={{ ...styles.td, color: theme.textMuted }}>{b.skipped_rows}</td>
+                  <td data-label="Imported At" style={styles.td}>{b.imported_at ? new Date(b.imported_at).toLocaleDateString() : '—'}</td>
+                  <td data-label="Merged At" style={{ ...styles.td, color: b.merged_at ? theme.green : theme.textMuted }}>{b.merged_at ? new Date(b.merged_at).toLocaleDateString() : 'Pending'}</td>
                 </tr>
               ))}
             </tbody>
@@ -757,12 +759,12 @@ function ProgressTracker() {
           <tbody>
             {IMPORT_TYPES.map(type => (
               <tr key={type.id}>
-                <td style={{ ...styles.td, fontWeight: '600' }}>{type.icon} {type.label}</td>
+                <td className="m-title" data-label="Import Type" style={{ ...styles.td, fontWeight: '600' }}><IconText icon={type.icon}>{type.label}</IconText></td>
                 {months.map(m => {
                   const bs = getBatchesFor(type.id, m, currentYear)
                   const color = cellColor(bs)
                   return (
-                    <td key={m} style={{ ...styles.td, textAlign: 'center', padding: '6px' }}>
+                    <td key={m} data-label={monthName(m)} style={{ ...styles.td, textAlign: 'center', padding: '6px' }}>
                       <div style={{ width: '28px', height: '28px', borderRadius: '6px', background: color + (color === theme.border ? '' : '33'), border: `1px solid ${color}55`, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', color, fontWeight: '700' }}>
                         {bs.length > 0 ? bs.length : ''}
                       </div>
@@ -785,20 +787,20 @@ export default function DataImport() {
   const [selectedType, setSelectedType] = useState(null)
 
   return (
-    <div style={styles.page}>
+    <div className="m-page" style={styles.page}>
       <div style={{ marginBottom: '24px' }}>
         <h1 style={{ margin: '0 0 4px', fontSize: '22px', fontWeight: '700', color: theme.text }}>Historical Data Import</h1>
         <div style={{ fontSize: '13px', color: theme.textMuted }}>Bulk import historical records from Excel files — MD and Accountant access</div>
       </div>
 
       {/* Tab nav */}
-      <div style={{ display: 'flex', gap: '6px', marginBottom: '24px', background: theme.surface, padding: '6px', borderRadius: '8px', width: 'fit-content' }}>
+      <div className="m-wrap" style={{ display: 'flex', gap: '6px', marginBottom: '24px', background: theme.surface, padding: '6px', borderRadius: '8px', width: 'fit-content' }}>
         {[
-          { id: 'import', label: '↑ New Import' },
-          { id: 'history', label: '📋 History' },
-          { id: 'progress', label: '📊 Progress' },
+          { id: 'import', label: 'New Import', icon: Upload },
+          { id: 'history', label: 'History', icon: History },
+          { id: 'progress', label: 'Progress', icon: BarChart3 },
         ].map(t => (
-          <button key={t.id} style={styles.tab(tab === t.id)} onClick={() => { setTab(t.id); setSelectedType(null) }}>{t.label}</button>
+          <button key={t.id} style={styles.tab(tab === t.id)} onClick={() => { setTab(t.id); setSelectedType(null) }}><IconText icon={t.icon}>{t.label}</IconText></button>
         ))}
       </div>
 
@@ -808,10 +810,10 @@ export default function DataImport() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '14px' }}>
             {IMPORT_TYPES.map(type => (
               <button key={type.id} onClick={() => setSelectedType(type.id)} style={{ ...styles.card, cursor: 'pointer', textAlign: 'left', border: `1px solid ${theme.border}`, background: theme.card, transition: 'border-color 0.15s', marginBottom: 0 }} onMouseOver={e => e.currentTarget.style.borderColor = theme.accent} onMouseOut={e => e.currentTarget.style.borderColor = theme.border}>
-                <div style={{ fontSize: '28px', marginBottom: '8px' }}>{type.icon}</div>
+                <div style={{ marginBottom: '8px', color: theme.accent }}><Ico icon={type.icon} size={28} /></div>
                 <div style={{ fontWeight: '700', color: theme.text, marginBottom: '4px' }}>{type.label}</div>
                 <div style={{ fontSize: '12px', color: theme.textMuted }}>{type.description}</div>
-                <div style={{ fontSize: '10px', color: theme.textMuted, marginTop: '8px' }}>→ {type.mergeTable}</div>
+                <div style={{ fontSize: '10px', color: theme.textMuted, marginTop: '8px' }}><IconText icon={ArrowRight} size={12}>{type.mergeTable}</IconText></div>
               </button>
             ))}
           </div>
@@ -820,9 +822,9 @@ export default function DataImport() {
 
       {tab === 'import' && selectedType && (
         <div>
-          <button onClick={() => setSelectedType(null)} style={{ ...styles.btn('ghost'), marginBottom: '20px' }}>← Back to Import Types</button>
+          <button onClick={() => setSelectedType(null)} style={{ ...styles.btn('ghost'), marginBottom: '20px' }}><IconText icon={ArrowLeft}>Back to Import Types</IconText></button>
           <div style={{ fontWeight: '700', fontSize: '16px', marginBottom: '20px', color: theme.text }}>
-            {IMPORT_TYPES.find(t => t.id === selectedType)?.icon} {IMPORT_TYPES.find(t => t.id === selectedType)?.label}
+            <IconText icon={IMPORT_TYPES.find(t => t.id === selectedType)?.icon} size={20}>{IMPORT_TYPES.find(t => t.id === selectedType)?.label}</IconText>
           </div>
           <ImportWizard typeConfig={IMPORT_TYPES.find(t => t.id === selectedType)} onBack={() => setSelectedType(null)} />
         </div>

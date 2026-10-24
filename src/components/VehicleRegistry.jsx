@@ -6,6 +6,8 @@ import { suppliersService, supplierTransactionsService } from '../services/suppl
 import { supabase } from '../lib/supabase'
 import { ConfirmDialog, fmtDate, fmtDay } from './site/siteUi'
 import { deleteMaintenanceRecord, deleteWhere } from '../utils/checkedDelete'
+import { AlertTriangle, ArrowLeft, Check, CheckCircle2, Package, User, X } from 'lucide-react'
+import { Ico, IconText, IconButton } from './Ico'
 
 const theme = {
   bg: '#0f1117', surface: '#1a1d27', card: '#21263a', border: '#2e3452',
@@ -62,7 +64,7 @@ const Spinner = () => (
 const AlertBar = ({ msg, type = 'error', onClose }) => (
   <div style={{ padding: '12px 16px', borderRadius: '8px', marginBottom: '14px', background: type === 'success' ? theme.green + '22' : type === 'warning' ? theme.accent + '22' : theme.red + '22', color: type === 'success' ? theme.green : type === 'warning' ? theme.accent : theme.red, display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px' }}>
     <span>{msg}</span>
-    {onClose && <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '16px' }}>×</button>}
+    {onClose && <IconButton onClick={onClose} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '16px' }} aria-label="Close"><Ico icon={X} /></IconButton>}
   </div>
 )
 
@@ -341,7 +343,7 @@ const MaintenanceTab = ({ vehicleId, vehicleNumber, vehicleName }) => {
             </div>
             <div style={{ ...styles.formGroup, gridColumn: 'span 2' }}><label style={styles.label}>Notes</label><input style={styles.input} value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} /></div>
           </div>
-          {Number(form.cost) > 0 && <div style={{ fontSize: '12px', color: theme.green, marginBottom: '10px' }}>✓ Cost will be logged to P&L{form.supplierId ? ' and recorded as supplier purchase' : ''}</div>}
+          {Number(form.cost) > 0 && <div style={{ fontSize: '12px', color: theme.green, marginBottom: '10px' }}><IconText icon={Check}>Cost will be logged to P&L{form.supplierId ? ' and recorded as supplier purchase' : ''}</IconText></div>}
           <div style={styles.row}>
             <button style={styles.btn('primary')} onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : editTarget ? 'Update Record' : 'Save Record'}</button>
             <button style={styles.btn()} onClick={() => { setShowForm(false); setEditTarget(null) }}>Cancel</button>
@@ -361,7 +363,7 @@ const MaintenanceTab = ({ vehicleId, vehicleNumber, vehicleName }) => {
                 <td style={styles.td}>{r.description || '—'}</td>
                 <td style={styles.td}>
                   <strong style={{ color: theme.accent }}>{naira(r.cost)}</strong>
-                  {r.linked_expense_id && <div style={{ fontSize: '10px', color: theme.green }}>✓ in P&L</div>}
+                  {r.linked_expense_id && <div style={{ fontSize: '10px', color: theme.green }}><IconText icon={Check} size={12}>in P&L</IconText></div>}
                 </td>
                 <td style={styles.td}>{r.vendor_name || '—'}{r.vendor_phone && <div style={{ fontSize: '11px', color: theme.textMuted }}>{r.vendor_phone}</div>}</td>
                 <td style={styles.td}>{r.downtime_days ? `${r.downtime_days}d` : '—'}</td>
@@ -644,7 +646,7 @@ const VehicleProfile = ({ vehicle: initialVehicle, staff, staffMap, onBack, onUp
   if (editing) {
     return (
       <div style={styles.page}>
-        <button style={{ ...styles.btn(), marginBottom: '16px' }} onClick={() => setEditing(false)}>← Back to Profile</button>
+        <button style={{ ...styles.btn(), marginBottom: '16px' }} onClick={() => setEditing(false)}><IconText icon={ArrowLeft}>Back to Profile</IconText></button>
         <VehicleForm vehicle={vehicle} staff={staff} onSave={handleUpdate} onCancel={() => setEditing(false)} />
       </div>
     )
@@ -653,7 +655,7 @@ const VehicleProfile = ({ vehicle: initialVehicle, staff, staffMap, onBack, onUp
   return (
     <div style={styles.page}>
       <div style={{ ...styles.row, marginBottom: '20px' }}>
-        <button style={styles.btn()} onClick={onBack}>← All Vehicles</button>
+        <button style={styles.btn()} onClick={onBack}><IconText icon={ArrowLeft}>All Vehicles</IconText></button>
       </div>
       {alert && <AlertBar msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
 
@@ -801,7 +803,7 @@ const VehicleProfile = ({ vehicle: initialVehicle, staff, staffMap, onBack, onUp
                 {fleetAvgRate !== null && (
                   <div style={{ padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', background: aboveAvg ? theme.red + '15' : theme.green + '15', border: `1px solid ${aboveAvg ? theme.red : theme.green}44` }}>
                     <span style={{ fontSize: '13px', color: aboveAvg ? theme.red : theme.green, fontWeight: '600' }}>
-                      {aboveAvg ? '⚠ Above fleet average' : '✓ Below fleet average'}: fleet avg is {fleetAvgRate.toFixed(2)}%, this vehicle is {rate.toFixed(2)}%
+                      {aboveAvg ? <IconText icon={AlertTriangle}>Above fleet average</IconText> : <IconText icon={CheckCircle2}>Below fleet average</IconText>}: fleet avg is {fleetAvgRate.toFixed(2)}%, this vehicle is {rate.toFixed(2)}%
                     </span>
                   </div>
                 )}
@@ -955,19 +957,19 @@ const VehicleRegistry = () => {
                   <span style={styles.badge(statusColor[v.status] || theme.textMuted)}>{v.status}</span>
                 </div>
                 <div style={{ ...styles.row, marginTop: '12px', fontSize: '12px', gap: '14px' }}>
-                  <span style={{ color: theme.textMuted }}>👤 {staffMap[v.assigned_driver_id]?.full_name || '— No driver —'}</span>
-                  {v.capacity_blocks && <span style={{ color: theme.textMuted }}>📦 {fmt(v.capacity_blocks)} blocks/trip</span>}
+                  <span style={{ color: theme.textMuted }}><IconText icon={User}>{staffMap[v.assigned_driver_id]?.full_name || '— No driver —'}</IconText></span>
+                  {v.capacity_blocks && <span style={{ color: theme.textMuted }}><IconText icon={Package}>{fmt(v.capacity_blocks)} blocks/trip</IconText></span>}
                 </div>
                 {(insExpired || insExpiring || rwExpired || rwExpiring) && (
                   <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: `1px solid ${theme.border}22` }}>
                     {(insExpired || insExpiring) && (
                       <div style={{ fontSize: '11px', color: insExpired ? theme.red : theme.accent }}>
-                        {insExpired ? '⚠ Insurance EXPIRED' : `⚠ Insurance expiring in ${daysUntil(v.insurance_expiry_date)} days`}
+                        {insExpired ? <IconText icon={AlertTriangle}>Insurance EXPIRED</IconText> : <IconText icon={AlertTriangle}>Insurance expiring in {daysUntil(v.insurance_expiry_date)} days</IconText>}
                       </div>
                     )}
                     {(rwExpired || rwExpiring) && (
                       <div style={{ fontSize: '11px', color: rwExpired ? theme.red : theme.accent }}>
-                        {rwExpired ? '⚠ Road Worthiness EXPIRED' : `⚠ Road Worthiness expiring in ${daysUntil(v.road_worthiness_expiry_date)} days`}
+                        {rwExpired ? <IconText icon={AlertTriangle}>Road Worthiness EXPIRED</IconText> : <IconText icon={AlertTriangle}>Road Worthiness expiring in {daysUntil(v.road_worthiness_expiry_date)} days</IconText>}
                       </div>
                     )}
                   </div>

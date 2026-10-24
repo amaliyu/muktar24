@@ -11,6 +11,8 @@ import { generateIDCardPDF, generateBusinessCardPDF } from '../utils/cardGenerat
 import { supabase } from '../lib/supabase';
 import { Z } from '../lib/zIndex'
 import { fmtDate, fmtDay, fmtDateTime } from './site/siteUi';
+import { AlertTriangle, ArrowLeft, ArrowRight, Check, CheckCircle2, Download, RotateCw, Undo2, X } from 'lucide-react'
+import { Ico, IconText, IconButton } from './Ico'
 
 const theme = {
   bg: "#0f1117", surface: "#1a1d27", card: "#21263a", border: "#2e3452",
@@ -74,7 +76,7 @@ const Spinner = () => (
 const Alert = ({ msg, type, onClose }) => (
   <div style={styles.alert(type)}>
     <span>{msg}</span>
-    {onClose && <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "inherit", fontSize: "16px" }}>×</button>}
+    {onClose && <IconButton onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "inherit", fontSize: "16px" }} aria-label="Close"><Ico icon={X} /></IconButton>}
   </div>
 );
 
@@ -368,7 +370,7 @@ const StaffFormModal = ({ onClose, onSaved, editTarget, roles }) => {
         {/* Header */}
         <div style={{ padding: "18px 24px", borderBottom: `1px solid ${theme.border}`, display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
           <div style={{ fontSize: "16px", fontWeight: "700", color: theme.text }}>{editTarget ? `Edit — ${editTarget.full_name}` : "Add New Staff Member"}</div>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: theme.textMuted, fontSize: "20px" }}>×</button>
+          <IconButton onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: theme.textMuted, fontSize: "20px" }} aria-label="Close"><Ico icon={X} size={20} /></IconButton>
         </div>
         {/* Tab bar */}
         <div style={{ display: "flex", borderBottom: `1px solid ${theme.border}`, flexShrink: 0, overflowX: "auto" }}>
@@ -516,8 +518,8 @@ const StaffFormModal = ({ onClose, onSaved, editTarget, roles }) => {
         {/* Footer */}
         <div style={{ padding: "16px 24px", borderTop: `1px solid ${theme.border}`, display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
           <div style={{ display: "flex", gap: "8px" }}>
-            {activeTab > 1 && <button style={styles.btn("secondary")} onClick={() => setActiveTab(t => t - 1)}>← Previous</button>}
-            {activeTab < 5 && <button style={styles.btn("primary")} onClick={() => setActiveTab(t => t + 1)}>Next →</button>}
+            {activeTab > 1 && <button style={styles.btn("secondary")} onClick={() => setActiveTab(t => t - 1)}><IconText icon={ArrowLeft}>Previous</IconText></button>}
+            {activeTab < 5 && <button style={styles.btn("primary")} onClick={() => setActiveTab(t => t + 1)}><IconText icon={ArrowRight} iconRight>Next</IconText></button>}
           </div>
           <div style={{ display: "flex", gap: "8px" }}>
             <button style={styles.btn("secondary")} onClick={onClose}>Cancel</button>
@@ -718,10 +720,10 @@ const StaffProfile = ({ staffId, onBack, onUpdated, roles, userProfile }) => {
                 const missing = getMissingFields(staff);
                 return missing.length > 0 ? (
                   <div style={{ fontSize: "12px", color: "#f5a623", marginTop: "8px", fontWeight: "600" }}>
-                    ⚠ Incomplete profile — missing: {missing.join(', ')}
+                    <IconText icon={AlertTriangle}>Incomplete profile — missing: {missing.join(', ')}</IconText>
                   </div>
                 ) : (
-                  <div style={{ fontSize: "12px", color: theme.green, marginTop: "8px" }}>✓ Profile complete</div>
+                  <div style={{ fontSize: "12px", color: theme.green, marginTop: "8px" }}><IconText icon={CheckCircle2}>Profile complete</IconText></div>
                 );
               })()}
             </div>
@@ -736,7 +738,7 @@ const StaffProfile = ({ staffId, onBack, onUpdated, roles, userProfile }) => {
             {/* ID Card button */}
             {staff.employment_status === "active" && staff.photo_path ? (
               <button style={{ ...styles.btn("primary"), fontSize: "12px" }} onClick={handleDownloadIDCard} disabled={generatingIDCard}>
-                {generatingIDCard ? "Generating…" : "↓ ID Card"}
+                {generatingIDCard ? "Generating…" : <IconText icon={Download}>ID Card</IconText>}
               </button>
             ) : (
               <button
@@ -744,18 +746,18 @@ const StaffProfile = ({ staffId, onBack, onUpdated, roles, userProfile }) => {
                 disabled
                 title="Staff must be active and have a photo before an ID card can be issued"
               >
-                ↓ ID Card
+                <IconText icon={Download}>ID Card</IconText>
               </button>
             )}
 
             {/* Business Card button */}
             {staff.employment_status === "active" ? (
               <button style={{ ...styles.btn("secondary"), fontSize: "12px" }} onClick={handleDownloadBizCard} disabled={generatingBizCard}>
-                {generatingBizCard ? "Generating…" : "↓ Business Card"}
+                {generatingBizCard ? "Generating…" : <IconText icon={Download}>Business Card</IconText>}
               </button>
             ) : (
               <button style={{ ...styles.btn("secondary"), fontSize: "12px", opacity: 0.5, cursor: "not-allowed" }} disabled title="Staff must be active">
-                ↓ Business Card
+                <IconText icon={Download}>Business Card</IconText>
               </button>
             )}
           </div>
@@ -1123,7 +1125,7 @@ const StaffDirectory = ({ onViewProfile, userProfile }) => {
                           const missing = getMissingFields(s);
                           return missing.length > 0 ? (
                             <div style={{ fontSize: "10px", color: "#f5a623", marginTop: "2px", fontWeight: "600" }}>
-                              ⚠ Missing: {missing.join(', ')}
+                              <IconText icon={AlertTriangle} size={12}>Missing: {missing.join(', ')}</IconText>
                             </div>
                           ) : null;
                         })()}
@@ -1166,7 +1168,7 @@ const StaffDirectory = ({ onViewProfile, userProfile }) => {
           <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: "12px", padding: "24px", width: "340px", maxWidth: "95vw" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
               <div style={{ fontWeight: "700", fontSize: "15px", color: theme.text }}>Set Kiosk PIN — {pinTarget.full_name}</div>
-              <button onClick={() => { setPinTarget(null); setPinValue(''); setPinMsg(null); }} style={{ background: "none", border: "none", cursor: "pointer", color: theme.textMuted, fontSize: "22px", lineHeight: 1 }}>×</button>
+              <IconButton onClick={() => { setPinTarget(null); setPinValue(''); setPinMsg(null); }} style={{ background: "none", border: "none", cursor: "pointer", color: theme.textMuted, fontSize: "22px", lineHeight: 1 }} aria-label="Close"><Ico icon={X} size={20} /></IconButton>
             </div>
             {pinMsg && <Alert msg={pinMsg.msg} type={pinMsg.type} onClose={() => setPinMsg(null)} />}
             <div style={styles.formGroup}>
@@ -1502,7 +1504,7 @@ const LeaveBalancesTab = ({ userProfile }) => {
               <div style={styles.sectionTitle}>Leave Policy — {currentYear}</div>
               <div style={{ fontSize: '13px', color: theme.textMuted }}>Defaults: 15 annual days / 12 sick days / 5 carry-over days</div>
             </div>
-            <span style={styles.badge(policyActive ? theme.green : theme.textMuted)}>{policyActive ? '● Active' : '○ Inactive'}</span>
+            <span style={styles.badge(policyActive ? theme.green : theme.textMuted)}>{policyActive ? 'Active' : 'Inactive'}</span>
           </div>
           {policyActive && policy?.activated_at && (
             <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '12px' }}>
@@ -1530,7 +1532,7 @@ const LeaveBalancesTab = ({ userProfile }) => {
             ) : (
               <>
                 {!policyActive && balances.length > 0 && (
-                  <button style={styles.btn('primary')} onClick={() => setShowConfirm('activate')}>✓ Activate Policy</button>
+                  <button style={styles.btn('primary')} onClick={() => setShowConfirm('activate')}><IconText icon={Check}>Activate Policy</IconText></button>
                 )}
                 {policyActive && (
                   <button style={{ ...styles.btn('secondary'), borderColor: theme.red, color: theme.red }} onClick={() => setShowConfirm('deactivate')}>Deactivate</button>
@@ -1564,10 +1566,10 @@ const LeaveBalancesTab = ({ userProfile }) => {
           ) : (
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
               <button style={styles.btn('secondary')} onClick={() => setYearendConfirm('rollover')} disabled={yearendSaving}>
-                ↻ Run {currentYear + 1} Rollover
+                <IconText icon={RotateCw}>Run {currentYear + 1} Rollover</IconText>
               </button>
               <button style={{ ...styles.btn('secondary'), borderColor: theme.red, color: theme.red }} onClick={() => setYearendConfirm('expire')} disabled={yearendSaving}>
-                ✕ Expire {currentYear} Carry-over
+                <IconText icon={X}>Expire {currentYear} Carry-over</IconText>
               </button>
             </div>
           )}
@@ -1603,16 +1605,16 @@ const LeaveBalancesTab = ({ userProfile }) => {
                             value={entitlementEdits[annKey] ?? ann.entitled_days}
                             onChange={e => setEntitlementEdits(ed => ({ ...ed, [annKey]: e.target.value }))} />
                           {entitlementEdits[annKey] !== undefined && (
-                            <button style={{ ...styles.btn('primary'), fontSize: '11px', padding: '3px 7px' }}
+                            <IconButton style={{ ...styles.btn('primary'), fontSize: '11px', padding: '3px 7px' }}
                               onClick={() => handleSaveEntitlement(staffId, 'annual', entitlementEdits[annKey])}
-                              disabled={savingKey === annKey}>{savingKey === annKey ? '…' : '✓'}</button>
+                              disabled={savingKey === annKey} aria-label="Save annual entitlement">{savingKey === annKey ? '…' : <Ico icon={Check} />}</IconButton>
                           )}
                         </div>
                       ) : <span>{ann?.entitled_days ?? '—'}</span>}
                     </td>
                     <td style={styles.td}>{ann?.used_days ?? '—'}</td>
                     <td style={styles.td}>
-                      {annBal !== null ? <strong style={{ color: annBal < 0 ? theme.red : theme.green }}>{annBal}{annBal < 0 ? ' ⚠' : ''}</strong> : '—'}
+                      {annBal !== null ? <strong style={{ color: annBal < 0 ? theme.red : theme.green }}>{annBal}{annBal < 0 ? <> <Ico icon={AlertTriangle} /> overdrawn</> : ''}</strong> : '—'}
                     </td>
                     <td style={styles.td}>
                       {isMD && !policyActive && sick ? (
@@ -1621,16 +1623,16 @@ const LeaveBalancesTab = ({ userProfile }) => {
                             value={entitlementEdits[sickKey] ?? sick.entitled_days}
                             onChange={e => setEntitlementEdits(ed => ({ ...ed, [sickKey]: e.target.value }))} />
                           {entitlementEdits[sickKey] !== undefined && (
-                            <button style={{ ...styles.btn('primary'), fontSize: '11px', padding: '3px 7px' }}
+                            <IconButton style={{ ...styles.btn('primary'), fontSize: '11px', padding: '3px 7px' }}
                               onClick={() => handleSaveEntitlement(staffId, 'sick', entitlementEdits[sickKey])}
-                              disabled={savingKey === sickKey}>{savingKey === sickKey ? '…' : '✓'}</button>
+                              disabled={savingKey === sickKey} aria-label="Save sick entitlement">{savingKey === sickKey ? '…' : <Ico icon={Check} />}</IconButton>
                           )}
                         </div>
                       ) : <span>{sick?.entitled_days ?? '—'}</span>}
                     </td>
                     <td style={styles.td}>{sick?.used_days ?? '—'}</td>
                     <td style={styles.td}>
-                      {sickBal !== null ? <strong style={{ color: sickBal < 0 ? theme.red : theme.green }}>{sickBal}{sickBal < 0 ? ' ⚠' : ''}</strong> : '—'}
+                      {sickBal !== null ? <strong style={{ color: sickBal < 0 ? theme.red : theme.green }}>{sickBal}{sickBal < 0 ? <> <Ico icon={AlertTriangle} /> overdrawn</> : ''}</strong> : '—'}
                     </td>
                   </tr>
                 );
@@ -1813,7 +1815,7 @@ const PayrollTab = ({ userProfile }) => {
                 <div style={styles.formGroup}><label style={styles.label}>Period To</label><input type="date" style={styles.input} value={periodTo} onChange={e => setPeriodTo(e.target.value)} /></div>
               </div>
               <div style={styles.formGroup}><label style={styles.label}>Prepared By</label><input style={styles.input} value={preparedBy} onChange={e => setPreparedBy(e.target.value)} /></div>
-              <button style={styles.btn("primary")} onClick={handleCalculate} disabled={calcLoading}>{calcLoading ? "Calculating…" : "Calculate Payroll →"}</button>
+              <button style={styles.btn("primary")} onClick={handleCalculate} disabled={calcLoading}>{calcLoading ? "Calculating…" : <IconText icon={ArrowRight} iconRight>Calculate Payroll</IconText>}</button>
             </div>
           )}
 
@@ -1866,8 +1868,8 @@ const PayrollTab = ({ userProfile }) => {
                 </div>
               )}
               <div style={styles.row}>
-                <button style={styles.btn("primary")} onClick={() => setStep(3)}>Approve Payroll →</button>
-                <button style={styles.btn("secondary")} onClick={() => setStep(1)}>← Back</button>
+                <button style={styles.btn("primary")} onClick={() => setStep(3)}><IconText icon={ArrowRight} iconRight>Approve Payroll</IconText></button>
+                <button style={styles.btn("secondary")} onClick={() => setStep(1)}><IconText icon={ArrowLeft}>Back</IconText></button>
               </div>
             </div>
           )}
@@ -1893,8 +1895,8 @@ const PayrollTab = ({ userProfile }) => {
                 Period: <strong>{periodFrom}</strong> → <strong>{periodTo}</strong> · {calcLines.length} staff members
               </div>
               <div style={styles.row}>
-                <button style={styles.btn("primary")} onClick={handleApprove} disabled={saving}>{saving ? "Saving…" : "✓ Approve & Save Payroll"}</button>
-                <button style={styles.btn("secondary")} onClick={() => setStep(2)}>← Back to Review</button>
+                <button style={styles.btn("primary")} onClick={handleApprove} disabled={saving}>{saving ? "Saving…" : <IconText icon={Check}>Approve & Save Payroll</IconText>}</button>
+                <button style={styles.btn("secondary")} onClick={() => setStep(2)}><IconText icon={ArrowLeft}>Back to Review</IconText></button>
               </div>
             </div>
           )}
@@ -1934,8 +1936,8 @@ const PayrollTab = ({ userProfile }) => {
               <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "2px" }}>Prepared by {selectedRun.prepared_by || "—"} · <span style={styles.badge(statusColor(selectedRun.status))}>{selectedRun.status}</span></div>
             </div>
             <div style={{ display: "flex", gap: "8px" }}>
-              <button style={{ ...styles.btn("secondary"), fontSize: "12px" }} onClick={() => setSelectedRun(null)}>← Back</button>
-              <button style={{ ...styles.btn("primary"), fontSize: "12px" }} onClick={() => handleDownloadPDF(selectedRun, runLines)} disabled={pdfLoading}>{pdfLoading ? "Generating…" : "↓ Download PDF"}</button>
+              <button style={{ ...styles.btn("secondary"), fontSize: "12px" }} onClick={() => setSelectedRun(null)}><IconText icon={ArrowLeft}>Back</IconText></button>
+              <button style={{ ...styles.btn("primary"), fontSize: "12px" }} onClick={() => handleDownloadPDF(selectedRun, runLines)} disabled={pdfLoading}>{pdfLoading ? "Generating…" : <IconText icon={Download}>Download PDF</IconText>}</button>
             </div>
           </div>
           {(() => {
@@ -1947,12 +1949,12 @@ const PayrollTab = ({ userProfile }) => {
               <div style={{ ...styles.card, marginBottom: "16px", display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
                 {status === 'draft' && role === 'ico' && (
                   <button style={styles.btn("primary")} onClick={() => handleAdvanceRun('ico_approve')} disabled={actionSaving}>
-                    {actionSaving ? "Saving…" : "✓ ICO Approve"}
+                    {actionSaving ? "Saving…" : <IconText icon={Check}>ICO Approve</IconText>}
                   </button>
                 )}
                 {status === 'ico_approved' && role === 'md' && (
                   <button style={styles.btn("primary")} onClick={() => handleAdvanceRun('md_approve')} disabled={actionSaving}>
-                    {actionSaving ? "Saving…" : "✓ MD Approve"}
+                    {actionSaving ? "Saving…" : <IconText icon={Check}>MD Approve</IconText>}
                   </button>
                 )}
                 {canRecall && (
@@ -1968,7 +1970,7 @@ const PayrollTab = ({ userProfile }) => {
                       onClick={() => recallReason.trim() && handleAdvanceRun('recall', recallReason.trim())}
                       disabled={actionSaving || !recallReason.trim()}
                     >
-                      {actionSaving ? "Saving…" : "↩ Recall to Draft"}
+                      {actionSaving ? "Saving…" : <IconText icon={Undo2}>Recall to Draft</IconText>}
                     </button>
                   </>
                 )}
@@ -2178,7 +2180,7 @@ const Staff = ({ userProfile }) => {
             <div style={{ fontSize: "22px", fontWeight: "700", color: theme.text }}>Staff Profile</div>
             <div style={{ fontSize: "13px", color: theme.textMuted, marginTop: "3px" }}>HR Management System</div>
           </div>
-          <button style={styles.btn("secondary")} onClick={() => setProfileStaffId(null)}>← Back to Directory</button>
+          <button style={styles.btn("secondary")} onClick={() => setProfileStaffId(null)}><IconText icon={ArrowLeft}>Back to Directory</IconText></button>
         </div>
         {rolesErr && <Alert msg={rolesErr} type="error" onClose={() => setRolesErr("")} />}
         <StaffProfile staffId={profileStaffId} onBack={() => setProfileStaffId(null)} roles={roles} userProfile={userProfile} />

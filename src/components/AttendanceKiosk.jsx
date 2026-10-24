@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { kioskService } from '../services/kioskService';
 import { supabase } from '../lib/supabase';
 import { Z } from '../lib/zIndex'
+import { Delete, RefreshCw, X } from 'lucide-react'
+import { Ico, IconText, IconButton } from './Ico'
 
 // ─── IndexedDB helpers ────────────────────────────────────────────────────────
 
@@ -409,7 +411,7 @@ export default function AttendanceKiosk({ userProfile }) {
             background: '#fff',
           }}
         >
-          {syncing ? '…' : '↑ Sync'}
+          {syncing ? '…' : <IconText icon={RefreshCw}>Sync</IconText>}
         </button>
       </div>
 
@@ -489,7 +491,7 @@ export default function AttendanceKiosk({ userProfile }) {
             ))}
             <button onClick={clearPin}    style={{ ...pinBtnStyle, background: '#fee2e2', color: '#dc2626' }}>C</button>
             <button onClick={() => handlePinDigit('0')} style={pinBtnStyle}>0</button>
-            <button onClick={backspacePin} style={{ ...pinBtnStyle, background: '#f3f4f6', fontSize: 18 }}>⌫</button>
+            <IconButton onClick={backspacePin} aria-label="Delete last digit" style={{ ...pinBtnStyle, background: '#f3f4f6', fontSize: 18 }}><Ico icon={Delete} size={20} /></IconButton>
           </div>
         </div>
       )}
@@ -512,7 +514,7 @@ export default function AttendanceKiosk({ userProfile }) {
         <div style={{ border: '1px solid #e5e7eb', borderRadius: 10, padding: 16, background: '#fafafa', display: 'flex', flexDirection: 'column', gap: 10, marginTop: 'auto' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <strong style={{ fontSize: 15 }}>Manual Override</strong>
-            <button onClick={() => setOverOpen(false)} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 20, color: '#9ca3af', lineHeight: 1 }}>✕</button>
+            <IconButton onClick={() => setOverOpen(false)} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 20, color: '#9ca3af', lineHeight: 1 }} aria-label="Close"><Ico icon={X} size={20} /></IconButton>
           </div>
           <select
             value={overStaffId}

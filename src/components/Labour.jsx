@@ -7,6 +7,8 @@ import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import * as XLSX from 'xlsx'
 import { Z } from '../lib/zIndex'
+import { ArrowLeft, Check, Lock, X } from 'lucide-react'
+import { Ico, IconText, IconButton } from './Ico'
 
 const theme = {
   bg: '#0f1117', surface: '#1a1d27', card: '#21263a', border: '#2e3452',
@@ -108,7 +110,7 @@ const Spinner = () => (
 const AlertBar = ({ msg, type = 'error', onClose }) => msg ? (
   <div style={{ padding: '12px 16px', borderRadius: '8px', marginBottom: '14px', background: type === 'success' ? theme.green + '22' : type === 'warning' ? theme.accent + '22' : theme.red + '22', color: type === 'success' ? theme.green : type === 'warning' ? theme.accent : theme.red, display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px' }}>
     <span>{msg}</span>
-    {onClose && <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '16px' }}>×</button>}
+    {onClose && <IconButton onClick={onClose} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '16px' }} aria-label="Close"><Ico icon={X} /></IconButton>}
   </div>
 ) : null
 
@@ -256,7 +258,7 @@ function WorkerProfile({ worker, roles, onBack, onEdit, onDeactivate }) {
   return (
     <div>
       <div style={{ ...styles.row, marginBottom: '20px', gap: '12px' }}>
-        <button style={styles.btn('ghost')} onClick={onBack}>← Back</button>
+        <button style={styles.btn('ghost')} onClick={onBack}><IconText icon={ArrowLeft}>Back</IconText></button>
         <h2 style={{ margin: 0, fontSize: '18px', color: theme.text }}>{worker.full_name}</h2>
         <span style={styles.badge(worker.is_active ? theme.green : theme.red)}>{worker.is_active ? 'Active' : 'Inactive'}</span>
       </div>
@@ -570,7 +572,7 @@ function DailyRosterTab({ pool, roles, userProfile }) {
                           <button style={{ ...styles.btn('danger'), padding: '4px 10px', fontSize: '12px' }} onClick={() => setDeleteTarget(r)}>Delete</button>
                         )}
                         {isPaid && (
-                          <span title="Paid rosters cannot be deleted" style={{ fontSize: '14px', cursor: 'help', alignSelf: 'center' }}>🔒</span>
+                          <span title="Paid rosters cannot be deleted" style={{ fontSize: '12px', cursor: 'help', alignSelf: 'center' }}><IconText icon={Lock}>Paid — locked</IconText></span>
                         )}
                       </div>
                     </td>
@@ -890,7 +892,7 @@ function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCanc
                   </td>
                   <td className="m-key" style={styles.td}><strong style={{ color: theme.green }}>{naira(netPay)}</strong></td>
                   <td style={styles.td}><input style={{ ...styles.input, width: '100px' }} value={row.notes} onChange={e => updateRow(i, 'notes', e.target.value)} /></td>
-                  <td className="m-actions" style={styles.td}><button style={{ ...styles.btn('danger'), padding: '4px 8px' }} onClick={() => removeRow(i)} aria-label="Remove worker">×</button></td>
+                  <td className="m-actions" style={styles.td}><IconButton style={{ ...styles.btn('danger'), padding: '4px 8px' }} onClick={() => removeRow(i)} aria-label={`Remove worker row ${i + 1}`}><Ico icon={X} /></IconButton></td>
                 </tr>
               )
             })}
@@ -968,7 +970,7 @@ function RosterDetail({ roster, sites = [], roles, pool, userProfile, onBack, on
 
   return (
     <div>
-      <button style={{ ...styles.btn('ghost'), marginBottom: '16px' }} onClick={onBack}>← Back to List</button>
+      <button style={{ ...styles.btn('ghost'), marginBottom: '16px' }} onClick={onBack}><IconText icon={ArrowLeft}>Back to List</IconText></button>
       {alert && <AlertBar msg={alert.msg} type={alert.type} onClose={clearAlert} />}
 
       <div style={{ ...styles.row, gap: '16px', marginBottom: '16px', flexWrap: 'wrap' }}>
@@ -1010,7 +1012,7 @@ function RosterDetail({ roster, sites = [], roles, pool, userProfile, onBack, on
           { label: 'ICO Review', sub: icoStatus === 'submitted' ? 'Awaiting' : icoStatus === 'ico_approved' ? 'Approved' : icoStatus === 'ico_rejected' ? 'Rejected' : 'Pending', done: icoStatus === 'ico_approved', current: icoStatus === 'submitted', rejected: icoStatus === 'ico_rejected' },
           { label: 'MD Approval', sub: mdStatus === 'pending' ? 'Awaiting' : mdStatus === 'approved' ? 'Approved' : mdStatus === 'rejected' ? 'Rejected' : 'Pending', done: mdStatus === 'approved', current: icoStatus === 'ico_approved' && mdStatus !== 'approved' && mdStatus !== 'rejected', rejected: mdStatus === 'rejected' },
           { label: 'Accountant', sub: payStatus === 'paid' ? 'Done' : mdStatus === 'approved' ? 'Awaiting' : 'Pending', done: payStatus === 'paid', current: mdStatus === 'approved' && payStatus !== 'paid', rejected: false },
-          { label: 'Paid', sub: payStatus === 'paid' ? '✓' : '', done: payStatus === 'paid', current: false, rejected: false },
+          { label: 'Paid', sub: payStatus === 'paid' ? 'Done' : '', done: payStatus === 'paid', current: false, rejected: false },
         ]
         return (
           <div style={{ ...styles.card, marginBottom: '16px' }}>
@@ -1022,7 +1024,7 @@ function RosterDetail({ roster, sites = [], roles, pool, userProfile, onBack, on
                   <React.Fragment key={step.label}>
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: '72px' }}>
                       <div style={{ width: '30px', height: '30px', borderRadius: '50%', background: color + '20', border: `2px solid ${color}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', color, fontWeight: '700' }}>
-                        {step.rejected ? '✕' : step.done ? '✓' : String(i + 1)}
+                        {step.rejected ? <Ico icon={X} /> : step.done ? <Ico icon={Check} /> : String(i + 1)}
                       </div>
                       <div style={{ fontSize: '12px', fontWeight: '700', color, marginTop: '5px', textAlign: 'center', lineHeight: 1.3 }}>{step.label}</div>
                       <div style={{ fontSize: '9px', color: theme.textMuted, textAlign: 'center', marginTop: '2px' }}>{step.sub}</div>
@@ -1108,7 +1110,7 @@ function WeeklySummary({ rosters, sites = [], onBack }) {
 
   return (
     <div>
-      <button style={{ ...styles.btn('ghost'), marginBottom: '16px' }} onClick={onBack}>← Back to List</button>
+      <button style={{ ...styles.btn('ghost'), marginBottom: '16px' }} onClick={onBack}><IconText icon={ArrowLeft}>Back to List</IconText></button>
       <h3 style={{ color: theme.text, marginBottom: '16px' }}>Weekly Summary</h3>
       {Object.entries(groups).sort(([a], [b]) => b.localeCompare(a)).map(([week, weekRosters]) => {
         const weekTotal = weekRosters.reduce((s, r) => s + Number(r.total_daily_cost || 0), 0)

@@ -7,6 +7,8 @@ import { effectiveRolesOf } from '../lib/roles'
 import SitePicker, { useSites } from './SitePicker'
 import { siteName } from '../services/sites'
 import { Z } from '../lib/zIndex'
+import { CheckCircle2, ChevronDown, ChevronUp, Download, Lock, X } from 'lucide-react'
+import { Ico, IconText, IconButton } from './Ico'
 
 // ── THEME ────────────────────────────────────────────────────
 const theme = {
@@ -1206,7 +1208,7 @@ function GenerateModal({ report, userProfile, onClose, onGenerated }) {
             <div style={{ fontWeight:'700', fontSize:'15px', marginBottom:'4px' }}>{report.name}</div>
             <div style={{ fontSize:'12px', color:theme.textMuted }}>{report.description}</div>
           </div>
-          <button onClick={onClose} style={{ background:'transparent', border:'none', color:theme.textMuted, fontSize:'18px', cursor:'pointer', padding:'0 4px' }}>✕</button>
+          <IconButton onClick={onClose} style={{ background:'transparent', border:'none', color:theme.textMuted, fontSize:'18px', cursor:'pointer', padding:'0 4px' }} aria-label="Close"><Ico icon={X} size={20} /></IconButton>
         </div>
 
         {error && <div style={{ background:theme.red+'18', border:`1px solid ${theme.red}44`, borderRadius:'8px', padding:'10px 14px', marginBottom:'14px', fontSize:'12px', color:theme.red }}>{error}</div>}
@@ -1255,11 +1257,11 @@ function GenerateModal({ report, userProfile, onClose, onGenerated }) {
 
         <div style={{ display:'flex', gap:'10px', flexWrap:'wrap' }}>
           <button data-board-allow data-ico-allow style={styles.btn('primary')} onClick={()=>handleGenerate('pdf')} disabled={loading}>
-            {loading ? 'Generating…' : '⬇ Generate PDF'}
+            {loading ? 'Generating…' : <IconText icon={Download}>Generate PDF</IconText>}
           </button>
           {report.formats.includes('excel') && (
             <button data-board-allow data-ico-allow style={styles.btn('secondary')} onClick={()=>handleGenerate('excel')} disabled={loading}>
-              ⬇ Generate Excel
+              <IconText icon={Download}>Generate Excel</IconText>
             </button>
           )}
           <button style={styles.btn('secondary')} onClick={onClose} disabled={loading}>Cancel</button>
@@ -1289,7 +1291,7 @@ function ScheduleModal({ report, onClose }) {
       <div style={{ background:theme.surface, borderRadius:'14px', padding:'28px', width:'100%', maxWidth:'400px', boxShadow:'0 20px 60px rgba(0,0,0,0.6)' }}>
         <div style={{ fontWeight:'700', fontSize:'15px', marginBottom:'4px' }}>Schedule Report</div>
         <div style={{ fontSize:'12px', color:theme.textMuted, marginBottom:'20px' }}>{report.name}</div>
-        {saved && <div style={{ color:theme.green, marginBottom:'12px', fontSize:'13px' }}>✓ Schedule saved!</div>}
+        {saved && <div style={{ color:theme.green, marginBottom:'12px', fontSize:'13px' }}><IconText icon={CheckCircle2}>Schedule saved!</IconText></div>}
         <div style={{ display:'grid', gap:'12px', marginBottom:'20px' }}>
           <div>
             <label style={lbl}>Frequency</label>
@@ -1360,7 +1362,7 @@ function ReportCard({ report, userRole, effectiveRoles = [], schedule, onGenerat
             <button style={{ ...styles.btn('secondary'), padding:'6px 10px', fontSize:'11px' }} onClick={onSchedule}>Schedule</button>
           </>
         ) : (
-          <span style={{ fontSize:'12px', color:theme.textMuted }}>🔒 No access for your role</span>
+          <span style={{ fontSize:'12px', color:theme.textMuted }}><IconText icon={Lock}>No access for your role</IconText></span>
         )}
       </div>
     </div>
@@ -1440,7 +1442,7 @@ export default function Reports({ userProfile }) {
           <div style={styles.card}>
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', cursor:'pointer', userSelect:'none' }} onClick={() => setShowHistory(s=>!s)}>
               <div style={{ fontWeight:'700', fontSize:'13px' }}>Report History</div>
-              <span style={{ fontSize:'12px', color:theme.textMuted }}>{showHistory ? '▲ Hide' : '▼ Show'} ({history.length})</span>
+              <span style={{ fontSize:'12px', color:theme.textMuted }}>{showHistory ? <IconText icon={ChevronUp}>Hide ({history.length})</IconText> : <IconText icon={ChevronDown}>Show ({history.length})</IconText>}</span>
             </div>
             {showHistory && (
               <div style={{ marginTop:'14px', overflowX:'auto' }}>

@@ -17,6 +17,7 @@
     "jspdf": "^2.5.2",
     "jspdf-autotable": "^3.8.4",
     "jszip": "^3.10.1",
+    "lucide-react": "1.53.0",
     "papaparse": "^5.5.3",
     "pdfjs-dist": "^5.7.284",
     "react": "^18.3.1",
