@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
+import { Clock, TrendingDown, TrendingUp } from 'lucide-react'
+import { Ico, IconText } from './Ico'
 
 // ── Theme ─────────────────────────────────────────────────────────────
 const theme = {
@@ -142,7 +144,7 @@ const StatCard = ({ label, value, sub, accent, trend }) => {
         <div style={{ fontSize: '24px', fontWeight: '800', color: accent || theme.text, lineHeight: 1.1 }}>{value}</div>
         {trend != null && trend !== 0 && (
           <span style={{ fontSize: '11px', fontWeight: '600', color: up ? theme.green : theme.red, background: (up ? theme.green : theme.red) + '22', padding: '2px 7px', borderRadius: '4px' }}>
-            {up ? '▲' : '▼'} {Math.abs(trend).toFixed(1)}%
+            <IconText icon={up ? TrendingUp : TrendingDown} size={12} style={{ gap: '4px' }}>{up ? '+' : '−'}{Math.abs(trend).toFixed(1)}%</IconText>
           </span>
         )}
       </div>
@@ -495,7 +497,7 @@ export default function BoardDashboard({ userProfile }) {
   if (loading) {
     return (
       <div style={{ padding: '48px', textAlign: 'center', color: theme.textMuted, fontSize: '14px', fontFamily: "'DM Sans','Segoe UI',sans-serif" }}>
-        <div style={{ marginBottom: '12px', fontSize: '24px' }}>⏳</div>
+        <div style={{ marginBottom: '12px' }}><Ico icon={Clock} size={24} /></div>
         Loading board dashboard…
       </div>
     )

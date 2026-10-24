@@ -1,4 +1,6 @@
 import { useState, useEffect, Component } from "react";
+import { AlertTriangle, ArrowLeft, ArrowRight, Banknote, BarChart3, Blocks, BookOpen, BookUser, Building2, Calculator, CalendarCheck, CalendarClock, CalendarDays, CalendarOff, Check, CheckCircle2, ChevronDown, ChevronUp, Circle, CircleUser, ClipboardCheck, ClipboardList, Contact, CornerDownRight, Download, Eye, Factory, FileSignature, FileText, FileUp, Fingerprint, Flag, Forklift, Gauge, Gavel, HandCoins, Handshake, HardHat, Hourglass, IdCard, Landmark, Layers, LayoutDashboard, Lock, Mail, MapPin, Menu, MessageSquare, Package, PackageCheck, Pencil, Phone, PiggyBank, Receipt, ScrollText, Settings, TrendingDown, TrendingUp, Truck, Undo2, Upload, User, UserCog, Users, Wallet, Wrench, X } from 'lucide-react';
+import { Ico, IconText } from './components/Ico';
 import { supabase } from './lib/supabase';
 import { authService } from './services/authService';
 import { hasRole, effectiveRolesOf } from './lib/roles';
@@ -196,7 +198,7 @@ const Spinner = () => (
 const Alert = ({ msg, type = "error", onClose }) => (
   <div style={styles.alert(type)}>
     <span>{msg}</span>
-    <span style={{ cursor: "pointer", marginLeft: "12px", fontWeight: "700" }} onClick={onClose}>✕</span>
+    <span role="button" aria-label="Close" style={{ cursor: "pointer", marginLeft: "12px", fontWeight: "700", display: "inline-flex", alignItems: "center" }} onClick={onClose}><Ico icon={X} /></span>
   </div>
 );
 
@@ -267,7 +269,7 @@ const InvoiceEditorModal = ({ editor, setEditor, onSave, saving }) => {
             <div style={{ fontSize: '16px', fontWeight: '700', color: theme.text }}>Draft Invoice Editor</div>
             <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '2px' }}>Saves as a draft (proforma). It becomes a receivable only when issued.</div>
           </div>
-          <button style={{ ...styles.btn('secondary'), padding: '4px 10px' }} onClick={() => setEditor(null)}>✕ Close</button>
+          <button style={{ ...styles.btn('secondary'), padding: '4px 10px' }} onClick={() => setEditor(null)}><IconText icon={X}>Close</IconText></button>
         </div>
 
         <div style={{ padding: '20px 24px' }}>
@@ -300,7 +302,7 @@ const InvoiceEditorModal = ({ editor, setEditor, onSave, saving }) => {
               <div style={{ ...styles.input, flex: 1, background: 'transparent', color: theme.accent, fontWeight: '700', fontSize: '12px' }}>
                 {item.quantity && item.unit_price ? N((Number(item.quantity) || 0) * (Number(item.unit_price) || 0)) : '—'}
               </div>
-              {items.length > 1 && <button style={{ ...styles.btn('danger'), padding: '8px 10px' }} onClick={() => removeItem(idx)}>✕</button>}
+              {items.length > 1 && <button style={{ ...styles.btn('danger'), padding: '8px 10px' }} onClick={() => removeItem(idx)} aria-label="Remove item"><Ico icon={X} /></button>}
             </div>
           ))}
           <button style={{ ...styles.btn('secondary'), fontSize: '12px', marginBottom: '16px' }} onClick={addItem}>+ Add Line Item</button>
@@ -366,9 +368,57 @@ const ConfirmModal = ({ msg, onConfirm, onCancel }) => (
   </div>
 );
 
-const Icon = ({ name, size = 16 }) => {
-  const icons = { dashboard: "⊞", production: "🏭", orders: "📋", staff: "👥", waybill: "📄", reports: "📊", inventory: "📦", batches: "🗂", pending: "⏳", schedule: "📅", lpo: "📝", approve: "✓", settings: "⚙", products: "🧱", truck: "🚛", supplier: "🏢", maintenance: "🔧", logout: "→" };
-  return <span style={{ fontSize: size }}>{icons[name] || "•"}</span>;
+// Sidebar icons: one distinct lucide icon per nav item, keyed by the item's
+// icon name. Colour inherits currentColor so active/hover states still apply.
+const NAV_ICONS = {
+  dashboard: LayoutDashboard,
+  production: Factory,
+  inventory: Package,
+  batches: Layers,
+  maintenance: Wrench,
+  asset_register: ClipboardList,
+  site_contracts: FileSignature,
+  material_receiving: PackageCheck,
+  handovers: Handshake,
+  waybills: FileText,
+  vehicles: Truck,
+  truck_loading: Forklift,
+  pending_register: Hourglass,
+  daily_schedule: CalendarDays,
+  staff: Users,
+  labour: HardHat,
+  disciplinary: Gavel,
+  attendance_kiosk: Fingerprint,
+  attendance_flags: Flag,
+  leave: CalendarOff,
+  advances: HandCoins,
+  customers: Contact,
+  orders: Receipt,
+  lpo_approvals: ClipboardCheck,
+  schedule_approvals: CalendarCheck,
+  reports: BarChart3,
+  kpi_dashboard: Gauge,
+  trading_margin: TrendingUp,
+  accounting: Calculator,
+  payment_requests: Banknote,
+  my_investment: Wallet,
+  investor_register: BookUser,
+  capital: Landmark,
+  terms: ScrollText,
+  monthly_close: CalendarClock,
+  spv_ledger: BookOpen,
+  reserve_budget: PiggyBank,
+  products: Blocks,
+  suppliers: Building2,
+  data_import: FileUp,
+  user_management: UserCog,
+  messages: MessageSquare,
+  my_hr: IdCard,
+  my_profile: CircleUser,
+};
+const Icon = ({ name, size = 20 }) => {
+  const C = NAV_ICONS[name] || Circle;
+  return <C size={size} strokeWidth={1.5} aria-hidden="true" focusable="false" style={{ flexShrink: 0 }} />;
 };
 
 const ProductSelect = ({ value, onChange, style, showEmpty = false }) => {
@@ -527,7 +577,7 @@ const Dashboard = ({ onNavigate, onOpenSite, userProfile }) => {
       <div>
         <div className="m-header" style={styles.header}>
           <div>
-            <div style={styles.pageTitle}>{greeting}, {firstName} 👋</div>
+            <div style={styles.pageTitle}>{greeting}, {firstName}</div>
             <div style={styles.pageSubtitle}>Business overview — Abuja Precast Concrete Limited</div>
           </div>
           <span style={styles.badge(theme.green)}>Operations Active</span>
@@ -583,7 +633,7 @@ const Dashboard = ({ onNavigate, onOpenSite, userProfile }) => {
     <div>
       <div className="m-header" style={styles.header}>
         <div>
-          <div style={styles.pageTitle}>{greeting}, {firstName} 👋</div>
+          <div style={styles.pageTitle}>{greeting}, {firstName}</div>
           <div style={styles.pageSubtitle}>Business overview — Abuja Precast Concrete Limited</div>
         </div>
         <span style={styles.badge(theme.green)}>Operations Active</span>
@@ -647,7 +697,7 @@ const Dashboard = ({ onNavigate, onOpenSite, userProfile }) => {
           )}
           {can('md', 'board_member', 'ico', 'logistics_manager') && vehicleAlerts.length > 0 && (
             <div style={{ ...styles.card, marginBottom: "16px", borderColor: theme.red + "55", borderLeft: `4px solid ${theme.red}` }}>
-              <div style={{ fontSize: "13px", fontWeight: "700", color: theme.red, marginBottom: "10px" }}>🚛 Vehicle Document Alerts ({vehicleAlerts.length})</div>
+              <div style={{ fontSize: "13px", fontWeight: "700", color: theme.red, marginBottom: "10px" }}><IconText icon={Truck} size={20}>Vehicle Document Alerts ({vehicleAlerts.length})</IconText></div>
               <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                 {vehicleAlerts.map(v => {
                   const todayStr = new Date().toISOString().split('T')[0];
@@ -670,11 +720,11 @@ const Dashboard = ({ onNavigate, onOpenSite, userProfile }) => {
                         {rwExpired   && <span style={{ fontSize: "12px", background: theme.red + "22", color: theme.red, padding: "2px 8px", borderRadius: "12px", fontWeight: "700" }}>Road Worthiness EXPIRED {fmtDate(v.road_worthiness_expiry_date)}</span>}
                         {rwWarning   && <span style={{ fontSize: "12px", background: "#e67e2222", color: "#e67e22", padding: "2px 8px", borderRadius: "12px", fontWeight: "700" }}>Road Worthiness WARNING — due {fmtDate(v.road_worthiness_expiry_date)}</span>}
                         {rwDue       && <span style={{ fontSize: "12px", background: theme.accent + "22", color: theme.accent, padding: "2px 8px", borderRadius: "12px", fontWeight: "600" }}>Road Worthiness due {fmtDate(v.road_worthiness_expiry_date)}</span>}
-                        {onNavigate  && <button onClick={() => onNavigate("vehicles")} style={{ fontSize: "12px", padding: "2px 10px", borderRadius: "12px", background: theme.blue + "22", color: theme.blue, border: `1px solid ${theme.blue}44`, cursor: "pointer", fontWeight: "600", marginLeft: "auto" }}>Update Documents →</button>}
+                        {onNavigate  && <button onClick={() => onNavigate("vehicles")} style={{ fontSize: "12px", padding: "2px 10px", borderRadius: "12px", background: theme.blue + "22", color: theme.blue, border: `1px solid ${theme.blue}44`, cursor: "pointer", fontWeight: "600", marginLeft: "auto" }}><IconText icon={ArrowRight} iconRight>Update Documents</IconText></button>}
                       </div>
                       {anyExpired && (
                         <div style={{ marginTop: "8px", fontSize: "12px", color: theme.red, fontWeight: "600", display: "flex", alignItems: "center", gap: "6px" }}>
-                          ⚠️ This vehicle should not be dispatched until documents are renewed.
+                          <IconText icon={AlertTriangle}>This vehicle should not be dispatched until documents are renewed.</IconText>
                         </div>
                       )}
                     </div>
@@ -685,14 +735,14 @@ const Dashboard = ({ onNavigate, onOpenSite, userProfile }) => {
           )}
           {can('md', 'ico', 'accountant', 'logistics_manager') && rentalVehicles.length > 0 && (
             <div style={{ ...styles.card, marginBottom: "16px", borderLeft: `4px solid ${theme.accent}` }}>
-              <div style={{ fontSize: "13px", fontWeight: "700", color: theme.accent, marginBottom: "10px" }}>🚐 Monthly Rental Payment Reminder</div>
+              <div style={{ fontSize: "13px", fontWeight: "700", color: theme.accent, marginBottom: "10px" }}><IconText icon={CalendarClock} size={20}>Monthly Rental Payment Reminder</IconText></div>
               <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                 {rentalVehicles.map(v => (
                   <div key={v.id} style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap", background: theme.surface, borderRadius: "8px", padding: "10px 12px" }}>
                     <span style={{ fontWeight: "700" }}>{v.vehicle_name || v.vehicle_number}</span>
                     <span style={{ color: theme.textMuted, fontSize: "12px" }}>{v.vehicle_number}</span>
                     <span style={{ fontWeight: "700", color: theme.accent }}>{naira(Number(v.monthly_rental_amount) || 0)}</span>
-                    {v.owner_name && <span style={{ fontSize: "12px", color: theme.textMuted }}>→ {v.owner_name}</span>}
+                    {v.owner_name && <span style={{ fontSize: "12px", color: theme.textMuted, display: "inline-flex", alignItems: "center", gap: "4px" }}><Ico icon={ArrowRight} /> {v.owner_name}</span>}
                     <span style={{ fontSize: "12px", color: theme.textMuted, marginLeft: "auto" }}>Monthly rental — see Labour → Monthly tab</span>
                   </div>
                 ))}
@@ -1026,7 +1076,7 @@ const Production = ({ userProfile }) => {
             <div style={{ fontWeight: "700", marginBottom: "4px" }}>Stock warning</div>
             {stockWarning.map(w => <div key={w}>{w}</div>)}
           </div>
-          <button onClick={() => setStockWarning(null)} style={{ background: "none", border: "none", color: theme.accent, cursor: "pointer", fontSize: "16px" }} aria-label="Dismiss stock warning">×</button>
+          <button onClick={() => setStockWarning(null)} style={{ background: "none", border: "none", color: theme.accent, cursor: "pointer", fontSize: "16px" }} aria-label="Dismiss stock warning"><Ico icon={X} /></button>
         </div>
       )}
 
@@ -1062,7 +1112,7 @@ const Production = ({ userProfile }) => {
                     <span style={{ fontSize: "12px", color: theme.textMuted }}>of {t.target_quantity.toLocaleString()}</span>
                   </div>
                   <div style={styles.progressBar()}><div style={styles.progressFill(pct, barColor)} /></div>
-                  <div style={{ fontSize: "12px", color: barColor, marginTop: "4px", fontWeight: "600" }}>{pct}% — {actualQty >= t.target_quantity ? "TARGET MET ✓" : `${(t.target_quantity - actualQty).toLocaleString()} remaining`}</div>
+                  <div style={{ fontSize: "12px", color: barColor, marginTop: "4px", fontWeight: "600" }}>{pct}% — {actualQty >= t.target_quantity ? "TARGET MET" : `${(t.target_quantity - actualQty).toLocaleString()} remaining`}</div>
                 </div>
               );
             })}
@@ -1736,7 +1786,7 @@ const Orders = ({ onNavigate, userProfile }) => {
       {orderDeleteMsg && (
         <div style={{ margin: "0 0 12px", padding: "10px 14px", background: theme.red + '18', border: `1px solid ${theme.red}44`, borderRadius: "6px", fontSize: "13px", color: theme.red, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <span>{orderDeleteMsg}</span>
-          <button style={{ background: "none", border: "none", color: theme.red, cursor: "pointer", fontWeight: "700", fontSize: "14px", padding: "0 4px" }} onClick={() => setOrderDeleteMsg(null)}>×</button>
+          <button style={{ background: "none", border: "none", color: theme.red, cursor: "pointer", fontWeight: "700", fontSize: "14px", padding: "0 4px" }} onClick={() => setOrderDeleteMsg(null)} aria-label="Dismiss"><Ico icon={X} /></button>
         </div>
       )}
 
@@ -1844,7 +1894,7 @@ const Orders = ({ onNavigate, userProfile }) => {
                     </div>
                   </div>
                   {form.items.length > 1 && (
-                    <button style={{ ...styles.btn("danger"), padding: "9px 12px", alignSelf: "flex-end" }} onClick={() => setForm({ ...form, items: form.items.filter((_, i) => i !== idx) })}>✕</button>
+                    <button style={{ ...styles.btn("danger"), padding: "9px 12px", alignSelf: "flex-end" }} onClick={() => setForm({ ...form, items: form.items.filter((_, i) => i !== idx) })} aria-label="Remove item"><Ico icon={X} /></button>
                   )}
                 </div>
                 {item.sourceType === 'resale' && (
@@ -1874,7 +1924,7 @@ const Orders = ({ onNavigate, userProfile }) => {
                 <div style={{ fontSize: "11px", fontWeight: "700", color: theme.textMuted, marginBottom: "10px", textTransform: "uppercase", letterSpacing: "0.06em" }}>Upload LPO Document <span style={{ color: theme.red }}>*</span></div>
                 {lpoDocUrl ? (
                   <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
-                    <span style={{ fontSize: "12px", color: theme.green }}>✓ {lpoDocName}</span>
+                    <span style={{ fontSize: "12px", color: theme.green }}><IconText icon={Check}>{lpoDocName}</IconText></span>
                     <span style={{ fontSize: "11px", color: theme.textMuted }}>({(lpoDocSize / 1024).toFixed(1)} KB)</span>
                     {lpoDocSignedUrl && <a href={lpoDocSignedUrl} target="_blank" rel="noreferrer" style={{ fontSize: "11px", color: theme.blue, textDecoration: "underline" }}>Preview</a>}
                     <button style={{ ...styles.btn("danger"), padding: "2px 8px", fontSize: "11px" }} onClick={() => { setLpoDocUrl(""); setLpoDocSignedUrl(""); setLpoDocName(""); setLpoDocSize(0); }}>Remove</button>
@@ -1971,7 +2021,7 @@ const Orders = ({ onNavigate, userProfile }) => {
                                 </button>
                               ))}
                             </div>
-                            {orderEditItems.length > 1 && <button style={{ ...styles.btn("danger"), padding: "8px 10px" }} onClick={() => setOrderEditItems(orderEditItems.filter((_, i) => i !== idx))}>✕</button>}
+                            {orderEditItems.length > 1 && <button style={{ ...styles.btn("danger"), padding: "8px 10px" }} onClick={() => setOrderEditItems(orderEditItems.filter((_, i) => i !== idx))} aria-label="Remove item"><Ico icon={X} /></button>}
                           </div>
                           {item.sourceType === 'resale' && (
                             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -2081,7 +2131,7 @@ const Orders = ({ onNavigate, userProfile }) => {
                     {invDeleteMsg && (
                       <div style={{ marginTop: "10px", padding: "10px 14px", background: theme.red + '18', border: `1px solid ${theme.red}44`, borderRadius: "6px", fontSize: "13px", color: theme.red, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                         <span>{invDeleteMsg}</span>
-                        <button style={{ background: "none", border: "none", color: theme.red, cursor: "pointer", fontWeight: "700", fontSize: "14px", padding: "0 4px" }} onClick={() => setInvDeleteMsg(null)}>×</button>
+                        <button style={{ background: "none", border: "none", color: theme.red, cursor: "pointer", fontWeight: "700", fontSize: "14px", padding: "0 4px" }} onClick={() => setInvDeleteMsg(null)} aria-label="Dismiss"><Ico icon={X} /></button>
                       </div>
                     )}
                     {showPayForm && (
@@ -2107,7 +2157,7 @@ const Orders = ({ onNavigate, userProfile }) => {
                 </>
               );
             })() : (
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "200px", color: theme.textMuted, fontSize: "13px" }}>← Select an order to view details</div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "200px", color: theme.textMuted, fontSize: "13px" }}>Select an order to view details</div>
             )}
           </div>
         </div>
@@ -2398,7 +2448,7 @@ const Waybills = ({ userProfile }) => {
   if (isDriverRole && !driverStaffId) {
     return (
       <div style={{ ...styles.card, textAlign: "center", padding: "48px 32px", maxWidth: "480px", margin: "40px auto" }}>
-        <div style={{ fontSize: "48px", marginBottom: "16px" }}>🚛</div>
+        <div style={{ marginBottom: "16px", color: theme.textMuted }}><Ico icon={Truck} size={48} /></div>
         <div style={{ fontWeight: "700", fontSize: "16px", color: theme.text, marginBottom: "10px" }}>Driver Record Not Linked</div>
         <div style={{ fontSize: "13px", color: theme.textMuted, lineHeight: "1.6" }}>
           Your account is not linked to a driver record yet. Please contact HR or the MD to link your account to your staff record so your waybills appear here.
@@ -2434,7 +2484,7 @@ const Waybills = ({ userProfile }) => {
 
       {isDriverRole && (
         <div style={{ background: theme.blue+'11', border: `1px solid ${theme.blue}33`, borderRadius: '8px', padding: '10px 16px', marginBottom: '16px', fontSize: '12px', color: theme.blue }}>
-          👁 Showing only waybills assigned to you.
+          <IconText icon={Eye}>Showing only waybills assigned to you.</IconText>
         </div>
       )}
 
@@ -2578,7 +2628,7 @@ const Waybills = ({ userProfile }) => {
                           <span key={lid} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: theme.accent + '22', border: `1px solid ${theme.accent}44`, borderRadius: '4px', padding: '3px 8px', fontSize: '12px', color: theme.text }}>
                             {worker?.full_name || lid}
                             <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: theme.red, padding: 0, fontSize: '13px', lineHeight: 1 }}
-                              onClick={() => setWaybillLoaders(l => l.filter(x => x !== lid))}>×</button>
+                              onClick={() => setWaybillLoaders(l => l.filter(x => x !== lid))} aria-label="Remove loader"><Ico icon={X} /></button>
                           </span>
                         );
                       })}
@@ -2632,7 +2682,7 @@ const Waybills = ({ userProfile }) => {
           )}
           {parseInt(form.quantityDamaged) > 0 && (
             <div style={{ ...styles.alert("error"), marginBottom: "14px" }}>
-              <span>⚠️ {form.quantityDamaged} damaged blocks will be automatically logged to the damage register as transit damage.</span>
+              <span><Ico icon={AlertTriangle} style={{ marginRight: "8px" }} />{form.quantityDamaged} damaged blocks will be automatically logged to the damage register as transit damage.</span>
             </div>
           )}
           <div className="m-buttons" style={styles.row}>
@@ -2669,7 +2719,7 @@ const Waybills = ({ userProfile }) => {
                   <td style={styles.td}>{fmt(w.quantity_loaded)}</td>
                   <td className="m-key" style={styles.td}><strong style={{ color: theme.green }}>{fmt(w.quantity_received)}</strong></td>
                   <td style={styles.td}><span style={styles.badge(w.quantity_damaged > 0 ? theme.red : theme.green)}>{w.quantity_damaged}</span></td>
-                  <td style={styles.td}>{w.receiver_name || "—"}{w.schedule_item_id && <div style={{ fontSize: "12px", color: theme.green, marginTop: "2px" }}>✓ Scheduled</div>}</td>
+                  <td style={styles.td}>{w.receiver_name || "—"}{w.schedule_item_id && <div style={{ fontSize: "12px", color: theme.green, marginTop: "2px" }}><IconText icon={Check}>Scheduled</IconText></div>}</td>
                   <td className="m-actions" style={styles.td}>
                     <div style={{ display: "flex", gap: "8px" }}>
                       <button style={{ ...styles.btn("secondary"), padding: "4px 10px", fontSize: "12px" }} onClick={() => {
@@ -3021,7 +3071,7 @@ const Customers = ({ userProfile }) => {
       {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
       {isMarketer && (
         <div style={{ background: theme.accent+'11', border: `1px solid ${theme.accent}33`, borderRadius: '8px', padding: '10px 16px', marginBottom: '16px', fontSize: '12px', color: theme.accent }}>
-          👤 Showing only customers you registered.
+          <IconText icon={User}>Showing only customers you registered.</IconText>
         </div>
       )}
       {showForm && !editMode && <CustomerForm form={form} setForm={setForm} staff={staff} saving={saving} onSubmit={handleSave} onCancel={() => setShowForm(false)} submitLabel="Register" />}
@@ -3063,7 +3113,7 @@ const Customers = ({ userProfile }) => {
 
         <div id="customer-detail" className={selected ? undefined : "m-hide"} style={styles.card}>
           {!selected ? (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "300px", color: theme.textMuted, fontSize: "13px" }}>← Select a customer to view profile</div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "300px", color: theme.textMuted, fontSize: "13px" }}>Select a customer to view profile</div>
           ) : editMode ? (
             <CustomerForm form={form} setForm={setForm} staff={staff} saving={saving} onSubmit={handleUpdate} onCancel={() => setEditMode(false)} submitLabel="Save Changes" />
           ) : (() => {
@@ -3076,9 +3126,9 @@ const Customers = ({ userProfile }) => {
                     <div style={{ fontSize: "18px", fontWeight: "700", color: theme.text }}>{selected.name}</div>
                     {selected.company_name && <div style={{ fontSize: "13px", color: theme.accent, marginTop: "2px" }}>{selected.company_name}</div>}
                     <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "4px", display: "flex", gap: "10px", flexWrap: "wrap" }}>
-                      {selected.phone && <span>📞 {selected.phone}</span>}
-                      {selected.email && <span>✉️ {selected.email}</span>}
-                      {selected.location && <span>📍 {selected.location}</span>}
+                      {selected.phone && <IconText icon={Phone}>{selected.phone}</IconText>}
+                      {selected.email && <IconText icon={Mail}>{selected.email}</IconText>}
+                      {selected.location && <IconText icon={MapPin}>{selected.location}</IconText>}
                     </div>
                     <div style={{ display: "flex", gap: "8px", marginTop: "8px", flexWrap: "wrap" }}>
                       {selected.how_heard && <span style={styles.badge(theme.blue)}>{howHeardLabel(selected.how_heard)}</span>}
@@ -3114,8 +3164,8 @@ const Customers = ({ userProfile }) => {
                         return (
                           <div key={s.id} style={{ background: theme.surface, borderRadius: "8px", padding: "10px 14px", border: `1px solid ${theme.border}`, minWidth: "180px", flex: "1" }}>
                             <div style={{ fontWeight: "700", fontSize: "13px", color: theme.accent }}>{s.site_name}</div>
-                            {s.site_address && <div style={{ fontSize: "12px", color: theme.text, marginTop: "2px" }}>📍 {s.site_address}</div>}
-                            {s.site_contact_name && <div style={{ fontSize: "11px", color: theme.textMuted, marginTop: "2px" }}>👤 {s.site_contact_name}{s.site_contact_phone ? ` · ${s.site_contact_phone}` : ""}</div>}
+                            {s.site_address && <div style={{ fontSize: "12px", color: theme.text, marginTop: "2px" }}><IconText icon={MapPin}>{s.site_address}</IconText></div>}
+                            {s.site_contact_name && <div style={{ fontSize: "11px", color: theme.textMuted, marginTop: "2px" }}><IconText icon={User}>{s.site_contact_name}{s.site_contact_phone ? ` · ${s.site_contact_phone}` : ""}</IconText></div>}
                             <div style={{ fontSize: "11px", color: theme.textMuted, marginTop: "4px" }}>{siteOrderCount} order{siteOrderCount !== 1 ? "s" : ""}</div>
                           </div>
                         );
@@ -3551,7 +3601,7 @@ const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
       {/* Low stock alerts */}
       {lowStockItems.length > 0 && (
         <div style={{ background: "rgba(240,107,107,0.10)", border: `1px solid ${theme.red}44`, borderRadius: "10px", padding: "14px 18px", marginBottom: "20px" }}>
-          <div style={{ fontWeight: "700", fontSize: "13px", color: theme.red, marginBottom: "8px" }}>⚠ {lowStockItems.length} item{lowStockItems.length > 1 ? "s" : ""} need restocking</div>
+          <div style={{ fontWeight: "700", fontSize: "13px", color: theme.red, marginBottom: "8px" }}><IconText icon={AlertTriangle} size={20}>{lowStockItems.length} item{lowStockItems.length > 1 ? "s" : ""} need restocking</IconText></div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
             {lowStockItems.map(i => (
               <div key={i.id} style={{ background: "rgba(240,107,107,0.12)", border: `1px solid ${theme.red}55`, borderRadius: "6px", padding: "5px 10px", fontSize: "12px" }}>
@@ -3732,7 +3782,7 @@ const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
             {inItemSel && !isFactorySite(inItemSel.site_id, sites) && (
               <div style={{ ...styles.formGroup, gridColumn: "1 / -1", background: theme.blue + "1f", border: `1px solid ${theme.blue}66`, borderRadius: "4px", padding: "10px 14px", fontSize: "13px", color: theme.text }}>
                 {itemSiteLabel(inItemSel)} is a client site. Record this delivery in <strong>Material Receiving</strong> — it checks accepted vs rejected quantities and keeps the photo and rejection notice.
-                {onNavigate && <button onClick={() => onNavigate("material_receiving")} style={{ ...styles.btn("secondary"), marginLeft: "12px", padding: "6px 12px" }}>Open Material Receiving →</button>}
+                {onNavigate && <button onClick={() => onNavigate("material_receiving")} style={{ ...styles.btn("secondary"), marginLeft: "12px", padding: "6px 12px" }}><IconText icon={ArrowRight} iconRight>Open Material Receiving</IconText></button>}
               </div>
             )}
             <div style={styles.formGroup}>
@@ -4114,7 +4164,7 @@ const LPOApprovals = () => {
                       ))}
                       <span style={{ color: theme.accent, fontWeight: "700" }}>{naira(total)}</span>
                       {lpo.document_url && docUrls[lpo.id] && (
-                        <a href={docUrls[lpo.id]} target="_blank" rel="noreferrer" style={{ ...styles.btn("primary"), fontSize: "11px", padding: "3px 10px", textDecoration: "none", display: "inline-block" }}>📄 View LPO Document</a>
+                        <a href={docUrls[lpo.id]} target="_blank" rel="noreferrer" style={{ ...styles.btn("primary"), fontSize: "11px", padding: "3px 10px", textDecoration: "none", display: "inline-block" }}><IconText icon={FileText}>View LPO Document</IconText></a>
                       )}
                     </div>
                   </div>
@@ -4127,8 +4177,8 @@ const LPOApprovals = () => {
                       <input style={styles.input} placeholder="Enter note…" value={note} onChange={e => setNote(e.target.value)} />
                     </div>
                     <div style={styles.row}>
-                      <button style={styles.btn("primary")} disabled={saving} onClick={() => handleDecide(lpo, "approved")}>{saving === lpo.id + "approved" ? "Approving…" : "✓ Approve LPO"}</button>
-                      <button style={styles.btn("danger")} disabled={saving} onClick={() => handleDecide(lpo, "rejected")}>{saving === lpo.id + "rejected" ? "Rejecting…" : "✕ Reject"}</button>
+                      <button style={styles.btn("primary")} disabled={saving} onClick={() => handleDecide(lpo, "approved")}>{saving === lpo.id + "approved" ? "Approving…" : <IconText icon={Check}>Approve LPO</IconText>}</button>
+                      <button style={styles.btn("danger")} disabled={saving} onClick={() => handleDecide(lpo, "rejected")}>{saving === lpo.id + "rejected" ? "Rejecting…" : <IconText icon={X}>Reject</IconText>}</button>
                     </div>
                   </div>
                 )}
@@ -4259,7 +4309,7 @@ const PendingDeliveryRegister = () => {
                         <td style={styles.td}>
                           <div style={{ paddingLeft: indent ? "16px" : "0" }}>
                             {!indent && <strong>{e.customer?.name || "—"}</strong>}
-                            {indent && <span style={{ color: theme.textMuted, fontSize: "12px" }}>↳ </span>}
+                            {indent && <span style={{ color: theme.textMuted, marginRight: "4px" }}><Ico icon={CornerDownRight} /></span>}
                             <span style={styles.badge(theme.blue)}>{e.block_type}</span>
                             {indent && e.customer?.company_name && <div style={{ fontSize: "12px", color: theme.textMuted }}>{e.customer.company_name}</div>}
                             {!indent && e.customer?.company_name && <div style={{ fontSize: "12px", color: theme.textMuted }}>{e.customer.company_name}</div>}
@@ -4672,7 +4722,7 @@ const ScheduleApprovals = () => {
                 <div style={{ fontWeight: "700", fontSize: "15px" }}>Schedule for {fmtDate(sched.schedule_date)}</div>
                 <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "3px" }}>Created by {sched.created_by || "—"} · {(sched.items || []).length} customers · Submitted for ICO review</div>
               </div>
-              <span style={{ ...styles.badge(theme.accent), cursor: "pointer" }}>{isOpen ? "▲ Hide" : "▼ Review"}</span>
+              <span style={{ ...styles.badge(theme.accent), cursor: "pointer" }}>{isOpen ? <IconText icon={ChevronUp}>Hide</IconText> : <IconText icon={ChevronDown}>Review</IconText>}</span>
             </div>
             {isOpen && (
               <div style={{ marginTop: "16px", borderTop: `1px solid ${theme.border}`, paddingTop: "16px" }}>
@@ -5072,7 +5122,7 @@ const Batches = ({ userProfile }) => {
                   {ci === null
                     ? <span style={styles.badge(theme.textMuted)}>N/A</span>
                     : ci.state === "cured"
-                      ? <span style={styles.badge(theme.green)}>✓ Cured</span>
+                      ? <span style={styles.badge(theme.green)}><IconText icon={Check}>Cured</IconText></span>
                       : <span style={styles.badge(theme.accent)}>Curing</span>}
                   <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "3px" }}>Site: <span style={{ color: theme.text }}>{siteName(b.site_id, sites)}</span> · Batch date: {fmtDate(b.date_cured)} · Created by: {b.created_by || "—"}</div>
                   {ci && ci.state === "curing" && !ci.ready && ci.daysRemaining != null && (
@@ -5449,7 +5499,7 @@ const BookkeepingTab = () => {
                   </div>
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                     <span style={{ fontSize: '13px', fontWeight: '600', color: theme.green }}>{naira(r.amount)}</span>
-                    <button style={{ ...styles.btn('danger'), padding: '2px 8px', fontSize: '10px' }} onClick={() => deleteIncome(r.id)}>✕</button>
+                    <button style={{ ...styles.btn('danger'), padding: '2px 8px', fontSize: '10px' }} onClick={() => deleteIncome(r.id)} aria-label="Delete income record"><Ico icon={X} /></button>
                   </div>
                 </div>
               ))}
@@ -5462,14 +5512,14 @@ const BookkeepingTab = () => {
           <div style={styles.card}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
               <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Record Expense</div>
-              <button style={{ ...styles.btn('secondary'), padding: '3px 10px', fontSize: '11px' }} onClick={openCatManager}>⚙ Manage Categories</button>
+              <button style={{ ...styles.btn('secondary'), padding: '3px 10px', fontSize: '11px' }} onClick={openCatManager}><IconText icon={Settings}>Manage Categories</IconText></button>
             </div>
 
             {showCatManager && (
               <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '8px', padding: '14px', marginBottom: '14px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
                   <div style={{ fontSize: '12px', fontWeight: '700', color: theme.text }}>Expense Categories</div>
-                  <button style={{ ...styles.btn('secondary'), padding: '2px 8px', fontSize: '11px' }} onClick={() => { setShowCatManager(false); setCatErr(''); }}>✕ Close</button>
+                  <button style={{ ...styles.btn('secondary'), padding: '2px 8px', fontSize: '11px' }} onClick={() => { setShowCatManager(false); setCatErr(''); }}><IconText icon={X}>Close</IconText></button>
                 </div>
                 {catErr && <div style={{ color: theme.red, fontSize: '11px', marginBottom: '8px' }}>{catErr}</div>}
                 <div style={{ display: 'flex', gap: '6px', marginBottom: '10px', flexWrap: 'wrap' }}>
@@ -5527,7 +5577,7 @@ const BookkeepingTab = () => {
             </div>
             {Number(expenseForm.amount) >= 50000 && (
               <div style={{ padding: '8px 12px', background: theme.accent + '22', border: `1px solid ${theme.accent}44`, borderRadius: '6px', fontSize: '11px', color: theme.accent, marginBottom: '10px' }}>
-                ⚠ Amount ≥ ₦50,000 — will be submitted for MD approval
+                <IconText icon={AlertTriangle}>Amount ≥ ₦50,000 — will be submitted for MD approval</IconText>
               </div>
             )}
             <button style={styles.btn('primary')} onClick={addExpense}>+ Record Expense</button>
@@ -5549,8 +5599,8 @@ const BookkeepingTab = () => {
                   </div>
                   {e.status === 'pending' && (
                     <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
-                      <button style={{ ...styles.btn('primary'), padding: '3px 10px', fontSize: '11px' }} onClick={() => approveExpense(e.id, 'approved')}>✓ Approve</button>
-                      <button style={{ ...styles.btn('danger'), padding: '3px 10px', fontSize: '11px' }} onClick={() => approveExpense(e.id, 'rejected')}>✕ Reject</button>
+                      <button style={{ ...styles.btn('primary'), padding: '3px 10px', fontSize: '11px' }} onClick={() => approveExpense(e.id, 'approved')}><IconText icon={Check}>Approve</IconText></button>
+                      <button style={{ ...styles.btn('danger'), padding: '3px 10px', fontSize: '11px' }} onClick={() => approveExpense(e.id, 'rejected')}><IconText icon={X}>Reject</IconText></button>
                     </div>
                   )}
                   {e.status !== 'pending' && (
@@ -5617,7 +5667,7 @@ const PLTab = () => {
         <div><label style={styles.label}>From</label><input type="date" style={{ ...styles.input, width: '150px' }} value={from} onChange={e => setFrom(e.target.value)} /></div>
         <div><label style={styles.label}>To</label><input type="date" style={{ ...styles.input, width: '150px' }} value={to} onChange={e => setTo(e.target.value)} /></div>
         <button style={styles.btn('secondary')} onClick={load}>Load</button>
-        <button data-board-allow style={{ ...styles.btn('primary'), marginLeft: 'auto' }} onClick={downloadPdf} disabled={pdfLoading}>{pdfLoading ? 'Generating…' : '↓ Download PDF'}</button>
+        <button data-board-allow style={{ ...styles.btn('primary'), marginLeft: 'auto' }} onClick={downloadPdf} disabled={pdfLoading}>{pdfLoading ? 'Generating…' : <IconText icon={Download}>Download PDF</IconText>}</button>
       </div>
       {err && <Alert msg={err} onClose={() => setErr('')} />}
       {loading ? <Spinner /> : (
@@ -5757,7 +5807,7 @@ const CostTab = () => {
         <div><label style={styles.label}>From</label><input type="date" style={{ ...styles.input, width: '150px' }} value={from} onChange={e => setFrom(e.target.value)} /></div>
         <div><label style={styles.label}>To</label><input type="date" style={{ ...styles.input, width: '150px' }} value={to} onChange={e => setTo(e.target.value)} /></div>
         <button style={styles.btn('secondary')} onClick={load}>Load</button>
-        <button data-board-allow style={{ ...styles.btn('primary'), marginLeft: 'auto' }} onClick={downloadPdf} disabled={pdfLoading}>{pdfLoading ? 'Generating…' : '↓ Download PDF'}</button>
+        <button data-board-allow style={{ ...styles.btn('primary'), marginLeft: 'auto' }} onClick={downloadPdf} disabled={pdfLoading}>{pdfLoading ? 'Generating…' : <IconText icon={Download}>Download PDF</IconText>}</button>
       </div>
       {err && <Alert msg={err} onClose={() => setErr('')} />}
       {loading ? <Spinner /> : (
@@ -5873,7 +5923,7 @@ const ReceivablesTab = () => {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '20px' }}>
-        <button data-board-allow style={styles.btn('primary')} onClick={downloadPdf} disabled={pdfLoading}>{pdfLoading ? 'Generating…' : '↓ Download PDF'}</button>
+        <button data-board-allow style={styles.btn('primary')} onClick={downloadPdf} disabled={pdfLoading}>{pdfLoading ? 'Generating…' : <IconText icon={Download}>Download PDF</IconText>}</button>
       </div>
       {err && <Alert msg={err} onClose={() => setErr('')} />}
 
@@ -6014,7 +6064,7 @@ const ManagementTab = () => {
           <input type="month" style={{ ...styles.input, width: '160px' }} value={month} onChange={e => setMonth(e.target.value)} />
         </div>
         <button style={styles.btn('secondary')} onClick={() => load(month)}>Load</button>
-        <button style={{ ...styles.btn('primary'), marginLeft: 'auto' }} onClick={downloadPdf} disabled={pdfLoading || !data}>{pdfLoading ? 'Generating…' : '↓ Download PDF'}</button>
+        <button style={{ ...styles.btn('primary'), marginLeft: 'auto' }} onClick={downloadPdf} disabled={pdfLoading || !data}>{pdfLoading ? 'Generating…' : <IconText icon={Download}>Download PDF</IconText>}</button>
       </div>
       {err && <Alert msg={err} onClose={() => setErr('')} />}
       {loading ? <Spinner /> : !data ? null : (
@@ -6521,7 +6571,7 @@ const BankAccountsTab = ({ userProfile }) => {
                 {importStep === 'mapping' && 'Map Columns'}
                 {importStep === 'preview' && `Preview — ${preview.length} transactions`}
               </div>
-              <button style={{ background: 'none', border: 'none', color: theme.textMuted, cursor: 'pointer', fontSize: '18px' }} onClick={closeImport}>✕</button>
+              <button style={{ background: 'none', border: 'none', color: theme.textMuted, cursor: 'pointer', fontSize: '18px' }} onClick={closeImport} aria-label="Close"><Ico icon={X} size={20} /></button>
             </div>
 
             {importStep === 'upload' && (
@@ -6571,8 +6621,8 @@ const BankAccountsTab = ({ userProfile }) => {
                   </table>
                 </div>
                 <div style={{ display: 'flex', gap: '10px' }}>
-                  <button style={styles.btn('secondary')} onClick={() => setImportStep('upload')}>← Back</button>
-                  <button style={styles.btn('primary')} onClick={buildPreview}>Check Duplicates & Auto-Match →</button>
+                  <button style={styles.btn('secondary')} onClick={() => setImportStep('upload')}><IconText icon={ArrowLeft}>Back</IconText></button>
+                  <button style={styles.btn('primary')} onClick={buildPreview}><IconText icon={ArrowRight} iconRight>Check Duplicates & Auto-Match</IconText></button>
                 </div>
               </div>
             )}
@@ -6617,8 +6667,8 @@ const BankAccountsTab = ({ userProfile }) => {
                   </table>
                 </div>
                 <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
-                  <button style={styles.btn('secondary')} onClick={() => setImportStep('mapping')}>← Back</button>
-                  <button style={{ ...styles.btn('primary'), marginLeft: 'auto' }} onClick={confirmImport} disabled={importing || (reconUnverified && !reconWarnAcked)}>{importing ? 'Importing…' : `✓ Import ${preview.length} Transactions`}</button>
+                  <button style={styles.btn('secondary')} onClick={() => setImportStep('mapping')}><IconText icon={ArrowLeft}>Back</IconText></button>
+                  <button style={{ ...styles.btn('primary'), marginLeft: 'auto' }} onClick={confirmImport} disabled={importing || (reconUnverified && !reconWarnAcked)}>{importing ? 'Importing…' : <IconText icon={Check}>Import {preview.length} Transactions</IconText>}</button>
                 </div>
               </div>
             )}
@@ -6703,7 +6753,7 @@ const BankAccountsTab = ({ userProfile }) => {
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <span style={{ fontWeight: '600', fontSize: '13px' }}>{pr.reference}</span>
                         <span style={{ fontSize: '11px', color: amtMatch ? theme.green : '#d97706' }}>
-                          {naira(Number(pr.amount))}{amtMatch ? ' ✓' : ' (amt differs)'}
+                          {naira(Number(pr.amount))}{amtMatch ? <> <Ico icon={Check} /><span> matches</span></> : ' (amt differs)'}
                         </span>
                       </div>
                       <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '2px' }}>
@@ -6809,7 +6859,7 @@ const BankAccountsTab = ({ userProfile }) => {
             </div>
             <div style={{ display: 'flex', gap: '8px' }}>
               <button style={styles.btn('secondary')} onClick={() => { setCreateExpModal(null); setModalErr(''); setCreateExpForm({ category_id: '', description: '', notes: '' }); }}>Cancel</button>
-              <button style={styles.btn('primary')} onClick={handleCreateExpFromTx} disabled={creatingExp}>{creatingExp ? 'Creating…' : '✓ Create Expense & Mark Matched'}</button>
+              <button style={styles.btn('primary')} onClick={handleCreateExpFromTx} disabled={creatingExp}>{creatingExp ? 'Creating…' : <IconText icon={Check}>Create Expense & Mark Matched</IconText>}</button>
             </div>
           </div>
         </div>
@@ -6896,7 +6946,7 @@ const BankAccountsTab = ({ userProfile }) => {
                     )}
                     {createPaymentForm.customer_id && (
                       <div style={{ fontSize: '11px', color: theme.green, marginTop: '4px' }}>
-                        ✓ {createPaymentForm.customerSearch} selected
+                        <IconText icon={Check}>{createPaymentForm.customerSearch} selected</IconText>
                         <span style={{ color: theme.textMuted, cursor: 'pointer', marginLeft: '8px' }}
                           onClick={() => setCreatePaymentForm(f => ({ ...f, customer_id: '', customerSearch: '', invoice_id: '' }))}>clear</span>
                       </div>
@@ -6928,7 +6978,7 @@ const BankAccountsTab = ({ userProfile }) => {
                               <div style={{ fontSize: '12px', color: amtMatch ? theme.green : theme.textMuted, fontWeight: amtMatch ? '700' : '400' }}>{naira(rem)} remaining</div>
                               <div style={{ fontSize: '10px', color: theme.textDim }}>of {naira(inv.total_amount)}</div>
                             </div>
-                            {isSelected && <span style={{ marginLeft: '8px', color: theme.accent, fontWeight: '700' }}>✓</span>}
+                            {isSelected && <span style={{ marginLeft: '8px', color: theme.accent, fontWeight: '700' }}><IconText icon={Check}>Selected</IconText></span>}
                           </div>
                         );
                       })}
@@ -6946,7 +6996,7 @@ const BankAccountsTab = ({ userProfile }) => {
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: '700', borderTop: `1px solid ${theme.border}`, paddingTop: '4px', marginTop: '4px' }}>
                         <span>After this payment</span>
                         <span style={{ color: willComplete ? theme.green : theme.accent }}>
-                          {willComplete ? '✓ FULLY PAID' : selInvRemaining - amount > 0 ? `Balance: ${naira(selInvRemaining - amount)}` : `Overpayment: ${naira(amount - selInvRemaining)}`}
+                          {willComplete ? <IconText icon={CheckCircle2}>FULLY PAID</IconText> : selInvRemaining - amount > 0 ? `Balance: ${naira(selInvRemaining - amount)}` : `Overpayment: ${naira(amount - selInvRemaining)}`}
                         </span>
                       </div>
                     </div>
@@ -6989,7 +7039,7 @@ const BankAccountsTab = ({ userProfile }) => {
               <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
                 <button style={styles.btn('secondary')} onClick={() => { setCreatePaymentModal(null); setModalErr(''); setCreatePaymentForm({ customer_id: '', customerSearch: '', invoice_id: '', payment_method: 'bank_transfer', reference: '', notes: '', mode: 'invoice', paymentAmount: '', otherIncomeDesc: '' }); }}>Cancel</button>
                 <button style={{ ...styles.btn('primary'), flex: 1 }} onClick={handleCreatePayment} disabled={creatingPayment}>
-                  {creatingPayment ? 'Saving…' : isOther ? '✓ Record as Other Income' : '✓ Record Payment & Match'}
+                  {creatingPayment ? 'Saving…' : isOther ? <IconText icon={Check}>Record as Other Income</IconText> : <IconText icon={Check}>Record Payment & Match</IconText>}
                 </button>
               </div>
             </div>
@@ -7020,8 +7070,8 @@ const BankAccountsTab = ({ userProfile }) => {
                 <div style={{ fontSize: '20px', fontWeight: '700', color: theme.accent, marginTop: '4px' }}>{naira(acct.current_balance)}</div>
               </div>
               <div style={{ display: 'flex', gap: '8px', marginTop: '14px' }} onClick={e => e.stopPropagation()}>
-                <button style={{ ...styles.btn('secondary'), padding: '5px 10px', fontSize: '12px', flex: 1 }} onClick={() => openImport(acct)}>↑ Import</button>
-                <button style={{ ...styles.btn('secondary'), padding: '5px 10px', fontSize: '12px' }} onClick={() => setEditAcct({ ...acct })} title="Edit account details">✎</button>
+                <button style={{ ...styles.btn('secondary'), padding: '5px 10px', fontSize: '12px', flex: 1 }} onClick={() => openImport(acct)}><IconText icon={Upload}>Import</IconText></button>
+                <button style={{ ...styles.btn('secondary'), padding: '5px 10px', fontSize: '12px' }} onClick={() => setEditAcct({ ...acct })} title="Edit account details" aria-label="Edit account details"><Ico icon={Pencil} /></button>
               </div>
             </div>
           );
@@ -7073,11 +7123,11 @@ const BankAccountsTab = ({ userProfile }) => {
                               <div style={{ display: 'flex', gap: '4px' }}>
                                 <button style={{ ...styles.btn('primary'), padding: '2px 8px', fontSize: '11px', background: theme.green }}
                                   onClick={() => handleConfirmMatch(stx)} disabled={actioningId === stx.id}>
-                                  {actioningId === stx.id ? '…' : '✓ Confirm'}
+                                  {actioningId === stx.id ? '…' : <IconText icon={Check}>Confirm</IconText>}
                                 </button>
                                 <button style={{ ...styles.btn('secondary'), padding: '2px 8px', fontSize: '11px' }}
                                   onClick={() => { setRejectModal(stx); setRejectReason(''); }} disabled={actioningId === stx.id}>
-                                  ✕ Reject
+                                  <IconText icon={X}>Reject</IconText>
                                 </button>
                               </div>
                             ) : <span style={{ fontSize: '11px', color: theme.textMuted }}>Awaiting accountant/MD review</span>}
@@ -7140,7 +7190,7 @@ const BankAccountsTab = ({ userProfile }) => {
                               <div style={{ fontSize: '10px', color: theme.green, marginTop: '3px', fontStyle: 'italic' }}>PR: {prCandidate.pr.reference}</div>
                             )}
                             {isUnmatched && prCandidate && !prCandidate.amtMatch && (
-                              <div style={{ fontSize: '10px', color: '#d97706', marginTop: '3px' }}>⚠ PR ref found, amt mismatch ({naira(prCandidate.pr.amount)})</div>
+                              <div style={{ fontSize: '10px', color: '#d97706', marginTop: '3px' }}><IconText icon={AlertTriangle} size={12}>PR ref found, amt mismatch ({naira(prCandidate.pr.amount)})</IconText></div>
                             )}
                             {isUnmatched && !prCandidate && suggestedCat && (
                               <div style={{ fontSize: '10px', color: theme.accent, marginTop: '3px', fontStyle: 'italic' }}>Suggested: {suggestedCat}</div>
@@ -7188,11 +7238,11 @@ const BankAccountsTab = ({ userProfile }) => {
                                 <>
                                   <button style={{ ...styles.btn('primary'), padding: '2px 7px', fontSize: '11px', background: theme.green }}
                                     onClick={() => handleConfirmMatch(tx)} disabled={actioningId === tx.id}>
-                                    {actioningId === tx.id ? '…' : '✓ Confirm'}
+                                    {actioningId === tx.id ? '…' : <IconText icon={Check}>Confirm</IconText>}
                                   </button>
                                   <button style={{ ...styles.btn('secondary'), padding: '2px 7px', fontSize: '11px' }}
                                     onClick={() => { setRejectModal(tx); setRejectReason(''); }} disabled={actioningId === tx.id}>
-                                    ✕ Reject
+                                    <IconText icon={X}>Reject</IconText>
                                   </button>
                                 </>
                               )}
@@ -7332,7 +7382,7 @@ const ReconciliationTab = () => {
         <div><label style={styles.label}>From</label><input type="date" style={{ ...styles.input, width: '150px' }} value={periodFrom} onChange={e => setPeriodFrom(e.target.value)} /></div>
         <div><label style={styles.label}>To</label><input type="date" style={{ ...styles.input, width: '150px' }} value={periodTo} onChange={e => setPeriodTo(e.target.value)} /></div>
         <button style={styles.btn('secondary')} onClick={runReconciliation} disabled={loading}>{loading ? 'Loading…' : 'Run Reconciliation'}</button>
-        {result && <button style={{ ...styles.btn('primary'), marginLeft: 'auto' }} onClick={downloadPdf} disabled={pdfLoading}>{pdfLoading ? 'Generating…' : '↓ PDF'}</button>}
+        {result && <button style={{ ...styles.btn('primary'), marginLeft: 'auto' }} onClick={downloadPdf} disabled={pdfLoading}>{pdfLoading ? 'Generating…' : <IconText icon={Download}>PDF</IconText>}</button>}
       </div>
 
       {result && (
@@ -7383,7 +7433,7 @@ const ReconciliationTab = () => {
           <div style={{ ...styles.card, marginTop: '16px', background: Math.abs(result.difference) < 0.01 ? theme.green + '11' : theme.red + '11', border: `1px solid ${Math.abs(result.difference) < 0.01 ? theme.green : theme.red}44` }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
               <span style={{ fontWeight: '700', fontSize: '14px', color: Math.abs(result.difference) < 0.01 ? theme.green : theme.red }}>
-                {Math.abs(result.difference) < 0.01 ? '✓ RECONCILED — Difference is ₦0' : `⚠ UNRECONCILED — Difference: ${naira(Math.abs(result.difference))}`}
+                {Math.abs(result.difference) < 0.01 ? <IconText icon={CheckCircle2} size={20}>RECONCILED — Difference is ₦0</IconText> : <IconText icon={AlertTriangle} size={20}>UNRECONCILED — Difference: {naira(Math.abs(result.difference))}</IconText>}
               </span>
             </div>
             <div style={styles.row}>
@@ -7571,12 +7621,12 @@ const ReceiptsTab = () => {
             <div style={styles.formGroup}><label style={styles.label}>Tax Category</label>
               <input style={styles.input} placeholder="e.g. Fuel, Labour, Materials" value={uploadForm.tax_category} onChange={e => setUploadForm(f => ({ ...f, tax_category: e.target.value }))} />
             </div>
-            <button style={{ ...styles.btn('primary'), width: '100%' }} onClick={handleUpload} disabled={uploading}>{uploading ? 'Uploading…' : '↑ Upload Receipt'}</button>
+            <button style={{ ...styles.btn('primary'), width: '100%' }} onClick={handleUpload} disabled={uploading}>{uploading ? 'Uploading…' : <IconText icon={Upload}>Upload Receipt</IconText>}</button>
           </div>
 
           {missingCount > 0 && (
             <div style={{ ...styles.card, background: theme.red + '11', border: `1px solid ${theme.red}33` }}>
-              <div style={{ color: theme.red, fontWeight: '700', fontSize: '13px' }}>⚠ {missingCount} expenses without receipts</div>
+              <div style={{ color: theme.red, fontWeight: '700', fontSize: '13px' }}><IconText icon={AlertTriangle} size={20}>{missingCount} expenses without receipts</IconText></div>
               <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '4px' }}>Upload receipts for approved expenses to maintain complete records.</div>
             </div>
           )}
@@ -7588,7 +7638,7 @@ const ReceiptsTab = () => {
             <div><label style={styles.label}>To</label><input type="date" style={{ ...styles.input, width: '140px' }} value={rto} onChange={e => setRto(e.target.value)} /></div>
             <div style={{ flex: 1 }}><label style={styles.label}>Search vendor</label><input style={styles.input} placeholder="Search…" value={rsearch} onChange={e => setRsearch(e.target.value)} /></div>
             <button style={styles.btn('secondary')} onClick={loadReceipts}>Search</button>
-            <button style={styles.btn('primary')} onClick={exportTaxPackage} disabled={exportLoading || receipts.length === 0}>{exportLoading ? 'Exporting…' : '↓ Tax ZIP'}</button>
+            <button style={styles.btn('primary')} onClick={exportTaxPackage} disabled={exportLoading || receipts.length === 0}>{exportLoading ? 'Exporting…' : <IconText icon={Download}>Tax ZIP</IconText>}</button>
           </div>
           {loading ? <Spinner /> : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '12px' }}>
@@ -7600,15 +7650,15 @@ const ReceiptsTab = () => {
                       onClick={() => { setViewIsPdf(r.receipt_type !== 'photo'); setViewUrl(signedMap[r.id]); }}>
                       {r.receipt_type === 'photo'
                         ? <img src={signedMap[r.id]} style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => e.target.style.display = 'none'} />
-                        : <div style={{ fontSize: '32px', textAlign: 'center' }}>📄</div>}
+                        : <div style={{ textAlign: 'center', color: theme.textMuted }}><Ico icon={FileText} size={32} /></div>}
                     </div>
                     <div style={{ fontSize: '11px', fontWeight: '700', color: theme.accent }}>{r.receipt_number}</div>
                     <div style={{ fontSize: '11px', fontWeight: '600', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.vendor_name}</div>
                     <div style={{ fontSize: '11px', color: theme.green, fontWeight: '600' }}>{naira(r.amount)}</div>
                     <div style={{ fontSize: '10px', color: theme.textMuted }}>{fmtDate(r.receipt_date)}</div>
                     <div style={{ display: 'flex', gap: '4px', marginTop: '8px' }}>
-                      <a href={signedMap[r.id] || undefined} target="_blank" rel="noreferrer" style={{ ...styles.btn('secondary'), padding: '3px 8px', fontSize: '10px', textDecoration: 'none', display: 'inline-block' }}>↓</a>
-                      <button style={{ ...styles.btn('danger'), padding: '3px 8px', fontSize: '10px' }} onClick={() => handleDelete(r)}>✕</button>
+                      <a href={signedMap[r.id] || undefined} target="_blank" rel="noreferrer" style={{ ...styles.btn('secondary'), padding: '3px 8px', fontSize: '10px', textDecoration: 'none', display: 'inline-block' }} aria-label="Download receipt"><Ico icon={Download} /></a>
+                      <button style={{ ...styles.btn('danger'), padding: '3px 8px', fontSize: '10px' }} onClick={() => handleDelete(r)} aria-label="Delete receipt"><Ico icon={X} /></button>
                     </div>
                   </div>
                 ))
@@ -7634,7 +7684,7 @@ const Accounting = ({ userProfile }) => {
     { id: 'reconciliation', label: 'Reconciliation' },
     { id: 'receipts', label: 'Receipts' },
     ...(isFinanceAdmin ? [{ id: 'opening_balances', label: 'Opening Balances' }] : []),
-    { id: 'financial_statements', label: '📊 Financial Statements' },
+    { id: 'financial_statements', label: 'Financial Statements' },
   ];
   return (
     <div>
@@ -7994,7 +8044,7 @@ const AdvancesPage = ({ userProfile }) => {
         </div>
         {canRecord && (
           <button style={styles.btn('primary')} onClick={() => setShowForm(v => !v)}>
-            {showForm ? '✕ Cancel' : '+ New Request'}
+            {showForm ? <IconText icon={X}>Cancel</IconText> : '+ New Request'}
           </button>
         )}
       </div>
@@ -8068,15 +8118,15 @@ const AdvancesPage = ({ userProfile }) => {
                 const status = adv.status;
                 const actions = [];
                 if (status === 'requested' && role === 'ico')
-                  actions.push(<button key="ico" style={{ ...styles.btn('primary'), padding: '4px 10px', fontSize: '11px' }} onClick={() => handleAction(adv.id, 'ico_approve')} disabled={actionSaving}>✓ ICO Approve</button>);
+                  actions.push(<button key="ico" style={{ ...styles.btn('primary'), padding: '4px 10px', fontSize: '11px' }} onClick={() => handleAction(adv.id, 'ico_approve')} disabled={actionSaving}><IconText icon={Check}>ICO Approve</IconText></button>);
                 if (status === 'ico_approved' && role === 'md')
-                  actions.push(<button key="md" style={{ ...styles.btn('primary'), padding: '4px 10px', fontSize: '11px' }} onClick={() => handleAction(adv.id, 'md_approve')} disabled={actionSaving}>✓ MD Approve</button>);
+                  actions.push(<button key="md" style={{ ...styles.btn('primary'), padding: '4px 10px', fontSize: '11px' }} onClick={() => handleAction(adv.id, 'md_approve')} disabled={actionSaving}><IconText icon={Check}>MD Approve</IconText></button>);
                 if (status === 'md_approved' && ['accountant', 'md'].includes(role))
-                  actions.push(<button key="disburse" style={{ ...styles.btn('primary'), padding: '4px 10px', fontSize: '11px', background: theme.green, color: '#000' }} onClick={() => handleAction(adv.id, 'disburse')} disabled={actionSaving}>↑ Disburse</button>);
+                  actions.push(<button key="disburse" style={{ ...styles.btn('primary'), padding: '4px 10px', fontSize: '11px', background: theme.green, color: '#000' }} onClick={() => handleAction(adv.id, 'disburse')} disabled={actionSaving}><IconText icon={Banknote}>Disburse</IconText></button>);
                 if (['requested','ico_approved','md_approved'].includes(status) && ['ico','md'].includes(role))
-                  actions.push(<button key="reject" style={{ ...styles.btn('danger'), padding: '4px 10px', fontSize: '11px' }} onClick={() => setRejectTarget({ id: adv.id, action: 'reject' })}>✕ Reject</button>);
+                  actions.push(<button key="reject" style={{ ...styles.btn('danger'), padding: '4px 10px', fontSize: '11px' }} onClick={() => setRejectTarget({ id: adv.id, action: 'reject' })}><IconText icon={X}>Reject</IconText></button>);
                 if (status === 'requested' && ['hr_officer','accountant','md'].includes(role))
-                  actions.push(<button key="cancel" style={{ ...styles.btn('secondary'), padding: '4px 10px', fontSize: '11px' }} onClick={() => setRejectTarget({ id: adv.id, action: 'cancel' })}>✕ Cancel</button>);
+                  actions.push(<button key="cancel" style={{ ...styles.btn('secondary'), padding: '4px 10px', fontSize: '11px' }} onClick={() => setRejectTarget({ id: adv.id, action: 'cancel' })}><IconText icon={X}>Cancel</IconText></button>);
                 return (
                   <tr key={adv.id}>
                     <td style={styles.td}><strong>{adv.staff?.full_name || '—'}</strong></td>
@@ -8454,39 +8504,39 @@ const PaymentRequestsPage = ({ userProfile }) => {
     const { id, status, disbursement_method } = req;
     const btns = [];
     if (role === 'ico' && status === 'draft') {
-      btns.push(<button key="approve" style={{ ...styles.btn('primary'), ...sm }} onClick={() => handleAction(id, 'ico_approve')} disabled={actionSaving}>✓ Approve</button>);
-      btns.push(<button key="recall" style={{ ...styles.btn('danger'), ...sm }} onClick={() => setRecallTarget({ id })}>↩ Recall</button>);
+      btns.push(<button key="approve" style={{ ...styles.btn('primary'), ...sm }} onClick={() => handleAction(id, 'ico_approve')} disabled={actionSaving}><IconText icon={Check}>Approve</IconText></button>);
+      btns.push(<button key="recall" style={{ ...styles.btn('danger'), ...sm }} onClick={() => setRecallTarget({ id })}><IconText icon={Undo2}>Recall</IconText></button>);
     } else if (role === 'md') {
       if (status === 'ico_approved') {
-        btns.push(<button key="approve" style={{ ...styles.btn('primary'), ...sm }} onClick={() => handleAction(id, 'md_approve')} disabled={actionSaving}>✓ Approve</button>);
-        btns.push(<button key="recall" style={{ ...styles.btn('danger'), ...sm }} onClick={() => setRecallTarget({ id })}>↩ Recall</button>);
+        btns.push(<button key="approve" style={{ ...styles.btn('primary'), ...sm }} onClick={() => handleAction(id, 'md_approve')} disabled={actionSaving}><IconText icon={Check}>Approve</IconText></button>);
+        btns.push(<button key="recall" style={{ ...styles.btn('danger'), ...sm }} onClick={() => setRecallTarget({ id })}><IconText icon={Undo2}>Recall</IconText></button>);
       }
       if (status === 'funded') {
-        btns.push(<button key="recall" style={{ ...styles.btn('danger'), ...sm }} onClick={() => setRecallTarget({ id })}>↩ Recall</button>);
+        btns.push(<button key="recall" style={{ ...styles.btn('danger'), ...sm }} onClick={() => setRecallTarget({ id })}><IconText icon={Undo2}>Recall</IconText></button>);
       }
     } else if (role === 'accountant') {
       if (status === 'md_approved') {
-        btns.push(<button key="fund" style={{ ...styles.btn('primary'), ...sm, background: theme.green, color: '#000' }} onClick={() => handleAction(id, 'mark_funded')} disabled={actionSaving}>↑ Mark Funded</button>);
+        btns.push(<button key="fund" style={{ ...styles.btn('primary'), ...sm, background: theme.green, color: '#000' }} onClick={() => handleAction(id, 'mark_funded')} disabled={actionSaving}><IconText icon={Banknote}>Mark Funded</IconText></button>);
       }
       if (status === 'funded') {
-        btns.push(<button key="disburse" style={{ ...styles.btn('primary'), ...sm }} onClick={() => disbursement_method === 'cash' ? handleAction(id, 'mark_disbursed') : setDisburseTarget({ id })} disabled={actionSaving}>✓ Mark Disbursed</button>);
+        btns.push(<button key="disburse" style={{ ...styles.btn('primary'), ...sm }} onClick={() => disbursement_method === 'cash' ? handleAction(id, 'mark_disbursed') : setDisburseTarget({ id })} disabled={actionSaving}><IconText icon={Check}>Mark Disbursed</IconText></button>);
       }
       if (status === 'disbursed') {
-        btns.push(<button key="close" style={{ ...styles.btn('primary'), ...sm, background: '#a78bfa', color: '#000' }} onClick={() => handleAction(id, 'close')} disabled={actionSaving}>✓ Close</button>);
+        btns.push(<button key="close" style={{ ...styles.btn('primary'), ...sm, background: '#a78bfa', color: '#000' }} onClick={() => handleAction(id, 'close')} disabled={actionSaving}><IconText icon={Check}>Close</IconText></button>);
         btns.push(<button key="override-close" style={{ ...styles.btn('secondary'), ...sm }} onClick={() => setOverrideCloseTarget({ id })}>Override Close</button>);
       }
     }
     if (role === 'md' && status === 'disbursed') {
-      btns.push(<button key="close" style={{ ...styles.btn('primary'), ...sm, background: '#a78bfa', color: '#000' }} onClick={() => handleAction(id, 'close')} disabled={actionSaving}>✓ Close</button>);
+      btns.push(<button key="close" style={{ ...styles.btn('primary'), ...sm, background: '#a78bfa', color: '#000' }} onClick={() => handleAction(id, 'close')} disabled={actionSaving}><IconText icon={Check}>Close</IconText></button>);
       btns.push(<button key="override-close" style={{ ...styles.btn('secondary'), ...sm }} onClick={() => setOverrideCloseTarget({ id })}>Override Close</button>);
     }
     if (canQuery && status === 'disbursed' && req.transaction_date) {
-      btns.push(<button key="query" style={{ ...styles.btn('secondary'), ...sm }} onClick={() => setQueryTarget({ id })}>⚑ Query</button>);
+      btns.push(<button key="query" style={{ ...styles.btn('secondary'), ...sm }} onClick={() => setQueryTarget({ id })}><IconText icon={Flag}>Query</IconText></button>);
     }
     if (status === 'queried') {
       if (req.requested_by === userId || role === 'md') {
-        btns.push(<button key="edit-queried" style={{ ...styles.btn('secondary'), ...sm }} onClick={() => openEdit(req)}>✏ Edit</button>);
-        btns.push(<button key="resolve" style={{ ...styles.btn('primary'), ...sm, background: theme.green, color: '#000' }} onClick={() => handleAction(id, 'resolve_query')} disabled={actionSaving}>✓ Resolve</button>);
+        btns.push(<button key="edit-queried" style={{ ...styles.btn('secondary'), ...sm }} onClick={() => openEdit(req)}><IconText icon={Pencil}>Edit</IconText></button>);
+        btns.push(<button key="resolve" style={{ ...styles.btn('primary'), ...sm, background: theme.green, color: '#000' }} onClick={() => handleAction(id, 'resolve_query')} disabled={actionSaving}><IconText icon={Check}>Resolve</IconText></button>);
       }
     }
     return btns;
@@ -8546,12 +8596,12 @@ const PaymentRequestsPage = ({ userProfile }) => {
           )}
           {canBackfill && (
             <button style={styles.btn(showBackfill ? 'secondary' : 'secondary')} onClick={() => { setShowBackfill(v => !v); setBackfillForm(emptyBackfillForm); setShowForm(false); setEditTarget(null); }}>
-              {showBackfill ? '✕ Cancel Backfill' : '+ Backfill Entry'}
+              {showBackfill ? <IconText icon={X}>Cancel Backfill</IconText> : '+ Backfill Entry'}
             </button>
           )}
           {isInitiator && (
             <button style={styles.btn(showForm ? 'secondary' : 'primary')} onClick={() => { setShowForm(v => !v); setEditTarget(null); setForm(emptyForm); setShowBackfill(false); }}>
-              {showForm ? '✕ Cancel' : '+ New Request'}
+              {showForm ? <IconText icon={X}>Cancel</IconText> : '+ New Request'}
             </button>
           )}
         </div>
@@ -8965,7 +9015,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
                 </div>
                 <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                   <span style={styles.badge(statusColor(req.status))}>{req.status}</span>
-                  <button style={{ ...styles.btn('secondary'), padding: '5px 10px' }} onClick={() => { setDetailReq(null); setAttachFile(null); setAttachNote(''); setAttachAlert(null); }}>✕</button>
+                  <button style={{ ...styles.btn('secondary'), padding: '5px 10px' }} onClick={() => { setDetailReq(null); setAttachFile(null); setAttachNote(''); setAttachAlert(null); }} aria-label="Close"><Ico icon={X} /></button>
                 </div>
               </div>
               <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: '16px' }}>
@@ -8987,7 +9037,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
                       <button
                         style={{ ...styles.btn(copiedField === 'acct' ? 'primary' : 'secondary'), padding: '3px 10px', fontSize: '11px' }}
                         onClick={copyAcct}>
-                        {copiedField === 'acct' ? '✓ Copied' : 'Copy'}
+                        {copiedField === 'acct' ? <IconText icon={Check}>Copied</IconText> : 'Copy'}
                       </button>
                     </div>
                   </div>
@@ -9033,7 +9083,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
                       {attachAlert && (
                         <div style={{ ...styles.alert(attachAlert.type), marginBottom: '10px' }}>
                           <span>{attachAlert.msg}</span>
-                          <span style={{ cursor: 'pointer' }} onClick={() => setAttachAlert(null)}>✕</span>
+                          <span role="button" aria-label="Close" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }} onClick={() => setAttachAlert(null)}><Ico icon={X} /></span>
                         </div>
                       )}
                       <div style={styles.formGroup}>
@@ -9132,7 +9182,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
                         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                           <button style={{ ...styles.btn('secondary'), ...sm }} onClick={() => setDetailReq(req)}>View</button>
                           {isInitiator && req.status === 'draft' && (
-                            <button style={{ ...styles.btn('secondary'), ...sm }} onClick={() => openEdit(req)}>✏ Edit</button>
+                            <button style={{ ...styles.btn('secondary'), ...sm }} onClick={() => openEdit(req)}><IconText icon={Pencil}>Edit</IconText></button>
                           )}
                           {actions}
                         </div>
@@ -9185,7 +9235,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
                             } catch (e) { setAlert({ type: 'error', msg: e.message }); }
                             finally { setVendorSaving(null); }
                           }}>
-                          {vendorSaving === v.id ? '…' : '✓ Approve'}
+                          {vendorSaving === v.id ? '…' : <IconText icon={Check}>Approve</IconText>}
                         </button>
                       </td>
                     </tr>
@@ -9311,7 +9361,7 @@ const LeavePage = ({ userProfile }) => {
         </div>
         {canRecord && (
           <button style={styles.btn('primary')} onClick={() => setShowForm(v => !v)}>
-            {showForm ? '✕ Cancel' : '+ New Request'}
+            {showForm ? <IconText icon={X}>Cancel</IconText> : '+ New Request'}
           </button>
         )}
       </div>
@@ -9402,13 +9452,13 @@ const LeavePage = ({ userProfile }) => {
                 const status = req.status;
                 const actions = [];
                 if (status === 'requested' && role === 'ico')
-                  actions.push(<button key="ico" style={{ ...styles.btn('primary'), padding: '4px 10px', fontSize: '11px' }} onClick={() => handleAction(req.id, 'ico_approve')} disabled={actionSaving}>✓ ICO Approve</button>);
+                  actions.push(<button key="ico" style={{ ...styles.btn('primary'), padding: '4px 10px', fontSize: '11px' }} onClick={() => handleAction(req.id, 'ico_approve')} disabled={actionSaving}><IconText icon={Check}>ICO Approve</IconText></button>);
                 if (status === 'ico_approved' && role === 'md')
-                  actions.push(<button key="md" style={{ ...styles.btn('primary'), padding: '4px 10px', fontSize: '11px' }} onClick={() => handleAction(req.id, 'md_approve')} disabled={actionSaving}>✓ MD Approve</button>);
+                  actions.push(<button key="md" style={{ ...styles.btn('primary'), padding: '4px 10px', fontSize: '11px' }} onClick={() => handleAction(req.id, 'md_approve')} disabled={actionSaving}><IconText icon={Check}>MD Approve</IconText></button>);
                 if (['requested','ico_approved'].includes(status) && ['ico','md'].includes(role))
-                  actions.push(<button key="reject" style={{ ...styles.btn('danger'), padding: '4px 10px', fontSize: '11px' }} onClick={() => setModalTarget({ id: req.id, action: 'reject' })}>✕ Reject</button>);
+                  actions.push(<button key="reject" style={{ ...styles.btn('danger'), padding: '4px 10px', fontSize: '11px' }} onClick={() => setModalTarget({ id: req.id, action: 'reject' })}><IconText icon={X}>Reject</IconText></button>);
                 if (['requested','ico_approved','md_approved'].includes(status) && ['hr_officer','md'].includes(role))
-                  actions.push(<button key="cancel" style={{ ...styles.btn('secondary'), padding: '4px 10px', fontSize: '11px' }} onClick={() => setModalTarget({ id: req.id, action: 'cancel' })}>✕ Cancel</button>);
+                  actions.push(<button key="cancel" style={{ ...styles.btn('secondary'), padding: '4px 10px', fontSize: '11px' }} onClick={() => setModalTarget({ id: req.id, action: 'cancel' })}><IconText icon={X}>Cancel</IconText></button>);
                 return (
                   <tr key={req.id}>
                     <td style={styles.td}><strong>{req.staff?.full_name || '—'}</strong></td>
@@ -9611,8 +9661,8 @@ const MyHRPage = ({ userProfile }) => {
             <div style={{ fontSize: '13px', color: theme.textMuted, marginTop: '4px' }}>{myStaff.job_title || myStaff.role || '—'} · {myStaff.employee_number || '—'}</div>
           </div>
           <div style={{ display: 'flex', gap: '8px' }}>
-            <button style={{ ...styles.btn('secondary'), fontSize: '12px' }} onClick={handleDownloadIDCard} disabled={cardLoading}>{cardLoading ? 'Generating…' : '↓ ID Card'}</button>
-            <button style={{ ...styles.btn('secondary'), fontSize: '12px' }} onClick={handleDownloadBizCard} disabled={bizCardLoading}>{bizCardLoading ? 'Generating…' : '↓ Business Card'}</button>
+            <button style={{ ...styles.btn('secondary'), fontSize: '12px' }} onClick={handleDownloadIDCard} disabled={cardLoading}>{cardLoading ? 'Generating…' : <IconText icon={Download}>ID Card</IconText>}</button>
+            <button style={{ ...styles.btn('secondary'), fontSize: '12px' }} onClick={handleDownloadBizCard} disabled={bizCardLoading}>{bizCardLoading ? 'Generating…' : <IconText icon={Download}>Business Card</IconText>}</button>
           </div>
         </div>
       )}
@@ -9634,7 +9684,7 @@ const MyHRPage = ({ userProfile }) => {
               return (
                 <div key={b.leave_type}>
                   <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{b.leave_type.charAt(0).toUpperCase() + b.leave_type.slice(1)}</div>
-                  <div style={{ fontSize: '26px', fontWeight: '700', color: bal < 0 ? theme.red : theme.green, marginTop: '4px' }}>{bal}{bal < 0 ? ' ⚠' : ''}</div>
+                  <div style={{ fontSize: '26px', fontWeight: '700', color: bal < 0 ? theme.red : theme.green, marginTop: '4px' }}>{bal}{bal < 0 ? <> <Ico icon={AlertTriangle} size={20} /><span style={{ fontSize: '13px' }}> overdrawn</span></> : ''}</div>
                   <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '2px' }}>{b.used_days} used / {b.entitled_days} entitled</div>
                 </div>
               );
@@ -9645,7 +9695,7 @@ const MyHRPage = ({ userProfile }) => {
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
         <div style={styles.sectionTitle}>My Advances</div>
-        <button style={{ ...styles.btn(showAdvForm ? 'secondary' : 'primary'), fontSize: '12px' }} onClick={() => setShowAdvForm(v => !v)} disabled={!myStaff}>{showAdvForm ? '✕ Cancel' : '+ Request Advance'}</button>
+        <button style={{ ...styles.btn(showAdvForm ? 'secondary' : 'primary'), fontSize: '12px' }} onClick={() => setShowAdvForm(v => !v)} disabled={!myStaff}>{showAdvForm ? <IconText icon={X}>Cancel</IconText> : '+ Request Advance'}</button>
       </div>
       {showAdvForm && (
         <div style={{ ...styles.card, marginBottom: '16px' }}>
@@ -9678,7 +9728,7 @@ const MyHRPage = ({ userProfile }) => {
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
         <div style={styles.sectionTitle}>My Leave</div>
-        <button style={{ ...styles.btn(showLeaveForm ? 'secondary' : 'primary'), fontSize: '12px' }} onClick={() => setShowLeaveForm(v => !v)} disabled={!myStaff}>{showLeaveForm ? '✕ Cancel' : '+ Request Leave'}</button>
+        <button style={{ ...styles.btn(showLeaveForm ? 'secondary' : 'primary'), fontSize: '12px' }} onClick={() => setShowLeaveForm(v => !v)} disabled={!myStaff}>{showLeaveForm ? <IconText icon={X}>Cancel</IconText> : '+ Request Leave'}</button>
       </div>
       {showLeaveForm && (
         <div style={{ ...styles.card, marginBottom: '16px' }}>
@@ -10125,7 +10175,7 @@ const DisciplinaryPage = ({ userProfile }) => {
         </div>
         {canIssue && (
           <button style={styles.btn('primary')} onClick={() => setShowForm(v => !v)}>
-            {showForm ? '✕ Cancel' : '+ Issue Case'}
+            {showForm ? <IconText icon={X}>Cancel</IconText> : '+ Issue Case'}
           </button>
         )}
       </div>
@@ -10195,7 +10245,7 @@ const DisciplinaryPage = ({ userProfile }) => {
                     onClick={() => { setCloseTarget(c.id); setCloseSanction('none'); setReviewTarget(null); }}>Close</button>
                 )}
                 <button style={{ ...styles.btn('secondary'), fontSize: '11px', padding: '4px 10px' }}
-                  onClick={() => toggleExpand(c.id)}>{expandedId === c.id ? '▲ Hide' : '▼ Details'}</button>
+                  onClick={() => toggleExpand(c.id)}>{expandedId === c.id ? <IconText icon={ChevronUp}>Hide</IconText> : <IconText icon={ChevronDown}>Details</IconText>}</button>
               </div>
             </div>
 
@@ -10474,7 +10524,7 @@ const TruckLoadingPage = ({ userProfile }) => {
           </div>
           <div className="m-buttons" style={{ marginBottom: '16px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             <button style={styles.btn('primary')} onClick={() => { setShowLogForm(f => !f); setLogAlert(null); setIsBackfill(false); setLogForm({ vehicle_id: '', product_id: '', date: '', quantity_loaded: '', waybill_id: '' }); setSelectedLoaders([]); }}>
-              {showLogForm ? '✕ Cancel' : '+ New Log Entry'}
+              {showLogForm ? <IconText icon={X}>Cancel</IconText> : '+ New Log Entry'}
             </button>
             {!showLogForm && (
               <button style={styles.btn('secondary')} onClick={() => { setShowLogForm(true); setIsBackfill(true); loadWaybillsForLog(logs); }}>
@@ -10908,7 +10958,7 @@ const TradingMarginReport = () => {
                           <div style={{ fontWeight: '700', color: mc(r.true_margin) }}>{naira(r.true_margin)}</div>
                           <div style={{ fontSize: '11px', color: theme.textMuted }}>{pct(r.true_margin, r.sale_amount)}</div>
                           {drag > 0 && (
-                            <div style={{ fontSize: '10px', color: '#f59e0b', marginTop: '2px' }}>▼ {naira(drag)} delivery drag</div>
+                            <div style={{ fontSize: '10px', color: '#f59e0b', marginTop: '2px' }}><IconText icon={TrendingDown} size={12}>{naira(drag)} delivery drag</IconText></div>
                           )}
                         </td>
                       </tr>
@@ -10932,7 +10982,7 @@ const TradingMarginReport = () => {
                       <div style={{ fontWeight: '700', color: mc(totals.trueMargin) }}>{naira(totals.trueMargin)}</div>
                       <div style={{ fontSize: '11px', color: theme.textMuted }}>{pct(totals.trueMargin, totals.sale)}</div>
                       {totals.grossMargin > totals.trueMargin && (
-                        <div style={{ fontSize: '10px', color: '#f59e0b', marginTop: '2px' }}>▼ {naira(totals.grossMargin - totals.trueMargin)} total delivery drag</div>
+                        <div style={{ fontSize: '10px', color: '#f59e0b', marginTop: '2px' }}><IconText icon={TrendingDown} size={12}>{naira(totals.grossMargin - totals.trueMargin)} total delivery drag</IconText></div>
                       )}
                     </td>
                   </tr>
@@ -10954,60 +11004,60 @@ const navItems = [
     { id: "inventory", label: "Inventory", icon: "inventory" },
     { id: "batches", label: "Batches", icon: "batches" },
     { id: "maintenance", label: "Maintenance", icon: "maintenance" },
-    { id: "asset_register", label: "Asset Register", icon: "maintenance" },
-    { id: "site_contracts", label: "Site Contracts", icon: "orders" },
-    { id: "material_receiving", label: "Material Receiving", icon: "inventory" },
-    { id: "handovers", label: "Handovers", icon: "batches" },
+    { id: "asset_register", label: "Asset Register", icon: "asset_register" },
+    { id: "site_contracts", label: "Site Contracts", icon: "site_contracts" },
+    { id: "material_receiving", label: "Material Receiving", icon: "material_receiving" },
+    { id: "handovers", label: "Handovers", icon: "handovers" },
   ]},
   { section: "Logistics", items: [
-    { id: "waybills", label: "Waybills", icon: "waybill" },
-    { id: "vehicles", label: "Vehicles", icon: "truck" },
-    { id: "truck_loading", label: "Truck Loading", icon: "truck" },
-    { id: "pending_register", label: "Pending Deliveries", icon: "pending" },
-    { id: "daily_schedule", label: "Daily Schedule", icon: "schedule" },
+    { id: "waybills", label: "Waybills", icon: "waybills" },
+    { id: "vehicles", label: "Vehicles", icon: "vehicles" },
+    { id: "truck_loading", label: "Truck Loading", icon: "truck_loading" },
+    { id: "pending_register", label: "Pending Deliveries", icon: "pending_register" },
+    { id: "daily_schedule", label: "Daily Schedule", icon: "daily_schedule" },
   ]},
   { section: "HR & Workforce", items: [
     { id: "staff", label: "Staff", icon: "staff" },
-    { id: "labour", label: "Labour", icon: "staff" },
-    { id: "disciplinary", label: "Disciplinary", icon: "staff" },
-    { id: "attendance_kiosk", label: "Attendance Kiosk", icon: "staff" },
-    { id: "attendance_flags", label: "Attendance Flags", icon: "staff" },
-    { id: "leave", label: "Leave Requests", icon: "staff" },
-    { id: "advances", label: "Salary Advances", icon: "orders" },
+    { id: "labour", label: "Labour", icon: "labour" },
+    { id: "disciplinary", label: "Disciplinary", icon: "disciplinary" },
+    { id: "attendance_kiosk", label: "Attendance Kiosk", icon: "attendance_kiosk" },
+    { id: "attendance_flags", label: "Attendance Flags", icon: "attendance_flags" },
+    { id: "leave", label: "Leave Requests", icon: "leave" },
+    { id: "advances", label: "Salary Advances", icon: "advances" },
   ]},
-  { section: "Sales", items: [{ id: "customers", label: "Customers", icon: "staff" }, { id: "orders", label: "Orders & Invoicing", icon: "orders" }] },
+  { section: "Sales", items: [{ id: "customers", label: "Customers", icon: "customers" }, { id: "orders", label: "Orders & Invoicing", icon: "orders" }] },
   { section: "Approvals", items: [
-    { id: "lpo_approvals", label: "LPO Approvals", icon: "lpo" },
-    { id: "schedule_approvals", label: "Schedule Approvals", icon: "approve" },
+    { id: "lpo_approvals", label: "LPO Approvals", icon: "lpo_approvals" },
+    { id: "schedule_approvals", label: "Schedule Approvals", icon: "schedule_approvals" },
   ]},
   { section: "Analytics", items: [
     { id: "reports", label: "Reports", icon: "reports" },
-    { id: "kpi_dashboard", label: "KPI Dashboard", icon: "reports" },
-    { id: "trading_margin", label: "Trading Margin", icon: "orders" },
+    { id: "kpi_dashboard", label: "KPI Dashboard", icon: "kpi_dashboard" },
+    { id: "trading_margin", label: "Trading Margin", icon: "trading_margin" },
   ]},
   { section: "Finance", items: [
-    { id: "accounting", label: "Accounting", icon: "orders" },
-    { id: "payment_requests", label: "Payment Requests", icon: "orders" },
+    { id: "accounting", label: "Accounting", icon: "accounting" },
+    { id: "payment_requests", label: "Payment Requests", icon: "payment_requests" },
   ]},
   { section: "Investors (SPV)", items: [
-    { id: "my_investment", label: "My Investment", icon: "orders" },
-    { id: "investor_register", label: "Investor Register", icon: "staff" },
-    { id: "capital", label: "Capital", icon: "orders" },
-    { id: "terms", label: "Terms", icon: "reports" },
-    { id: "monthly_close", label: "Monthly Close", icon: "approve" },
-    { id: "spv_ledger", label: "SPV Ledger", icon: "orders" },
-    { id: "reserve_budget", label: "Reserve Budget", icon: "orders" },
+    { id: "my_investment", label: "My Investment", icon: "my_investment" },
+    { id: "investor_register", label: "Investor Register", icon: "investor_register" },
+    { id: "capital", label: "Capital", icon: "capital" },
+    { id: "terms", label: "Terms", icon: "terms" },
+    { id: "monthly_close", label: "Monthly Close", icon: "monthly_close" },
+    { id: "spv_ledger", label: "SPV Ledger", icon: "spv_ledger" },
+    { id: "reserve_budget", label: "Reserve Budget", icon: "reserve_budget" },
   ]},
   { section: "Settings", items: [
     { id: "products", label: "Products", icon: "products" },
-    { id: "suppliers", label: "Suppliers", icon: "supplier" },
-    { id: "data_import", label: "Data Import", icon: "orders" },
-    { id: "user_management", label: "User Management", icon: "staff" },
+    { id: "suppliers", label: "Suppliers", icon: "suppliers" },
+    { id: "data_import", label: "Data Import", icon: "data_import" },
+    { id: "user_management", label: "User Management", icon: "user_management" },
   ]},
   { section: "Account", items: [
-    { id: "messages", label: "Messages", icon: "staff" },
-    { id: "my_hr", label: "My HR", icon: "staff" },
-    { id: "my_profile", label: "My Profile", icon: "staff" },
+    { id: "messages", label: "Messages", icon: "messages" },
+    { id: "my_hr", label: "My HR", icon: "my_hr" },
+    { id: "my_profile", label: "My Profile", icon: "my_profile" },
   ]},
 ];
 
@@ -11107,7 +11157,7 @@ const RoleGrantsManager = ({ users }) => {
 
       {conflict ? (
         <div style={{ padding: '12px 14px', borderRadius: '8px', background: theme.red + '18', border: `1px solid ${theme.red}55`, marginBottom: '12px' }}>
-          <div style={{ fontSize: '13px', color: theme.text, fontWeight: '600', marginBottom: '6px' }}>⚠ Separation-of-duties warning</div>
+          <div style={{ fontSize: '13px', color: theme.text, fontWeight: '600', marginBottom: '6px' }}><IconText icon={AlertTriangle} size={20}>Separation-of-duties warning</IconText></div>
           <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '10px' }}>{conflict}</div>
           <div style={{ display: 'flex', gap: '8px' }}>
             <button style={styles.btn('danger')} disabled={busy} onClick={() => submitGrant(true)}>{busy ? 'Granting…' : 'Grant anyway'}</button>
@@ -11252,7 +11302,7 @@ const UserManagement = ({ userProfile }) => {
     <div>
       <div className="m-header" style={styles.header}>
         <div><div style={styles.pageTitle}>User Management</div><div style={styles.pageSubtitle}>Manage system users and roles — MD access only</div></div>
-        {isMD && <button style={styles.btn('primary')} onClick={() => { setShowCreate(s => !s); setErr(''); if (showCreate) resetForm(); }}>{showCreate ? '✕ Cancel' : '+ Add User'}</button>}
+        {isMD && <button style={styles.btn('primary')} onClick={() => { setShowCreate(s => !s); setErr(''); if (showCreate) resetForm(); }}>{showCreate ? <IconText icon={X}>Cancel</IconText> : '+ Add User'}</button>}
       </div>
       {err && <Alert msg={err} onClose={() => setErr('')} />}
       {ok  && <Alert msg={ok} type="success" onClose={() => setOk('')} />}
@@ -11296,12 +11346,12 @@ const UserManagement = ({ userProfile }) => {
                     )}
                     {selectedStaff && !duplicateUser && (
                       <div style={{ marginTop:'6px', fontSize:'11px', color:theme.textMuted, padding:'6px 10px', background:theme.accent+'11', borderRadius:'6px' }}>
-                        ✓ {selectedStaff.full_name} · {selectedStaff.role} · {selectedStaff.staff_type === 'permanent' ? 'Permanent' : 'Daily'}
+                        <Ico icon={Check} style={{ marginRight: '8px' }} />{selectedStaff.full_name} · {selectedStaff.role} · {selectedStaff.staff_type === 'permanent' ? 'Permanent' : 'Daily'}
                       </div>
                     )}
                     {duplicateUser && (
                       <div style={{ marginTop:'6px', padding:'8px 10px', background:theme.red+'18', border:`1px solid ${theme.red}44`, borderRadius:'6px', fontSize:'12px' }}>
-                        <div style={{ color:theme.red, fontWeight:'700' }}>⚠ {selectedStaff?.full_name} already has a system account</div>
+                        <div style={{ color:theme.red, fontWeight:'700' }}><IconText icon={AlertTriangle}>{selectedStaff?.full_name} already has a system account</IconText></div>
                         <div style={{ color:theme.textMuted, marginTop:'2px' }}>{duplicateUser.email} · {APP_ROLES.find(r=>r.id===duplicateUser.role)?.label || duplicateUser.role}</div>
                         <div style={{ marginTop:'6px', fontSize:'11px', color:theme.textMuted }}>Update their role using the table below instead.</div>
                       </div>
@@ -11400,7 +11450,7 @@ const UserManagement = ({ userProfile }) => {
                     </td>
                     <td style={{ padding:'8px 10px', fontSize:'12px' }}>
                       {linked
-                        ? <span style={{ color:theme.green, fontWeight:'600' }}>✓ {linked.full_name}</span>
+                        ? <span style={{ color:theme.green, fontWeight:'600' }}><IconText icon={Check}>{linked.full_name}</IconText></span>
                         : <span style={{ color:theme.textMuted }}>—</span>}
                     </td>
                     <td style={{ padding:'8px 10px' }}>
@@ -11742,7 +11792,7 @@ export default function App() {
                 const badge = getBadge(item.id);
                 return (
                   <div key={item.id} style={{ ...styles.navItem(active === item.id), ...(isMobile ? { minHeight: '44px' } : {}) }} onClick={() => { setActive(item.id); setContractsReport(false); if (isMobile) setSidebarOpen(false); }}>
-                    <Icon name={item.icon} size={14} />
+                    <Icon name={item.icon} size={20} />
                     <span style={{ flex: 1 }}>{item.label}</span>
                     {badge > 0 && (
                       <span style={{ background: theme.red, color: "#fff", fontSize: "10px", fontWeight: "700", borderRadius: "10px", padding: "1px 6px", minWidth: "18px", textAlign: "center" }}>{badge}</span>
@@ -11756,9 +11806,9 @@ export default function App() {
         <div style={{ padding: "14px 20px", borderTop: `1px solid ${theme.border}`, fontSize: "11px", color: theme.textMuted, lineHeight: "1.7" }}>
           <div style={{ fontWeight: "700", color: theme.text, fontSize: "12px", marginBottom: "2px" }}>{userProfile?.full_name || 'User'}</div>
           <div style={{ color: theme.accent, fontSize: "11px", marginBottom: "6px" }}>{APP_ROLES.find(r => r.id === role)?.label || role} {(isBoard || isICO) ? '· View Only' : ''}</div>
-          <div>📍 1, Dutse Alhaji, Behind Tipper Garage, Off Bwari Expressway, Abuja.</div>
-          <div>📞 +234 905 554 4433</div>
-          <div style={{ wordBreak: "break-all" }}>✉️ abujaprecastconcreteltd@gmail.com</div>
+          <div style={{ display: "flex", gap: "8px" }}><Ico icon={MapPin} style={{ marginTop: "3px" }} /><span>1, Dutse Alhaji, Behind Tipper Garage, Off Bwari Expressway, Abuja.</span></div>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}><Ico icon={Phone} /><span>+234 905 554 4433</span></div>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", wordBreak: "break-all" }}><Ico icon={Mail} /><span>abujaprecastconcreteltd@gmail.com</span></div>
           <div style={{ display:"flex", gap:"8px", marginTop:"10px" }}>
             <button onClick={() => setShowChangePwd(true)} style={{ flex:1, padding:"6px", minHeight: isMobile ? '44px' : undefined, background:"transparent", border:`1px solid ${theme.border}`, borderRadius:"6px", color:theme.textMuted, fontSize:"11px", cursor:"pointer", fontWeight:"600" }}>Change Password</button>
             <button onClick={handleLogout} style={{ flex:1, padding:"6px", minHeight: isMobile ? '44px' : undefined, background:"transparent", border:`1px solid ${theme.border}`, borderRadius:"6px", color:theme.textMuted, fontSize:"11px", cursor:"pointer", fontWeight:"600" }}>Sign Out</button>
@@ -11779,11 +11829,11 @@ export default function App() {
       <main style={{ ...styles.main, ...(isMobile ? { marginLeft: 0, minWidth: 0, padding: '16px 14px', paddingTop: '68px' } : {}) }} {...(boardMasked ? { 'data-board-view': 'true' } : {})} {...(icoMasked ? { 'data-ico-view': 'true' } : {})}>
         {/* Mobile hamburger */}
         {isMobile && (
-          <button data-board-allow data-ico-allow aria-label="Menu" onClick={() => setSidebarOpen(s => !s)} style={{ position: 'fixed', top: '10px', left: '12px', zIndex: Z.floating, width: '44px', height: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '8px', padding: 0, cursor: 'pointer', fontSize: '20px', color: theme.text, lineHeight: 1, boxShadow: '0 2px 8px rgba(0,0,0,0.3)' }}>☰</button>
+          <button data-board-allow data-ico-allow aria-label="Open menu" onClick={() => setSidebarOpen(s => !s)} style={{ position: 'fixed', top: '10px', left: '12px', zIndex: Z.floating, width: '44px', height: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '8px', padding: 0, cursor: 'pointer', fontSize: '20px', color: theme.text, lineHeight: 1, boxShadow: '0 2px 8px rgba(0,0,0,0.3)' }}><Ico icon={Menu} size={20} /></button>
         )}
         {sessionWarning && (
           <div style={{ background: "#7c3a0022", border: "1px solid #c47d0e88", borderRadius: "8px", padding: "10px 16px", marginBottom: "16px", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "13px", color: theme.accent }}>
-            <span>⚠️ Your session expires in <strong>{sessionMinutes} minute{sessionMinutes !== 1 ? 's' : ''}</strong>. Unsaved work may be lost.</span>
+            <span><Ico icon={AlertTriangle} size={20} style={{ marginRight: "8px" }} />Your session expires in <strong>{sessionMinutes} minute{sessionMinutes !== 1 ? 's' : ''}</strong>. Unsaved work may be lost.</span>
             <div style={{ display: "flex", gap: "8px" }}>
               <button data-board-allow data-ico-allow onClick={handleExtendSession} style={{ padding: "5px 14px", borderRadius: "6px", background: theme.accent, color: "#000", border: "none", fontSize: "12px", fontWeight: "700", cursor: "pointer" }}>Extend Session</button>
               <button data-board-allow data-ico-allow onClick={() => setSessionWarning(false)} style={{ padding: "5px 10px", borderRadius: "6px", background: "transparent", color: theme.textMuted, border: `1px solid ${theme.border}`, fontSize: "12px", cursor: "pointer" }}>Dismiss</button>
@@ -11805,12 +11855,12 @@ export default function App() {
         )}
         {boardMasked && (
           <div style={{ background: theme.accent+'22', border: `1px solid ${theme.accent}44`, borderRadius: '8px', padding: '8px 16px', margin: '0 0 16px', fontSize: '12px', color: theme.accent, fontWeight: '600' }}>
-            👁 View Only Mode — Board Member access
+            <IconText icon={Eye}>View Only Mode — Board Member access</IconText>
           </div>
         )}
         {icoMasked && (
           <div style={{ background: theme.blue+'22', border: `1px solid ${theme.blue}44`, borderRadius: '8px', padding: '8px 16px', margin: '0 0 16px', fontSize: '12px', color: theme.blue, fontWeight: '600' }}>
-            🔒 Read-Only Mode — Internal Control Officer. Approvals available in Schedule Approvals and Labour modules.
+            <Ico icon={Lock} style={{ marginRight: '8px' }} />Read-Only Mode — Internal Control Officer. Approvals available in Schedule Approvals and Labour modules.
           </div>
         )}
         {pages[safePage]}

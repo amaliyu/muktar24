@@ -4,6 +4,8 @@ import autoTable from 'jspdf-autotable'
 import { balanceSheetService, incomeStatementService, cashFlowService, openingBalancesService, financialAdjustmentsService } from '../services/financialService'
 import { hasRole } from '../lib/roles'
 import { fmtDate } from './site/siteUi'
+import { AlertTriangle, CheckCircle2, Download, TrendingDown, TrendingUp, X } from 'lucide-react'
+import { Ico, IconText } from './Ico'
 
 const theme = {
   bg: '#0f1117', surface: '#1a1d27', card: '#21263a', border: '#2e3452',
@@ -269,7 +271,7 @@ const BalanceSheetTab = ({ userProfile }) => {
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
           <div><div style={s.label}>As at Date</div><input type="date" style={s.input} value={asAt} onChange={e => setAsAt(e.target.value)} /></div>
           <div><div style={s.label}>Compare with</div><input type="date" style={s.input} value={compareDate} onChange={e => setCompareDate(e.target.value)} /></div>
-          <button style={{ ...s.btn('primary'), marginTop: '18px' }} onClick={downloadPDF}>⬇ Download PDF</button>
+          <button style={{ ...s.btn('primary'), marginTop: '18px' }} onClick={downloadPDF}><IconText icon={Download}>Download PDF</IconText></button>
         </div>
       </div>
 
@@ -444,8 +446,8 @@ const BalanceSheetTab = ({ userProfile }) => {
           {/* Balance Check */}
           <div style={{ ...s.card, background: Math.abs(bs.difference) > 1 ? theme.red + '18' : theme.green + '18', border: `1px solid ${Math.abs(bs.difference) > 1 ? theme.red : theme.green}44` }}>
             {Math.abs(bs.difference) > 1
-              ? <div style={{ color: theme.red, fontWeight: '700' }}>⚠ Balance Sheet does not balance — difference of {naira(Math.abs(bs.difference))}. Please check opening balances.</div>
-              : <div style={{ color: theme.green, fontWeight: '700' }}>✓ Balance Sheet balances</div>
+              ? <div style={{ color: theme.red, fontWeight: '700' }}><IconText icon={AlertTriangle} size={20}>Balance Sheet does not balance — difference of {naira(Math.abs(bs.difference))}. Please check opening balances.</IconText></div>
+              : <div style={{ color: theme.green, fontWeight: '700' }}><IconText icon={CheckCircle2} size={20}>Balance Sheet balances</IconText></div>
             }
           </div>
 
@@ -470,7 +472,7 @@ const BalanceSheetTab = ({ userProfile }) => {
                   <span>{adj.account_name} {adj.reason && <span style={{ color: theme.textMuted, fontSize: '11px' }}>— {adj.reason}</span>}</span>
                   <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                     <span style={{ fontWeight: '600' }}>{naira(adj.amount)}</span>
-                    <button style={{ ...s.btn('danger'), padding: '2px 8px', fontSize: '10px' }} onClick={async () => { await financialAdjustmentsService.delete(adj.id); load(asAt, setData) }}>✕</button>
+                    <button style={{ ...s.btn('danger'), padding: '2px 8px', fontSize: '10px' }} onClick={async () => { await financialAdjustmentsService.delete(adj.id); load(asAt, setData) }} aria-label="Delete adjustment"><Ico icon={X} /></button>
                   </div>
                 </div>
               ))}
@@ -615,7 +617,7 @@ const IncomeStatementTab = ({ userProfile }) => {
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
           <div><div style={s.label}>From</div><input type="date" style={s.input} value={from} onChange={e => setFrom(e.target.value)} /></div>
           <div><div style={s.label}>To</div><input type="date" style={s.input} value={to} onChange={e => setTo(e.target.value)} /></div>
-          <button style={{ ...s.btn('primary'), marginTop: '18px' }} onClick={downloadPDF}>⬇ Download PDF</button>
+          <button style={{ ...s.btn('primary'), marginTop: '18px' }} onClick={downloadPDF}><IconText icon={Download}>Download PDF</IconText></button>
         </div>
       </div>
 
@@ -802,7 +804,7 @@ const CashFlowTab = ({ userProfile }) => {
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
           <div><div style={s.label}>From</div><input type="date" style={s.input} value={from} onChange={e => setFrom(e.target.value)} /></div>
           <div><div style={s.label}>To</div><input type="date" style={s.input} value={to} onChange={e => setTo(e.target.value)} /></div>
-          <button style={{ ...s.btn('primary'), marginTop: '18px' }} onClick={downloadPDF}>⬇ Download PDF</button>
+          <button style={{ ...s.btn('primary'), marginTop: '18px' }} onClick={downloadPDF}><IconText icon={Download}>Download PDF</IconText></button>
         </div>
       </div>
 
@@ -1039,7 +1041,7 @@ const ManagementAccountsTab = ({ userProfile }) => {
         </div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
           <div><div style={s.label}>Month</div><input type="month" style={s.input} value={month} onChange={e => setMonth(e.target.value)} /></div>
-          <button style={{ ...s.btn('primary'), marginTop: '18px', fontWeight: '700' }} onClick={downloadManagementAccounts}>⬇ Download Management Accounts Pack</button>
+          <button style={{ ...s.btn('primary'), marginTop: '18px', fontWeight: '700' }} onClick={downloadManagementAccounts}><IconText icon={Download}>Download Management Accounts Pack</IconText></button>
         </div>
       </div>
 
@@ -1064,7 +1066,7 @@ const ManagementAccountsTab = ({ userProfile }) => {
                 <div style={{ fontSize: '20px', fontWeight: '800', color, marginTop: '6px' }}>{naira(val||0)}</div>
                 {prev != null && (
                   <div style={{ fontSize: '11px', color: arrowColor(val||0, prev, label.includes('Expense')||label.includes('Receivable')), marginTop: '2px' }}>
-                    {arrow(val||0, prev)} {pct(val||0, prev)} vs last month
+                    <IconText icon={(val||0) >= prev ? TrendingUp : TrendingDown} size={12} style={{ gap: '4px' }}>{pct(val||0, prev)} vs last month</IconText>
                   </div>
                 )}
               </div>

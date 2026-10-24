@@ -3,6 +3,8 @@ import { supabase } from '../lib/supabase'
 import { openingBalancesService } from '../services/financialService'
 import { Z } from '../lib/zIndex'
 import { ConfirmDialog, ui, fmtDay, fmtDateTime as fmtStamp } from './site/siteUi'
+import { X } from 'lucide-react'
+import { Ico, IconText } from './Ico'
 
 // ── Theme ─────────────────────────────────────────────────────────────
 const theme = {
@@ -77,7 +79,7 @@ const StyledInput = ({ value, onChange, type = 'text', placeholder, disabled, st
   />
 )
 
-const Btn = ({ children, onClick, variant = 'secondary', small, disabled, style }) => {
+const Btn = ({ children, onClick, variant = 'secondary', small, disabled, style, 'aria-label': ariaLabel }) => {
   const colors = {
     primary:   { bg: theme.accent,   color: '#1a0e00', border: theme.accent },
     secondary: { bg: theme.surface,  color: theme.text, border: theme.border },
@@ -89,6 +91,7 @@ const Btn = ({ children, onClick, variant = 'secondary', small, disabled, style 
     <button
       onClick={onClick}
       disabled={disabled}
+      aria-label={ariaLabel}
       style={{
         padding: small ? '5px 12px' : '8px 16px',
         borderRadius: '7px',
@@ -268,7 +271,7 @@ const BalanceRow = ({
           <div style={{ display: 'flex', gap: '6px' }}>
             <Btn variant="ghost" small onClick={() => onEdit(row)}>Edit</Btn>
             {!row.vehicle_id && !isVehicle && (
-              <Btn variant="danger" small onClick={() => onDelete(row.id)}>×</Btn>
+              <Btn variant="danger" small onClick={() => onDelete(row.id)} aria-label="Delete"><Ico icon={X} /></Btn>
             )}
           </div>
         )}

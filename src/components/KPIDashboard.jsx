@@ -5,6 +5,8 @@ import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { Z } from '../lib/zIndex'
 import { fmtDate } from './site/siteUi'
+import { ArrowRight, ClipboardList, Download, Factory, FileText, LayoutGrid, RefreshCw, Settings, TrendingDown, TrendingUp, Users, Wallet, X } from 'lucide-react'
+import { Ico, IconText } from './Ico'
 
 const theme = {
   bg: '#0f1117', surface: '#1a1d27', card: '#21263a', border: '#2e3452',
@@ -109,7 +111,7 @@ const TrendBadge = ({ current, previous }) => {
   const up = delta >= 0
   return (
     <span style={{ ...s.badge(up ? theme.green : theme.red), fontSize: '10px', marginLeft: '6px' }}>
-      {up ? '▲' : '▼'} {Math.abs(delta).toFixed(1)}%
+      <IconText icon={up ? TrendingUp : TrendingDown} size={12} style={{ gap: '4px' }}>{up ? '+' : '−'}{Math.abs(delta).toFixed(1)}%</IconText>
     </span>
   )
 }
@@ -384,12 +386,12 @@ export default function KPIDashboard() {
 
   // ── TABS ─────────────────────────────────────────────────────────
   const TABS = [
-    { id: 'overview',    label: '⊞ Overview' },
-    { id: 'production',  label: '🏭 Production' },
-    { id: 'sales',       label: '📋 Sales' },
-    { id: 'delivery',    label: '📄 Delivery' },
-    { id: 'staff',       label: '👥 Staff' },
-    { id: 'financial',   label: '💰 Financial' },
+    { id: 'overview',    label: 'Overview', icon: LayoutGrid },
+    { id: 'production',  label: 'Production', icon: Factory },
+    { id: 'sales',       label: 'Sales', icon: ClipboardList },
+    { id: 'delivery',    label: 'Delivery', icon: FileText },
+    { id: 'staff',       label: 'Staff', icon: Users },
+    { id: 'financial',   label: 'Financial', icon: Wallet },
   ]
 
   // ── PDF ─────────────────────────────────────────────────────────
@@ -471,9 +473,9 @@ export default function KPIDashboard() {
           <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '2px' }}>Abuja Precast Concrete Limited · {fmtDate(range.from)} → {fmtDate(range.to)}</div>
         </div>
         <div style={s.row}>
-          <button data-ico-allow data-board-allow style={s.btn('primary')} onClick={downloadPDF}>↓ KPI Report PDF</button>
-          <button style={s.btn()} onClick={() => { setTargetForm({ ...targets }); setShowTargets(true) }}>⚙ Set Targets</button>
-          <button data-ico-allow data-board-allow style={s.btn()} onClick={load} disabled={loading}>{loading ? '…' : '↺'}</button>
+          <button data-ico-allow data-board-allow style={s.btn('primary')} onClick={downloadPDF}><IconText icon={Download}>KPI Report PDF</IconText></button>
+          <button style={s.btn()} onClick={() => { setTargetForm({ ...targets }); setShowTargets(true) }}><IconText icon={Settings}>Set Targets</IconText></button>
+          <button data-ico-allow data-board-allow style={s.btn()} onClick={load} disabled={loading} aria-label="Refresh">{loading ? '…' : <Ico icon={RefreshCw} />}</button>
         </div>
       </div>
 
@@ -489,7 +491,7 @@ export default function KPIDashboard() {
           {preset === 'custom' && (
             <>
               <input type="date" style={s.input} value={range.from} onChange={e => setRange(r => ({ ...r, from: e.target.value }))} />
-              <span style={{ color: theme.textMuted }}>→</span>
+              <span style={{ color: theme.textMuted }} aria-label="to"><Ico icon={ArrowRight} /></span>
               <input type="date" style={s.input} value={range.to} onChange={e => setRange(r => ({ ...r, to: e.target.value }))} />
             </>
           )}
@@ -498,7 +500,7 @@ export default function KPIDashboard() {
 
       {/* Tabs */}
       <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '16px' }}>
-        {TABS.map(t => <button key={t.id} data-ico-allow data-board-allow style={s.tab(tab === t.id)} onClick={() => setTab(t.id)}>{t.label}</button>)}
+        {TABS.map(t => <button key={t.id} data-ico-allow data-board-allow style={s.tab(tab === t.id)} onClick={() => setTab(t.id)}><IconText icon={t.icon}>{t.label}</IconText></button>)}
       </div>
 
       {loading && <div style={{ textAlign: 'center', padding: '60px', color: theme.textMuted, fontSize: '13px' }}>Loading KPIs…</div>}
@@ -836,7 +838,7 @@ export default function KPIDashboard() {
           <div style={{ ...s.card, width: '100%', maxWidth: '480px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <div style={{ fontWeight: '700', color: theme.text, fontSize: '15px' }}>Set KPI Targets</div>
-              <button style={s.btn()} onClick={() => setShowTargets(false)}>✕</button>
+              <button style={s.btn()} onClick={() => setShowTargets(false)} aria-label="Close"><Ico icon={X} /></button>
             </div>
             {[
               ['monthlyProductionTarget', 'Monthly Production Target (blocks)', 'e.g. 50000'],

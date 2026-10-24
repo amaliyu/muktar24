@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { notificationsService } from '../services/notifications'
 import { Z } from '../lib/zIndex'
+import { ArrowRight } from 'lucide-react'
+import { Ico, IconText } from './Ico'
 
 const theme = {
   bg: "#0f1117", surface: "#1a1d27", card: "#21263a", border: "#2e3452",
@@ -281,7 +283,7 @@ export default function NotificationBell({ userProfile, onNavigate, isMobile }) 
                         <div style={{ fontSize: '11px', color: theme.textMuted, lineHeight: '1.4', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{n.body}</div>
                       )}
                       {hasNav && (
-                        <div style={{ fontSize: '10px', color: theme.blue, marginTop: '3px', fontWeight: '600' }}>View →</div>
+                        <div style={{ fontSize: '10px', color: theme.blue, marginTop: '3px', fontWeight: '600' }}><IconText icon={ArrowRight} size={12} iconRight>View</IconText></div>
                       )}
                     </div>
                   </div>
