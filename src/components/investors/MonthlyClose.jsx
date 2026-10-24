@@ -1,3 +1,4 @@
+import { withPhase7Touch } from './investorUi'
 import { useState } from 'react'
 import { useSites } from '../SitePicker'
 import { siteName } from '../../services/sites'
@@ -17,7 +18,7 @@ import { POOL_READ_ROLES, INTERNAL_PDF_ROLES, PoolSitePicker, MonthSelect, PageH
 
 const STATUS = { none: { label: 'Not computed', color: theme.textMuted }, draft: { label: 'Draft', color: theme.accent }, approved: { label: 'Approved', color: theme.green }, voided: { label: 'Voided', color: theme.red } }
 
-export default function MonthlyClose({ userProfile }) {
+function MonthlyClose({ userProfile }) {
   const canRead = hasRole(userProfile, ...POOL_READ_ROLES)
   const canCompute = hasRole(userProfile, 'md', 'accountant')
   const canPay = hasRole(userProfile, 'md', 'accountant')
@@ -242,3 +243,5 @@ function Statement({ st, approved, canPay, onPay, onPdf }) {
     </>
   )
 }
+
+export default withPhase7Touch(MonthlyClose)

@@ -1,3 +1,4 @@
+import { withPhase7Touch } from './siteUi'
 import { useEffect, useMemo, useState } from 'react'
 import { useSites } from '../SitePicker'
 import { siteName } from '../../services/sites'
@@ -22,7 +23,7 @@ const CYCLE_EDIT_ROLES = ['md', 'accountant']
 
 const MODEL_LABEL = { service_fee: 'Service fee', full_supply: 'Full supply' }
 
-export default function SiteContracts({ userProfile, initialSiteId, initialReport = false }) {
+function SiteContracts({ userProfile, initialSiteId, initialReport = false }) {
   const isReader = hasRole(userProfile, ...SITE_READ_ROLES)
   const isMD = userProfile?.role === 'md'
   const canHolidays = isMD || hasRole(userProfile, 'hr_officer')
@@ -672,3 +673,5 @@ function HolidaysEditor() {
     </div>
   )
 }
+
+export default withPhase7Touch(SiteContracts)

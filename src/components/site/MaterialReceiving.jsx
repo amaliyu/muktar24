@@ -1,3 +1,4 @@
+import { withPhase7Touch } from './siteUi'
 import { useEffect, useMemo, useState } from 'react'
 import SitePicker, { useSites } from '../SitePicker'
 import { DUTSE_SITE_ID, siteName } from '../../services/sites'
@@ -173,7 +174,7 @@ export function ReceivingForm({ onSaved }) {
   )
 }
 
-export default function MaterialReceiving({ userProfile }) {
+function MaterialReceiving({ userProfile }) {
   const canWrite = hasRole(userProfile, ...RECEIVING_WRITE_ROLES)
   const canVoid = hasRole(userProfile, ...RECEIVING_VOID_ROLES)
   const { sites } = useSites()
@@ -305,3 +306,5 @@ export default function MaterialReceiving({ userProfile }) {
     </div>
   )
 }
+
+export default withPhase7Touch(MaterialReceiving)

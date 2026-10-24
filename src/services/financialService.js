@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase'
+import { deleteById } from '../utils/checkedDelete'
 
 // ============================================================
 // Opening Balances
@@ -160,11 +161,7 @@ export const financialAdjustmentsService = {
    * Permanently delete a financial adjustment by id.
    */
   async delete(id) {
-    const { error } = await supabase
-      .from('financial_adjustments')
-      .delete()
-      .eq('id', id)
-    if (error) throw error
+    return deleteById(supabase, 'financial_adjustments', id)
   },
 }
 

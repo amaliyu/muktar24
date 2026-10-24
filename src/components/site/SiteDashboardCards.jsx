@@ -1,3 +1,4 @@
+import { withPhase7Touch } from './siteUi'
 import { useEffect, useState } from 'react'
 import { useSites } from '../SitePicker'
 import { siteContractsService, lagosToday } from '../../services/siteContracts'
@@ -11,7 +12,7 @@ import { theme, ui, fmtQty, fmtDec, fmtDate, ErrorBox, SkeletonRows } from './si
 // Who gets the "Weekly report" shortcut on each card.
 const REPORT_LINK_ROLES = ['md', 'production_manager', 'assistant_production_manager', 'ico', 'board_member']
 
-export default function SiteDashboardCards({ userProfile, onOpenSite }) {
+function SiteDashboardCards({ userProfile, onOpenSite }) {
   const showReportLink = hasRole(userProfile, ...REPORT_LINK_ROLES)
   const { sites, error: sitesErr } = useSites()
   const clientSites = sites.filter(s => s.site_type === 'client_site')
@@ -125,3 +126,5 @@ const Metric = ({ label, value, sub }) => (
     {sub && <div style={ui.hint}>{sub}</div>}
   </div>
 )
+
+export default withPhase7Touch(SiteDashboardCards)

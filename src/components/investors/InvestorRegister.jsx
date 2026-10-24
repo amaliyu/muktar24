@@ -1,3 +1,4 @@
+import { withPhase7Touch } from './investorUi'
 import { useMemo, useState } from 'react'
 import { useSites } from '../SitePicker'
 import { siteName } from '../../services/sites'
@@ -11,7 +12,7 @@ import { POOL_READ_ROLES, PageHeader, Field, Empty, useLoad, NoAccess } from './
 // board read. Investors are deactivated, never deleted. The APCL row (kind
 // 'apcl') keeps its kind and is never deactivated.
 
-export default function InvestorRegister({ userProfile }) {
+function InvestorRegister({ userProfile }) {
   const canRead = hasRole(userProfile, ...POOL_READ_ROLES)
   const isMD = userProfile?.role === 'md'
   const { sites } = useSites()
@@ -190,3 +191,5 @@ function LinkDialog({ link, setLink, onClose, onDone }) {
     </ConfirmDialog>
   )
 }
+
+export default withPhase7Touch(InvestorRegister)

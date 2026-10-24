@@ -1,3 +1,4 @@
+import { withPhase7Touch } from './investorUi'
 import { useMemo, useState } from 'react'
 import { useSites } from '../SitePicker'
 import { siteName } from '../../services/sites'
@@ -13,7 +14,7 @@ import { POOL_READ_ROLES, PoolSitePicker, PageHeader, Field, Empty, useLoad, NoA
 // with version + 1. The DB trigger validates the tiers and locks any version
 // used by an approved month. Sites pick a version from a date (site_pool_terms).
 
-export default function Terms({ userProfile }) {
+function Terms({ userProfile }) {
   const canRead = hasRole(userProfile, ...POOL_READ_ROLES)
   const isMD = userProfile?.role === 'md'
   const { sites } = useSites()
@@ -301,3 +302,5 @@ function AssignDialog({ assign, setAssign, terms, siteId, siteLabel, onClose, on
     </ConfirmDialog>
   )
 }
+
+export default withPhase7Touch(Terms)

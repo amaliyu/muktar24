@@ -1,3 +1,4 @@
+import { withPhase7Touch } from './siteUi'
 import { useState } from 'react'
 import { fetchWeeklyReportData } from '../../services/siteReports'
 import { buildWeeklySiteReport, lastCompletedWeek, weekOf, weekLabel, lagosDateOf } from '../../utils/weeklySiteReport'
@@ -18,7 +19,7 @@ export const WEEKLY_INTERNAL_ROLES = ['md', 'ico', 'accountant']
 
 const isoShift = (iso, days) => new Date(Date.parse(`${iso}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10)
 
-export default function WeeklyReportPanel({ contract, site, userProfile }) {
+function WeeklyReportPanel({ contract, site, userProfile }) {
   const canInternal = hasRole(userProfile, ...WEEKLY_INTERNAL_ROLES)
   const [week, setWeek] = useState(() => lastCompletedWeek())
   const [busy, setBusy] = useState(null)
@@ -90,3 +91,5 @@ export default function WeeklyReportPanel({ contract, site, userProfile }) {
     </div>
   )
 }
+
+export default withPhase7Touch(WeeklyReportPanel)

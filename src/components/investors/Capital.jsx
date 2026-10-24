@@ -1,3 +1,4 @@
+import { withPhase7Touch } from './investorUi'
 import { useState } from 'react'
 import { useSites } from '../SitePicker'
 import { siteName } from '../../services/sites'
@@ -15,7 +16,7 @@ import { POOL_READ_ROLES, PoolSitePicker, PageHeader, Field, Empty, useLoad, NoA
 
 const KIND_COLOR = { contribution: theme.green, bridge: theme.blue, bridge_refund: theme.accent, correction: theme.red }
 
-export default function Capital({ userProfile }) {
+function Capital({ userProfile }) {
   const canRead = hasRole(userProfile, ...POOL_READ_ROLES)
   const isMD = userProfile?.role === 'md'
   const { sites } = useSites()
@@ -198,3 +199,5 @@ function ContributionForm({ form, setForm, siteId, siteLabel, investors, assets,
     </ConfirmDialog>
   )
 }
+
+export default withPhase7Touch(Capital)
