@@ -76,8 +76,9 @@ import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { Z } from './lib/zIndex'
 import { defaultMachineId, resolveMachine } from './utils/productionMachine'
-import MobileScope from './components/MobileScope'
-import { ConfirmDialog, fmtDate } from './components/site/siteUi'
+import MobileScope, { revealOnPhone } from './components/MobileScope'
+import { ConfirmDialog, fmtDate, fmtDay, fmtDateTime } from './components/site/siteUi'
+import { deleteWhere } from './utils/checkedDelete'
 
 const theme = {
   bg: "#0f1117", surface: "#1a1d27", card: "#21263a", border: "#2e3452",
@@ -225,6 +226,7 @@ const InvoiceEditorModal = ({ editor, setEditor, onSave, saving }) => {
   // Active products power the line-item datalist (pick-or-type) and the
   // optional unit-price default. Hooks must run before the early return below.
   const [products, setProducts] = useState([]);
+  // Suggestions only — a line can still be typed in full, so a failed load is safe to ignore.
   useEffect(() => { productsService.getActive().then(setProducts).catch(() => {}); }, []);
   if (!editor) return null;
   const { items, delivery_cost, include_vat, discount } = editor;
@@ -293,8 +295,8 @@ const InvoiceEditorModal = ({ editor, setEditor, onSave, saving }) => {
           {items.map((item, idx) => (
             <div key={idx} style={{ display: 'flex', gap: '8px', marginBottom: '8px', alignItems: 'center' }}>
               <input list="invoice-line-products" style={{ ...styles.input, flex: 2 }} placeholder="Select or type product…" value={item.description} onChange={e => onDescriptionChange(idx, e.target.value)} />
-              <input style={{ ...styles.input, flex: 1 }} type="number" placeholder="Qty" value={item.quantity} onChange={e => updItem(idx, 'quantity', e.target.value)} />
-              <input style={{ ...styles.input, flex: 1 }} type="number" placeholder="Unit Price" value={item.unit_price} onChange={e => updItem(idx, 'unit_price', e.target.value)} />
+              <input style={{ ...styles.input, flex: 1 }} type="number" inputMode="decimal" placeholder="Qty" value={item.quantity} onChange={e => updItem(idx, 'quantity', e.target.value)} />
+              <input style={{ ...styles.input, flex: 1 }} type="number" inputMode="decimal" placeholder="Unit Price" value={item.unit_price} onChange={e => updItem(idx, 'unit_price', e.target.value)} />
               <div style={{ ...styles.input, flex: 1, background: 'transparent', color: theme.accent, fontWeight: '700', fontSize: '12px' }}>
                 {item.quantity && item.unit_price ? N((Number(item.quantity) || 0) * (Number(item.unit_price) || 0)) : '—'}
               </div>
@@ -307,11 +309,11 @@ const InvoiceEditorModal = ({ editor, setEditor, onSave, saving }) => {
           <div style={styles.grid(3)}>
             <div style={styles.formGroup}>
               <label style={styles.label}>Delivery Cost (₦)</label>
-              <input style={styles.input} type="number" placeholder="0" value={editor.delivery_cost} onChange={e => upd('delivery_cost', e.target.value)} />
+              <input style={styles.input} type="number" inputMode="decimal" placeholder="0" value={editor.delivery_cost} onChange={e => upd('delivery_cost', e.target.value)} />
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Discount (₦)</label>
-              <input style={styles.input} type="number" placeholder="0" value={editor.discount} onChange={e => upd('discount', e.target.value)} />
+              <input style={styles.input} type="number" inputMode="decimal" placeholder="0" value={editor.discount} onChange={e => upd('discount', e.target.value)} />
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>VAT</label>
@@ -371,8 +373,9 @@ const Icon = ({ name, size = 16 }) => {
 
 const ProductSelect = ({ value, onChange, style, showEmpty = false }) => {
   const [products, setProducts] = useState([]);
+  const [loadErr, setLoadErr] = useState('');
   useEffect(() => {
-    productsService.getActive().then(setProducts).catch(() => {});
+    productsService.getActive().then(setProducts).catch(e => setLoadErr(e?.message || 'unknown error'));
   }, []);
   const categories = [...new Set(products.map(p => p.category))];
   return (
@@ -380,6 +383,7 @@ const ProductSelect = ({ value, onChange, style, showEmpty = false }) => {
       const p = products.find(pr => pr.name === e.target.value);
       onChange(e.target.value, p?.unit || "pieces");
     }}>
+      {loadErr && <option value="" disabled>Could not load products: {loadErr}</option>}
       {showEmpty && <option value="">— Select product —</option>}
       {value && !products.find(p => p.name === value) && <option value={value}>{value}</option>}
       {categories.length === 0 && !value && <option value="9 Inch 3 Hole Block">9 Inch 3 Hole Block</option>}
@@ -1350,7 +1354,7 @@ const Orders = ({ onNavigate, userProfile }) => {
     try {
       const prods = await productsService.getActive();
       prods.forEach(p => { productMap[p.name] = p.unit; });
-    } catch {}
+    } catch { /* unit labels only ("pcs" beside a line); lines still show without them */ }
     return productMap;
   };
 
@@ -1374,8 +1378,9 @@ const Orders = ({ onNavigate, userProfile }) => {
       if (existingInvoice) {
         // Read saved line items; fall back to order_items if none exist yet
         // (existing invoices have no invoice_items rows).
-        let savedItems = [];
-        try { savedItems = await invoicesService.getItems(existingInvoice.id); } catch {}
+        // A failed read must stop here: falling back to order_items would show
+        // (and on save, overwrite) the invoice with the wrong lines.
+        const savedItems = await invoicesService.getItems(existingInvoice.id);
         const editorItems = savedItems.length > 0
           ? savedItems.map(it => ({ description: it.block_type || "", quantity: it.quantity, unit_price: it.unit_price, unit: productMap[it.block_type] || "" }))
           : fromOrderItems(selected.order_items || []);
@@ -1419,8 +1424,9 @@ const Orders = ({ onNavigate, userProfile }) => {
     setInvoicing(true);
     try {
       const productMap = await loadProductUnits();
-      let items = [];
-      try { items = await invoicesService.getItems(invoice.id); } catch {}
+      // Not caught here: a PDF built from order_items instead of the saved
+      // invoice lines would be wrong, so a failed read reports the error.
+      const items = await invoicesService.getItems(invoice.id);
       const pdfItems = items.length > 0
         ? items.map(it => ({ description: it.block_type || "", quantity: it.quantity, unit_price: it.unit_price, unit: productMap[it.block_type] || "" }))
         : (selected?.order_items || []).map(i => ({ description: i.block_type || "", quantity: i.quantity, unit_price: i.unit_price, unit: productMap[i.block_type] || "" }));
@@ -1448,11 +1454,14 @@ const Orders = ({ onNavigate, userProfile }) => {
       await invoicesService.issue(invoice.id);
       // Issuing a draft is the point the order becomes a firm sale — advance it
       // to 'invoiced' now (a draft/quotation left it untouched).
-      if (selected?.id) { try { await ordersService.updateStatus(selected.id, "invoiced"); } catch {} }
+      let statusErr = null;
+      if (selected?.id) { try { await ordersService.updateStatus(selected.id, "invoiced"); } catch (e) { statusErr = e; } }
       setIssueTarget(null);
       const newOrders = await load();
       if (newOrders) setSelected(newOrders.find(o => o.id === selected?.id) || null);
-      setAlert({ type: "success", msg: `Invoice ${invoice.invoice_number} issued — it is now a receivable.` });
+      setAlert(statusErr
+        ? { type: "error", msg: `Invoice ${invoice.invoice_number} issued, but the order could not be moved to "invoiced": ${statusErr.message}` }
+        : { type: "success", msg: `Invoice ${invoice.invoice_number} issued — it is now a receivable.` });
     } catch (e) {
       setIssueTarget(null);
       setAlert({ type: "error", msg: cleanInvoiceError(e) });
@@ -1812,11 +1821,11 @@ const Orders = ({ onNavigate, userProfile }) => {
                   </div>
                   <div style={{ flex: 1 }}>
                     {idx === 0 && <label style={styles.label}>Quantity</label>}
-                    <input style={styles.input} type="number" placeholder="e.g. 10000" value={item.quantity} onChange={e => updateItem(idx, "quantity", e.target.value)} />
+                    <input style={styles.input} type="number" inputMode="decimal" placeholder="e.g. 10000" value={item.quantity} onChange={e => updateItem(idx, "quantity", e.target.value)} />
                   </div>
                   <div style={{ flex: 1 }}>
                     {idx === 0 && <label style={styles.label}>Unit Price (₦)</label>}
-                    <input style={styles.input} type="number" placeholder="e.g. 250" value={item.unitPrice} onChange={e => updateItem(idx, "unitPrice", e.target.value)} />
+                    <input style={styles.input} type="number" inputMode="decimal" placeholder="e.g. 250" value={item.unitPrice} onChange={e => updateItem(idx, "unitPrice", e.target.value)} />
                   </div>
                   <div style={{ flex: 1 }}>
                     {idx === 0 && <label style={styles.label}>Subtotal</label>}
@@ -1841,7 +1850,7 @@ const Orders = ({ onNavigate, userProfile }) => {
                 {item.sourceType === 'resale' && (
                   <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                     <label style={{ ...styles.label, marginBottom: 0, fontSize: "12px", whiteSpace: "nowrap" }}>Partner cost (₦):</label>
-                    <input style={{ ...styles.input, maxWidth: "200px" }} type="number" min="0" placeholder="Cost basis (optional)" value={item.costBasis} onChange={e => updateItem(idx, "costBasis", e.target.value)} />
+                    <input style={{ ...styles.input, maxWidth: "200px" }} type="number" inputMode="decimal" min="0" placeholder="Cost basis (optional)" value={item.costBasis} onChange={e => updateItem(idx, "costBasis", e.target.value)} />
                   </div>
                 )}
               </div>
@@ -1896,7 +1905,7 @@ const Orders = ({ onNavigate, userProfile }) => {
       </div>
 
       {loading ? <Spinner /> : (
-        <div style={styles.grid(2)}>
+        <div className="m-stack" style={styles.grid(2)}>
           <div style={styles.card}>
             <div style={styles.sectionTitle}>All Orders</div>
             {orders.length === 0 ? (
@@ -1905,7 +1914,7 @@ const Orders = ({ onNavigate, userProfile }) => {
               const total = orderTotal(o);
               const paid = orderPaid(o);
               return (
-                <div key={o.id} onClick={() => setSelected(o)} style={{ padding: "14px", borderRadius: "8px", marginBottom: "8px", background: selected?.id === o.id ? "rgba(245,166,35,0.08)" : "transparent", border: `1px solid ${selected?.id === o.id ? theme.accent + "44" : theme.border}`, cursor: "pointer", transition: "all 0.15s" }}>
+                <div key={o.id} onClick={() => { setSelected(o); revealOnPhone('order-detail'); }} style={{ padding: "14px", borderRadius: "8px", marginBottom: "8px", background: selected?.id === o.id ? "rgba(245,166,35,0.08)" : "transparent", border: `1px solid ${selected?.id === o.id ? theme.accent + "44" : theme.border}`, cursor: "pointer", transition: "all 0.15s" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <div>
                       <div style={{ fontWeight: "600", fontSize: "14px" }}>{o.customer?.name || "—"}</div>
@@ -1926,7 +1935,7 @@ const Orders = ({ onNavigate, userProfile }) => {
             })}
           </div>
 
-          <div style={styles.card}>
+          <div id="order-detail" className={selected ? undefined : "m-hide"} style={styles.card}>
             {selected ? (() => {
               const total = orderTotal(selected);
               const paid = orderPaid(selected);
@@ -1952,8 +1961,8 @@ const Orders = ({ onNavigate, userProfile }) => {
                         <div key={idx} style={{ marginBottom: "10px", padding: item.sourceType === 'resale' ? "8px" : "0", background: item.sourceType === 'resale' ? theme.accent + "08" : "transparent", borderRadius: "6px", border: item.sourceType === 'resale' ? `1px solid ${theme.accent}33` : "1px solid transparent" }}>
                           <div style={{ display: "flex", gap: "8px", marginBottom: item.sourceType === 'resale' ? "6px" : "0", alignItems: "center" }}>
                             <ProductSelect value={item.blockType} onChange={(name, unit) => { const it = [...orderEditItems]; it[idx] = { ...it[idx], blockType: name, unit }; setOrderEditItems(it); }} style={{ ...styles.input, flex: 1 }} />
-                            <input style={{ ...styles.input, flex: 1 }} type="number" placeholder="Qty" value={item.quantity} onChange={e => { const it = [...orderEditItems]; it[idx] = { ...it[idx], quantity: e.target.value }; setOrderEditItems(it); }} />
-                            <input style={{ ...styles.input, flex: 1 }} type="number" placeholder="Unit Price" value={item.unitPrice} onChange={e => { const it = [...orderEditItems]; it[idx] = { ...it[idx], unitPrice: e.target.value }; setOrderEditItems(it); }} />
+                            <input style={{ ...styles.input, flex: 1 }} type="number" inputMode="decimal" placeholder="Qty" value={item.quantity} onChange={e => { const it = [...orderEditItems]; it[idx] = { ...it[idx], quantity: e.target.value }; setOrderEditItems(it); }} />
+                            <input style={{ ...styles.input, flex: 1 }} type="number" inputMode="decimal" placeholder="Unit Price" value={item.unitPrice} onChange={e => { const it = [...orderEditItems]; it[idx] = { ...it[idx], unitPrice: e.target.value }; setOrderEditItems(it); }} />
                             <div style={{ ...styles.input, flex: 1, background: "transparent", color: theme.accent, fontWeight: "700" }}>{item.quantity && item.unitPrice ? naira(parseInt(item.quantity) * parseFloat(item.unitPrice)) : "—"}</div>
                             <div style={{ display: "flex", gap: "3px", flexShrink: 0 }}>
                               {["manufactured", "resale"].map(t => (
@@ -1967,7 +1976,7 @@ const Orders = ({ onNavigate, userProfile }) => {
                           {item.sourceType === 'resale' && (
                             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                               <label style={{ ...styles.label, marginBottom: 0, fontSize: "12px", whiteSpace: "nowrap" }}>Partner cost (₦):</label>
-                              <input style={{ ...styles.input, maxWidth: "180px" }} type="number" min="0" placeholder="Cost basis (optional)" value={item.costBasis} onChange={e => { const it = [...orderEditItems]; it[idx] = { ...it[idx], costBasis: e.target.value }; setOrderEditItems(it); }} />
+                              <input style={{ ...styles.input, maxWidth: "180px" }} type="number" inputMode="decimal" min="0" placeholder="Cost basis (optional)" value={item.costBasis} onChange={e => { const it = [...orderEditItems]; it[idx] = { ...it[idx], costBasis: e.target.value }; setOrderEditItems(it); }} />
                             </div>
                           )}
                         </div>
@@ -2019,7 +2028,7 @@ const Orders = ({ onNavigate, userProfile }) => {
                         <div style={{ fontSize: "11px", fontWeight: "700", color: theme.textMuted, marginBottom: "8px", textTransform: "uppercase", letterSpacing: "0.06em" }}>Payment History</div>
                         {allPayments.map(p => (
                           <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: `1px solid ${theme.border}22`, fontSize: "13px" }}>
-                            <span style={{ color: theme.textMuted }}>{p.payment_date}</span>
+                            <span style={{ color: theme.textMuted }}>{fmtDate(p.payment_date)}</span>
                             <span style={{ color: theme.green, fontWeight: "600" }}>{naira(p.amount_paid)}</span>
                             <span style={styles.badge(p.status === "confirmed" ? theme.green : theme.accent)}>{p.status}</span>
                             <div style={{ display: "flex", gap: "6px" }}>
@@ -2081,7 +2090,7 @@ const Orders = ({ onNavigate, userProfile }) => {
                         <div style={styles.row}>
                           <div style={{ flex: 1 }}>
                             <label style={styles.label}>Amount (₦)</label>
-                            <input style={styles.input} type="number" placeholder="e.g. 500000" value={payForm.amount} onChange={e => setPayForm({ ...payForm, amount: e.target.value })} />
+                            <input style={styles.input} type="number" inputMode="decimal" placeholder="e.g. 500000" value={payForm.amount} onChange={e => setPayForm({ ...payForm, amount: e.target.value })} />
                           </div>
                           <div style={{ flex: 1 }}>
                             <label style={styles.label}>Payment Date</label>
@@ -2340,28 +2349,41 @@ const Waybills = ({ userProfile }) => {
   };
 
   const handleDeleteWaybill = async (waybill) => {
+    // Each reversal step is attempted as before, but a failure is recorded and
+    // named in the result instead of being dropped (§10.5).
+    const failed = [];
+    const done = [];
+    const step = async (label, fn) => {
+      try { await fn(); done.push(label); } catch (e) { failed.push(`${label} (${e?.message || e})`); }
+    };
     try {
       // Step 1 — Restore finished goods stock
-      try { await finishedGoodsService.increase(waybill.block_type, waybill.quantity_loaded); } catch {}
+      await step('finished goods stock restore', () => finishedGoodsService.increase(waybill.block_type, waybill.quantity_loaded));
       // Step 2 — Restore batch stock
-      try { if (waybill.batch_id) await batchesService.restoreStock(waybill.batch_id, waybill.quantity_loaded); } catch {}
+      if (waybill.batch_id) await step('batch stock restore', () => batchesService.restoreStock(waybill.batch_id, waybill.quantity_loaded));
       // Step 3 — Reverse transit damage log entry
-      try { await productionService.deleteTransitDamage(waybill.waybill_number); } catch {}
+      await step('transit damage reversal', () => productionService.deleteTransitDamage(waybill.waybill_number));
       // Step 3b — Delete linked fuel log entry
-      try { await fuelLogService.deleteByWaybill(waybill.id); } catch {}
+      await step('fuel log removal', () => fuelLogService.deleteByWaybill(waybill.id));
       // Step 4 — Delete the waybill record
-      await waybillsService.delete(waybill.id);
-      // Step 5 — Resync pending delivery register (waybill is now gone so recount is accurate)
       try {
+        await waybillsService.delete(waybill.id);
+      } catch (e) {
+        throw new Error(`${e.message}${done.length ? ` — already done before the failure: ${done.join(', ')}; check stock before retrying` : ''}`);
+      }
+      // Step 5 — Resync pending delivery register (waybill is now gone so recount is accurate)
+      await step('pending delivery register resync', async () => {
         if (waybill.order_id) {
           const pending = await pendingDeliveryService.getByOrder(waybill.order_id);
           for (const entry of pending) {
             if (entry.block_type === waybill.block_type) await pendingDeliveryService.resyncFromWaybills(entry);
           }
         }
-      } catch {}
+      });
       await load();
-      setAlert({ type: "success", msg: `Waybill ${waybill.waybill_number} deleted — finished goods, batch and pending delivery register all reversed.` });
+      setAlert(failed.length
+        ? { type: "error", msg: `Waybill ${waybill.waybill_number} deleted, but these steps failed and need fixing by hand: ${failed.join('; ')}.` }
+        : { type: "success", msg: `Waybill ${waybill.waybill_number} deleted — finished goods, batch and pending delivery register all reversed.` });
     } catch (e) {
       setAlert({ type: "error", msg: "Failed to delete waybill. " + e.message });
     } finally {
@@ -3023,7 +3045,7 @@ const Customers = ({ userProfile }) => {
               {filtered.map(c => {
                 const { totalValue, outstanding, orderCount } = getStats(c);
                 return (
-                  <div key={c.id} onClick={() => { setSelected(c); setEditMode(false); }} style={{ padding: "12px 14px", borderRadius: "8px", marginBottom: "6px", cursor: "pointer", border: `1px solid ${selected?.id === c.id ? theme.accent + "66" : theme.border}`, background: selected?.id === c.id ? "rgba(245,166,35,0.06)" : "transparent", transition: "all 0.15s" }}>
+                  <div key={c.id} onClick={() => { setSelected(c); setEditMode(false); revealOnPhone('customer-detail'); }} style={{ padding: "12px 14px", borderRadius: "8px", marginBottom: "6px", cursor: "pointer", border: `1px solid ${selected?.id === c.id ? theme.accent + "66" : theme.border}`, background: selected?.id === c.id ? "rgba(245,166,35,0.06)" : "transparent", transition: "all 0.15s" }}>
                     <div style={{ fontWeight: "600", fontSize: "13px" }}>{c.name}</div>
                     {c.company_name && <div style={{ fontSize: "11px", color: theme.accent, marginTop: "1px" }}>{c.company_name}</div>}
                     <div style={{ fontSize: "11px", color: theme.textMuted, marginTop: "2px" }}>{c.phone}{c.location ? ` · ${c.location}` : ""}</div>
@@ -3039,7 +3061,7 @@ const Customers = ({ userProfile }) => {
           )}
         </div>
 
-        <div style={styles.card}>
+        <div id="customer-detail" className={selected ? undefined : "m-hide"} style={styles.card}>
           {!selected ? (
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "300px", color: theme.textMuted, fontSize: "13px" }}>← Select a customer to view profile</div>
           ) : editMode ? (
@@ -3061,7 +3083,7 @@ const Customers = ({ userProfile }) => {
                     <div style={{ display: "flex", gap: "8px", marginTop: "8px", flexWrap: "wrap" }}>
                       {selected.how_heard && <span style={styles.badge(theme.blue)}>{howHeardLabel(selected.how_heard)}</span>}
                       {selected.marketer?.full_name && <span style={styles.badge(theme.green)}>via {selected.marketer.full_name}</span>}
-                      {selected.date_registered && <span style={{ fontSize: "11px", color: theme.textMuted }}>Registered: {selected.date_registered}</span>}
+                      {selected.date_registered && <span style={{ fontSize: "11px", color: theme.textMuted }}>Registered: {fmtDate(selected.date_registered)}</span>}
                     </div>
                   </div>
                   <div style={{ display: "flex", gap: "8px" }}>
@@ -3144,7 +3166,7 @@ const Customers = ({ userProfile }) => {
                         const paid = (o.invoices || []).flatMap(inv => inv.payments || []).filter(p => p.status === "confirmed").reduce((s, p) => s + Number(p.amount_paid), 0);
                         return (
                           <tr key={o.id}>
-                            <td style={styles.td}>{o.created_at?.split("T")[0]}</td>
+                            <td style={styles.td}>{fmtDay(o.created_at)}</td>
                             <td style={styles.td}>{(o.order_items || []).map(i => i.block_type).join(", ") || "—"}</td>
                             <td style={styles.td}><strong style={{ color: theme.accent }}>{naira(val)}</strong></td>
                             <td style={styles.td}><span style={{ color: theme.green }}>{naira(paid)}</span></td>
@@ -3191,7 +3213,7 @@ const Customers = ({ userProfile }) => {
                             {filteredWaybills.map(w => (
                               <tr key={w.id}>
                                 <td style={styles.td}><span style={{ color: theme.accent, fontWeight: "600" }}>{w.waybill_number}</span></td>
-                                <td style={styles.td}>{w.waybill_date}</td>
+                                <td style={styles.td}>{fmtDate(w.waybill_date)}</td>
                                 <td style={styles.td}><span style={styles.badge(theme.blue)}>{w.block_type}</span></td>
                                 <td style={styles.td}>{fmt(w.quantity_loaded)}</td>
                                 <td style={styles.td}><strong style={{ color: theme.green }}>{fmt(w.quantity_received)}</strong></td>
@@ -3470,7 +3492,8 @@ const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
     setMovConfirmDelete(null);
     try {
       if (m.movement_type === "in") {
-        try { await supabase.from('supplier_transactions').delete().eq('linked_stock_movement_id', m.id); } catch {}
+        try { await deleteWhere(supabase, 'supplier_transactions', 'linked_stock_movement_id', m.id); }
+        catch (e) { throw new Error(`The movement was not deleted because its linked supplier transaction could not be removed: ${e.message}. Nothing was changed.`); }
       }
       await inventoryService.deleteMovement(m.id, m);
       await load();
@@ -4084,7 +4107,7 @@ const LPOApprovals = () => {
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                   <div>
                     <div style={{ fontWeight: "700", fontSize: "15px" }}>{order.customer?.name || "—"}</div>
-                    <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "3px" }}>{order.customer?.location} · Submitted by: {lpo.submitted_by || "—"} · {lpo.submitted_at?.split("T")[0]}</div>
+                    <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "3px" }}>{order.customer?.location} · Submitted by: {lpo.submitted_by || "—"} · {fmtDay(lpo.submitted_at)}</div>
                     <div style={{ marginTop: "8px", display: "flex", gap: "12px", fontSize: "13px", flexWrap: "wrap", alignItems: "center" }}>
                       {(order.order_items || []).map((it, i) => (
                         <span key={i} style={styles.badge(theme.blue)}>{it.quantity?.toLocaleString()} {it.block_type}</span>
@@ -4122,7 +4145,7 @@ const LPOApprovals = () => {
                     <tr key={l.id}>
                       <td style={styles.td}><strong>{l.order?.customer?.name || "—"}</strong></td>
                       <td style={styles.td}>{l.submitted_by || "—"}</td>
-                      <td style={styles.td}>{l.decided_at?.split("T")[0] || "—"}</td>
+                      <td style={styles.td}>{fmtDay(l.decided_at)}</td>
                       <td style={styles.td}><span style={styles.badge(statusColor(l.md_decision))}>{l.md_decision}</span></td>
                       <td style={styles.td}><span style={{ fontSize: "12px", color: theme.textMuted }}>{l.md_note || "—"}</span></td>
                     </tr>
@@ -4427,7 +4450,7 @@ const DailySchedule = () => {
                   </div>
                   {sel && (
                     <div style={{ display: "flex", gap: "8px" }}>
-                      <div><label style={{ ...styles.label, fontSize: "10px" }}>Qty Today</label><input style={{ ...styles.input, width: "100px" }} type="number" value={sel.qtyToday} onChange={e => updateSelectedQty(entry.id, e.target.value)} /></div>
+                      <div><label style={{ ...styles.label, fontSize: "10px" }}>Qty Today</label><input style={{ ...styles.input, width: "100px" }} type="number" inputMode="decimal" value={sel.qtyToday} onChange={e => updateSelectedQty(entry.id, e.target.value)} /></div>
                       <div><label style={{ ...styles.label, fontSize: "10px" }}>Instructions</label><input style={{ ...styles.input, width: "180px" }} placeholder="Optional" value={sel.notes} onChange={e => updateSelectedNotes(entry.id, e.target.value)} /></div>
                     </div>
                   )}
@@ -4468,7 +4491,7 @@ const DailySchedule = () => {
           <div key={s.id} style={{ borderRadius: "8px", border: `1px solid ${theme.border}`, marginBottom: "10px", overflow: "hidden" }}>
             <div style={{ padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", background: expandedId === s.id ? "rgba(245,166,35,0.06)" : "transparent" }} onClick={() => setExpandedId(expandedId === s.id ? null : s.id)}>
               <div>
-                <strong>{s.schedule_date}</strong>
+                <strong>{fmtDate(s.schedule_date)}</strong>
                 <span style={{ fontSize: "12px", color: theme.textMuted, marginLeft: "10px" }}>Created by {s.created_by || "—"} · {(s.items || []).length} deliveries</span>
                 {s.ico_notes && <div style={{ fontSize: "11px", color: theme.textMuted, marginTop: "3px" }}>ICO note: {s.ico_notes}</div>}
               </div>
@@ -4541,13 +4564,17 @@ const ScheduleApprovals = () => {
       const rejected = rejectedItems[sched.id] || [];
       await schedulesService.icoApprove(sched.id, approvedBy, notes[sched.id] || null, rejected);
       const approved = (sched.items || []).filter(i => !rejected.includes(i.id));
+      const registerErrs = [];
       for (const item of approved) {
         if (item.pending_register_id) {
-          await pendingDeliveryService.updateDelivered(item.pending_register_id, 0).catch(() => {});
+          try { await pendingDeliveryService.updateDelivered(item.pending_register_id, 0); }
+          catch (e) { registerErrs.push(e?.message || String(e)); }
           await supabaseUpdateScheduleItemStatus(item.pending_register_id);
         }
       }
-      setAlert({ type: "success", msg: `Schedule approved by ICO. ${rejected.length > 0 ? `${rejected.length} delivery(ies) removed.` : ""}` });
+      setAlert(registerErrs.length
+        ? { type: "error", msg: `Schedule approved by ICO, but ${registerErrs.length} pending-delivery register line(s) could not be updated: ${registerErrs[0]}` }
+        : { type: "success", msg: `Schedule approved by ICO. ${rejected.length > 0 ? `${rejected.length} delivery(ies) removed.` : ""}` });
       await load();
     } catch (e) { setAlert({ type: "error", msg: "Failed: " + e.message }); }
     finally { setSaving(null); }
@@ -4642,7 +4669,7 @@ const ScheduleApprovals = () => {
           <div key={sched.id} style={{ ...styles.card, marginBottom: "14px", borderLeft: `4px solid ${theme.accent}` }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }} onClick={() => setExpandedId(isOpen ? null : sched.id)}>
               <div>
-                <div style={{ fontWeight: "700", fontSize: "15px" }}>Schedule for {sched.schedule_date}</div>
+                <div style={{ fontWeight: "700", fontSize: "15px" }}>Schedule for {fmtDate(sched.schedule_date)}</div>
                 <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "3px" }}>Created by {sched.created_by || "—"} · {(sched.items || []).length} customers · Submitted for ICO review</div>
               </div>
               <span style={{ ...styles.badge(theme.accent), cursor: "pointer" }}>{isOpen ? "▲ Hide" : "▼ Review"}</span>
@@ -5195,7 +5222,7 @@ const Products = () => {
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Default Unit Price (₦)</label>
-              <input style={styles.input} type="number" placeholder="0" value={form.unit_price} onChange={e => setForm({ ...form, unit_price: e.target.value })} />
+              <input style={styles.input} type="number" inputMode="decimal" placeholder="0" value={form.unit_price} onChange={e => setForm({ ...form, unit_price: e.target.value })} />
             </div>
             <div style={{ ...styles.formGroup, gridColumn: "span 2" }}>
               <label style={styles.label}>Description (optional)</label>
@@ -5272,7 +5299,7 @@ const BookkeepingTab = () => {
       .catch(e => setErr(e?.message || 'An error occurred')).finally(() => setLoading(false));
   }, [date]);
 
-  useEffect(() => { suppliersService.getActive().then(setAcctSuppliers).catch(() => {}); }, []);
+  useEffect(() => { suppliersService.getActive().then(setAcctSuppliers).catch(e => setErr('Could not load the supplier list: ' + (e?.message || e))); }, []);
 
   const addIncome = async () => {
     if (!incomeForm.source || !incomeForm.amount) return;
@@ -5381,7 +5408,7 @@ const BookkeepingTab = () => {
       {ok && <Alert msg={ok} type="success" onClose={() => setOk('')} />}
       {loading && <Spinner />}
 
-      <div style={styles.row}>
+      <div className="m-col" style={styles.row}>
         <div style={{ flex: 1 }}>
           <div style={styles.sectionTitle}>Income</div>
           {payments.length > 0 && (
@@ -5408,7 +5435,7 @@ const BookkeepingTab = () => {
             <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Add Other Income</div>
             <div style={styles.formGroup}><label style={styles.label}>Source *</label><input style={styles.input} placeholder="e.g. Equipment rental, Scrap sale" value={incomeForm.source} onChange={e => setIncomeForm(f => ({ ...f, source: e.target.value }))} /></div>
             <div style={styles.formGroup}><label style={styles.label}>Description</label><input style={styles.input} placeholder="Optional details" value={incomeForm.description} onChange={e => setIncomeForm(f => ({ ...f, description: e.target.value }))} /></div>
-            <div style={styles.formGroup}><label style={styles.label}>Amount (₦) *</label><input type="number" style={styles.input} placeholder="0" value={incomeForm.amount} onChange={e => setIncomeForm(f => ({ ...f, amount: e.target.value }))} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Amount (₦) *</label><input type="number" inputMode="decimal" style={styles.input} placeholder="0" value={incomeForm.amount} onChange={e => setIncomeForm(f => ({ ...f, amount: e.target.value }))} /></div>
             <button style={styles.btn('primary')} onClick={addIncome}>+ Add Income</button>
           </div>
           {incomeList.length > 0 && (
@@ -5479,7 +5506,7 @@ const BookkeepingTab = () => {
             <div style={styles.row}>
               <div style={{ flex: 1, ...styles.formGroup }}>
                 <label style={styles.label}>Amount (₦) *</label>
-                <input type="number" style={styles.input} placeholder="0" value={expenseForm.amount} onChange={e => setExpenseForm(f => ({ ...f, amount: e.target.value }))} />
+                <input type="number" inputMode="decimal" style={styles.input} placeholder="0" value={expenseForm.amount} onChange={e => setExpenseForm(f => ({ ...f, amount: e.target.value }))} />
               </div>
               <div style={{ flex: 1, ...styles.formGroup }}>
                 <label style={styles.label}>Vendor / Payee</label>
@@ -5882,7 +5909,7 @@ const ReceivablesTab = () => {
                 <tr key={i}>
                   <td style={{ ...styles.td, fontWeight: '600' }}>{r.customer}</td>
                   <td style={styles.td}>{r.invoice}</td>
-                  <td style={styles.td}>{r.issuedDate ? new Date(r.issuedDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</td>
+                  <td style={styles.td}>{fmtDate(r.issuedDate)}</td>
                   <td style={styles.td}>{r.days === 999 ? '—' : `${r.days}d`}</td>
                   <td style={{ ...styles.td, fontWeight: '700', color: bucketColor(r.bucket) }}>{r.bucket}</td>
                   <td style={{ ...styles.td, textAlign: 'right' }}>{naira(r.invoiced)}</td>
@@ -6118,18 +6145,21 @@ const BankAccountsTab = ({ userProfile }) => {
   };
 
   useEffect(() => {
-    // Supporting data — fail silently so they don't block the accounts tab
-    expenseCategoriesService.getActive().then(setExpCategories).catch(() => {});
-    accountingService.getOpenInvoices().then(setAllInvoices).catch(() => {});
-    customersService.getAll().then(setAllCustomers).catch(() => {});
-    paymentRequestsService.listDisbursed().then(setPaymentRequests).catch(() => {});
+    // Supporting data — a failure must not block the accounts tab, but it is
+    // named so an empty picker or "no match" is not mistaken for real data.
+    const supportErr = (what) => (e) => setErr(`Could not load ${what}: ${e?.message || e}`);
+    expenseCategoriesService.getActive().then(setExpCategories).catch(supportErr('expense categories'));
+    accountingService.getOpenInvoices().then(setAllInvoices).catch(supportErr('open invoices'));
+    customersService.getAll().then(setAllCustomers).catch(supportErr('customers'));
+    paymentRequestsService.listDisbursed().then(setPaymentRequests).catch(supportErr('disbursed payment requests (for matching)'));
     // Core accounts load
     bankAccountsService.getAll()
       .then(async (existing) => {
         let all = [...existing];
         for (const seed of SEED_ACCOUNTS) {
           if (!existing.find(a => a.account_number === seed.account_number)) {
-            try { const created = await bankAccountsService.create(seed); all = [...all, created]; } catch {}
+            try { const created = await bankAccountsService.create(seed); all = [...all, created]; }
+            catch (e) { setErr(`Could not add the standard account ${seed.account_number}: ${e.message}`); }
           }
         }
         all.sort((a, b) => {
@@ -6157,7 +6187,7 @@ const BankAccountsTab = ({ userProfile }) => {
 
   useEffect(() => {
     if (!selected) { setSuggestedTxs([]); return; }
-    bankTransactionsService.getSuggested(selected.id).then(setSuggestedTxs).catch(() => {});
+    bankTransactionsService.getSuggested(selected.id).then(setSuggestedTxs).catch(e => setErr('Could not load suggested matches: ' + (e?.message || e)));
   }, [selected?.id]);
 
   const openImport = (acct) => { setImportAcct(acct.id); setImportFile(null); setImportStep('upload'); setErr(''); setOk(''); setReconUnverified(false); setReconWarnAcked(false); };
@@ -6226,7 +6256,11 @@ const BankAccountsTab = ({ userProfile }) => {
     }
     // ─────────────────────────────────────────────────────────────────────────
 
-    const withDups = await bankTransactionsService.checkDuplicates(importAcct, txs).catch(() => txs.map(t => ({ ...t, isDuplicate: false })));
+    // A failed duplicate check must stop the import: treating every row as new
+    // would import transactions that are already on the account.
+    let withDups;
+    try { withDups = await bankTransactionsService.checkDuplicates(importAcct, txs); }
+    catch (e) { setErr('Could not check for transactions already imported, so the import was stopped: ' + e.message); return; }
     const acct = accounts.find(a => a.id === importAcct);
     let payments = [], expenses2 = [], invoices2 = allInvoices, customers2 = allCustomers;
     try {
@@ -6236,7 +6270,10 @@ const BankAccountsTab = ({ userProfile }) => {
       ]);
       if (!invoices2.length) invoices2 = await accountingService.getOpenInvoices().catch(() => []);
       if (!customers2.length) customers2 = await customersService.getAll().catch(() => []);
-    } catch {}
+    } catch (e) {
+      // The import can go ahead; rows just won't be auto-matched — say so.
+      setErr('Payments and expenses could not be loaded, so no rows were auto-matched: ' + e.message);
+    }
     const matched = autoMatchTransactions(
       withDups.filter(t => !t.isDuplicate),
       payments, expenses2,
@@ -6276,7 +6313,7 @@ const BankAccountsTab = ({ userProfile }) => {
       setOk(`Imported ${preview.length} transactions (${preview.filter(t => t.autoMatch).length} auto-matched)`);
       setImportStep(null);
       if (selected?.id === importAcct) {
-        bankTransactionsService.getByAccount(importAcct, txFrom || null, txTo || null).then(setTransactions).catch(() => {});
+        bankTransactionsService.getByAccount(importAcct, txFrom || null, txTo || null).then(setTransactions).catch(e => setErr('Imported, but the transaction list could not be refreshed: ' + (e?.message || e)));
       }
     } catch (e) { setErr(e?.message || 'An error occurred'); } finally { setImporting(false); }
   };
@@ -6368,7 +6405,7 @@ const BankAccountsTab = ({ userProfile }) => {
           // 'partially_paid' value in the invoices_status_check constraint, so
           // writing one would fail; the outstanding balance is derived from
           // (total_amount − confirmed payments) instead.
-          accountingService.getOpenInvoices().then(setAllInvoices).catch(() => {});
+          accountingService.getOpenInvoices().then(setAllInvoices).catch(e => setErr('Saved, but the open-invoice list could not be refreshed: ' + (e?.message || e)));
         }
         await bankTransactionsService.updateMatch(tx.id, 'matched', 'payment', payment.id, `Invoice: ${inv?.invoice_number || ''}`);
         setTransactions(t => t.map(x => x.id === tx.id ? { ...x, match_status: 'matched', matched_to_type: 'payment' } : x));
@@ -6565,7 +6602,7 @@ const BankAccountsTab = ({ userProfile }) => {
                     <tbody>
                       {preview.map((t, i) => (
                         <tr key={i} style={{ opacity: t.isDuplicate ? 0.4 : 1 }}>
-                          <td style={styles.td}>{t.transaction_date}</td>
+                          <td style={styles.td}>{fmtDate(t.transaction_date)}</td>
                           <td style={{ ...styles.td, maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.description}</td>
                           <td style={{ ...styles.td, textAlign: 'right', color: theme.red }}>{t.debit > 0 ? naira(t.debit) : ''}</td>
                           <td style={{ ...styles.td, textAlign: 'right', color: theme.green }}>{t.credit > 0 ? naira(t.credit) : ''}</td>
@@ -6642,7 +6679,7 @@ const BankAccountsTab = ({ userProfile }) => {
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: Z.modal + 2, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '10px', padding: '20px', width: '460px', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
             <div style={{ fontWeight: '700', marginBottom: '4px' }}>Link to Payment Request</div>
-            <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '12px' }}>{suggestModal.description} · {naira(suggestModal.debit)} · {suggestModal.transaction_date}</div>
+            <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '12px' }}>{suggestModal.description} · {naira(suggestModal.debit)} · {fmtDate(suggestModal.transaction_date)}</div>
             <input style={{ ...styles.input, marginBottom: '10px' }} placeholder="Search reference, payee, or purpose…"
               value={prSearch} onChange={e => setPrSearch(e.target.value)} autoFocus />
             <div style={{ overflowY: 'auto', flex: 1 }}>
@@ -6745,7 +6782,7 @@ const BankAccountsTab = ({ userProfile }) => {
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: Z.modal + 3, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '12px', padding: '24px', width: '420px' }}>
             <div style={{ fontWeight: '700', fontSize: '15px', marginBottom: '4px' }}>Create Expense Record</div>
-            <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '16px' }}>From bank transaction: {createExpModal.transaction_date} · {naira(createExpModal.debit)}</div>
+            <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '16px' }}>From bank transaction: {fmtDate(createExpModal.transaction_date)} · {naira(createExpModal.debit)}</div>
             {modalErr && <div style={{ background: theme.red + '22', border: `1px solid ${theme.red}`, borderRadius: '6px', padding: '8px 12px', fontSize: '12px', color: theme.red, marginBottom: '12px' }}>{modalErr}</div>}
             <div style={styles.formGroup}>
               <label style={styles.label}>Category *</label>
@@ -6764,7 +6801,7 @@ const BankAccountsTab = ({ userProfile }) => {
             </div>
             <div style={{ ...styles.card, padding: '10px 14px', marginBottom: '16px', background: theme.surface2 || theme.bg }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
-                <span style={{ color: theme.textMuted }}>Date</span><span>{createExpModal.transaction_date}</span>
+                <span style={{ color: theme.textMuted }}>Date</span><span>{fmtDate(createExpModal.transaction_date)}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', fontWeight: '700', marginTop: '4px' }}>
                 <span style={{ color: theme.textMuted }}>Amount</span><span style={{ color: theme.red }}>{naira(createExpModal.debit)}</span>
@@ -6808,7 +6845,7 @@ const BankAccountsTab = ({ userProfile }) => {
               {/* Header */}
               <div style={{ fontWeight: '700', fontSize: '15px', marginBottom: '4px' }}>Record Incoming Payment</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
-                <div style={{ fontSize: '12px', color: theme.textMuted }}>{tx.transaction_date}</div>
+                <div style={{ fontSize: '12px', color: theme.textMuted }}>{fmtDate(tx.transaction_date)}</div>
                 <div style={{ fontWeight: '700', color: theme.green, fontSize: '15px' }}>{naira(tx.credit)}</div>
               </div>
               <div style={{ fontSize: '11px', color: theme.textMuted, marginBottom: '14px', background: theme.bg, borderRadius: '6px', padding: '7px 10px', fontFamily: 'monospace', wordBreak: 'break-all' }}>
@@ -6830,7 +6867,7 @@ const BankAccountsTab = ({ userProfile }) => {
               {/* Payment amount (editable for partial) */}
               <div style={styles.formGroup}>
                 <label style={styles.label}>Payment Amount (₦) — edit for partial payment</label>
-                <input type="number" style={styles.input} value={createPaymentForm.paymentAmount}
+                <input type="number" inputMode="decimal" style={styles.input} value={createPaymentForm.paymentAmount}
                   onChange={e => setCreatePaymentForm(f => ({ ...f, paymentAmount: e.target.value }))}
                   placeholder={String(tx.credit)} />
               </div>
@@ -6885,7 +6922,7 @@ const BankAccountsTab = ({ userProfile }) => {
                             onClick={() => setCreatePaymentForm(f => ({ ...f, invoice_id: inv.id }))}>
                             <div>
                               <div style={{ fontSize: '12px', fontWeight: '600' }}>{inv.invoice_number}</div>
-                              <div style={{ fontSize: '11px', color: theme.textMuted }}>{inv.order?.customer?.name} · {inv.issued_date}</div>
+                              <div style={{ fontSize: '11px', color: theme.textMuted }}>{inv.order?.customer?.name} · {fmtDate(inv.issued_date)}</div>
                             </div>
                             <div style={{ textAlign: 'right' }}>
                               <div style={{ fontSize: '12px', color: amtMatch ? theme.green : theme.textMuted, fontWeight: amtMatch ? '700' : '400' }}>{naira(rem)} remaining</div>
@@ -7018,7 +7055,7 @@ const BankAccountsTab = ({ userProfile }) => {
                       const pr = paymentRequests.find(p => p.id === stx.matched_to_id);
                       return (
                         <tr key={stx.id}>
-                          <td style={{ ...styles.td, whiteSpace: 'nowrap' }}>{stx.transaction_date}</td>
+                          <td style={{ ...styles.td, whiteSpace: 'nowrap' }}>{fmtDate(stx.transaction_date)}</td>
                           <td style={{ ...styles.td, maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={stx.description}>{stx.description}</td>
                           <td style={{ ...styles.td, textAlign: 'right', color: theme.red, fontWeight: '600' }}>{stx.debit > 0 ? naira(stx.debit) : ''}</td>
                           <td style={styles.td}>
@@ -7085,7 +7122,7 @@ const BankAccountsTab = ({ userProfile }) => {
                       const prCandidate = (isUnmatched && tx.debit > 0) ? findPRCandidate(tx) : null;
                       return (
                         <tr key={tx.id}>
-                          <td style={{ ...styles.td, whiteSpace: 'nowrap' }}>{tx.transaction_date}</td>
+                          <td style={{ ...styles.td, whiteSpace: 'nowrap' }}>{fmtDate(tx.transaction_date)}</td>
                           <td style={{ ...styles.td, maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={tx.description}>{tx.description}</td>
                           <td style={{ ...styles.td, textAlign: 'right', color: theme.red, fontWeight: '600' }}>{tx.debit > 0 ? naira(tx.debit) : ''}</td>
                           <td style={{ ...styles.td, textAlign: 'right', color: theme.green, fontWeight: '600' }}>{tx.credit > 0 ? naira(tx.credit) : ''}</td>
@@ -7200,7 +7237,7 @@ const ReconciliationTab = () => {
 
   useEffect(() => {
     if (!accountId) return;
-    bankReconciliationsService.getByAccount(accountId).then(setHistory).catch(() => {});
+    bankReconciliationsService.getByAccount(accountId).then(setHistory).catch(e => setErr('Could not load reconciliation history: ' + (e?.message || e)));
   }, [accountId]);
 
   const runReconciliation = async () => {
@@ -7366,8 +7403,8 @@ const ReconciliationTab = () => {
             <tbody>
               {history.map(r => (
                 <tr key={r.id}>
-                  <td style={styles.td}>{r.period_from} — {r.period_to}</td>
-                  <td style={styles.td}>{r.reconciliation_date}</td>
+                  <td style={styles.td}>{fmtDate(r.period_from)} — {fmtDate(r.period_to)}</td>
+                  <td style={styles.td}>{fmtDate(r.reconciliation_date)}</td>
                   <td style={{ ...styles.td, color: Math.abs(r.difference) < 0.01 ? theme.green : theme.red, fontWeight: '600' }}>{naira(Math.abs(r.difference || 0))}</td>
                   <td style={styles.td}><span style={styles.badge(r.status === 'completed' ? theme.green : theme.accent)}>{r.status}</span></td>
                   <td style={{ ...styles.td, color: theme.textMuted }}>{r.reconciled_by || '—'}</td>
@@ -7419,8 +7456,8 @@ const ReceiptsTab = () => {
 
   useEffect(() => {
     loadReceipts();
-    receiptsService.getMissingReceiptExpenses().then(setMissingCount).catch(() => {});
-    expensesService.getAll().then(all => setApprovedExpenses(all.filter(e => e.status === 'approved'))).catch(() => {});
+    receiptsService.getMissingReceiptExpenses().then(setMissingCount).catch(() => {}); // count badge only
+    expensesService.getAll().then(all => setApprovedExpenses(all.filter(e => e.status === 'approved'))).catch(e => setErr('Could not load expenses to link receipts to: ' + (e?.message || e)));
   }, []);
 
   const handleUpload = async () => {
@@ -7434,7 +7471,7 @@ const ReceiptsTab = () => {
       setUploadFile(null);
       setUploadForm({ receipt_date: today, vendor_name: '', amount: '', tax_category: '', notes: '', expense_id: '' });
       setOk(`Receipt ${rec.receipt_number} uploaded`);
-      receiptsService.getMissingReceiptExpenses().then(setMissingCount).catch(() => {});
+      receiptsService.getMissingReceiptExpenses().then(setMissingCount).catch(() => {}); // count badge only
     } catch (e) { setErr(e?.message || 'An error occurred'); }
     finally { setUploading(false); }
   };
@@ -7454,6 +7491,7 @@ const ReceiptsTab = () => {
       const folder = zip.folder('receipts');
 
       let csvRows = 'Receipt Number,Date,Vendor,Category,Amount,File Name\n';
+      const missingFiles = [];
 
       await Promise.all(receipts.map(async (r) => {
         try {
@@ -7462,8 +7500,10 @@ const ReceiptsTab = () => {
           if (res?.ok) {
             const blob = await res.blob();
             folder.file(r.file_name || `${r.receipt_number}.file`, blob);
+          } else {
+            missingFiles.push(r.receipt_number);
           }
-        } catch {}
+        } catch { missingFiles.push(r.receipt_number); }
         const cat = r.expense?.category?.name || r.tax_category || '';
         csvRows += `"${r.receipt_number}","${r.receipt_date}","${r.vendor_name}","${cat}","${r.amount}","${r.file_name || ''}"\n`;
       }));
@@ -7475,6 +7515,7 @@ const ReceiptsTab = () => {
       a.href = url; a.download = `TaxPackage_${today}.zip`; a.click();
       URL.revokeObjectURL(url);
       setOk('Tax package downloaded');
+      if (missingFiles.length) setErr(`${missingFiles.length} receipt file(s) could not be downloaded and are missing from the zip (still listed in summary.csv): ${missingFiles.join(', ')}`);
     } catch (e) { setErr('Export failed: ' + e.message); }
     finally { setExportLoading(false); }
   };
@@ -7506,7 +7547,7 @@ const ReceiptsTab = () => {
             {uploadFile && <div style={{ fontSize: '11px', color: theme.textMuted, marginBottom: '8px' }}>Selected: {uploadFile.name}</div>}
             <div style={styles.formGroup}><label style={styles.label}>Date *</label><input type="date" style={styles.input} value={uploadForm.receipt_date} onChange={e => setUploadForm(f => ({ ...f, receipt_date: e.target.value }))} /></div>
             <div style={styles.formGroup}><label style={styles.label}>Vendor *</label><input style={styles.input} placeholder="Supplier name" value={uploadForm.vendor_name} onChange={e => setUploadForm(f => ({ ...f, vendor_name: e.target.value }))} /></div>
-            <div style={styles.formGroup}><label style={styles.label}>Amount (₦) *</label><input type="number" style={styles.input} placeholder="0" value={uploadForm.amount} onChange={e => setUploadForm(f => ({ ...f, amount: e.target.value }))} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Amount (₦) *</label><input type="number" inputMode="decimal" style={styles.input} placeholder="0" value={uploadForm.amount} onChange={e => setUploadForm(f => ({ ...f, amount: e.target.value }))} /></div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Link to Expense (optional)</label>
               <select style={styles.input} value={uploadForm.expense_id} onChange={e => {
@@ -7522,7 +7563,7 @@ const ReceiptsTab = () => {
                 <option value="">— None —</option>
                 {approvedExpenses.map(e => (
                   <option key={e.id} value={e.id}>
-                    {e.expense_date} · {e.description} · ₦{Number(e.amount).toLocaleString()}
+                    {fmtDate(e.expense_date)} · {e.description} · ₦{Number(e.amount).toLocaleString()}
                   </option>
                 ))}
               </select>
@@ -7564,7 +7605,7 @@ const ReceiptsTab = () => {
                     <div style={{ fontSize: '11px', fontWeight: '700', color: theme.accent }}>{r.receipt_number}</div>
                     <div style={{ fontSize: '11px', fontWeight: '600', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.vendor_name}</div>
                     <div style={{ fontSize: '11px', color: theme.green, fontWeight: '600' }}>{naira(r.amount)}</div>
-                    <div style={{ fontSize: '10px', color: theme.textMuted }}>{r.receipt_date}</div>
+                    <div style={{ fontSize: '10px', color: theme.textMuted }}>{fmtDate(r.receipt_date)}</div>
                     <div style={{ display: 'flex', gap: '4px', marginTop: '8px' }}>
                       <a href={signedMap[r.id] || undefined} target="_blank" rel="noreferrer" style={{ ...styles.btn('secondary'), padding: '3px 8px', fontSize: '10px', textDecoration: 'none', display: 'inline-block' }}>↓</a>
                       <button style={{ ...styles.btn('danger'), padding: '3px 8px', fontSize: '10px' }} onClick={() => handleDelete(r)}>✕</button>
@@ -7840,7 +7881,7 @@ const MyProfile = ({ userProfile }) => {
                       <td style={styles.td}><a href={doc.displayUrl || '#'} target="_blank" rel="noreferrer" style={{ color: theme.blue, textDecoration: 'none', fontWeight: '600' }}>{doc.file_name}</a></td>
                       <td style={styles.td}><span style={styles.badge(theme.blue)}>{doc.document_type}</span></td>
                       <td style={styles.td}>{doc.file_size ? fmtBytes(doc.file_size) : '—'}</td>
-                      <td style={styles.td}>{doc.uploaded_at ? new Date(doc.uploaded_at).toLocaleDateString('en-GB') : '—'}</td>
+                      <td style={styles.td}>{fmtDay(doc.uploaded_at)}</td>
                       <td style={styles.td}>
                         <button data-ico-allow style={{ ...styles.btn('danger'), padding: '4px 10px', fontSize: '11px' }} onClick={() => handleDeleteDoc(doc)}>Delete</button>
                       </td>
@@ -7971,11 +8012,11 @@ const AdvancesPage = ({ userProfile }) => {
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Amount (₦)</label>
-              <input style={styles.input} type="number" placeholder="0" value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} />
+              <input style={styles.input} type="number" inputMode="decimal" placeholder="0" value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} />
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Installments</label>
-              <input style={styles.input} type="number" min="1" placeholder="1" value={form.installments} onChange={e => setForm(f => ({ ...f, installments: e.target.value }))} />
+              <input style={styles.input} type="number" inputMode="decimal" min="1" placeholder="1" value={form.installments} onChange={e => setForm(f => ({ ...f, installments: e.target.value }))} />
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Reason</label>
@@ -8077,7 +8118,7 @@ const PaymentRequestAttachmentRow = ({ att }) => {
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: '13px', color: theme.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{fileName}</div>
         <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '2px' }}>
-          {att.uploader_name || 'Unknown'}{att.created_at ? ` · ${new Date(att.created_at).toLocaleDateString('en-GB')}` : ''}
+          {att.uploader_name || 'Unknown'}{att.created_at ? ` · ${fmtDateTime(att.created_at)}` : ''}
         </div>
         {att.note && <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '2px', fontStyle: 'italic' }}>{att.note}</div>}
         {failed && <div style={{ fontSize: '11px', color: theme.red, marginTop: '2px' }}>Couldn&rsquo;t load file.</div>}
@@ -8180,15 +8221,16 @@ const PaymentRequestsPage = ({ userProfile }) => {
       ]);
       setRequests(reqs);
       setCategories(cats);
-      if (isInitiator || role === 'md') paymentRequestsService.getActiveSuppliers().then(setActiveSuppliers).catch(() => {});
-      if (canReviewVendors) paymentRequestsService.getPendingVendors().then(setPendingVendors).catch(() => {});
+      if (isInitiator || role === 'md') paymentRequestsService.getActiveSuppliers().then(setActiveSuppliers).catch(e => setAlert({ type: 'error', msg: 'Could not load the vendor list: ' + (e?.message || e) }));
+      if (canReviewVendors) paymentRequestsService.getPendingVendors().then(setPendingVendors).catch(e => setAlert({ type: 'error', msg: 'Could not load vendors awaiting review: ' + (e?.message || e) }));
     } catch (e) { setAlert({ type: 'error', msg: e.message }); }
     finally { setLoading(false); }
   };
 
   useEffect(() => { load(); }, []);
-  useEffect(() => { bankAccountsService.getAll().then(setBankAccounts).catch(() => {}); }, []);
+  useEffect(() => { bankAccountsService.getAll().then(setBankAccounts).catch(e => setAlert({ type: 'error', msg: 'Could not load bank accounts: ' + (e?.message || e) })); }, []);
   useEffect(() => {
+    // Names for the "requested by" display only; ids still work without them.
     supabase.from('user_profiles_directory').select('id, full_name, role').order('full_name')
       .then(({ data }) => setAllUsers(data || [])).catch(() => {});
   }, []);
@@ -8210,10 +8252,9 @@ const PaymentRequestsPage = ({ userProfile }) => {
     const payeeMode = req.supplier_id ? 'existing' : 'new';
     let _order_id = '';
     if (req.order_item_id && req.expense_category_id === tradingPurchasesId) {
-      try {
-        const { data } = await supabase.from('order_items').select('order_id').eq('id', req.order_item_id).single();
-        _order_id = data?.order_id || '';
-      } catch {}
+      const { data, error } = await supabase.from('order_items').select('order_id').eq('id', req.order_item_id).single();
+      if (error) setAlert({ type: 'error', msg: 'Could not look up the linked order for this resale item — pick the order again before saving. ' + error.message });
+      _order_id = data?.order_id || '';
       loadResaleItems();
     }
     setForm({
@@ -8484,7 +8525,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
         </div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
           {!isInitiator && (
-            <div style={{ display: 'flex', gap: '4px' }}>
+            <div className="m-wrap" style={{ display: 'flex', gap: '4px' }}>
               {[['Action Queue', 'queue'], ['All Requests', 'all'], ...((canQuery || role === 'md') ? [['Queried', 'queried']] : [])].map(([label, val]) => {
                 const active = val === 'queried' ? showQueried : (!showQueried && showHistory === (val === 'all'));
                 return (
@@ -8546,7 +8587,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Amount (₦) *</label>
-              <input style={styles.input} type="number" min="1" placeholder="0"
+              <input style={styles.input} type="number" inputMode="decimal" min="1" placeholder="0"
                 value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} />
             </div>
             <div style={styles.formGroup}>
@@ -8601,7 +8642,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
                       <option value="">— None —</option>
                       {Object.entries(resaleOrderMap).map(([id, o]) => (
                         <option key={id} value={id}>
-                          {o.customer?.name || '—'} · {o.created_at ? new Date(o.created_at).toLocaleDateString('en-GB') : '—'}
+                          {o.customer?.name || '—'} · {fmtDay(o.created_at)}
                         </option>
                       ))}
                     </select>
@@ -8664,7 +8705,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
                   </div>
                   <div style={styles.formGroup}>
                     <label style={styles.label}>Account number</label>
-                    <input style={styles.input} placeholder="10-digit account number"
+                    <input style={styles.input} inputMode="numeric" placeholder="10-digit account number"
                       value={form.payee_account_number} onChange={e => setForm(f => ({ ...f, payee_account_number: e.target.value }))} />
                   </div>
                   <div style={styles.formGroup}>
@@ -8708,7 +8749,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Amount (₦) *</label>
-              <input style={styles.input} type="number" min="1" placeholder="0"
+              <input style={styles.input} type="number" inputMode="decimal" min="1" placeholder="0"
                 value={backfillForm.amount}
                 onChange={e => setBackfillForm(f => ({ ...f, amount: e.target.value }))} />
             </div>
@@ -8793,7 +8834,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
                 </div>
                 <div style={styles.formGroup}>
                   <label style={styles.label}>Account number</label>
-                  <input style={styles.input} placeholder="10-digit account number"
+                  <input style={styles.input} inputMode="numeric" placeholder="10-digit account number"
                     value={backfillForm.payee_account_number}
                     onChange={e => setBackfillForm(f => ({ ...f, payee_account_number: e.target.value }))} />
                 </div>
@@ -8901,7 +8942,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
         const payeeName = req.supplier?.company_name || req.payee_name;
         const copyAcct = async () => {
           if (!acctNum) return;
-          try { await navigator.clipboard.writeText(acctNum); setCopiedField('acct'); setTimeout(() => setCopiedField(null), 2000); } catch {}
+          try { await navigator.clipboard.writeText(acctNum); setCopiedField('acct'); setTimeout(() => setCopiedField(null), 2000); } catch { /* clipboard blocked by the browser; the number stays on screen to copy by hand */ }
         };
         const cat = categories.find(c => c.id === req.expense_category_id);
         const closureMechanism = cat?.closure_mechanism;
@@ -8932,7 +8973,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
                 <DL label="Category" value={req.expense_category_id ? catMap[req.expense_category_id] : null} />
                 {req.category_other_note && <DL label="Category note" value={req.category_other_note} />}
                 <DL label="Disbursement method" value={req.disbursement_method === 'bank_transfer' ? 'Bank Transfer' : req.disbursement_method === 'cash' ? 'Cash' : req.disbursement_method} />
-                {req.transaction_date && <DL label="Transaction Date (Historical)" value={new Date(req.transaction_date).toLocaleDateString('en-GB')} />}
+                {req.transaction_date && <DL label="Transaction Date (Historical)" value={fmtDate(req.transaction_date)} />}
               </div>
               <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: '16px', marginTop: '4px' }}>
                 <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '12px' }}>Payee / Bank Details</div>
@@ -8959,7 +9000,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
               {!isInitiator && req.requester?.full_name && (
                 <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: '16px', marginTop: '4px' }}>
                   <DL label="Requested by" value={req.requester.full_name} />
-                  <DL label="Date" value={req.created_at ? new Date(req.created_at).toLocaleDateString('en-GB') : null} />
+                  <DL label="Date" value={req.created_at ? fmtDay(req.created_at) : null} />
                 </div>
               )}
               {(canUploadEvidence || attachments.length > 0) && (
@@ -9086,7 +9127,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
                         <span style={styles.badge(statusColor(req.status))}>{req.status}</span>
                         {req.transaction_date && <span style={{ ...styles.badge('#f59e0b'), marginLeft: '4px', fontSize: '10px', color: '#000' }}>Historical</span>}
                       </td>
-                      <td style={styles.td}>{req.transaction_date ? new Date(req.transaction_date).toLocaleDateString('en-GB') : req.created_at ? new Date(req.created_at).toLocaleDateString('en-GB') : '—'}</td>
+                      <td style={styles.td}>{req.transaction_date ? fmtDate(req.transaction_date) : fmtDay(req.created_at)}</td>
                       <td style={styles.td}>
                         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                           <button style={{ ...styles.btn('secondary'), ...sm }} onClick={() => setDetailReq(req)}>View</button>
@@ -9130,7 +9171,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
                       <td style={styles.td}>{v.bank_name || '—'}</td>
                       <td style={styles.td}><span style={{ fontFamily: 'monospace', fontSize: '12px' }}>{v.bank_account_number || '—'}</span></td>
                       <td style={styles.td}>{v.bank_account_name || '—'}</td>
-                      <td style={styles.td}>{v.created_at ? new Date(v.created_at).toLocaleDateString('en-GB') : '—'}</td>
+                      <td style={styles.td}>{fmtDay(v.created_at)}</td>
                       <td style={styles.td}>
                         <button
                           style={{ ...styles.btn('primary'), ...sm, background: theme.green, color: '#000' }}
@@ -9309,7 +9350,7 @@ const LeavePage = ({ userProfile }) => {
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Days</label>
-              <input type="number" min="1" style={styles.input} value={form.days} onChange={e => setFormField('days', e.target.value)} placeholder="Auto-filled from dates" />
+              <input type="number" inputMode="decimal" min="1" style={styles.input} value={form.days} onChange={e => setFormField('days', e.target.value)} placeholder="Auto-filled from dates" />
             </div>
           </div>
           <div style={styles.formGroup}>
@@ -9373,8 +9414,8 @@ const LeavePage = ({ userProfile }) => {
                     <td style={styles.td}><strong>{req.staff?.full_name || '—'}</strong></td>
                     <td style={styles.td}><span style={styles.badge(theme.accent)}>{req.leave_type}</span></td>
                     <td style={styles.td}>{req.is_paid ? <span style={{ color: theme.green, fontWeight: '600' }}>Yes</span> : <span style={{ color: theme.textMuted }}>No</span>}</td>
-                    <td style={styles.td}>{req.start_date || '—'}</td>
-                    <td style={styles.td}>{req.end_date || '—'}</td>
+                    <td style={styles.td}>{fmtDate(req.start_date)}</td>
+                    <td style={styles.td}>{fmtDate(req.end_date)}</td>
                     <td style={styles.td}><strong>{req.days ?? '—'}</strong></td>
                     <td style={styles.td}>{req.reason || '—'}</td>
                     <td style={styles.td}><span style={styles.badge(leaveStatusColor(status))}>{status}</span></td>
@@ -9490,7 +9531,7 @@ const MyHRPage = ({ userProfile }) => {
       setAdvForm({ amount: '', reason: '', installments: '1' });
       setShowAdvForm(false);
       setAlert({ type: 'success', msg: 'Advance request submitted.' });
-      advancesService.listMine(myStaff.id).then(setAdvances).catch(() => {});
+      advancesService.listMine(myStaff.id).then(setAdvances).catch(e => setAlert({ type: 'error', msg: 'Submitted, but your list could not be refreshed: ' + (e?.message || e) }));
     } catch (e) { setAlert({ type: 'error', msg: e.message }); }
     finally { setAdvSaving(false); }
   };
@@ -9504,7 +9545,7 @@ const MyHRPage = ({ userProfile }) => {
       setLeaveForm({ leave_type: 'annual', is_paid: true, start_date: '', end_date: '', days: '', reason: '' });
       setShowLeaveForm(false);
       setAlert({ type: 'success', msg: 'Leave request submitted.' });
-      leaveService.listMine(myStaff.id).then(setLeaves).catch(() => {});
+      leaveService.listMine(myStaff.id).then(setLeaves).catch(e => setAlert({ type: 'error', msg: 'Submitted, but your list could not be refreshed: ' + (e?.message || e) }));
     } catch (e) { setAlert({ type: 'error', msg: e.message }); }
     finally { setLeaveSaving(false); }
   };
@@ -9668,8 +9709,8 @@ const MyHRPage = ({ userProfile }) => {
               <tr key={req.id}>
                 <td style={styles.td}><span style={styles.badge(theme.accent)}>{req.leave_type}</span></td>
                 <td style={styles.td}>{req.is_paid ? <span style={{ color: theme.green, fontWeight: '600' }}>Yes</span> : <span style={{ color: theme.textMuted }}>No</span>}</td>
-                <td style={styles.td}>{req.start_date || '—'}</td>
-                <td style={styles.td}>{req.end_date || '—'}</td>
+                <td style={styles.td}>{fmtDate(req.start_date)}</td>
+                <td style={styles.td}>{fmtDate(req.end_date)}</td>
                 <td style={styles.td}><strong>{req.days ?? '—'}</strong></td>
                 <td style={styles.td}>{req.reason || '—'}</td>
                 <td style={styles.td}><span style={styles.badge(leaveStatusColor(req.status))}>{req.status}</span></td>
@@ -9697,8 +9738,8 @@ const MyHRPage = ({ userProfile }) => {
                 <div>
                   <div style={{ fontWeight: '600', fontSize: '14px', color: theme.text }}>{c.title}</div>
                   <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '2px' }}>
-                    {DISC_TYPES.find(t => t.id === c.type)?.label || c.type} · {c.incident_date || '—'}
-                    {c.response_deadline ? ` · Respond by ${c.response_deadline}` : ''}
+                    {DISC_TYPES.find(t => t.id === c.type)?.label || c.type} · {fmtDate(c.incident_date)}
+                    {c.response_deadline ? ` · Respond by ${fmtDate(c.response_deadline)}` : ''}
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
@@ -9920,7 +9961,7 @@ const AttendanceFlagsPage = ({ userProfile }) => {
                   <div>
                     <div style={{ fontWeight: '600', fontSize: '14px' }}>{row.staff?.full_name || '—'}</div>
                     <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '2px' }}>
-                      {row.staff?.employee_number || ''} · {row.date}
+                      {row.staff?.employee_number || ''} · {fmtDate(row.date)}
                     </div>
                   </div>
                   <span style={styles.badge(theme.red)}>Flagged</span>
@@ -9938,7 +9979,7 @@ const AttendanceFlagsPage = ({ userProfile }) => {
                 <div style={{ marginTop: '12px', display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
                   <div style={styles.formGroup}>
                     <label style={styles.label}>Hours Worked</label>
-                    <input type="number" step="0.5" min="0" max="24"
+                    <input type="number" inputMode="decimal" step="0.5" min="0" max="24"
                       style={{ ...styles.input, width: '100px' }}
                       placeholder="e.g. 8"
                       value={form.hours_worked ?? ''}
@@ -10018,7 +10059,7 @@ const DisciplinaryPage = ({ userProfile }) => {
       try {
         const rows = await disciplinaryService.getAudit(caseId);
         setAudit(a => ({ ...a, [caseId]: rows }));
-      } catch (_) {}
+      } catch (e) { setAlert({ type: 'error', msg: 'Could not load the case history: ' + e.message }); }
       finally { setAuditLoading(false); }
     }
   };
@@ -10027,7 +10068,7 @@ const DisciplinaryPage = ({ userProfile }) => {
     try {
       const rows = await disciplinaryService.getAudit(caseId);
       setAudit(a => ({ ...a, [caseId]: rows }));
-    } catch (_) {}
+    } catch (e) { setAlert({ type: 'error', msg: 'Saved, but the case history could not be refreshed: ' + e.message }); }
   };
 
   const handleIssue = async () => {
@@ -10140,7 +10181,7 @@ const DisciplinaryPage = ({ userProfile }) => {
               <div>
                 <div style={{ fontWeight: '600', fontSize: '14px', color: theme.text }}>{c.title}</div>
                 <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '2px' }}>
-                  {c.staff?.full_name || '—'} · {DISC_TYPES.find(t => t.id === c.type)?.label || c.type} · {c.incident_date || '—'}
+                  {c.staff?.full_name || '—'} · {DISC_TYPES.find(t => t.id === c.type)?.label || c.type} · {fmtDate(c.incident_date)}
                 </div>
               </div>
               <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -10197,7 +10238,7 @@ const DisciplinaryPage = ({ userProfile }) => {
                 </div>
                 {c.response_deadline && (
                   <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '8px' }}>
-                    <strong style={{ color: theme.text }}>Response deadline:</strong> {c.response_deadline}
+                    <strong style={{ color: theme.text }}>Response deadline:</strong> {fmtDate(c.response_deadline)}
                   </div>
                 )}
                 {c.employee_response && (
@@ -10221,7 +10262,7 @@ const DisciplinaryPage = ({ userProfile }) => {
                     {entry.actor_role ? ` — ${entry.actor_role}` : ''}
                     {entry.note ? `: "${entry.note}"` : ''}
                     <span style={{ marginLeft: '8px', fontSize: '11px', color: theme.textDim }}>
-                      {entry.created_at ? new Date(entry.created_at).toLocaleDateString() : ''}
+                      {entry.created_at ? fmtDateTime(entry.created_at) : ''}
                     </span>
                   </div>
                 ))}
@@ -10315,7 +10356,7 @@ const TruckLoadingPage = ({ userProfile }) => {
       truckLoadingService.getAssignments(),
       productsService.getActive(),
     ]).then(([v, a, p]) => { setVehicles(v); setAssignments(a); setProducts(p); })
-      .catch(() => {});
+      .catch(e => setLogAlert({ type: 'error', msg: 'Could not load vehicles, loader assignments or products: ' + (e?.message || e) }));
   }, []);
 
   // Load (and reload) the log list whenever the range or null-toggle changes.
@@ -10852,7 +10893,7 @@ const TradingMarginReport = () => {
                       <tr key={r.order_id || i}>
                         <td style={styles.td}><strong style={{ fontFamily: 'monospace', fontSize: '12px' }}>{r.invoice_number || (r.order_id ? r.order_id.slice(0, 8) + ' (not invoiced)' : '—')}</strong></td>
                         <td style={styles.td}>{r.customer_name || '—'}</td>
-                        <td style={styles.td}>{r.order_date ? new Date(r.order_date).toLocaleDateString('en-GB') : '—'}</td>
+                        <td style={styles.td}>{fmtDate(r.order_date)}</td>
                         <td style={styles.td}><strong>{naira(r.sale_amount)}</strong></td>
                         <td style={styles.td}>{naira(r.purchase_cost)}</td>
                         <td style={styles.td}>
@@ -11026,7 +11067,7 @@ const RoleGrantsManager = ({ users }) => {
     finally { setRevoking(null); }
   };
 
-  const fmtD = (d) => d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+  const fmtD = fmtDay;
   const expiringSoon = (d) => d && new Date(d) < new Date(Date.now() + 14 * 86400000);
 
   return (
@@ -11368,7 +11409,7 @@ const UserManagement = ({ userProfile }) => {
                       </span>
                     </td>
                     <td style={{ padding:'8px 10px', color:theme.textMuted, fontSize:'11px' }}>
-                      {u.last_login ? new Date(u.last_login).toLocaleString('en-GB',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}) : '—'}
+                      {u.last_login ? fmtDateTime(u.last_login) : '—'}
                     </td>
                     <td style={{ padding:'8px 10px' }}>
                       {u.id !== userProfile?.id && isMD && (
@@ -11514,7 +11555,7 @@ export default function App() {
         return;
       }
       setUserProfile(await attachEffectiveRoles(profile));
-      supabase.from('user_profiles').update({ last_login: new Date().toISOString() }).eq('id', user.id).then(() => {}).catch(() => {});
+      supabase.from('user_profiles').update({ last_login: new Date().toISOString() }).eq('id', user.id).then(() => {}).catch(() => {}); // last-login stamp only
     } catch (err) {
       if (err?.code === 'PGRST116') {
         // No profile row at all — do not auto-create one.
@@ -11538,11 +11579,13 @@ export default function App() {
   const investorOnly = userProfile?.role === 'investor';
   useEffect(() => {
     if (investorOnly) return;
+    // Sidebar badge counts only; the pages load and report their own errors.
     lpoService.getPending().then(l => setLpoCount(l.length)).catch(() => {});
     schedulesService.getSubmitted().then(s => setScheduleCount(s.length)).catch(() => {});
   }, [active, investorOnly]);
 
-  // Poll unread message count for the nav badge (30s interval; skip while on Messages page)
+  // Poll unread message count for the nav badge (30s interval; skip while on Messages page).
+  // Badge only, so a failed poll is safe to ignore — the next one retries.
   useEffect(() => {
     if (!userProfile || active === 'messages' || userProfile.role === 'investor') return;
     messagesService.getTotalUnread(userProfile.id).then(setUnreadMsgCount).catch(() => {});
@@ -11625,34 +11668,34 @@ export default function App() {
     handovers: <Handovers userProfile={userProfile} />,
     batches: <MobileScope><Batches userProfile={userProfile} /></MobileScope>,
     waybills: <MobileScope><Waybills userProfile={userProfile} /></MobileScope>,
-    vehicles: <VehicleRegistry />,
-    staff: <Staff userProfile={userProfile} />,
-    customers: <Customers userProfile={userProfile} />,
-    orders: <Orders onNavigate={setActive} userProfile={userProfile} />,
+    vehicles: <MobileScope fit><VehicleRegistry /></MobileScope>,
+    staff: <MobileScope fit><Staff userProfile={userProfile} /></MobileScope>,
+    customers: <MobileScope fit><Customers userProfile={userProfile} /></MobileScope>,
+    orders: <MobileScope fit><Orders onNavigate={setActive} userProfile={userProfile} /></MobileScope>,
     pending_register: <MobileScope><PendingDeliveryRegister /></MobileScope>,
-    daily_schedule: <DailySchedule />,
-    lpo_approvals: <LPOApprovals />,
-    schedule_approvals: <ScheduleApprovals />,
-    reports: <Reports userProfile={userProfile} />,
-    kpi_dashboard: <KPIDashboard />,
-    trading_margin: <TradingMarginReport />,
-    products: <Products />,
-    suppliers: <SupplierRegistry />,
-    accounting: <Accounting userProfile={userProfile} />,
+    daily_schedule: <MobileScope fit><DailySchedule /></MobileScope>,
+    lpo_approvals: <MobileScope fit><LPOApprovals /></MobileScope>,
+    schedule_approvals: <MobileScope fit><ScheduleApprovals /></MobileScope>,
+    reports: <MobileScope fit><Reports userProfile={userProfile} /></MobileScope>,
+    kpi_dashboard: <MobileScope fit><KPIDashboard /></MobileScope>,
+    trading_margin: <MobileScope fit><TradingMarginReport /></MobileScope>,
+    products: <MobileScope fit><Products /></MobileScope>,
+    suppliers: <MobileScope fit><SupplierRegistry /></MobileScope>,
+    accounting: <MobileScope fit><Accounting userProfile={userProfile} /></MobileScope>,
     data_import: <DataImport />,
-    user_management: <UserManagement userProfile={userProfile} />,
+    user_management: <MobileScope fit><UserManagement userProfile={userProfile} /></MobileScope>,
     labour: <MobileScope><Labour userProfile={userProfile} /></MobileScope>,
-    maintenance: <Maintenance userProfile={userProfile} />,
+    maintenance: <MobileScope fit><Maintenance userProfile={userProfile} /></MobileScope>,
     truck_loading: <MobileScope><TruckLoadingPage userProfile={userProfile} /></MobileScope>,
-    advances: <AdvancesPage userProfile={userProfile} />,
-    payment_requests: <PaymentRequestsPage userProfile={userProfile} />,
-    leave: <LeavePage userProfile={userProfile} />,
-    disciplinary: <DisciplinaryPage userProfile={userProfile} />,
+    advances: <MobileScope fit><AdvancesPage userProfile={userProfile} /></MobileScope>,
+    payment_requests: <MobileScope fit><PaymentRequestsPage userProfile={userProfile} /></MobileScope>,
+    leave: <MobileScope fit><LeavePage userProfile={userProfile} /></MobileScope>,
+    disciplinary: <MobileScope fit><DisciplinaryPage userProfile={userProfile} /></MobileScope>,
     attendance_kiosk: <AttendanceKiosk userProfile={userProfile} />,
-    attendance_flags: <AttendanceFlagsPage userProfile={userProfile} />,
-    messages: <Messages userProfile={userProfile} onUnreadChange={setUnreadMsgCount} />,
+    attendance_flags: <MobileScope fit><AttendanceFlagsPage userProfile={userProfile} /></MobileScope>,
+    messages: <MobileScope fit><Messages userProfile={userProfile} onUnreadChange={setUnreadMsgCount} /></MobileScope>,
     my_hr: <MyHRPage userProfile={userProfile} />,
-    my_profile: <MyProfile userProfile={userProfile} />,
+    my_profile: <MobileScope fit><MyProfile userProfile={userProfile} /></MobileScope>,
     investor_register: <InvestorRegister userProfile={userProfile} />,
     capital: <Capital userProfile={userProfile} />,
     terms: <Terms userProfile={userProfile} />,
@@ -11722,7 +11765,7 @@ export default function App() {
           </div>
         </div>
       </div>
-      {showChangePwd && <ChangePasswordModal onClose={() => setShowChangePwd(false)} />}
+      {showChangePwd && <MobileScope fit><ChangePasswordModal onClose={() => setShowChangePwd(false)} /></MobileScope>}
       {!investorOnly && <MessagesBell
         unreadMsgCount={unreadMsgCount}
         onNavigate={(page) => { setActive(page); if (isMobile) setSidebarOpen(false); }}

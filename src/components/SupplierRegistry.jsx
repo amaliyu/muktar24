@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { suppliersService, supplierTransactionsService, supplierDocumentsService } from '../services/suppliers'
 import { expensesService } from '../services/accounting'
 import { supabase } from '../lib/supabase'
-import { ConfirmDialog, fmtDate } from './site/siteUi'
+import { ConfirmDialog, fmtDate, fmtDay } from './site/siteUi'
 
 const theme = {
   bg: "#0f1117", surface: "#1a1d27", card: "#21263a", border: "#2e3452",
@@ -179,6 +179,7 @@ const TransactionsTab = ({ supplierId, companyName }) => {
     setSaving(true)
     try {
       let expenseId = null
+      let expenseErr = null
       if (payForm.create_expense) {
         try {
           const exp = await expensesService.create({
@@ -187,7 +188,7 @@ const TransactionsTab = ({ supplierId, companyName }) => {
             notes: `Supplier payment: ${companyName}${payForm.reference ? ' · Ref: ' + payForm.reference : ''}`,
           })
           expenseId = exp.id
-        } catch { /* non-blocking */ }
+        } catch (e) { expenseErr = e } // the payment is still recorded; the message below says the P&L entry failed
       }
       await supplierTransactionsService.create({
         supplier_id: supplierId, transaction_date: payForm.transaction_date,
@@ -197,15 +198,18 @@ const TransactionsTab = ({ supplierId, companyName }) => {
       })
       setPayForm({ transaction_date: todayStr(), amount: '', description: '', reference: '', payment_method: 'Bank Transfer', create_expense: true })
       setShowPayForm(false)
-      setAlert({ type: 'success', msg: `Payment of ${naira(payForm.amount)} recorded${expenseId ? ' and added to P&L expenses.' : '.'}` })
+      setAlert(expenseErr
+        ? { type: 'error', msg: `Payment of ${naira(payForm.amount)} recorded, but it could not be added to P&L expenses: ${expenseErr.message}. Record the expense in Accounting.` }
+        : { type: 'success', msg: `Payment of ${naira(payForm.amount)} recorded${expenseId ? ' and added to P&L expenses.' : '.'}` })
       await load()
     } catch (e) { setAlert({ type: 'error', msg: e.message }) }
     finally { setSaving(false) }
   }
 
   const handleDelete = async (id) => {
-    try { await supplierTransactionsService.delete(id); await load() }
-    catch (e) { setAlert({ type: 'error', msg: e.message }) }
+    try { await supplierTransactionsService.delete(id); setAlert({ type: 'success', msg: 'Transaction deleted.' }) }
+    catch (e) { setAlert({ type: 'error', msg: 'Delete failed: ' + e.message }) }
+    await load()
   }
 
   return (
@@ -234,7 +238,7 @@ const TransactionsTab = ({ supplierId, companyName }) => {
           <div style={{ fontWeight: '700', marginBottom: '12px' }}>Record Payment to {companyName}</div>
           <div style={styles.grid(3)}>
             <div style={styles.formGroup}><label style={styles.label}>Date</label><input style={styles.input} type="date" value={payForm.transaction_date} onChange={e => setPayForm(f => ({ ...f, transaction_date: e.target.value }))} /></div>
-            <div style={styles.formGroup}><label style={styles.label}>Amount (₦) *</label><input style={styles.input} type="number" value={payForm.amount} onChange={e => setPayForm(f => ({ ...f, amount: e.target.value }))} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Amount (₦) *</label><input style={styles.input} type="number" inputMode="decimal" value={payForm.amount} onChange={e => setPayForm(f => ({ ...f, amount: e.target.value }))} /></div>
             <div style={styles.formGroup}><label style={styles.label}>Payment Method</label>
               <select style={styles.input} value={payForm.payment_method} onChange={e => setPayForm(f => ({ ...f, payment_method: e.target.value }))}>
                 {['Bank Transfer', 'Cash', 'Cheque', 'Mobile Transfer'].map(m => <option key={m}>{m}</option>)}
@@ -271,7 +275,7 @@ const TransactionsTab = ({ supplierId, companyName }) => {
               return acc
             }, []).reverse().map(t => (
               <tr key={t.id}>
-                <td style={styles.td}>{t.transaction_date}</td>
+                <td style={styles.td}>{fmtDate(t.transaction_date)}</td>
                 <td style={styles.td}><span style={styles.badge(t.transaction_type === 'purchase' ? theme.red : t.transaction_type === 'payment' ? theme.green : theme.blue)}>{t.transaction_type}</span></td>
                 <td style={styles.td}>{t.description || '—'}</td>
                 <td style={styles.td}>{t.transaction_type === 'purchase' ? <strong style={{ color: theme.red }}>{naira(t.amount)}</strong> : <span style={{ color: theme.textMuted }}>—</span>}</td>
@@ -292,18 +296,20 @@ const SupplyHistoryTab = ({ supplierId, companyName }) => {
   const [stockMoves, setStockMoves] = useState([])
   const [maintenance, setMaintenance] = useState([])
   const [loading, setLoading] = useState(true)
+  const [loadErr, setLoadErr] = useState('')
 
   useEffect(() => {
     const load = async () => {
-      setLoading(true)
+      setLoading(true); setLoadErr('')
+      const rows = r => { if (r.error) throw r.error; return r.data || [] }
       try {
         const [sm, vm] = await Promise.all([
-          supabase.from('stock_movements').select('*, item:item_id(name, unit)').or(`supplier_id.eq.${supplierId},supplier.ilike.%${companyName}%`).eq('movement_type', 'in').order('date', { ascending: false }).then(r => r.data || []),
-          supabase.from('vehicle_maintenance').select('*, vehicle:vehicle_id(vehicle_number, vehicle_name)').or(`supplier_id.eq.${supplierId},vendor_name.ilike.%${companyName}%`).order('maintenance_date', { ascending: false }).then(r => r.data || []),
+          supabase.from('stock_movements').select('*, item:item_id(name, unit)').or(`supplier_id.eq.${supplierId},supplier.ilike.%${companyName}%`).eq('movement_type', 'in').order('date', { ascending: false }).then(rows),
+          supabase.from('vehicle_maintenance').select('*, vehicle:vehicle_id(vehicle_number, vehicle_name)').or(`supplier_id.eq.${supplierId},vendor_name.ilike.%${companyName}%`).order('maintenance_date', { ascending: false }).then(rows),
         ])
         setStockMoves(sm)
         setMaintenance(vm)
-      } catch { }
+      } catch (e) { setLoadErr('Could not load the supply history: ' + e.message) }
       finally { setLoading(false) }
     }
     load()
@@ -315,6 +321,7 @@ const SupplyHistoryTab = ({ supplierId, companyName }) => {
   if (loading) return <Spinner />
   return (
     <div>
+      {loadErr && <AlertBar msg={loadErr} />}
       <div style={{ ...styles.grid(2), marginBottom: '20px' }}>
         <div style={{ background: theme.surface, borderRadius: '8px', padding: '14px', borderTop: `3px solid ${theme.blue}` }}>
           <div style={{ fontSize: '11px', color: theme.textMuted, textTransform: 'uppercase' }}>Stock Supplied (Value)</div>
@@ -336,7 +343,7 @@ const SupplyHistoryTab = ({ supplierId, companyName }) => {
             <tbody>
               {stockMoves.map(m => (
                 <tr key={m.id}>
-                  <td style={styles.td}>{m.date}</td>
+                  <td style={styles.td}>{fmtDate(m.date)}</td>
                   <td style={styles.td}>{m.item?.name || '—'}</td>
                   <td style={styles.td}>{fmt(m.quantity)} {m.item?.unit || ''}</td>
                   <td style={styles.td}>{m.unit_cost ? naira(m.unit_cost) : '—'}</td>
@@ -356,7 +363,7 @@ const SupplyHistoryTab = ({ supplierId, companyName }) => {
             <tbody>
               {maintenance.map(m => (
                 <tr key={m.id}>
-                  <td style={styles.td}>{m.maintenance_date}</td>
+                  <td style={styles.td}>{fmtDate(m.maintenance_date)}</td>
                   <td style={styles.td}>{m.vehicle?.vehicle_number || '—'}</td>
                   <td style={styles.td}>{m.maintenance_type}</td>
                   <td style={styles.td}>{m.description || '—'}</td>
@@ -397,7 +404,7 @@ const SupplierDocumentsTab = ({ supplierId }) => {
       }))
       setDocUrls(Object.fromEntries(entries))
     }
-    catch { }
+    catch (e) { setAlert({ type: 'error', msg: 'Could not load documents: ' + e.message }) }
     finally { setLoading(false) }
   }
   useEffect(() => { load() }, [supplierId])
@@ -415,8 +422,9 @@ const SupplierDocumentsTab = ({ supplierId }) => {
   }
 
   const handleDelete = async (doc) => {
-    try { await supplierDocumentsService.delete(doc.id, doc.file_url); await load() }
-    catch (e) { setAlert({ type: 'error', msg: e.message }) }
+    try { await supplierDocumentsService.delete(doc.id, doc.file_url); setAlert({ type: 'success', msg: 'Document deleted.' }) }
+    catch (e) { setAlert({ type: 'error', msg: 'Delete failed: ' + e.message }) }
+    await load()
   }
 
   return (
@@ -441,9 +449,9 @@ const SupplierDocumentsTab = ({ supplierId }) => {
             <div key={d.id} style={{ ...styles.row, ...styles.card, padding: '12px 16px' }}>
               <div style={{ flex: 1 }}>
                 <div style={{ fontWeight: '600', fontSize: '13px' }}>{d.document_label}</div>
-                <div style={{ fontSize: '11px', color: theme.textMuted }}>{d.file_name} {d.file_size ? `· ${(d.file_size / 1024).toFixed(0)} KB` : ''} · {new Date(d.uploaded_at).toLocaleDateString('en-NG')}</div>
+                <div style={{ fontSize: '11px', color: theme.textMuted }}>{d.file_name} {d.file_size ? `· ${(d.file_size / 1024).toFixed(0)} KB` : ''} · {fmtDay(d.uploaded_at)}</div>
               </div>
-              <a href={docUrls[d.id] || undefined} target="_blank" rel="noreferrer" style={{ fontSize: '12px', color: theme.blue }}>View</a>
+              <a className="m-tap" href={docUrls[d.id] || undefined} target="_blank" rel="noreferrer" style={{ fontSize: '12px', color: theme.blue }}>View</a>
               <button style={{ ...styles.btn('danger'), padding: '3px 8px', fontSize: '11px' }} onClick={() => setConfirmDel(d)}>Delete</button>
             </div>
           ))}
@@ -462,7 +470,7 @@ const SupplierProfile = ({ supplier: initialSupplier, onBack, onUpdate }) => {
   const [balance, setBalance] = useState(0)
 
   useEffect(() => {
-    supplierTransactionsService.getBalance(supplier.id).then(setBalance).catch(() => {})
+    supplierTransactionsService.getBalance(supplier.id).then(setBalance).catch(e => setAlert({ type: 'error', msg: 'Could not load the balance: ' + e.message }))
   }, [supplier.id])
 
   const TABS = [
@@ -491,7 +499,7 @@ const SupplierProfile = ({ supplier: initialSupplier, onBack, onUpdate }) => {
       </div>
 
       <div style={{ ...styles.card, marginBottom: '20px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px' }}>
+        <div className="m-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px' }}>
           <div>
             <div style={{ fontSize: '22px', fontWeight: '800', color: theme.text }}>{supplier.company_name}</div>
             <div style={{ fontSize: '12px', color: theme.accent, fontWeight: '600', marginTop: '2px' }}>{supplier.supplier_number}</div>
@@ -572,9 +580,11 @@ const SupplierRegistry = () => {
   const load = async () => {
     setLoading(true)
     try {
-      const [s, b] = await Promise.all([suppliersService.getAll(), supplierTransactionsService.getAllBalances().catch(() => ({}))])
+      let balErr = null
+      const [s, b] = await Promise.all([suppliersService.getAll(), supplierTransactionsService.getAllBalances().catch(e => { balErr = e; return {} })])
       setSuppliers(s)
       setBalances(b)
+      if (balErr) setAlert({ type: 'error', msg: 'Suppliers loaded, but balances could not be loaded (shown as ₦0): ' + balErr.message })
     } catch (e) { setAlert({ type: 'error', msg: 'Could not load suppliers: ' + e.message }) }
     finally { setLoading(false) }
   }
@@ -600,7 +610,7 @@ const SupplierRegistry = () => {
 
   return (
     <div style={styles.page}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px', flexWrap: 'wrap', gap: '12px' }}>
+      <div className="m-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px', flexWrap: 'wrap', gap: '12px' }}>
         <div>
           <div style={{ fontSize: '20px', fontWeight: '800', color: theme.text }}>Supplier Registry</div>
           <div style={{ fontSize: '13px', color: theme.textMuted, marginTop: '3px' }}>Manage suppliers, track transactions, and monitor balances</div>
@@ -651,7 +661,7 @@ const SupplierRegistry = () => {
           {suppliers.length === 0 ? 'No suppliers registered. Click "+ Register Supplier" to get started.' : 'No suppliers match your filters.'}
         </div>
       ) : (
-        <div style={styles.grid(2)}>
+        <div className="m-stack" style={styles.grid(2)}>
           {filtered.map(s => {
             const bal = balances[s.id] || 0
             const statusColor = STATUS_COLORS[s.status] || theme.textMuted

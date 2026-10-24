@@ -10,6 +10,7 @@ import { generatePayrollPDF } from '../utils/generatePayrollPDF';
 import { generateIDCardPDF, generateBusinessCardPDF } from '../utils/cardGenerator';
 import { supabase } from '../lib/supabase';
 import { Z } from '../lib/zIndex'
+import { fmtDate, fmtDay, fmtDateTime } from './site/siteUi';
 
 const theme = {
   bg: "#0f1117", surface: "#1a1d27", card: "#21263a", border: "#2e3452",
@@ -290,7 +291,7 @@ const StaffFormModal = ({ onClose, onSaved, editTarget, roles }) => {
     } else {
       hrStaffService.getNextEmployeeNumber().then(num => {
         setForm(f => ({ ...f, employee_number: num }));
-      }).catch(() => {});
+      }).catch(() => {}); // prefill only: the field can be typed, and save assigns the next number on a clash
     }
   }, []);
 
@@ -454,10 +455,10 @@ const StaffFormModal = ({ onClose, onSaved, editTarget, roles }) => {
                 </div>
               </div>
               {form.staff_type === "permanent" && (
-                <div style={styles.formGroup}><label style={styles.label}>Monthly Salary (₦)</label><input type="number" style={styles.input} placeholder="e.g. 85000" value={form.monthly_salary} onChange={e => upd("monthly_salary", e.target.value)} /></div>
+                <div style={styles.formGroup}><label style={styles.label}>Monthly Salary (₦)</label><input type="number" inputMode="decimal" style={styles.input} placeholder="e.g. 85000" value={form.monthly_salary} onChange={e => upd("monthly_salary", e.target.value)} /></div>
               )}
               {form.staff_type === "daily" && (
-                <div style={styles.formGroup}><label style={styles.label}>Daily Rate (₦)</label><input type="number" style={styles.input} placeholder="e.g. 3500" value={form.daily_rate} onChange={e => upd("daily_rate", e.target.value)} /></div>
+                <div style={styles.formGroup}><label style={styles.label}>Daily Rate (₦)</label><input type="number" inputMode="decimal" style={styles.input} placeholder="e.g. 3500" value={form.daily_rate} onChange={e => upd("daily_rate", e.target.value)} /></div>
               )}
             </div>
           )}
@@ -505,7 +506,7 @@ const StaffFormModal = ({ onClose, onSaved, editTarget, roles }) => {
                 </select>
               </div>
               <div style={styles.grid(2)}>
-                <div style={styles.formGroup}><label style={styles.label}>Account Number</label><input style={styles.input} placeholder="10-digit account number" value={form.bank_account_number} onChange={e => upd("bank_account_number", e.target.value)} /></div>
+                <div style={styles.formGroup}><label style={styles.label}>Account Number</label><input style={styles.input} inputMode="numeric" placeholder="10-digit account number" value={form.bank_account_number} onChange={e => upd("bank_account_number", e.target.value)} /></div>
                 <div style={styles.formGroup}><label style={styles.label}>Account Name (as on bank)</label><input style={styles.input} placeholder="Name as on bank account" value={form.bank_account_name} onChange={e => upd("bank_account_name", e.target.value)} /></div>
               </div>
               <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "8px" }}>Bank details used for salary/wage transfers</div>
@@ -619,7 +620,7 @@ const StaffProfile = ({ staffId, onBack, onUpdated, roles, userProfile }) => {
       const from = new Date(Date.now() - 30 * 86400000).toISOString().split("T")[0];
       attendanceService.getByRange(from, to, staffId)
         .then(setAttendanceHistory)
-        .catch(() => {})
+        .catch(e => setAlert({ type: "error", msg: "Could not load attendance history: " + e.message }))
         .finally(() => setAttendanceLoading(false));
     }
   }, [tab, staffId]);
@@ -729,7 +730,7 @@ const StaffProfile = ({ staffId, onBack, onUpdated, roles, userProfile }) => {
           {/* Right: status + actions */}
           <div style={{ textAlign: "right", display: "flex", flexDirection: "column", gap: "6px", alignItems: "flex-end" }}>
             <span style={styles.badge(statusColor)}>{staff.employment_status || "active"}</span>
-            <div style={{ fontSize: "12px", color: theme.textMuted }}>Hired: {staff.date_hired || "—"}</div>
+            <div style={{ fontSize: "12px", color: theme.textMuted }}>Hired: {fmtDate(staff.date_hired)}</div>
             <button style={{ ...styles.btn("secondary"), fontSize: "12px" }} onClick={() => setEditMode(true)}>Edit Profile</button>
 
             {/* ID Card button */}
@@ -774,7 +775,7 @@ const StaffProfile = ({ staffId, onBack, onUpdated, roles, userProfile }) => {
           <div style={styles.grid(2)}>
             {[
               ["Full Name", staff.full_name],
-              ["Date of Birth", staff.date_of_birth],
+              ["Date of Birth", fmtDate(staff.date_of_birth)],
               ["Gender", staff.gender],
               ["Marital Status", staff.marital_status],
               ["State of Origin", staff.state_of_origin],
@@ -820,7 +821,7 @@ const StaffProfile = ({ staffId, onBack, onUpdated, roles, userProfile }) => {
               ["Role", roleName],
               ["Job Title", staff.job_title],
               ["Staff Type", staff.staff_type],
-              ["Date Hired", staff.date_hired],
+              ["Date Hired", fmtDate(staff.date_hired)],
               ["Employment Status", staff.employment_status],
             ].map(([label, val]) => (
               <div key={label} style={styles.formGroup}>
@@ -866,7 +867,7 @@ const StaffProfile = ({ staffId, onBack, onUpdated, roles, userProfile }) => {
                 <tbody>
                   {attendanceHistory.map(a => (
                     <tr key={a.id}>
-                      <td style={styles.td}>{a.date}</td>
+                      <td style={styles.td}>{fmtDate(a.date)}</td>
                       <td style={styles.td}><span style={styles.badge(a.present ? theme.green : theme.red)}>{a.present ? "Present" : "Absent"}</span></td>
                       <td style={styles.td}>{a.hours_worked ? a.hours_worked + "h" : "—"}</td>
                       <td style={styles.td}>{a.notes || "—"}</td>
@@ -892,10 +893,10 @@ const StaffProfile = ({ staffId, onBack, onUpdated, roles, userProfile }) => {
                 <tbody>
                   {payrollHistory.map(l => (
                     <tr key={l.id}>
-                      <td style={styles.td}>{l.payroll_run ? `${l.payroll_run.period_from} → ${l.payroll_run.period_to}` : "—"}</td>
+                      <td style={styles.td}>{l.payroll_run ? `${fmtDate(l.payroll_run.period_from)} → ${fmtDate(l.payroll_run.period_to)}` : "—"}</td>
                       <td style={styles.td}><strong style={{ color: theme.accent }}>{naira(l.amount_due)}</strong></td>
                       <td style={styles.td}>{naira(l.amount_paid)}</td>
-                      <td style={styles.td}>{l.payment_date || "—"}</td>
+                      <td style={styles.td}>{fmtDate(l.payment_date)}</td>
                       <td style={styles.td}>{l.payment_method || "—"}</td>
                       <td style={styles.td}><span style={styles.badge(l.payroll_run?.status === "paid" ? theme.green : theme.blue)}>{l.payroll_run?.status || "—"}</span></td>
                     </tr>
@@ -939,7 +940,7 @@ const StaffProfile = ({ staffId, onBack, onUpdated, roles, userProfile }) => {
                     <tr key={doc.id}>
                       <td style={styles.td}><span style={styles.badge(theme.blue)}>{doc.document_label}</span></td>
                       <td style={styles.td}>{doc.file_name}</td>
-                      <td style={styles.td}>{doc.uploaded_at ? new Date(doc.uploaded_at).toLocaleDateString() : "—"}</td>
+                      <td style={styles.td}>{fmtDay(doc.uploaded_at)}</td>
                       <td style={styles.td}>
                         <div style={{ display: "flex", gap: "6px" }}>
                           <a href={doc.displayUrl || '#'} target="_blank" rel="noopener noreferrer" style={{ ...styles.btn("secondary"), padding: "4px 10px", fontSize: "11px", textDecoration: "none" }}>View</a>
@@ -1133,7 +1134,7 @@ const StaffDirectory = ({ onViewProfile, userProfile }) => {
                       </td>
                       <td style={styles.td}><span style={styles.badge(s.staff_type === "permanent" ? theme.blue : s.staff_type === "daily" ? theme.accent : theme.textMuted)}>{s.staff_type}</span></td>
                       <td style={styles.td}>{s.staff_type === "permanent" ? naira(s.monthly_salary) + "/mo" : naira(s.daily_rate) + "/day"}</td>
-                      <td style={styles.td}>{s.date_hired || "—"}</td>
+                      <td style={styles.td}>{fmtDate(s.date_hired)}</td>
                       <td style={styles.td}><span style={styles.badge(statusColor(s))}>{s.employment_status || "active"}</span></td>
                       <td style={styles.td}>
                         <div style={{ display: "flex", gap: "6px" }}>
@@ -1217,7 +1218,7 @@ const AttendanceTab = () => {
   const [view, setView] = useState("entry");
 
   useEffect(() => {
-    staffService.getActive().then(s => { setActiveStaff(s); }).catch(() => {});
+    staffService.getActive().then(s => { setActiveStaff(s); }).catch(e => setAlert({ type: "error", msg: "Could not load the staff list: " + e.message }));
   }, []);
 
   useEffect(() => {
@@ -1228,7 +1229,12 @@ const AttendanceTab = () => {
         const ex = existingMap[s.id];
         return { staff_id: s.id, full_name: s.full_name, role: s.staffRole?.role_name || s.role || "—", staff_type: s.staff_type, daily_rate: s.daily_rate, present: ex ? ex.present : true, hours_worked: ex ? (ex.hours_worked || "") : "", notes: ex ? (ex.notes || "") : "" };
       }));
-    }).catch(() => {});
+    }).catch(e => {
+      // No sheet rather than an all-present default that would overwrite the
+      // day's real attendance on save.
+      setRows([]);
+      setAlert({ type: "error", msg: "Could not load attendance already recorded for this date, so the sheet is hidden: " + e.message });
+    });
   }, [attendanceDate, activeStaff]);
 
   const loadHistory = async () => {
@@ -1245,7 +1251,7 @@ const AttendanceTab = () => {
     try {
       const records = rows.map(r => ({ staff_id: r.staff_id, date: attendanceDate, present: r.present, hours_worked: r.hours_worked ? parseFloat(r.hours_worked) : null, notes: r.notes || null, recorded_by: "Admin" }));
       await attendanceService.saveAll(records);
-      setAlert({ type: "success", msg: `Attendance saved for ${attendanceDate} (${rows.filter(r => r.present).length} present, ${rows.filter(r => !r.present).length} absent).` });
+      setAlert({ type: "success", msg: `Attendance saved for ${fmtDate(attendanceDate)} (${rows.filter(r => r.present).length} present, ${rows.filter(r => !r.present).length} absent).` });
     } catch (e) {
       const msg = e.message?.includes('not active') || e.message?.includes('not eligible')
         ? 'This staff member is not active and cannot be added to attendance/payroll.'
@@ -1306,7 +1312,7 @@ const AttendanceTab = () => {
             <div style={{ ...styles.card, textAlign: "center", padding: "40px", color: theme.textMuted }}>No active staff found.</div>
           ) : (
             <div style={styles.card}>
-              <div style={styles.sectionTitle}>Staff Attendance — {attendanceDate}</div>
+              <div style={styles.sectionTitle}>Staff Attendance — {fmtDate(attendanceDate)}</div>
               <table style={styles.table}>
                 <thead><tr>{["Name","Role","Type","Present/Absent","Hours Worked","Notes"].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
                 <tbody>
@@ -1321,7 +1327,7 @@ const AttendanceTab = () => {
                           <button onClick={() => updateRow(r.staff_id, "present", false)} style={{ padding: "5px 14px", borderRadius: "6px", fontSize: "12px", fontWeight: "600", cursor: "pointer", border: "none", background: !r.present ? theme.red : theme.surface, color: !r.present ? "#fff" : theme.textMuted }}>Absent</button>
                         </div>
                       </td>
-                      <td style={styles.td}><input style={{ ...styles.input, width: "80px" }} type="number" placeholder="8" value={r.hours_worked} onChange={e => updateRow(r.staff_id, "hours_worked", e.target.value)} /></td>
+                      <td style={styles.td}><input style={{ ...styles.input, width: "80px" }} type="number" inputMode="decimal" placeholder="8" value={r.hours_worked} onChange={e => updateRow(r.staff_id, "hours_worked", e.target.value)} /></td>
                       <td style={styles.td}><input style={styles.input} placeholder="Optional note" value={r.notes} onChange={e => updateRow(r.staff_id, "notes", e.target.value)} /></td>
                     </tr>
                   ))}
@@ -1374,7 +1380,7 @@ const AttendanceTab = () => {
                 <tbody>
                   {filteredHistory.map(h => (
                     <tr key={h.id}>
-                      <td style={styles.td}>{h.date}</td>
+                      <td style={styles.td}>{fmtDate(h.date)}</td>
                       <td style={styles.td}><strong>{h.staff?.full_name || "—"}</strong></td>
                       <td style={styles.td}>{h.staff?.role || "—"}</td>
                       <td style={styles.td}><span style={styles.badge(h.present ? theme.green : theme.red)}>{h.present ? "Present" : "Absent"}</span></td>
@@ -1500,7 +1506,7 @@ const LeaveBalancesTab = ({ userProfile }) => {
           </div>
           {policyActive && policy?.activated_at && (
             <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '12px' }}>
-              Activated {new Date(policy.activated_at).toLocaleString()}
+              Activated {fmtDateTime(policy.activated_at)}
             </div>
           )}
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -1593,7 +1599,7 @@ const LeaveBalancesTab = ({ userProfile }) => {
                     <td style={styles.td}>
                       {isMD && !policyActive && ann ? (
                         <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-                          <input style={{ ...styles.input, width: '60px', padding: '4px 6px' }} type="number" min="0"
+                          <input style={{ ...styles.input, width: '60px', padding: '4px 6px' }} type="number" inputMode="decimal" min="0"
                             value={entitlementEdits[annKey] ?? ann.entitled_days}
                             onChange={e => setEntitlementEdits(ed => ({ ...ed, [annKey]: e.target.value }))} />
                           {entitlementEdits[annKey] !== undefined && (
@@ -1611,7 +1617,7 @@ const LeaveBalancesTab = ({ userProfile }) => {
                     <td style={styles.td}>
                       {isMD && !policyActive && sick ? (
                         <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-                          <input style={{ ...styles.input, width: '60px', padding: '4px 6px' }} type="number" min="0"
+                          <input style={{ ...styles.input, width: '60px', padding: '4px 6px' }} type="number" inputMode="decimal" min="0"
                             value={entitlementEdits[sickKey] ?? sick.entitled_days}
                             onChange={e => setEntitlementEdits(ed => ({ ...ed, [sickKey]: e.target.value }))} />
                           {entitlementEdits[sickKey] !== undefined && (
@@ -1906,8 +1912,8 @@ const PayrollTab = ({ userProfile }) => {
               <tbody>
                 {runs.map(r => (
                   <tr key={r.id}>
-                    <td style={styles.td}>{r.period_from} → {r.period_to}</td>
-                    <td style={styles.td}>{r.run_date}</td>
+                    <td style={styles.td}>{fmtDate(r.period_from)} → {fmtDate(r.period_to)}</td>
+                    <td style={styles.td}>{fmtDate(r.run_date)}</td>
                     <td style={styles.td}>{r.prepared_by || "—"}</td>
                     <td style={styles.td}><strong style={{ color: theme.green }}>{naira(r.total_payroll)}</strong></td>
                     <td style={styles.td}><span style={styles.badge(statusColor(r.status))}>{r.status}</span></td>
@@ -1924,7 +1930,7 @@ const PayrollTab = ({ userProfile }) => {
         <div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
             <div>
-              <div style={{ fontSize: "16px", fontWeight: "700" }}>Payroll Run — {selectedRun.period_from} → {selectedRun.period_to}</div>
+              <div style={{ fontSize: "16px", fontWeight: "700" }}>Payroll Run — {fmtDate(selectedRun.period_from)} → {fmtDate(selectedRun.period_to)}</div>
               <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "2px" }}>Prepared by {selectedRun.prepared_by || "—"} · <span style={styles.badge(statusColor(selectedRun.status))}>{selectedRun.status}</span></div>
             </div>
             <div style={{ display: "flex", gap: "8px" }}>
@@ -1995,7 +2001,7 @@ const PayrollTab = ({ userProfile }) => {
                       <td style={styles.td}><span style={styles.badge(l.staff_type === "permanent" ? theme.blue : theme.accent)}>{l.staff_type}</span></td>
                       <td style={styles.td}><strong style={{ color: theme.accent }}>{naira(l.amount_due)}</strong></td>
                       <td style={styles.td}>{(l.deductions || 0) > 0 ? <span style={{ color: theme.red }}>−{naira(l.deductions)}{leaveDeductionDerived > 0 && <span style={{ fontSize: "11px", color: theme.textMuted, display: "block" }}>{(l.advance_deduction || 0) > 0 && <>Loan {naira(l.advance_deduction)} + </>}Leave {naira(leaveDeductionDerived)}</span>}</span> : <span style={{ color: theme.textMuted }}>—</span>}</td>
-                      <td style={styles.td}>{editable ? <input style={{ ...styles.input, width: "110px" }} type="number" value={e.amount_paid} onChange={ev => setPaymentEdits(pe => ({ ...pe, [l.id]: { ...pe[l.id], amount_paid: ev.target.value } }))} /> : naira(l.amount_paid)}</td>
+                      <td style={styles.td}>{editable ? <input style={{ ...styles.input, width: "110px" }} type="number" inputMode="decimal" value={e.amount_paid} onChange={ev => setPaymentEdits(pe => ({ ...pe, [l.id]: { ...pe[l.id], amount_paid: ev.target.value } }))} /> : naira(l.amount_paid)}</td>
                       <td style={styles.td}>{editable ? <input type="date" style={{ ...styles.input, width: "130px" }} value={e.payment_date} onChange={ev => setPaymentEdits(pe => ({ ...pe, [l.id]: { ...pe[l.id], payment_date: ev.target.value } }))} /> : l.payment_date || "—"}</td>
                       <td style={styles.td}>{editable ? <select style={{ ...styles.input, width: "110px" }} value={e.payment_method} onChange={ev => setPaymentEdits(pe => ({ ...pe, [l.id]: { ...pe[l.id], payment_method: ev.target.value } }))}><option value="cash">Cash</option><option value="transfer">Transfer</option></select> : l.payment_method || "—"}</td>
                       <td style={styles.td}>{l.notes || "—"}</td>
@@ -2098,7 +2104,7 @@ const OnboardingTab = () => {
               <div>
                 <div style={{ fontWeight: '700', fontSize: '15px' }}>{s.full_name}</div>
                 <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '2px' }}>
-                  {s.staffRole?.role_name || s.role || '—'} · {s.staff_type} · Hired {s.date_hired || '—'}
+                  {s.staffRole?.role_name || s.role || '—'} · {s.staff_type} · Hired {fmtDate(s.date_hired)}
                 </div>
               </div>
               {canEdit && (
@@ -2140,7 +2146,7 @@ const OnboardingTab = () => {
                         />
                       </td>
                       <td style={styles.td}>{row?.completed_by || '—'}</td>
-                      <td style={styles.td}>{row?.completed_at ? new Date(row.completed_at).toLocaleDateString('en-GB') : '—'}</td>
+                      <td style={styles.td}>{fmtDay(row?.completed_at)}</td>
                     </tr>
                   );
                 })}
@@ -2158,21 +2164,23 @@ const Staff = ({ userProfile }) => {
   const [tab, setTab] = useState("directory");
   const [profileStaffId, setProfileStaffId] = useState(null);
   const [roles, setRoles] = useState([]);
+  const [rolesErr, setRolesErr] = useState("");
 
   useEffect(() => {
-    rolesService.getActive().then(setRoles).catch(() => {});
+    rolesService.getActive().then(setRoles).catch(e => setRolesErr("Could not load staff roles (role pickers will be empty): " + e.message));
   }, []);
 
   if (profileStaffId) {
     return (
       <div>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "28px" }}>
+        <div className="m-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "28px" }}>
           <div>
             <div style={{ fontSize: "22px", fontWeight: "700", color: theme.text }}>Staff Profile</div>
             <div style={{ fontSize: "13px", color: theme.textMuted, marginTop: "3px" }}>HR Management System</div>
           </div>
           <button style={styles.btn("secondary")} onClick={() => setProfileStaffId(null)}>← Back to Directory</button>
         </div>
+        {rolesErr && <Alert msg={rolesErr} type="error" onClose={() => setRolesErr("")} />}
         <StaffProfile staffId={profileStaffId} onBack={() => setProfileStaffId(null)} roles={roles} userProfile={userProfile} />
       </div>
     );
@@ -2180,7 +2188,7 @@ const Staff = ({ userProfile }) => {
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "28px" }}>
+      <div className="m-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "28px" }}>
         <div>
           <div style={{ fontSize: "22px", fontWeight: "700", color: theme.text }}>HR Management</div>
           <div style={{ fontSize: "13px", color: theme.textMuted, marginTop: "3px" }}>Staff directory, attendance tracking, payroll, and roles</div>
@@ -2191,6 +2199,7 @@ const Staff = ({ userProfile }) => {
           <button key={id} style={{ ...styles.btn(tab === id ? "primary" : "secondary"), fontSize: "13px" }} onClick={() => setTab(id)}>{label}</button>
         ))}
       </div>
+      {rolesErr && <Alert msg={rolesErr} type="error" onClose={() => setRolesErr("")} />}
       {tab === "directory"     && <StaffDirectory onViewProfile={setProfileStaffId} roles={roles} userProfile={userProfile} />}
       {tab === "onboarding"    && <OnboardingTab />}
       {tab === "attendance"    && <AttendanceTab />}

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { messagesService } from '../services/messages'
 import { Z } from '../lib/zIndex'
+import { fmtDay, fmtTime } from './site/siteUi'
 
 const theme = {
   bg: "#0f1117", surface: "#1a1d27", card: "#21263a", border: "#2e3452",
@@ -8,16 +9,14 @@ const theme = {
   blue: "#5b8dee", text: "#e8eaf0", textMuted: "#a0a7bf",
 }
 
+// Lagos time: "4:30pm" today, "Yesterday", otherwise "29 Aug 2026".
+const lagosDay = (d) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Lagos', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d)
 function formatMsgTime(iso) {
   if (!iso) return ''
-  const d = new Date(iso)
-  const today = new Date().toISOString().split('T')[0]
-  const msgDay = iso.split('T')[0]
-  if (msgDay === today) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  const yesterday = new Date()
-  yesterday.setDate(yesterday.getDate() - 1)
-  if (msgDay === yesterday.toISOString().split('T')[0]) return 'Yesterday'
-  return d.toLocaleDateString([], { month: 'short', day: 'numeric' })
+  const msgDay = lagosDay(new Date(iso))
+  if (msgDay === lagosDay(new Date())) return fmtTime(iso)
+  if (msgDay === lagosDay(new Date(Date.now() - 86400000))) return 'Yesterday'
+  return fmtDay(iso)
 }
 
 const Spinner = () => (
@@ -93,7 +92,7 @@ const Messages = ({ userProfile, onUnreadChange }) => {
     if (!userProfile) return
     setLoading(true)
     loadInbox()
-    messagesService.getAllUsers(userProfile.id).then(setAllUsers).catch(() => {})
+    messagesService.getAllUsers(userProfile.id).then(setAllUsers).catch(e => setAlert({ type: 'error', msg: 'Could not load the people list for new messages: ' + (e?.message || e) }))
   }, [userProfile])
 
   // Scroll to bottom when messages change or entering thread view
@@ -202,7 +201,7 @@ const Messages = ({ userProfile, onUnreadChange }) => {
       {/* ── INBOX ─────────────────────────────────────── */}
       {view === 'inbox' && (
         <>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+          <div className="m-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
             <div>
               <div style={{ fontSize: '22px', fontWeight: '700', color: theme.text }}>Messages</div>
               <div style={{ fontSize: '13px', color: theme.textMuted, marginTop: '3px' }}>Internal team communications</div>

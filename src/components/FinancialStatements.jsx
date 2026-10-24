@@ -3,6 +3,7 @@ import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { balanceSheetService, incomeStatementService, cashFlowService, openingBalancesService, financialAdjustmentsService } from '../services/financialService'
 import { hasRole } from '../lib/roles'
+import { fmtDate } from './site/siteUi'
 
 const theme = {
   bg: '#0f1117', surface: '#1a1d27', card: '#21263a', border: '#2e3452',
@@ -62,6 +63,18 @@ async function addPdfHeader(doc, title, subtitle) {
 }
 
 // ── BALANCE SHEET ──────────────────────────────────────────────────
+// Sources that failed to load. The statement still renders from the rest,
+// so the gap must be visible — a missing source would otherwise read as ₦0.
+const SourceWarnings = ({ warnings }) => {
+  if (!warnings?.length) return null
+  return (
+    <div role="alert" style={{ background: theme.red + '18', border: `1px solid ${theme.red}44`, borderRadius: '8px', padding: '10px 14px', marginBottom: '12px', fontSize: '13px', color: theme.red }}>
+      <strong>Incomplete — figures below leave out:</strong>
+      <ul style={{ margin: '6px 0 0', paddingLeft: '18px' }}>{warnings.map((m, i) => <li key={i}>{m}</li>)}</ul>
+    </div>
+  )
+}
+
 const BalanceSheetTab = ({ userProfile }) => {
   const [asAt, setAsAt] = useState(today())
   const [compareDate, setCompareDate] = useState('')
@@ -261,6 +274,7 @@ const BalanceSheetTab = ({ userProfile }) => {
       </div>
 
       {err && <div style={{ color: theme.red, marginBottom: '12px', fontSize: '12px' }}>{err}</div>}
+      <SourceWarnings warnings={[...(data?.warnings || []), ...(compareData?.warnings || []).map(m => `Comparison date: ${m}`)]} />
       {loading && <div style={{ color: theme.textMuted, marginBottom: '12px' }}>Loading...</div>}
 
       {bs && (
@@ -268,9 +282,9 @@ const BalanceSheetTab = ({ userProfile }) => {
           {bsC && (
             <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '8px', padding: '8px 14px', marginBottom: '14px', fontSize: '11px', color: theme.textMuted, display: 'flex', gap: '20px' }}>
               <span>Comparison mode:</span>
-              <span style={{ color: theme.text }}>{asAt} (current)</span>
+              <span style={{ color: theme.text }}>{fmtDate(asAt)} (current)</span>
               <span>vs</span>
-              <span style={{ color: theme.accent }}>{compareDate}</span>
+              <span style={{ color: theme.accent }}>{fmtDate(compareDate)}</span>
             </div>
           )}
 
@@ -279,8 +293,8 @@ const BalanceSheetTab = ({ userProfile }) => {
             <div style={{ ...s.card, background: theme.surface, marginBottom: '14px' }}>
               <div style={{ fontWeight: '700', marginBottom: '10px', fontSize: '13px' }}>Edit Balance Entry</div>
               <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-                <div><div style={s.label}>Cost / Amount (₦)</div><input type="number" style={s.input} value={editVal.amount} onChange={e => setEditVal(v => ({...v, amount: e.target.value}))} /></div>
-                <div><div style={s.label}>Accumulated Depreciation (₦)</div><input type="number" style={s.input} value={editVal.depreciation_amount} onChange={e => setEditVal(v => ({...v, depreciation_amount: e.target.value}))} /></div>
+                <div><div style={s.label}>Cost / Amount (₦)</div><input type="number" inputMode="decimal" style={s.input} value={editVal.amount} onChange={e => setEditVal(v => ({...v, amount: e.target.value}))} /></div>
+                <div><div style={s.label}>Accumulated Depreciation (₦)</div><input type="number" inputMode="decimal" style={s.input} value={editVal.depreciation_amount} onChange={e => setEditVal(v => ({...v, depreciation_amount: e.target.value}))} /></div>
                 <div style={{ flex: 2 }}><div style={s.label}>Notes</div><input style={{ ...s.input, width: '100%' }} value={editVal.notes} onChange={e => setEditVal(v => ({...v, notes: e.target.value}))} /></div>
               </div>
               <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
@@ -298,8 +312,8 @@ const BalanceSheetTab = ({ userProfile }) => {
             <div style={{ ...s.row(), fontWeight: '700', color: theme.textMuted, fontSize: '11px' }}>
               <span></span>
               <div style={{ display: 'flex', gap: '12px' }}>
-                {bsC && <span style={{ minWidth: '90px', textAlign: 'right' }}>{compareDate}</span>}
-                <span style={{ minWidth: '90px', textAlign: 'right' }}>{asAt}</span>
+                {bsC && <span style={{ minWidth: '90px', textAlign: 'right' }}>{fmtDate(compareDate)}</span>}
+                <span style={{ minWidth: '90px', textAlign: 'right' }}>{fmtDate(asAt)}</span>
               </div>
             </div>
 
@@ -445,7 +459,7 @@ const BalanceSheetTab = ({ userProfile }) => {
               {showAdjForm && (
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '10px' }}>
                   <input style={s.input} placeholder="Account name" value={adjForm.account_name} onChange={e => setAdjForm(v => ({...v, account_name: e.target.value}))} />
-                  <input type="number" style={s.input} placeholder="Amount (₦)" value={adjForm.amount} onChange={e => setAdjForm(v => ({...v, amount: e.target.value}))} />
+                  <input type="number" inputMode="decimal" style={s.input} placeholder="Amount (₦)" value={adjForm.amount} onChange={e => setAdjForm(v => ({...v, amount: e.target.value}))} />
                   <input style={s.input} placeholder="Reason" value={adjForm.reason} onChange={e => setAdjForm(v => ({...v, reason: e.target.value}))} />
                   <button style={s.btn('primary')} onClick={addAdj}>Add</button>
                   <button style={s.btn('secondary')} onClick={() => setShowAdjForm(false)}>Cancel</button>
@@ -606,6 +620,7 @@ const IncomeStatementTab = ({ userProfile }) => {
       </div>
 
       {err && <div style={{ color: theme.red, marginBottom: '12px', fontSize: '12px' }}>{err}</div>}
+      <SourceWarnings warnings={data?.warnings} />
       {loading && <div style={{ color: theme.textMuted, marginBottom: '12px' }}>Loading...</div>}
 
       {is && (
@@ -792,6 +807,7 @@ const CashFlowTab = ({ userProfile }) => {
       </div>
 
       {err && <div style={{ color: theme.red, marginBottom: '12px', fontSize: '12px' }}>{err}</div>}
+      <SourceWarnings warnings={data?.warnings} />
       {loading && <div style={{ color: theme.textMuted, marginBottom: '12px' }}>Loading...</div>}
 
       {cf && (
@@ -841,7 +857,7 @@ const CashFlowTab = ({ userProfile }) => {
               {showAdjForm && (
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '10px' }}>
                   <input style={s.input} placeholder="Description (include: invest/loan/capital for correct section)" value={adjForm.account_name} onChange={e => setAdjForm(v => ({...v, account_name: e.target.value}))} />
-                  <input type="number" style={s.input} placeholder="Amount (₦, negative for outflows)" value={adjForm.amount} onChange={e => setAdjForm(v => ({...v, amount: e.target.value}))} />
+                  <input type="number" inputMode="decimal" style={s.input} placeholder="Amount (₦, negative for outflows)" value={adjForm.amount} onChange={e => setAdjForm(v => ({...v, amount: e.target.value}))} />
                   <input style={s.input} placeholder="Reason" value={adjForm.reason} onChange={e => setAdjForm(v => ({...v, reason: e.target.value}))} />
                   <button style={s.btn('primary')} onClick={addAdj}>Add</button>
                   <button style={s.btn('secondary')} onClick={() => setShowAdjForm(false)}>Cancel</button>
@@ -881,7 +897,11 @@ const ManagementAccountsTab = ({ userProfile }) => {
         return incomeStatementService.getData(pFrom, pEnd.toISOString().split('T')[0])
       })(),
     ]).then(([is, bs, cf, prevIs]) => {
-      setData({ is: is.value, bs: bs.value, cf: cf.value, prevIs: prevIs.value })
+      const warnings = [['Income statement', is], ['Balance sheet', bs], ['Cash flow', cf], ['Previous month', prevIs]]
+        .flatMap(([name, r]) => r.status === 'rejected'
+          ? [`${name} could not be loaded: ${r.reason?.message || r.reason}`]
+          : (r.value?.warnings || []).map(m => `${name}: ${m}`))
+      setData({ is: is.value, bs: bs.value, cf: cf.value, prevIs: prevIs.value, warnings })
     }).finally(() => setLoading(false))
   }, [from, to])
 
@@ -1024,6 +1044,7 @@ const ManagementAccountsTab = ({ userProfile }) => {
       </div>
 
       {err && <div style={{ color: theme.red, marginBottom: '12px', fontSize: '12px' }}>{err}</div>}
+      <SourceWarnings warnings={data?.warnings} />
       {loading && <div style={{ color: theme.textMuted, marginBottom: '12px' }}>Loading...</div>}
 
       {is && (
@@ -1129,7 +1150,7 @@ export default function FinancialStatements({ userProfile }) {
     { id: 'management', label: 'Management Accounts' },
   ]
   return (
-    <div>
+    <div className="m-statement">
       <div style={s.tabBar}>
         {TABS.map(t => (
           <button key={t.id} style={s.tab(tab === t.id)} onClick={() => setTab(t.id)}>{t.label}</button>

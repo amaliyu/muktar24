@@ -76,6 +76,21 @@ export const fmtDateTime = (iso) => {
     .format(new Date(iso)).replace(' am', 'am').replace(' pm', 'pm')
 }
 
+// A timestamp's calendar day in Lagos, as "29 Aug 2026" (fmtDate is for plain
+// 'YYYY-MM-DD' dates; a timestamp must be shifted to Lagos first).
+export const fmtDay = (iso) => {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return String(iso)
+  return longDate(new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Lagos', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d))
+}
+// A timestamp's time of day in Lagos, as "4:30pm".
+export const fmtTime = (iso) => {
+  if (!iso) return '—'
+  return new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Lagos', hour: 'numeric', minute: '2-digit', hour12: true })
+    .format(new Date(iso)).replace(' am', 'am').replace(' pm', 'pm')
+}
+
 // Whole calendar days from today (Lagos) to an ISO date; negative = past.
 export const daysFrom = (todayIso, iso) => {
   if (!iso) return null

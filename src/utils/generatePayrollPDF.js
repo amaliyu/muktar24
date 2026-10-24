@@ -20,7 +20,7 @@ export async function generatePayrollPDF(run, lines) {
     const blob = await res.blob();
     const b64 = await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(blob); });
     doc.addImage(b64, 'PNG', ml, 8, 28, 14);
-  } catch {}
+  } catch { /* no logo — the PDF prints without it */ }
 
   // Header
   doc.setFontSize(12); doc.setFont('helvetica', 'bold'); doc.setTextColor(20);

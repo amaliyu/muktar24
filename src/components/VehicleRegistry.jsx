@@ -4,7 +4,8 @@ import { staffService } from '../services/staff'
 import { expensesService } from '../services/accounting'
 import { suppliersService, supplierTransactionsService } from '../services/suppliers'
 import { supabase } from '../lib/supabase'
-import { ConfirmDialog, fmtDate } from './site/siteUi'
+import { ConfirmDialog, fmtDate, fmtDay } from './site/siteUi'
+import { deleteMaintenanceRecord, deleteWhere } from '../utils/checkedDelete'
 
 const theme = {
   bg: '#0f1117', surface: '#1a1d27', card: '#21263a', border: '#2e3452',
@@ -108,9 +109,9 @@ const VehicleForm = ({ vehicle, staff, onSave, onCancel }) => {
           <select style={styles.input} value={form.vehicle_type} onChange={e => upd('vehicle_type', e.target.value)}>{VEHICLE_TYPES.map(t => <option key={t}>{t}</option>)}</select></div>
         <div style={styles.formGroup}><label style={styles.label}>Make</label><input style={styles.input} placeholder="e.g. Mack, Volvo" value={form.make} onChange={e => upd('make', e.target.value)} /></div>
         <div style={styles.formGroup}><label style={styles.label}>Model</label><input style={styles.input} value={form.model} onChange={e => upd('model', e.target.value)} /></div>
-        <div style={styles.formGroup}><label style={styles.label}>Year</label><input style={styles.input} type="number" placeholder="e.g. 2018" value={form.year} onChange={e => upd('year', e.target.value)} /></div>
+        <div style={styles.formGroup}><label style={styles.label}>Year</label><input style={styles.input} type="number" inputMode="decimal" placeholder="e.g. 2018" value={form.year} onChange={e => upd('year', e.target.value)} /></div>
         <div style={styles.formGroup}><label style={styles.label}>Color</label><input style={styles.input} placeholder="e.g. Yellow" value={form.color} onChange={e => upd('color', e.target.value)} /></div>
-        <div style={styles.formGroup}><label style={styles.label}>Capacity (blocks/trip)</label><input style={styles.input} type="number" placeholder="e.g. 500" value={form.capacity_blocks} onChange={e => upd('capacity_blocks', e.target.value)} /></div>
+        <div style={styles.formGroup}><label style={styles.label}>Capacity (blocks/trip)</label><input style={styles.input} type="number" inputMode="decimal" placeholder="e.g. 500" value={form.capacity_blocks} onChange={e => upd('capacity_blocks', e.target.value)} /></div>
         <div style={styles.formGroup}><label style={styles.label}>Ownership</label>
           <select style={styles.input} value={form.ownership} onChange={e => upd('ownership', e.target.value)}>
             <option value="company_owned">Company Owned</option>
@@ -130,7 +131,7 @@ const VehicleForm = ({ vehicle, staff, onSave, onCancel }) => {
         <div style={styles.formGroup}><label style={styles.label}>Insurance Expiry</label><input style={styles.input} type="date" value={form.insurance_expiry_date} onChange={e => upd('insurance_expiry_date', e.target.value)} /></div>
         <div style={styles.formGroup}><label style={styles.label}>Road Worthiness Expiry</label><input style={styles.input} type="date" value={form.road_worthiness_expiry_date} onChange={e => upd('road_worthiness_expiry_date', e.target.value)} /></div>
         <div style={styles.formGroup}><label style={styles.label}>Purchase Date</label><input style={styles.input} type="date" value={form.purchase_date} onChange={e => upd('purchase_date', e.target.value)} /></div>
-        <div style={styles.formGroup}><label style={styles.label}>Purchase Price (₦)</label><input style={styles.input} type="number" value={form.purchase_price} onChange={e => upd('purchase_price', e.target.value)} /></div>
+        <div style={styles.formGroup}><label style={styles.label}>Purchase Price (₦)</label><input style={styles.input} type="number" inputMode="decimal" value={form.purchase_price} onChange={e => upd('purchase_price', e.target.value)} /></div>
         <div style={{ ...styles.formGroup, gridColumn: 'span 3' }}><label style={styles.label}>Notes</label><input style={styles.input} value={form.notes} onChange={e => upd('notes', e.target.value)} /></div>
       </div>
       {form.vehicle_type === 'Rental' && (
@@ -138,8 +139,8 @@ const VehicleForm = ({ vehicle, staff, onSave, onCancel }) => {
           <div style={{ fontSize: '12px', fontWeight: '700', color: theme.accent, marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Rental Details</div>
           <div style={styles.grid(3)}>
             <div style={styles.formGroup}><label style={styles.label}>Owner Name</label><input style={styles.input} placeholder="e.g. Alhaji Musa" value={form.owner_name} onChange={e => upd('owner_name', e.target.value)} /></div>
-            <div style={styles.formGroup}><label style={styles.label}>Owner Phone</label><input style={styles.input} placeholder="e.g. 0801234567" value={form.owner_phone} onChange={e => upd('owner_phone', e.target.value)} /></div>
-            <div style={styles.formGroup}><label style={styles.label}>Monthly Rental (₦)</label><input style={styles.input} type="number" placeholder="e.g. 150000" value={form.monthly_rental_amount} onChange={e => upd('monthly_rental_amount', e.target.value)} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Owner Phone</label><input style={styles.input} inputMode="tel" placeholder="e.g. 0801234567" value={form.owner_phone} onChange={e => upd('owner_phone', e.target.value)} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Monthly Rental (₦)</label><input style={styles.input} type="number" inputMode="decimal" placeholder="e.g. 150000" value={form.monthly_rental_amount} onChange={e => upd('monthly_rental_amount', e.target.value)} /></div>
             <div style={styles.formGroup}><label style={styles.label}>Contract Start Date</label><input style={styles.input} type="date" value={form.contract_start_date} onChange={e => upd('contract_start_date', e.target.value)} /></div>
             <div style={{ ...styles.formGroup, gridColumn: 'span 2' }}><label style={styles.label}>Maintenance Responsibility</label><input style={{ ...styles.input, color: theme.textMuted }} value="APCL (Abuja Precast Concrete Limited)" readOnly /></div>
           </div>
@@ -185,7 +186,7 @@ const MaintenanceTab = ({ vehicleId, vehicleNumber, vehicleName }) => {
     finally { setLoading(false) }
   }
   useEffect(() => { load() }, [vehicleId])
-  useEffect(() => { suppliersService.getActive().then(setSuppliers).catch(() => {}) }, [])
+  useEffect(() => { suppliersService.getActive().then(setSuppliers).catch(e => setAlert({ type: 'error', msg: 'Could not load the supplier list: ' + e.message })) }, [])
 
   const openCreate = () => { setEditTarget(null); setForm(emptyForm); setReceiptUrl(''); setReceiptSignedUrl(''); setShowForm(true) }
   const openEdit = (r) => {
@@ -193,7 +194,7 @@ const MaintenanceTab = ({ vehicleId, vehicleNumber, vehicleName }) => {
     setForm({ maintenance_date: r.maintenance_date, maintenance_type: r.maintenance_type, description: r.description || '', cost: String(r.cost || ''), supplierId: r.supplier_id || '', vendor_name: r.vendor_name || '', vendor_phone: r.vendor_phone || '', downtime_days: String(r.downtime_days || ''), next_maintenance_date: r.next_maintenance_date || '', recorded_by: r.recorded_by || '', notes: r.notes || '' })
     setReceiptUrl(r.receipt_url || '')
     setReceiptSignedUrl(r.receipt_url ? (recUrls[r.id] || '') : '')
-    if (r.receipt_url && !recUrls[r.id]) maintenanceService.getSignedUrl(r.receipt_url).then(u => setReceiptSignedUrl(u || '')).catch(() => {})
+    if (r.receipt_url && !recUrls[r.id]) maintenanceService.getSignedUrl(r.receipt_url).then(u => setReceiptSignedUrl(u || '')).catch(() => {}) // preview link only; the receipt itself is kept
     setShowForm(true)
   }
 
@@ -220,7 +221,8 @@ const MaintenanceTab = ({ vehicleId, vehicleNumber, vehicleName }) => {
         const existing = await supabase.from('supplier_transactions').select('id').eq('linked_expense_id', expId).maybeSingle()
         if (existing.data?.id) {
           await supplierTransactionsService.update ? null : null
-          await supabase.from('supplier_transactions').update({ amount, description: expDesc, transaction_date: form.maintenance_date }).eq('id', existing.data.id)
+          const { error: txnErr } = await supabase.from('supplier_transactions').update({ amount, description: expDesc, transaction_date: form.maintenance_date }).eq('id', existing.data.id)
+          if (txnErr) throw new Error(`Saved, but the linked supplier transaction could not be updated: ${txnErr.message}`)
         } else {
           await supplierTransactionsService.create({ supplier_id: form.supplierId, transaction_date: form.maintenance_date, transaction_type: 'purchase', amount, description: expDesc, linked_expense_id: expId })
         }
@@ -239,8 +241,12 @@ const MaintenanceTab = ({ vehicleId, vehicleNumber, vehicleName }) => {
             await upsertSupplierTxn(exp.id, cost)
           }
         } else if (editTarget.linked_expense_id) {
-          await supabase.from('supplier_transactions').delete().eq('linked_expense_id', editTarget.linked_expense_id)
-          await expensesService.delete(editTarget.linked_expense_id)
+          // Cost cleared: remove the expense made from this record. Each step is
+          // checked so a blocked delete is reported, not taken as done.
+          try { await deleteWhere(supabase, 'supplier_transactions', 'linked_expense_id', editTarget.linked_expense_id) }
+          catch (e) { throw new Error(`The record was updated, but its linked supplier transaction could not be removed: ${e.message}. The linked expense is still in place.`) }
+          try { await deleteWhere(supabase, 'expenses', 'id', editTarget.linked_expense_id) }
+          catch (e) { throw new Error(`The record was updated, but its linked expense could not be removed: ${e.message}. The expense is still in place.`) }
           await maintenanceService.update(editTarget.id, { linked_expense_id: null })
         }
         setAlert({ type: 'success', msg: 'Maintenance record updated.' })
@@ -261,15 +267,9 @@ const MaintenanceTab = ({ vehicleId, vehicleNumber, vehicleName }) => {
   }
 
   const handleDelete = async (r) => {
-    try {
-      if (r.linked_expense_id) {
-        try { await supabase.from('supplier_transactions').delete().eq('linked_expense_id', r.linked_expense_id) } catch {}
-        try { await expensesService.delete(r.linked_expense_id) } catch {}
-      }
-      await maintenanceService.delete(r.id)
-      await load()
-      setAlert({ type: 'success', msg: 'Record, linked expense, and supplier transaction deleted.' })
-    } catch (e) { setAlert({ type: 'error', msg: e.message }) }
+    const result = await deleteMaintenanceRecord(supabase, r)
+    await load()
+    setAlert({ type: result.ok ? 'success' : 'error', msg: result.message })
   }
 
   const handleReceiptUpload = async (file) => {
@@ -290,7 +290,7 @@ const MaintenanceTab = ({ vehicleId, vehicleNumber, vehicleName }) => {
     <div>
       {alert && <AlertBar msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
       {confirmDel && <ConfirmDialog title={`Delete the ${confirmDel.maintenance_type || 'maintenance'} record of ${fmtDate(confirmDel.maintenance_date)} for ${vehicleNumber || 'this vehicle'}?`} body="This also removes the linked P&L expense and supplier transaction. This cannot be undone." confirmLabel="Delete record" danger onCancel={() => setConfirmDel(null)} onConfirm={() => { const x = confirmDel; setConfirmDel(null); handleDelete(x) }} />}
-      {overdueNext && <AlertBar msg={`Maintenance overdue! Next service was due ${overdueNext.next_maintenance_date} (${overdueNext.maintenance_type})`} type="warning" />}
+      {overdueNext && <AlertBar msg={`Maintenance overdue! Next service was due ${fmtDate(overdueNext.next_maintenance_date)} (${overdueNext.maintenance_type})`} type="warning" />}
       <div style={{ ...styles.row, justifyContent: 'space-between', marginBottom: '16px' }}>
         <div>
           <span style={{ fontSize: '13px', color: theme.textMuted }}>Total maintenance cost: </span>
@@ -307,7 +307,7 @@ const MaintenanceTab = ({ vehicleId, vehicleNumber, vehicleName }) => {
               <select style={styles.input} value={form.maintenance_type} onChange={e => setForm(f => ({ ...f, maintenance_type: e.target.value }))}>
                 {MAINTENANCE_TYPES.map(t => <option key={t}>{t}</option>)}
               </select></div>
-            <div style={styles.formGroup}><label style={styles.label}>Cost (₦)</label><input style={styles.input} type="number" value={form.cost} onChange={e => setForm(f => ({ ...f, cost: e.target.value }))} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Cost (₦)</label><input style={styles.input} type="number" inputMode="decimal" value={form.cost} onChange={e => setForm(f => ({ ...f, cost: e.target.value }))} /></div>
             <div style={{ ...styles.formGroup, gridColumn: 'span 3' }}><label style={styles.label}>Description</label><input style={styles.input} placeholder="What was done?" value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} /></div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Vendor / Supplier</label>
@@ -323,7 +323,7 @@ const MaintenanceTab = ({ vehicleId, vehicleNumber, vehicleName }) => {
               {!form.supplierId && <input style={{ ...styles.input, marginTop: suppliers.length > 0 ? '6px' : '0' }} placeholder="Or enter vendor name manually" value={form.vendor_name} onChange={e => setForm(f => ({ ...f, vendor_name: e.target.value }))} />}
             </div>
             <div style={styles.formGroup}><label style={styles.label}>Vendor Phone</label><input style={styles.input} value={form.vendor_phone} onChange={e => setForm(f => ({ ...f, vendor_phone: e.target.value }))} /></div>
-            <div style={styles.formGroup}><label style={styles.label}>Downtime (days)</label><input style={styles.input} type="number" value={form.downtime_days} onChange={e => setForm(f => ({ ...f, downtime_days: e.target.value }))} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Downtime (days)</label><input style={styles.input} type="number" inputMode="decimal" value={form.downtime_days} onChange={e => setForm(f => ({ ...f, downtime_days: e.target.value }))} /></div>
             <div style={styles.formGroup}><label style={styles.label}>Next Maintenance Date</label><input style={styles.input} type="date" value={form.next_maintenance_date} onChange={e => setForm(f => ({ ...f, next_maintenance_date: e.target.value }))} /></div>
             <div style={styles.formGroup}><label style={styles.label}>Recorded By</label><input style={styles.input} value={form.recorded_by} onChange={e => setForm(f => ({ ...f, recorded_by: e.target.value }))} /></div>
             <div style={styles.formGroup}><label style={styles.label}>Receipt</label>
@@ -356,7 +356,7 @@ const MaintenanceTab = ({ vehicleId, vehicleNumber, vehicleName }) => {
           <tbody>
             {records.map(r => (
               <tr key={r.id}>
-                <td style={styles.td}>{r.maintenance_date}</td>
+                <td style={styles.td}>{fmtDate(r.maintenance_date)}</td>
                 <td style={styles.td}><span style={styles.badge(theme.blue)}>{r.maintenance_type}</span></td>
                 <td style={styles.td}>{r.description || '—'}</td>
                 <td style={styles.td}>
@@ -365,8 +365,8 @@ const MaintenanceTab = ({ vehicleId, vehicleNumber, vehicleName }) => {
                 </td>
                 <td style={styles.td}>{r.vendor_name || '—'}{r.vendor_phone && <div style={{ fontSize: '11px', color: theme.textMuted }}>{r.vendor_phone}</div>}</td>
                 <td style={styles.td}>{r.downtime_days ? `${r.downtime_days}d` : '—'}</td>
-                <td style={styles.td}>{r.next_maintenance_date ? <span style={{ color: expiryColor(r.next_maintenance_date) }}>{r.next_maintenance_date}</span> : '—'}</td>
-                <td style={styles.td}>
+                <td style={styles.td}>{r.next_maintenance_date ? <span style={{ color: expiryColor(r.next_maintenance_date) }}>{fmtDate(r.next_maintenance_date)}</span> : '—'}</td>
+                <td className="m-actions" style={styles.td}>
                   <div style={styles.row}>
                     {r.receipt_url && recUrls[r.id] && <a href={recUrls[r.id]} target="_blank" rel="noreferrer" style={{ fontSize: '11px', color: theme.blue }}>Receipt</a>}
                     <button style={{ ...styles.btn(), padding: '3px 8px', fontSize: '11px' }} onClick={() => openEdit(r)}>Edit</button>
@@ -441,10 +441,10 @@ const FuelLogTab = ({ vehicleId }) => {
         <div style={{ ...styles.card, borderLeft: `4px solid ${theme.green}`, marginBottom: '16px' }}>
           <div style={styles.grid(3)}>
             <div style={styles.formGroup}><label style={styles.label}>Date</label><input style={styles.input} type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} /></div>
-            <div style={styles.formGroup}><label style={styles.label}>Litres Dispensed</label><input style={styles.input} type="number" placeholder="0" value={form.litres_dispensed} onChange={e => setForm(f => ({ ...f, litres_dispensed: e.target.value }))} /></div>
-            <div style={styles.formGroup}><label style={styles.label}>Cost per Litre (₦)</label><input style={styles.input} type="number" placeholder="0" value={form.cost_per_litre} onChange={e => setForm(f => ({ ...f, cost_per_litre: e.target.value }))} /></div>
-            <div style={styles.formGroup}><label style={styles.label}>Total Cost (₦) {autoTotal > 0 ? <span style={{ color: theme.green }}>= {naira(autoTotal)}</span> : '(auto)'}</label><input style={styles.input} type="number" placeholder="Auto-calculated" value={autoTotal || form.total_cost} readOnly={autoTotal > 0} onChange={e => setForm(f => ({ ...f, total_cost: e.target.value }))} /></div>
-            <div style={styles.formGroup}><label style={styles.label}>Odometer (km)</label><input style={styles.input} type="number" value={form.odometer_reading} onChange={e => setForm(f => ({ ...f, odometer_reading: e.target.value }))} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Litres Dispensed</label><input style={styles.input} type="number" inputMode="decimal" placeholder="0" value={form.litres_dispensed} onChange={e => setForm(f => ({ ...f, litres_dispensed: e.target.value }))} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Cost per Litre (₦)</label><input style={styles.input} type="number" inputMode="decimal" placeholder="0" value={form.cost_per_litre} onChange={e => setForm(f => ({ ...f, cost_per_litre: e.target.value }))} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Total Cost (₦) {autoTotal > 0 ? <span style={{ color: theme.green }}>= {naira(autoTotal)}</span> : '(auto)'}</label><input style={styles.input} type="number" inputMode="decimal" placeholder="Auto-calculated" value={autoTotal || form.total_cost} readOnly={autoTotal > 0} onChange={e => setForm(f => ({ ...f, total_cost: e.target.value }))} /></div>
+            <div style={styles.formGroup}><label style={styles.label}>Odometer (km)</label><input style={styles.input} type="number" inputMode="decimal" value={form.odometer_reading} onChange={e => setForm(f => ({ ...f, odometer_reading: e.target.value }))} /></div>
             <div style={styles.formGroup}><label style={styles.label}>Dispensed By</label><input style={styles.input} value={form.dispensed_by} onChange={e => setForm(f => ({ ...f, dispensed_by: e.target.value }))} /></div>
             <div style={styles.formGroup}><label style={styles.label}>Purpose</label>
               <select style={styles.input} value={form.purpose} onChange={e => setForm(f => ({ ...f, purpose: e.target.value }))}>
@@ -467,7 +467,7 @@ const FuelLogTab = ({ vehicleId }) => {
           <tbody>
             {entries.map(e => (
               <tr key={e.id}>
-                <td style={styles.td}>{e.date}</td>
+                <td style={styles.td}>{fmtDate(e.date)}</td>
                 <td style={styles.td}><strong style={{ color: theme.blue }}>{fmt(e.litres_dispensed)} L</strong></td>
                 <td style={styles.td}>{e.cost_per_litre ? naira(e.cost_per_litre) : '—'}</td>
                 <td style={styles.td}><strong style={{ color: theme.accent }}>{naira(e.total_cost)}</strong></td>
@@ -506,7 +506,7 @@ const DocumentsTab = ({ vehicleId }) => {
       }))
       setDocUrls(Object.fromEntries(entries))
     }
-    catch { setDocs([]) }
+    catch (e) { setDocs([]); setAlert({ type: 'error', msg: 'Could not load documents: ' + e.message }) }
     finally { setLoading(false) }
   }
   useEffect(() => { load() }, [vehicleId])
@@ -522,8 +522,9 @@ const DocumentsTab = ({ vehicleId }) => {
   }
 
   const handleDelete = async (doc) => {
-    try { await vehicleDocumentsService.delete(doc.id, doc.file_url); await load() }
-    catch (e) { setAlert({ type: 'error', msg: e.message }) }
+    try { await vehicleDocumentsService.delete(doc.id, doc.file_url); setAlert({ type: 'success', msg: 'Document deleted.' }) }
+    catch (e) { setAlert({ type: 'error', msg: 'Delete failed: ' + e.message }) }
+    await load()
   }
 
   return (
@@ -558,8 +559,8 @@ const DocumentsTab = ({ vehicleId }) => {
               <div key={d.id} style={{ ...styles.card, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 18px', borderLeft: `3px solid ${expired ? theme.red : expiring ? theme.accent : theme.border}` }}>
                 <div>
                   <div style={{ fontWeight: '700', fontSize: '13px' }}>{d.document_label}</div>
-                  <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '3px' }}>{d.file_name} · Uploaded {d.uploaded_at?.split('T')[0]}</div>
-                  {d.expiry_date && <div style={{ fontSize: '11px', color: expiryColor(d.expiry_date), marginTop: '3px' }}>Expires: {d.expiry_date}{expired ? ' — EXPIRED' : expiring ? ` — Expires in ${daysUntil(d.expiry_date)} days` : ''}</div>}
+                  <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '3px' }}>{d.file_name} · Uploaded {fmtDay(d.uploaded_at)}</div>
+                  {d.expiry_date && <div style={{ fontSize: '11px', color: expiryColor(d.expiry_date), marginTop: '3px' }}>Expires: {fmtDate(d.expiry_date)}{expired ? ' — EXPIRED' : expiring ? ` — Expires in ${daysUntil(d.expiry_date)} days` : ''}</div>}
                 </div>
                 <div style={styles.row}>
                   <a href={docUrls[d.id] || undefined} target="_blank" rel="noreferrer" style={{ ...styles.btn(), textDecoration: 'none', padding: '6px 12px', fontSize: '12px' }}>View</a>
@@ -614,18 +615,19 @@ const VehicleProfile = ({ vehicle: initialVehicle, staff, staffMap, onBack, onUp
         .order('waybill_date', { ascending: false })
       if (error) throw error
       setDeliveries(data || [])
-    } catch { setDeliveries([]) }
+    } catch (e) { setDeliveries([]); setAlert({ type: 'error', msg: 'Could not load delivery history: ' + e.message }) }
     finally { setDelvLoading(false) }
   }
 
   const loadFleetAvg = async () => {
     try {
-      const { data } = await supabase.from('waybills').select('quantity_loaded, quantity_damaged')
+      const { data, error } = await supabase.from('waybills').select('quantity_loaded, quantity_damaged')
+      if (error) throw error
       if (!data || data.length === 0) { setFleetAvgRate(0); return }
       const tl = data.reduce((s, w) => s + (w.quantity_loaded || 0), 0)
       const td = data.reduce((s, w) => s + (w.quantity_damaged || 0), 0)
       setFleetAvgRate(tl > 0 ? (td / tl) * 100 : 0)
-    } catch { setFleetAvgRate(0) }
+    } catch (e) { setFleetAvgRate(0); setAlert({ type: 'error', msg: 'Could not load the fleet damage average: ' + e.message }) }
   }
 
   const handleUpdate = async () => {
@@ -634,7 +636,7 @@ const VehicleProfile = ({ vehicle: initialVehicle, staff, staffMap, onBack, onUp
       setVehicle(updated)
       setEditing(false)
       onUpdate()
-    } catch {}
+    } catch (e) { setEditing(false); setAlert({ type: 'error', msg: 'The vehicle was saved, but the profile could not be refreshed: ' + e.message }) }
   }
 
   const statusColor = { active: theme.green, inactive: theme.textMuted, maintenance: theme.accent }
@@ -653,10 +655,11 @@ const VehicleProfile = ({ vehicle: initialVehicle, staff, staffMap, onBack, onUp
       <div style={{ ...styles.row, marginBottom: '20px' }}>
         <button style={styles.btn()} onClick={onBack}>← All Vehicles</button>
       </div>
+      {alert && <AlertBar msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
 
       {/* Vehicle Header */}
       <div style={{ ...styles.card, borderLeft: `5px solid ${theme.accent}`, marginBottom: '24px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px' }}>
+        <div className="m-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px' }}>
           <div>
             <div style={{ fontSize: '24px', fontWeight: '800', color: theme.accent, letterSpacing: '0.05em' }}>{vehicle.vehicle_number}</div>
             <div style={{ fontSize: '15px', fontWeight: '600', color: theme.text, marginTop: '4px' }}>{vehicle.vehicle_name || vehicle.vehicle_type}</div>
@@ -679,13 +682,13 @@ const VehicleProfile = ({ vehicle: initialVehicle, staff, staffMap, onBack, onUp
           {vehicle.insurance_expiry_date && (
             <div style={{ fontSize: '12px' }}>
               <span style={{ color: theme.textMuted }}>Insurance: </span>
-              <span style={{ color: expiryColor(vehicle.insurance_expiry_date), fontWeight: '600' }}>{vehicle.insurance_expiry_date}{isExpired(vehicle.insurance_expiry_date) ? ' — EXPIRED' : isExpiring(vehicle.insurance_expiry_date) ? ` (${daysUntil(vehicle.insurance_expiry_date)}d)` : ''}</span>
+              <span style={{ color: expiryColor(vehicle.insurance_expiry_date), fontWeight: '600' }}>{fmtDate(vehicle.insurance_expiry_date)}{isExpired(vehicle.insurance_expiry_date) ? ' — EXPIRED' : isExpiring(vehicle.insurance_expiry_date) ? ` (${daysUntil(vehicle.insurance_expiry_date)}d)` : ''}</span>
             </div>
           )}
           {vehicle.road_worthiness_expiry_date && (
             <div style={{ fontSize: '12px' }}>
               <span style={{ color: theme.textMuted }}>Road Worthiness: </span>
-              <span style={{ color: expiryColor(vehicle.road_worthiness_expiry_date), fontWeight: '600' }}>{vehicle.road_worthiness_expiry_date}{isExpired(vehicle.road_worthiness_expiry_date) ? ' — EXPIRED' : isExpiring(vehicle.road_worthiness_expiry_date) ? ` (${daysUntil(vehicle.road_worthiness_expiry_date)}d)` : ''}</span>
+              <span style={{ color: expiryColor(vehicle.road_worthiness_expiry_date), fontWeight: '600' }}>{fmtDate(vehicle.road_worthiness_expiry_date)}{isExpired(vehicle.road_worthiness_expiry_date) ? ' — EXPIRED' : isExpiring(vehicle.road_worthiness_expiry_date) ? ` (${daysUntil(vehicle.road_worthiness_expiry_date)}d)` : ''}</span>
             </div>
           )}
         </div>
@@ -711,10 +714,10 @@ const VehicleProfile = ({ vehicle: initialVehicle, staff, staffMap, onBack, onUp
             ['Ownership', vehicle.ownership === 'company_owned' ? 'Company Owned' : 'Hired'],
             ['Status', vehicle.status],
             ['Assigned Driver', staffMap?.[vehicle.assigned_driver_id]?.full_name || '—'],
-            ['Purchase Date', vehicle.purchase_date || '—'],
+            ['Purchase Date', fmtDate(vehicle.purchase_date)],
             ['Purchase Price', vehicle.purchase_price ? naira(vehicle.purchase_price) : '—'],
-            ['Insurance Expiry', vehicle.insurance_expiry_date || '—'],
-            ['Road Worthiness Expiry', vehicle.road_worthiness_expiry_date || '—'],
+            ['Insurance Expiry', fmtDate(vehicle.insurance_expiry_date)],
+            ['Road Worthiness Expiry', fmtDate(vehicle.road_worthiness_expiry_date)],
           ].map(([label, val]) => (
             <div key={label} style={{ padding: '12px 0', borderBottom: `1px solid ${theme.border}22`, display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ fontSize: '12px', color: theme.textMuted }}>{label}</span>
@@ -740,7 +743,7 @@ const VehicleProfile = ({ vehicle: initialVehicle, staff, staffMap, onBack, onUp
                 <tbody>
                   {deliveries.map(d => (
                     <tr key={d.id}>
-                      <td style={styles.td}>{d.waybill_date}</td>
+                      <td style={styles.td}>{fmtDate(d.waybill_date)}</td>
                       <td style={styles.td}><span style={{ color: theme.accent, fontWeight: '600' }}>{d.waybill_number}</span></td>
                       <td style={styles.td}>{d.receiver_name || '—'}</td>
                       <td style={styles.td}><span style={styles.badge(theme.blue)}>{d.block_type}</span></td>
@@ -812,7 +815,7 @@ const VehicleProfile = ({ vehicle: initialVehicle, staff, staffMap, onBack, onUp
                           const r = d.quantity_loaded > 0 ? (d.quantity_damaged / d.quantity_loaded * 100).toFixed(1) : '0.0'
                           return (
                             <tr key={d.id}>
-                              <td style={styles.td}>{d.waybill_date}</td>
+                              <td style={styles.td}>{fmtDate(d.waybill_date)}</td>
                               <td style={styles.td}><span style={{ color: theme.accent, fontWeight: '600' }}>{d.waybill_number}</span></td>
                               <td style={styles.td}>{d.receiver_name || '—'}</td>
                               <td style={styles.td}><span style={styles.badge(theme.blue)}>{d.block_type}</span></td>
@@ -890,7 +893,7 @@ const VehicleRegistry = () => {
 
   return (
     <div style={styles.page}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px', flexWrap: 'wrap', gap: '12px' }}>
+      <div className="m-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px', flexWrap: 'wrap', gap: '12px' }}>
         <div>
           <div style={{ fontSize: '20px', fontWeight: '800', color: theme.text }}>Vehicle Registry</div>
           <div style={{ fontSize: '13px', color: theme.textMuted, marginTop: '3px' }}>Fleet management, maintenance tracking, and fuel logs</div>
@@ -931,7 +934,7 @@ const VehicleRegistry = () => {
           {vehicles.length === 0 ? 'No vehicles registered yet. Click "+ Register Vehicle" to add your first vehicle.' : 'No vehicles match your filters.'}
         </div>
       ) : (
-        <div style={styles.grid(2)}>
+        <div className="m-stack" style={styles.grid(2)}>
           {filtered.map(v => {
             const insExpired = v.insurance_expiry_date && isExpired(v.insurance_expiry_date)
             const insExpiring = v.insurance_expiry_date && isExpiring(v.insurance_expiry_date)

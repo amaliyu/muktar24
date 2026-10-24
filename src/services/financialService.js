@@ -168,6 +168,14 @@ export const financialAdjustmentsService = {
   },
 }
 
+// Each statement loads its sources one by one so a single failure does not
+// blank the whole statement — but a failed source is recorded in `warnings`
+// and shown on screen, never silently counted as zero (§10.5).
+async function section(warnings, label, fn) {
+  try { await fn() } catch (e) { warnings.push(`${label} could not be loaded: ${e?.message || e}`) }
+}
+const rowsOf = ({ data, error }) => { if (error) throw error; return data || [] }
+
 // ============================================================
 // Balance Sheet
 // ============================================================
@@ -175,11 +183,12 @@ export const financialAdjustmentsService = {
 export const balanceSheetService = {
   /**
    * Gather all data sources needed to render the balance sheet.
-   * Each source is fetched with an individual try/catch so that a missing
-   * table or permission error on one source never silences the others.
+   * Each source is fetched on its own so that a missing table or permission
+   * error on one source never silences the others; failures are listed in
+   * `warnings`.
    *
    * @param {string} asAtDate - ISO date string (YYYY-MM-DD), used for context
-   * @returns {object} Keyed data map; failed sources return [] or 0.
+   * @returns {object} Keyed data map; failed sources return [] or 0 and add a warning.
    */
   async getData(asAtDate) {
     const result = {
@@ -192,95 +201,86 @@ export const balanceSheetService = {
       receivables:      0,    // total accounts receivable (numeric)
       supplierPayables: 0,    // total accounts payable   (numeric)
       adjustments:      [],
+      warnings:         [],
     }
+    const w = result.warnings
 
     // Opening balances
-    try {
+    await section(w, 'Opening balances', async () => {
       result.openingBalances = await openingBalancesService.getAll()
-    } catch (_) { /* non-fatal */ }
+    })
 
     // Vehicles (for fleet / fixed asset section)
-    try {
-      const { data } = await supabase
+    await section(w, 'Vehicles', async () => {
+      result.vehicles = rowsOf(await supabase
         .from('vehicles')
-        .select('id, vehicle_number, vehicle_name, status')
-      result.vehicles = data || []
-    } catch (_) { /* non-fatal */ }
+        .select('id, vehicle_number, vehicle_name, status'))
+    })
 
     // Bank accounts (cash & bank balances)
-    try {
-      const { data } = await supabase
+    await section(w, 'Bank balances', async () => {
+      result.bankAccounts = rowsOf(await supabase
         .from('bank_accounts')
         .select('id, account_name, current_balance')
-        .order('account_name', { ascending: true })
-      result.bankAccounts = data || []
-    } catch (_) { /* non-fatal */ }
+        .order('account_name', { ascending: true }))
+    })
 
     // Finished goods stock in yard
-    try {
-      const { data } = await supabase
+    await section(w, 'Finished goods stock', async () => {
+      result.finishedGoods = rowsOf(await supabase
         .from('finished_goods_stock')
-        .select('block_type, quantity_in_yard')
-      result.finishedGoods = data || []
-    } catch (_) { /* non-fatal */ }
+        .select('block_type, quantity_in_yard'))
+    })
 
     // Product unit prices (to value finished goods)
-    try {
-      const { data } = await supabase
+    await section(w, 'Product prices', async () => {
+      result.products = rowsOf(await supabase
         .from('products')
-        .select('name, unit_price')
-      result.products = data || []
-    } catch (_) { /* non-fatal */ }
+        .select('name, unit_price'))
+    })
 
     // Raw material / consumable inventory
-    try {
-      const { data } = await supabase
+    await section(w, 'Raw material inventory', async () => {
+      result.inventoryItems = rowsOf(await supabase
         .from('inventory_items')
         .select('name, current_stock, unit_cost')
         // Client-owned (e.g. Bilaad-supplied) material is tracked but is NOT APCL
         // stock — keep it out of the balance-sheet inventory value.
-        .eq('owner', 'apcl')
-      result.inventoryItems = data || []
-    } catch (_) { /* non-fatal */ }
+        .eq('owner', 'apcl'))
+    })
 
     // Accounts receivable — sum of (invoice total − confirmed payments).
     // Drafts (quotations) and cancelled invoices are NOT receivables.
-    try {
-      const { data } = await supabase
+    await section(w, 'Accounts receivable', async () => {
+      const data = rowsOf(await supabase
         .from('invoices')
         .select('total_amount, payments(amount_paid, status)')
-        .not('status', 'in', '("draft","cancelled")')
-
-      if (data) {
-        result.receivables = data.reduce((total, invoice) => {
-          const confirmed = (invoice.payments || [])
-            .filter(p => p.status === 'confirmed')
-            .reduce((s, p) => s + Number(p.amount_paid || 0), 0)
-          return total + (Number(invoice.total_amount || 0) - confirmed)
-        }, 0)
-      }
-    } catch (_) { /* non-fatal */ }
+        .not('status', 'in', '("draft","cancelled")'))
+      result.receivables = data.reduce((total, invoice) => {
+        const confirmed = (invoice.payments || [])
+          .filter(p => p.status === 'confirmed')
+          .reduce((s, p) => s + Number(p.amount_paid || 0), 0)
+        return total + (Number(invoice.total_amount || 0) - confirmed)
+      }, 0)
+    })
 
     // Supplier payables — purchase adds, payment/return subtracts
-    try {
-      const { data } = await supabase
+    await section(w, 'Supplier payables', async () => {
+      const data = rowsOf(await supabase
         .from('supplier_transactions')
-        .select('transaction_type, amount')
-
-      if (data) {
-        result.supplierPayables = data.reduce((total, t) => {
-          const amt = Number(t.amount || 0)
-          if (t.transaction_type === 'purchase') return total + amt
-          if (t.transaction_type === 'payment' || t.transaction_type === 'return') return total - amt
-          return total
-        }, 0)
-      }
-    } catch (_) { /* non-fatal */ }
+        .select('transaction_type, amount'))
+      result.supplierPayables = data.reduce((total, t) => {
+        const amt = Number(t.amount || 0)
+        if (t.transaction_type === 'purchase') return total + amt
+        if (t.transaction_type === 'payment' || t.transaction_type === 'return') return total - amt
+        return total
+      }, 0)
+    })
 
     // Manual balance-sheet adjustments
-    try {
+    await section(w, 'Balance-sheet adjustments', async () => {
       result.adjustments = await financialAdjustmentsService.getAll('balance_sheet')
-    } catch (_) { /* non-fatal */ }
+    })
 
     return result
   },
@@ -293,8 +293,8 @@ export const balanceSheetService = {
 export const incomeStatementService = {
   /**
    * Gather all revenue and expense sources for a date range.
-   * Each source is individually guarded so a missing table never aborts
-   * the whole fetch (payroll in particular may not exist yet).
+   * Each source is loaded on its own so one failure never aborts the whole
+   * fetch; failures are listed in `warnings`.
    *
    * @param {string} fromDate - ISO date string (YYYY-MM-DD)
    * @param {string} toDate   - ISO date string (YYYY-MM-DD)
@@ -307,61 +307,57 @@ export const incomeStatementService = {
       expenses:      [],
       payroll:       [],
       adjustments:   [],
+      warnings:      [],
     }
+    const w = result.warnings
 
     // Confirmed payment receipts with order line details (for revenue breakdown).
     // Exclude payments tied to draft/cancelled invoices so revenue never counts
     // a quotation or a cancelled sale. !inner drops rows whose invoice is
     // filtered out; every payment has an invoice_id (verified), so nothing
     // legitimate is lost.
-    try {
-      const { data } = await supabase
+    await section(w, 'Customer payments (revenue)', async () => {
+      result.payments = rowsOf(await supabase
         .from('payments')
         .select('amount_paid, invoice:invoice_id!inner(status, order:order_id(order_items(block_type, quantity, unit_price)))')
         .eq('status', 'confirmed')
         .not('invoice.status', 'in', '("draft","cancelled")')
         .gte('payment_date', fromDate)
-        .lte('payment_date', toDate)
-      result.payments = data || []
-    } catch (_) { /* non-fatal */ }
+        .lte('payment_date', toDate))
+    })
 
     // Miscellaneous income records (non-invoice revenue)
-    try {
-      const { data } = await supabase
+    await section(w, 'Other income', async () => {
+      result.incomeRecords = rowsOf(await supabase
         .from('income_records')
         .select('amount, source')
         .gte('record_date', fromDate)
-        .lte('record_date', toDate)
-      result.incomeRecords = data || []
-    } catch (_) { /* non-fatal */ }
+        .lte('record_date', toDate))
+    })
 
     // Approved / pending expenses (exclude rejected)
-    try {
-      const { data } = await supabase
+    await section(w, 'Expenses', async () => {
+      result.expenses = rowsOf(await supabase
         .from('expenses')
         .select('amount, category:category_id(name, parent_category)')
         .neq('status', 'rejected')
         .gte('expense_date', fromDate)
-        .lte('expense_date', toDate)
-      result.expenses = data || []
-    } catch (_) { /* non-fatal */ }
+        .lte('expense_date', toDate))
+    })
 
-    // Payroll runs that overlap the period (table may not exist yet)
-    try {
-      const { data } = await supabase
+    // Payroll runs that overlap the period
+    await section(w, 'Payroll', async () => {
+      result.payroll = rowsOf(await supabase
         .from('payroll_runs')
         .select('total_amount, period_from, period_to')
         .gte('period_from', fromDate)
-        .lte('period_to', toDate)
-      result.payroll = data || []
-    } catch (_) {
-      // Silently ignore — payroll table is optional
-    }
+        .lte('period_to', toDate))
+    })
 
     // Manual income-statement adjustments
-    try {
+    await section(w, 'Income-statement adjustments', async () => {
       result.adjustments = await financialAdjustmentsService.getAll('income')
-    } catch (_) { /* non-fatal */ }
+    })
 
     return result
   },
@@ -389,11 +385,15 @@ export const cashFlowService = {
       adjustments:    [],
       bankStart:      [],   // [{ account_id, account_name, opening_balance }]
       bankEnd:        [],   // [{ account_id, account_name, current_balance }]
+      warnings:       [],
     }
+    const w = result.warnings
 
     // ---- Net profit from income statement ----
-    try {
+    await section(w, 'Net profit', async () => {
       const incomeData = await incomeStatementService.getData(fromDate, toDate)
+      // A source missing from the income statement makes net profit wrong too.
+      w.push(...incomeData.warnings.map(m => `Net profit is incomplete — ${m}`))
 
       const totalRevenue =
         incomeData.payments.reduce((s, p) => s + Number(p.amount_paid || 0), 0) +
@@ -409,26 +409,26 @@ export const cashFlowService = {
         incomeData.adjustments.reduce((s, adj) => s + Number(adj.amount || 0), 0)
 
       result.netProfit = totalRevenue - totalExpenses - totalPayroll + adjustmentNet
-    } catch (_) { /* leave as 0 */ }
+    })
 
     // ---- Opening balances (for non-cash working capital adjustments) ----
-    try {
+    await section(w, 'Opening balances', async () => {
       result.openingBalances = await openingBalancesService.getAll()
-    } catch (_) { /* non-fatal */ }
+    })
 
     // ---- Manual cash-flow adjustments ----
-    try {
+    await section(w, 'Cash-flow adjustments', async () => {
       result.adjustments = await financialAdjustmentsService.getAll('cashflow')
-    } catch (_) { /* non-fatal */ }
+    })
 
     // ---- Bank accounts — opening (earliest transaction in period) & closing ----
-    try {
-      const { data: accounts } = await supabase
+    await section(w, 'Bank balances', async () => {
+      const accounts = rowsOf(await supabase
         .from('bank_accounts')
         .select('id, account_name, current_balance')
-        .order('account_name', { ascending: true })
+        .order('account_name', { ascending: true }))
 
-      if (accounts && accounts.length > 0) {
+      if (accounts.length > 0) {
         result.bankEnd = accounts.map(acc => ({
           account_id:      acc.id,
           account_name:    acc.account_name,
@@ -439,16 +439,16 @@ export const cashFlowService = {
         const bankStartRows = await Promise.all(
           accounts.map(async acc => {
             try {
-              const { data: txRows } = await supabase
+              const txRows = rowsOf(await supabase
                 .from('bank_transactions')
                 .select('balance, transaction_date')
                 .eq('bank_account_id', acc.id)
                 .gte('transaction_date', fromDate)
                 .lte('transaction_date', toDate)
                 .order('transaction_date', { ascending: true })
-                .limit(1)
+                .limit(1))
 
-              const opening = txRows && txRows.length > 0
+              const opening = txRows.length > 0
                 ? Number(txRows[0].balance || 0)
                 : Number(acc.current_balance || 0)
 
@@ -457,7 +457,8 @@ export const cashFlowService = {
                 account_name:    acc.account_name,
                 opening_balance: opening,
               }
-            } catch (_) {
+            } catch (e) {
+              w.push(`Opening balance for ${acc.account_name} could not be loaded (current balance used): ${e?.message || e}`)
               return {
                 account_id:      acc.id,
                 account_name:    acc.account_name,
@@ -468,7 +469,7 @@ export const cashFlowService = {
         )
         result.bankStart = bankStartRows
       }
-    } catch (_) { /* non-fatal */ }
+    })
 
     return result
   },
