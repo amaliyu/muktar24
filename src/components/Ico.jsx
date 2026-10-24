@@ -19,3 +19,8 @@ export const IconText = ({ icon, size = 16, iconRight = false, children, style }
     {iconRight && <Ico icon={icon} size={size} />}
   </span>
 )
+
+// Native keyboard support and a consistent minimum target for icon-only actions.
+export const IconButton = ({ style, ...props }) => (
+  <button type="button" {...props} style={{ ...style, minWidth: 44, minHeight: 44 }} />
+)

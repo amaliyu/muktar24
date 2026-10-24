@@ -271,7 +271,7 @@ const BalanceRow = ({
           <div style={{ display: 'flex', gap: '6px' }}>
             <Btn variant="ghost" small onClick={() => onEdit(row)}>Edit</Btn>
             {!row.vehicle_id && !isVehicle && (
-              <Btn variant="danger" small onClick={() => onDelete(row.id)} aria-label="Delete"><Ico icon={X} /></Btn>
+              <Btn variant="danger" small style={{ minWidth: 44, minHeight: 44 }} onClick={() => onDelete(row.id)} aria-label={`Delete opening balance ${row.id}`}><Ico icon={X} /></Btn>
             )}
           </div>
         )}

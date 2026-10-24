@@ -8,7 +8,7 @@ import SitePicker, { useSites } from './SitePicker'
 import { siteName } from '../services/sites'
 import { Z } from '../lib/zIndex'
 import { CheckCircle2, ChevronDown, ChevronUp, Download, Lock, X } from 'lucide-react'
-import { Ico, IconText } from './Ico'
+import { Ico, IconText, IconButton } from './Ico'
 
 // ── THEME ────────────────────────────────────────────────────
 const theme = {
@@ -1208,7 +1208,7 @@ function GenerateModal({ report, userProfile, onClose, onGenerated }) {
             <div style={{ fontWeight:'700', fontSize:'15px', marginBottom:'4px' }}>{report.name}</div>
             <div style={{ fontSize:'12px', color:theme.textMuted }}>{report.description}</div>
           </div>
-          <button onClick={onClose} style={{ background:'transparent', border:'none', color:theme.textMuted, fontSize:'18px', cursor:'pointer', padding:'0 4px' }} aria-label="Close"><Ico icon={X} size={20} /></button>
+          <IconButton onClick={onClose} style={{ background:'transparent', border:'none', color:theme.textMuted, fontSize:'18px', cursor:'pointer', padding:'0 4px' }} aria-label="Close"><Ico icon={X} size={20} /></IconButton>
         </div>
 
         {error && <div style={{ background:theme.red+'18', border:`1px solid ${theme.red}44`, borderRadius:'8px', padding:'10px 14px', marginBottom:'14px', fontSize:'12px', color:theme.red }}>{error}</div>}

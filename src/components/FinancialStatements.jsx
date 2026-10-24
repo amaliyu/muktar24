@@ -5,7 +5,7 @@ import { balanceSheetService, incomeStatementService, cashFlowService, openingBa
 import { hasRole } from '../lib/roles'
 import { fmtDate } from './site/siteUi'
 import { AlertTriangle, CheckCircle2, Download, TrendingDown, TrendingUp, X } from 'lucide-react'
-import { Ico, IconText } from './Ico'
+import { Ico, IconText, IconButton } from './Ico'
 
 const theme = {
   bg: '#0f1117', surface: '#1a1d27', card: '#21263a', border: '#2e3452',
@@ -472,7 +472,7 @@ const BalanceSheetTab = ({ userProfile }) => {
                   <span>{adj.account_name} {adj.reason && <span style={{ color: theme.textMuted, fontSize: '11px' }}>— {adj.reason}</span>}</span>
                   <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                     <span style={{ fontWeight: '600' }}>{naira(adj.amount)}</span>
-                    <button style={{ ...s.btn('danger'), padding: '2px 8px', fontSize: '10px' }} onClick={async () => { await financialAdjustmentsService.delete(adj.id); load(asAt, setData) }} aria-label="Delete adjustment"><Ico icon={X} /></button>
+                    <IconButton style={{ ...s.btn('danger'), padding: '2px 8px', fontSize: '10px' }} onClick={async () => { await financialAdjustmentsService.delete(adj.id); load(asAt, setData) }} aria-label={`Delete adjustment ${adj.account_name || adj.id}`}><Ico icon={X} /></IconButton>
                   </div>
                 </div>
               ))}

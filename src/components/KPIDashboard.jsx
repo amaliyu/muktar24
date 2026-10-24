@@ -6,7 +6,7 @@ import autoTable from 'jspdf-autotable'
 import { Z } from '../lib/zIndex'
 import { fmtDate } from './site/siteUi'
 import { ArrowRight, ClipboardList, Download, Factory, FileText, LayoutGrid, RefreshCw, Settings, TrendingDown, TrendingUp, Users, Wallet, X } from 'lucide-react'
-import { Ico, IconText } from './Ico'
+import { Ico, IconText, IconButton } from './Ico'
 
 const theme = {
   bg: '#0f1117', surface: '#1a1d27', card: '#21263a', border: '#2e3452',
@@ -475,7 +475,7 @@ export default function KPIDashboard() {
         <div style={s.row}>
           <button data-ico-allow data-board-allow style={s.btn('primary')} onClick={downloadPDF}><IconText icon={Download}>KPI Report PDF</IconText></button>
           <button style={s.btn()} onClick={() => { setTargetForm({ ...targets }); setShowTargets(true) }}><IconText icon={Settings}>Set Targets</IconText></button>
-          <button data-ico-allow data-board-allow style={s.btn()} onClick={load} disabled={loading} aria-label="Refresh">{loading ? '…' : <Ico icon={RefreshCw} />}</button>
+          <IconButton data-ico-allow data-board-allow style={s.btn()} onClick={load} disabled={loading} aria-label="Refresh KPI dashboard">{loading ? '…' : <Ico icon={RefreshCw} />}</IconButton>
         </div>
       </div>
 
@@ -838,7 +838,7 @@ export default function KPIDashboard() {
           <div style={{ ...s.card, width: '100%', maxWidth: '480px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <div style={{ fontWeight: '700', color: theme.text, fontSize: '15px' }}>Set KPI Targets</div>
-              <button style={s.btn()} onClick={() => setShowTargets(false)} aria-label="Close"><Ico icon={X} /></button>
+              <IconButton style={s.btn()} onClick={() => setShowTargets(false)} aria-label="Close"><Ico icon={X} /></IconButton>
             </div>
             {[
               ['monthlyProductionTarget', 'Monthly Production Target (blocks)', 'e.g. 50000'],

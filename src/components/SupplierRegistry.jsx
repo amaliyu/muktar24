@@ -4,7 +4,7 @@ import { expensesService } from '../services/accounting'
 import { supabase } from '../lib/supabase'
 import { ConfirmDialog, fmtDate, fmtDay } from './site/siteUi'
 import { ArrowLeft, Star, X } from 'lucide-react'
-import { Ico, IconText } from './Ico'
+import { Ico, IconText, IconButton } from './Ico'
 
 const theme = {
   bg: "#0f1117", surface: "#1a1d27", card: "#21263a", border: "#2e3452",
@@ -45,15 +45,22 @@ const Spinner = () => <div style={{ textAlign: 'center', padding: '48px', color:
 const AlertBar = ({ msg, type = 'error', onClose }) => (
   <div style={styles.alert(type)}>
     <span>{msg}</span>
-    {onClose && <span role="button" aria-label="Close" style={{ cursor: 'pointer', fontWeight: '700', marginLeft: '12px', display: 'inline-flex', alignItems: 'center' }} onClick={onClose}><Ico icon={X} /></span>}
+    {onClose && <IconButton data-board-allow data-ico-allow aria-label="Close" style={{ background: 'none', border: 'none', padding: 0, color: 'inherit', font: 'inherit', cursor: 'pointer', fontWeight: '700', marginLeft: '12px', display: 'inline-flex', alignItems: 'center' }} onClick={onClose}><Ico icon={X} /></IconButton>}
   </div>
 )
 
 const Stars = ({ value = 0, onChange }) => (
-  <div style={{ display: 'flex', gap: '4px' }}>
-    {[1, 2, 3, 4, 5].map(n => (
-      <span key={n} style={{ fontSize: '22px', cursor: onChange ? 'pointer' : 'default', color: n <= value ? theme.accent : theme.border }}
-        onClick={() => onChange && onChange(n === value ? 0 : n)}><Star size={22} strokeWidth={1.5} fill={n <= value ? 'currentColor' : 'none'} aria-hidden="true" focusable="false" /></span>
+  <div role={onChange ? 'group' : 'img'} aria-label={`Rating ${value} of 5`} style={{ display: 'flex', gap: '4px' }}>
+    {[1, 2, 3, 4, 5].map(n => onChange ? (
+      <IconButton key={n} aria-label={`Rate ${n} of 5`} aria-pressed={n === value}
+        style={{ padding: 0, border: 'none', background: 'none', cursor: 'pointer', color: n <= value ? theme.accent : theme.border }}
+        onClick={() => onChange && onChange(n === value ? 0 : n)}>
+        <Star size={22} strokeWidth={1.5} fill={n <= value ? 'currentColor' : 'none'} aria-hidden="true" focusable="false" />
+      </IconButton>
+    ) : (
+      <span key={n} style={{ fontSize: '22px', color: n <= value ? theme.accent : theme.border }}>
+        <Star size={22} strokeWidth={1.5} fill={n <= value ? 'currentColor' : 'none'} aria-hidden="true" focusable="false" />
+      </span>
     ))}
   </div>
 )
@@ -283,7 +290,7 @@ const TransactionsTab = ({ supplierId, companyName }) => {
                 <td style={styles.td}>{t.transaction_type === 'purchase' ? <strong style={{ color: theme.red }}>{naira(t.amount)}</strong> : <span style={{ color: theme.textMuted }}>—</span>}</td>
                 <td style={styles.td}>{t.transaction_type === 'payment' ? <strong style={{ color: theme.green }}>{naira(t.amount)}</strong> : <span style={{ color: theme.textMuted }}>—</span>}</td>
                 <td style={styles.td}>{t.reference || '—'}</td>
-                <td style={styles.td}><button style={{ ...styles.btn('danger'), padding: '2px 7px', fontSize: '11px' }} onClick={() => setConfirmDel(t)} aria-label="Delete transaction"><Ico icon={X} /></button></td>
+                <td style={styles.td}><IconButton style={{ ...styles.btn('danger'), padding: '2px 7px', fontSize: '11px' }} onClick={() => setConfirmDel(t)} aria-label={`Delete supplier transaction ${t.reference || t.id}`}><Ico icon={X} /></IconButton></td>
               </tr>
             ))}
           </tbody>

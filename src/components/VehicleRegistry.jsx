@@ -7,7 +7,7 @@ import { supabase } from '../lib/supabase'
 import { ConfirmDialog, fmtDate, fmtDay } from './site/siteUi'
 import { deleteMaintenanceRecord, deleteWhere } from '../utils/checkedDelete'
 import { AlertTriangle, ArrowLeft, Check, CheckCircle2, Package, User, X } from 'lucide-react'
-import { Ico, IconText } from './Ico'
+import { Ico, IconText, IconButton } from './Ico'
 
 const theme = {
   bg: '#0f1117', surface: '#1a1d27', card: '#21263a', border: '#2e3452',
@@ -64,7 +64,7 @@ const Spinner = () => (
 const AlertBar = ({ msg, type = 'error', onClose }) => (
   <div style={{ padding: '12px 16px', borderRadius: '8px', marginBottom: '14px', background: type === 'success' ? theme.green + '22' : type === 'warning' ? theme.accent + '22' : theme.red + '22', color: type === 'success' ? theme.green : type === 'warning' ? theme.accent : theme.red, display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px' }}>
     <span>{msg}</span>
-    {onClose && <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '16px' }} aria-label="Close"><Ico icon={X} /></button>}
+    {onClose && <IconButton onClick={onClose} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '16px' }} aria-label="Close"><Ico icon={X} /></IconButton>}
   </div>
 )
 

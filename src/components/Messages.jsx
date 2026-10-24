@@ -3,7 +3,7 @@ import { messagesService } from '../services/messages'
 import { Z } from '../lib/zIndex'
 import { fmtDay, fmtTime } from './site/siteUi'
 import { ArrowLeft, X } from 'lucide-react'
-import { Ico, IconText } from './Ico'
+import { Ico, IconText, IconButton } from './Ico'
 
 const theme = {
   bg: "#0f1117", surface: "#1a1d27", card: "#21263a", border: "#2e3452",
@@ -34,7 +34,7 @@ const AlertBar = ({ msg, type = 'error', onClose }) => (
     fontSize: '13px', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
   }}>
     <span>{msg}</span>
-    <span role="button" aria-label="Close" onClick={onClose} style={{ cursor: 'pointer', marginLeft: '12px', fontWeight: '700', display: 'inline-flex', alignItems: 'center' }}><Ico icon={X} /></span>
+    <IconButton data-board-allow data-ico-allow aria-label="Close" onClick={onClose} style={{ background: 'none', border: 'none', padding: 0, color: 'inherit', font: 'inherit', cursor: 'pointer', marginLeft: '12px', fontWeight: '700', display: 'inline-flex', alignItems: 'center' }}><Ico icon={X} /></IconButton>
   </div>
 )
 
@@ -263,7 +263,7 @@ const Messages = ({ userProfile, onUnreadChange }) => {
       {view === 'thread' && selectedConv && (
         <>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px' }}>
-            <button onClick={backToInbox} aria-label="Back to inbox" style={{ ...s.btn('ghost'), padding: '6px 10px', fontSize: '18px', lineHeight: 1 }}><Ico icon={ArrowLeft} size={20} /></button>
+            <IconButton onClick={backToInbox} aria-label="Back to inbox" style={{ ...s.btn('ghost'), padding: '6px 10px', fontSize: '18px', lineHeight: 1 }}><Ico icon={ArrowLeft} size={20} /></IconButton>
             <div>
               <div style={{ fontSize: '18px', fontWeight: '700', color: theme.text }}>{selectedConv.name}</div>
               {selectedConv.is_group && (
@@ -348,7 +348,7 @@ const Messages = ({ userProfile, onUnreadChange }) => {
           <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: '12px', padding: '24px', width: '100%', maxWidth: '480px', maxHeight: '90vh', overflowY: 'auto' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
               <div style={{ fontSize: '16px', fontWeight: '700', color: theme.text }}>New Conversation</div>
-              <button onClick={() => { setShowNewConv(false); setAlert(null); }} style={{ background: 'none', border: 'none', color: theme.textMuted, cursor: 'pointer', fontSize: '20px', lineHeight: 1 }} aria-label="Close"><Ico icon={X} size={20} /></button>
+              <IconButton onClick={() => { setShowNewConv(false); setAlert(null); }} style={{ background: 'none', border: 'none', color: theme.textMuted, cursor: 'pointer', fontSize: '20px', lineHeight: 1 }} aria-label="Close"><Ico icon={X} size={20} /></IconButton>
             </div>
 
             {/* DM / Group toggle */}

@@ -12,7 +12,7 @@ import { supabase } from '../lib/supabase';
 import { Z } from '../lib/zIndex'
 import { fmtDate, fmtDay, fmtDateTime } from './site/siteUi';
 import { AlertTriangle, ArrowLeft, ArrowRight, Check, CheckCircle2, Download, RotateCw, Undo2, X } from 'lucide-react'
-import { Ico, IconText } from './Ico'
+import { Ico, IconText, IconButton } from './Ico'
 
 const theme = {
   bg: "#0f1117", surface: "#1a1d27", card: "#21263a", border: "#2e3452",
@@ -76,7 +76,7 @@ const Spinner = () => (
 const Alert = ({ msg, type, onClose }) => (
   <div style={styles.alert(type)}>
     <span>{msg}</span>
-    {onClose && <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "inherit", fontSize: "16px" }} aria-label="Close"><Ico icon={X} /></button>}
+    {onClose && <IconButton onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "inherit", fontSize: "16px" }} aria-label="Close"><Ico icon={X} /></IconButton>}
   </div>
 );
 
@@ -370,7 +370,7 @@ const StaffFormModal = ({ onClose, onSaved, editTarget, roles }) => {
         {/* Header */}
         <div style={{ padding: "18px 24px", borderBottom: `1px solid ${theme.border}`, display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
           <div style={{ fontSize: "16px", fontWeight: "700", color: theme.text }}>{editTarget ? `Edit — ${editTarget.full_name}` : "Add New Staff Member"}</div>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: theme.textMuted, fontSize: "20px" }} aria-label="Close"><Ico icon={X} size={20} /></button>
+          <IconButton onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: theme.textMuted, fontSize: "20px" }} aria-label="Close"><Ico icon={X} size={20} /></IconButton>
         </div>
         {/* Tab bar */}
         <div style={{ display: "flex", borderBottom: `1px solid ${theme.border}`, flexShrink: 0, overflowX: "auto" }}>
@@ -1168,7 +1168,7 @@ const StaffDirectory = ({ onViewProfile, userProfile }) => {
           <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: "12px", padding: "24px", width: "340px", maxWidth: "95vw" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
               <div style={{ fontWeight: "700", fontSize: "15px", color: theme.text }}>Set Kiosk PIN — {pinTarget.full_name}</div>
-              <button onClick={() => { setPinTarget(null); setPinValue(''); setPinMsg(null); }} style={{ background: "none", border: "none", cursor: "pointer", color: theme.textMuted, fontSize: "22px", lineHeight: 1 }} aria-label="Close"><Ico icon={X} size={20} /></button>
+              <IconButton onClick={() => { setPinTarget(null); setPinValue(''); setPinMsg(null); }} style={{ background: "none", border: "none", cursor: "pointer", color: theme.textMuted, fontSize: "22px", lineHeight: 1 }} aria-label="Close"><Ico icon={X} size={20} /></IconButton>
             </div>
             {pinMsg && <Alert msg={pinMsg.msg} type={pinMsg.type} onClose={() => setPinMsg(null)} />}
             <div style={styles.formGroup}>
@@ -1605,9 +1605,9 @@ const LeaveBalancesTab = ({ userProfile }) => {
                             value={entitlementEdits[annKey] ?? ann.entitled_days}
                             onChange={e => setEntitlementEdits(ed => ({ ...ed, [annKey]: e.target.value }))} />
                           {entitlementEdits[annKey] !== undefined && (
-                            <button style={{ ...styles.btn('primary'), fontSize: '11px', padding: '3px 7px' }}
+                            <IconButton style={{ ...styles.btn('primary'), fontSize: '11px', padding: '3px 7px' }}
                               onClick={() => handleSaveEntitlement(staffId, 'annual', entitlementEdits[annKey])}
-                              disabled={savingKey === annKey} aria-label="Save annual entitlement">{savingKey === annKey ? '…' : <Ico icon={Check} />}</button>
+                              disabled={savingKey === annKey} aria-label="Save annual entitlement">{savingKey === annKey ? '…' : <Ico icon={Check} />}</IconButton>
                           )}
                         </div>
                       ) : <span>{ann?.entitled_days ?? '—'}</span>}
@@ -1623,9 +1623,9 @@ const LeaveBalancesTab = ({ userProfile }) => {
                             value={entitlementEdits[sickKey] ?? sick.entitled_days}
                             onChange={e => setEntitlementEdits(ed => ({ ...ed, [sickKey]: e.target.value }))} />
                           {entitlementEdits[sickKey] !== undefined && (
-                            <button style={{ ...styles.btn('primary'), fontSize: '11px', padding: '3px 7px' }}
+                            <IconButton style={{ ...styles.btn('primary'), fontSize: '11px', padding: '3px 7px' }}
                               onClick={() => handleSaveEntitlement(staffId, 'sick', entitlementEdits[sickKey])}
-                              disabled={savingKey === sickKey} aria-label="Save sick entitlement">{savingKey === sickKey ? '…' : <Ico icon={Check} />}</button>
+                              disabled={savingKey === sickKey} aria-label="Save sick entitlement">{savingKey === sickKey ? '…' : <Ico icon={Check} />}</IconButton>
                           )}
                         </div>
                       ) : <span>{sick?.entitled_days ?? '—'}</span>}

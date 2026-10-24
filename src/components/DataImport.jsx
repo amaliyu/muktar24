@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import * as XLSX from 'xlsx'
 import { supabase } from '../lib/supabase'
 import { AlertTriangle, ArrowLeft, ArrowRight, Banknote, BarChart3, Check, CheckCircle2, ClipboardList, Factory, History, Package, Truck, Upload, Wallet, X, XCircle } from 'lucide-react'
-import { Ico, IconText } from './Ico'
+import { Ico, IconText, IconButton } from './Ico'
 
 const theme = {
   bg: '#0f1117', surface: '#1a1d27', card: '#21263a', border: '#2e3452',
@@ -60,7 +60,7 @@ function parseExcelDate(val) {
 const AlertBar = ({ msg, type = 'error', onClose }) => (
   <div style={{ padding: '12px 16px', borderRadius: '8px', marginBottom: '14px', background: type === 'success' ? theme.green + '22' : type === 'warning' ? theme.accent + '22' : theme.red + '22', color: type === 'success' ? theme.green : type === 'warning' ? theme.accent : theme.red, display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px' }}>
   <span>{msg}</span>
-  {onClose && <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '18px' }} aria-label="Close"><Ico icon={X} /></button>}
+  {onClose && <IconButton onClick={onClose} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '18px' }} aria-label="Close"><Ico icon={X} /></IconButton>}
 </div>
 )
 
@@ -686,15 +686,15 @@ function ImportHistory() {
             <tbody>
               {batches.map(b => (
                 <tr key={b.id}>
-                  <td style={styles.td}>{IMPORT_TYPES.find(t => t.id === b.import_type)?.label || b.import_type}</td>
-                  <td style={styles.td}>{b.period_label || `${b.period_month}/${b.period_year}`}</td>
-                  <td style={styles.td}><span style={styles.badge(statusColor(b.status))}>{b.status}</span></td>
-                  <td style={styles.td}>{b.total_rows}</td>
-                  <td style={{ ...styles.td, color: theme.green }}>{b.valid_rows}</td>
-                  <td style={{ ...styles.td, color: b.error_rows > 0 ? theme.red : theme.textMuted }}>{b.error_rows}</td>
-                  <td style={{ ...styles.td, color: theme.textMuted }}>{b.skipped_rows}</td>
-                  <td style={styles.td}>{b.imported_at ? new Date(b.imported_at).toLocaleDateString() : '—'}</td>
-                  <td style={{ ...styles.td, color: b.merged_at ? theme.green : theme.textMuted }}>{b.merged_at ? new Date(b.merged_at).toLocaleDateString() : 'Pending'}</td>
+                  <td className="m-title" data-label="Type" style={styles.td}>{IMPORT_TYPES.find(t => t.id === b.import_type)?.label || b.import_type}</td>
+                  <td data-label="Period" style={styles.td}>{b.period_label || `${b.period_month}/${b.period_year}`}</td>
+                  <td data-label="Status" style={styles.td}><span style={styles.badge(statusColor(b.status))}>{b.status}</span></td>
+                  <td className="m-key" data-label="Total" style={styles.td}>{b.total_rows}</td>
+                  <td data-label="Valid" style={{ ...styles.td, color: theme.green }}>{b.valid_rows}</td>
+                  <td data-label="Errors" style={{ ...styles.td, color: b.error_rows > 0 ? theme.red : theme.textMuted }}>{b.error_rows}</td>
+                  <td data-label="Skipped" style={{ ...styles.td, color: theme.textMuted }}>{b.skipped_rows}</td>
+                  <td data-label="Imported At" style={styles.td}>{b.imported_at ? new Date(b.imported_at).toLocaleDateString() : '—'}</td>
+                  <td data-label="Merged At" style={{ ...styles.td, color: b.merged_at ? theme.green : theme.textMuted }}>{b.merged_at ? new Date(b.merged_at).toLocaleDateString() : 'Pending'}</td>
                 </tr>
               ))}
             </tbody>
@@ -759,12 +759,12 @@ function ProgressTracker() {
           <tbody>
             {IMPORT_TYPES.map(type => (
               <tr key={type.id}>
-                <td style={{ ...styles.td, fontWeight: '600' }}><IconText icon={type.icon}>{type.label}</IconText></td>
+                <td className="m-title" data-label="Import Type" style={{ ...styles.td, fontWeight: '600' }}><IconText icon={type.icon}>{type.label}</IconText></td>
                 {months.map(m => {
                   const bs = getBatchesFor(type.id, m, currentYear)
                   const color = cellColor(bs)
                   return (
-                    <td key={m} style={{ ...styles.td, textAlign: 'center', padding: '6px' }}>
+                    <td key={m} data-label={monthName(m)} style={{ ...styles.td, textAlign: 'center', padding: '6px' }}>
                       <div style={{ width: '28px', height: '28px', borderRadius: '6px', background: color + (color === theme.border ? '' : '33'), border: `1px solid ${color}55`, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', color, fontWeight: '700' }}>
                         {bs.length > 0 ? bs.length : ''}
                       </div>
@@ -787,14 +787,14 @@ export default function DataImport() {
   const [selectedType, setSelectedType] = useState(null)
 
   return (
-    <div style={styles.page}>
+    <div className="m-page" style={styles.page}>
       <div style={{ marginBottom: '24px' }}>
         <h1 style={{ margin: '0 0 4px', fontSize: '22px', fontWeight: '700', color: theme.text }}>Historical Data Import</h1>
         <div style={{ fontSize: '13px', color: theme.textMuted }}>Bulk import historical records from Excel files — MD and Accountant access</div>
       </div>
 
       {/* Tab nav */}
-      <div style={{ display: 'flex', gap: '6px', marginBottom: '24px', background: theme.surface, padding: '6px', borderRadius: '8px', width: 'fit-content' }}>
+      <div className="m-wrap" style={{ display: 'flex', gap: '6px', marginBottom: '24px', background: theme.surface, padding: '6px', borderRadius: '8px', width: 'fit-content' }}>
         {[
           { id: 'import', label: 'New Import', icon: Upload },
           { id: 'history', label: 'History', icon: History },

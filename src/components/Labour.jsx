@@ -8,7 +8,7 @@ import autoTable from 'jspdf-autotable'
 import * as XLSX from 'xlsx'
 import { Z } from '../lib/zIndex'
 import { ArrowLeft, Check, Lock, X } from 'lucide-react'
-import { Ico, IconText } from './Ico'
+import { Ico, IconText, IconButton } from './Ico'
 
 const theme = {
   bg: '#0f1117', surface: '#1a1d27', card: '#21263a', border: '#2e3452',
@@ -110,7 +110,7 @@ const Spinner = () => (
 const AlertBar = ({ msg, type = 'error', onClose }) => msg ? (
   <div style={{ padding: '12px 16px', borderRadius: '8px', marginBottom: '14px', background: type === 'success' ? theme.green + '22' : type === 'warning' ? theme.accent + '22' : theme.red + '22', color: type === 'success' ? theme.green : type === 'warning' ? theme.accent : theme.red, display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px' }}>
     <span>{msg}</span>
-    {onClose && <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '16px' }} aria-label="Close"><Ico icon={X} /></button>}
+    {onClose && <IconButton onClick={onClose} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '16px' }} aria-label="Close"><Ico icon={X} /></IconButton>}
   </div>
 ) : null
 
@@ -892,7 +892,7 @@ function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCanc
                   </td>
                   <td className="m-key" style={styles.td}><strong style={{ color: theme.green }}>{naira(netPay)}</strong></td>
                   <td style={styles.td}><input style={{ ...styles.input, width: '100px' }} value={row.notes} onChange={e => updateRow(i, 'notes', e.target.value)} /></td>
-                  <td className="m-actions" style={styles.td}><button style={{ ...styles.btn('danger'), padding: '4px 8px' }} onClick={() => removeRow(i)} aria-label="Remove worker"><Ico icon={X} /></button></td>
+                  <td className="m-actions" style={styles.td}><IconButton style={{ ...styles.btn('danger'), padding: '4px 8px' }} onClick={() => removeRow(i)} aria-label={`Remove worker row ${i + 1}`}><Ico icon={X} /></IconButton></td>
                 </tr>
               )
             })}

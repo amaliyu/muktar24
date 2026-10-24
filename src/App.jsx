@@ -1,6 +1,6 @@
 import { useState, useEffect, Component } from "react";
 import { AlertTriangle, ArrowLeft, ArrowRight, Banknote, BarChart3, Blocks, BookOpen, BookUser, Building2, Calculator, CalendarCheck, CalendarClock, CalendarDays, CalendarOff, Check, CheckCircle2, ChevronDown, ChevronUp, Circle, CircleUser, ClipboardCheck, ClipboardList, Contact, CornerDownRight, Download, Eye, Factory, FileSignature, FileText, FileUp, Fingerprint, Flag, Forklift, Gauge, Gavel, HandCoins, Handshake, HardHat, Hourglass, IdCard, Landmark, Layers, LayoutDashboard, Lock, Mail, MapPin, Menu, MessageSquare, Package, PackageCheck, Pencil, Phone, PiggyBank, Receipt, ScrollText, Settings, TrendingDown, TrendingUp, Truck, Undo2, Upload, User, UserCog, Users, Wallet, Wrench, X } from 'lucide-react';
-import { Ico, IconText } from './components/Ico';
+import { Ico, IconText, IconButton } from './components/Ico';
 import { supabase } from './lib/supabase';
 import { authService } from './services/authService';
 import { hasRole, effectiveRolesOf } from './lib/roles';
@@ -198,7 +198,7 @@ const Spinner = () => (
 const Alert = ({ msg, type = "error", onClose }) => (
   <div style={styles.alert(type)}>
     <span>{msg}</span>
-    <span role="button" aria-label="Close" style={{ cursor: "pointer", marginLeft: "12px", fontWeight: "700", display: "inline-flex", alignItems: "center" }} onClick={onClose}><Ico icon={X} /></span>
+    <IconButton data-board-allow data-ico-allow aria-label="Close" style={{ background: 'none', border: 'none', padding: 0, color: 'inherit', font: 'inherit', cursor: "pointer", marginLeft: "12px", fontWeight: "700", display: "inline-flex", alignItems: "center" }} onClick={onClose}><Ico icon={X} /></IconButton>
   </div>
 );
 
@@ -302,7 +302,7 @@ const InvoiceEditorModal = ({ editor, setEditor, onSave, saving }) => {
               <div style={{ ...styles.input, flex: 1, background: 'transparent', color: theme.accent, fontWeight: '700', fontSize: '12px' }}>
                 {item.quantity && item.unit_price ? N((Number(item.quantity) || 0) * (Number(item.unit_price) || 0)) : '—'}
               </div>
-              {items.length > 1 && <button style={{ ...styles.btn('danger'), padding: '8px 10px' }} onClick={() => removeItem(idx)} aria-label="Remove item"><Ico icon={X} /></button>}
+              {items.length > 1 && <IconButton style={{ ...styles.btn('danger'), padding: '8px 10px' }} onClick={() => removeItem(idx)} aria-label={`Remove line item ${idx + 1}`}><Ico icon={X} /></IconButton>}
             </div>
           ))}
           <button style={{ ...styles.btn('secondary'), fontSize: '12px', marginBottom: '16px' }} onClick={addItem}>+ Add Line Item</button>
@@ -1076,7 +1076,7 @@ const Production = ({ userProfile }) => {
             <div style={{ fontWeight: "700", marginBottom: "4px" }}>Stock warning</div>
             {stockWarning.map(w => <div key={w}>{w}</div>)}
           </div>
-          <button onClick={() => setStockWarning(null)} style={{ background: "none", border: "none", color: theme.accent, cursor: "pointer", fontSize: "16px" }} aria-label="Dismiss stock warning"><Ico icon={X} /></button>
+          <IconButton onClick={() => setStockWarning(null)} style={{ background: "none", border: "none", color: theme.accent, cursor: "pointer", fontSize: "16px" }} aria-label="Dismiss stock warning"><Ico icon={X} /></IconButton>
         </div>
       )}
 
@@ -1786,7 +1786,7 @@ const Orders = ({ onNavigate, userProfile }) => {
       {orderDeleteMsg && (
         <div style={{ margin: "0 0 12px", padding: "10px 14px", background: theme.red + '18', border: `1px solid ${theme.red}44`, borderRadius: "6px", fontSize: "13px", color: theme.red, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <span>{orderDeleteMsg}</span>
-          <button style={{ background: "none", border: "none", color: theme.red, cursor: "pointer", fontWeight: "700", fontSize: "14px", padding: "0 4px" }} onClick={() => setOrderDeleteMsg(null)} aria-label="Dismiss"><Ico icon={X} /></button>
+          <IconButton style={{ background: "none", border: "none", color: theme.red, cursor: "pointer", fontWeight: "700", fontSize: "14px", padding: "0 4px" }} onClick={() => setOrderDeleteMsg(null)} aria-label="Dismiss"><Ico icon={X} /></IconButton>
         </div>
       )}
 
@@ -1894,7 +1894,7 @@ const Orders = ({ onNavigate, userProfile }) => {
                     </div>
                   </div>
                   {form.items.length > 1 && (
-                    <button style={{ ...styles.btn("danger"), padding: "9px 12px", alignSelf: "flex-end" }} onClick={() => setForm({ ...form, items: form.items.filter((_, i) => i !== idx) })} aria-label="Remove item"><Ico icon={X} /></button>
+                    <IconButton style={{ ...styles.btn("danger"), padding: "9px 12px", alignSelf: "flex-end" }} onClick={() => setForm({ ...form, items: form.items.filter((_, i) => i !== idx) })} aria-label={`Remove line item ${idx + 1}`}><Ico icon={X} /></IconButton>
                   )}
                 </div>
                 {item.sourceType === 'resale' && (
@@ -2021,7 +2021,7 @@ const Orders = ({ onNavigate, userProfile }) => {
                                 </button>
                               ))}
                             </div>
-                            {orderEditItems.length > 1 && <button style={{ ...styles.btn("danger"), padding: "8px 10px" }} onClick={() => setOrderEditItems(orderEditItems.filter((_, i) => i !== idx))} aria-label="Remove item"><Ico icon={X} /></button>}
+                            {orderEditItems.length > 1 && <IconButton style={{ ...styles.btn("danger"), padding: "8px 10px" }} onClick={() => setOrderEditItems(orderEditItems.filter((_, i) => i !== idx))} aria-label={`Remove line item ${idx + 1}`}><Ico icon={X} /></IconButton>}
                           </div>
                           {item.sourceType === 'resale' && (
                             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -2131,7 +2131,7 @@ const Orders = ({ onNavigate, userProfile }) => {
                     {invDeleteMsg && (
                       <div style={{ marginTop: "10px", padding: "10px 14px", background: theme.red + '18', border: `1px solid ${theme.red}44`, borderRadius: "6px", fontSize: "13px", color: theme.red, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                         <span>{invDeleteMsg}</span>
-                        <button style={{ background: "none", border: "none", color: theme.red, cursor: "pointer", fontWeight: "700", fontSize: "14px", padding: "0 4px" }} onClick={() => setInvDeleteMsg(null)} aria-label="Dismiss"><Ico icon={X} /></button>
+                        <IconButton style={{ background: "none", border: "none", color: theme.red, cursor: "pointer", fontWeight: "700", fontSize: "14px", padding: "0 4px" }} onClick={() => setInvDeleteMsg(null)} aria-label="Dismiss"><Ico icon={X} /></IconButton>
                       </div>
                     )}
                     {showPayForm && (
@@ -2627,8 +2627,8 @@ const Waybills = ({ userProfile }) => {
                         return (
                           <span key={lid} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: theme.accent + '22', border: `1px solid ${theme.accent}44`, borderRadius: '4px', padding: '3px 8px', fontSize: '12px', color: theme.text }}>
                             {worker?.full_name || lid}
-                            <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: theme.red, padding: 0, fontSize: '13px', lineHeight: 1 }}
-                              onClick={() => setWaybillLoaders(l => l.filter(x => x !== lid))} aria-label="Remove loader"><Ico icon={X} /></button>
+                            <IconButton style={{ background: 'none', border: 'none', cursor: 'pointer', color: theme.red, padding: 0, fontSize: '13px', lineHeight: 1 }}
+                              onClick={() => setWaybillLoaders(l => l.filter(x => x !== lid))} aria-label={`Remove loader ${worker?.full_name || lid}`}><Ico icon={X} /></IconButton>
                           </span>
                         );
                       })}
@@ -5499,7 +5499,7 @@ const BookkeepingTab = () => {
                   </div>
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                     <span style={{ fontSize: '13px', fontWeight: '600', color: theme.green }}>{naira(r.amount)}</span>
-                    <button style={{ ...styles.btn('danger'), padding: '2px 8px', fontSize: '10px' }} onClick={() => deleteIncome(r.id)} aria-label="Delete income record"><Ico icon={X} /></button>
+                    <IconButton style={{ ...styles.btn('danger'), padding: '2px 8px', fontSize: '10px' }} onClick={() => deleteIncome(r.id)} aria-label={`Delete income record ${r.id}`}><Ico icon={X} /></IconButton>
                   </div>
                 </div>
               ))}
@@ -6571,7 +6571,7 @@ const BankAccountsTab = ({ userProfile }) => {
                 {importStep === 'mapping' && 'Map Columns'}
                 {importStep === 'preview' && `Preview — ${preview.length} transactions`}
               </div>
-              <button style={{ background: 'none', border: 'none', color: theme.textMuted, cursor: 'pointer', fontSize: '18px' }} onClick={closeImport} aria-label="Close"><Ico icon={X} size={20} /></button>
+              <IconButton style={{ background: 'none', border: 'none', color: theme.textMuted, cursor: 'pointer', fontSize: '18px' }} onClick={closeImport} aria-label="Close"><Ico icon={X} size={20} /></IconButton>
             </div>
 
             {importStep === 'upload' && (
@@ -7071,7 +7071,7 @@ const BankAccountsTab = ({ userProfile }) => {
               </div>
               <div style={{ display: 'flex', gap: '8px', marginTop: '14px' }} onClick={e => e.stopPropagation()}>
                 <button style={{ ...styles.btn('secondary'), padding: '5px 10px', fontSize: '12px', flex: 1 }} onClick={() => openImport(acct)}><IconText icon={Upload}>Import</IconText></button>
-                <button style={{ ...styles.btn('secondary'), padding: '5px 10px', fontSize: '12px' }} onClick={() => setEditAcct({ ...acct })} title="Edit account details" aria-label="Edit account details"><Ico icon={Pencil} /></button>
+                <IconButton style={{ ...styles.btn('secondary'), padding: '5px 10px', fontSize: '12px' }} onClick={() => setEditAcct({ ...acct })} title="Edit account details" aria-label={`Edit bank account ${acct.bank_name || acct.id}`}><Ico icon={Pencil} /></IconButton>
               </div>
             </div>
           );
@@ -7657,8 +7657,8 @@ const ReceiptsTab = () => {
                     <div style={{ fontSize: '11px', color: theme.green, fontWeight: '600' }}>{naira(r.amount)}</div>
                     <div style={{ fontSize: '10px', color: theme.textMuted }}>{fmtDate(r.receipt_date)}</div>
                     <div style={{ display: 'flex', gap: '4px', marginTop: '8px' }}>
-                      <a href={signedMap[r.id] || undefined} target="_blank" rel="noreferrer" style={{ ...styles.btn('secondary'), padding: '3px 8px', fontSize: '10px', textDecoration: 'none', display: 'inline-block' }} aria-label="Download receipt"><Ico icon={Download} /></a>
-                      <button style={{ ...styles.btn('danger'), padding: '3px 8px', fontSize: '10px' }} onClick={() => handleDelete(r)} aria-label="Delete receipt"><Ico icon={X} /></button>
+                      <a href={signedMap[r.id] || undefined} target="_blank" rel="noreferrer" style={{ ...styles.btn('secondary'), padding: '3px 8px', fontSize: '10px', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: '44px', minHeight: '44px', boxSizing: 'border-box' }} aria-label={`Download receipt ${r.receipt_number || r.id}`}><Ico icon={Download} /></a>
+                      <IconButton style={{ ...styles.btn('danger'), padding: '3px 8px', fontSize: '10px' }} onClick={() => handleDelete(r)} aria-label={`Delete receipt ${r.receipt_number || r.id}`}><Ico icon={X} /></IconButton>
                     </div>
                   </div>
                 ))
@@ -9015,7 +9015,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
                 </div>
                 <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                   <span style={styles.badge(statusColor(req.status))}>{req.status}</span>
-                  <button style={{ ...styles.btn('secondary'), padding: '5px 10px' }} onClick={() => { setDetailReq(null); setAttachFile(null); setAttachNote(''); setAttachAlert(null); }} aria-label="Close"><Ico icon={X} /></button>
+                  <IconButton style={{ ...styles.btn('secondary'), padding: '5px 10px' }} onClick={() => { setDetailReq(null); setAttachFile(null); setAttachNote(''); setAttachAlert(null); }} aria-label="Close"><Ico icon={X} /></IconButton>
                 </div>
               </div>
               <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: '16px' }}>
@@ -9083,7 +9083,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
                       {attachAlert && (
                         <div style={{ ...styles.alert(attachAlert.type), marginBottom: '10px' }}>
                           <span>{attachAlert.msg}</span>
-                          <span role="button" aria-label="Close" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }} onClick={() => setAttachAlert(null)}><Ico icon={X} /></span>
+                          <IconButton data-board-allow data-ico-allow aria-label="Close" style={{ background: 'none', border: 'none', padding: 0, color: 'inherit', font: 'inherit', cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }} onClick={() => setAttachAlert(null)}><Ico icon={X} /></IconButton>
                         </div>
                       )}
                       <div style={styles.formGroup}>
@@ -11732,7 +11732,7 @@ export default function App() {
     products: <MobileScope fit><Products /></MobileScope>,
     suppliers: <MobileScope fit><SupplierRegistry /></MobileScope>,
     accounting: <MobileScope fit><Accounting userProfile={userProfile} /></MobileScope>,
-    data_import: <DataImport />,
+    data_import: <MobileScope fit><DataImport /></MobileScope>,
     user_management: <MobileScope fit><UserManagement userProfile={userProfile} /></MobileScope>,
     labour: <MobileScope><Labour userProfile={userProfile} /></MobileScope>,
     maintenance: <MobileScope fit><Maintenance userProfile={userProfile} /></MobileScope>,
@@ -11829,7 +11829,7 @@ export default function App() {
       <main style={{ ...styles.main, ...(isMobile ? { marginLeft: 0, minWidth: 0, padding: '16px 14px', paddingTop: '68px' } : {}) }} {...(boardMasked ? { 'data-board-view': 'true' } : {})} {...(icoMasked ? { 'data-ico-view': 'true' } : {})}>
         {/* Mobile hamburger */}
         {isMobile && (
-          <button data-board-allow data-ico-allow aria-label="Open menu" onClick={() => setSidebarOpen(s => !s)} style={{ position: 'fixed', top: '10px', left: '12px', zIndex: Z.floating, width: '44px', height: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '8px', padding: 0, cursor: 'pointer', fontSize: '20px', color: theme.text, lineHeight: 1, boxShadow: '0 2px 8px rgba(0,0,0,0.3)' }}><Ico icon={Menu} size={20} /></button>
+          <IconButton data-board-allow data-ico-allow aria-label="Open menu" onClick={() => setSidebarOpen(s => !s)} style={{ position: 'fixed', top: '10px', left: '12px', zIndex: Z.floating, width: '44px', height: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '8px', padding: 0, cursor: 'pointer', fontSize: '20px', color: theme.text, lineHeight: 1, boxShadow: '0 2px 8px rgba(0,0,0,0.3)' }}><Ico icon={Menu} size={20} /></IconButton>
         )}
         {sessionWarning && (
           <div style={{ background: "#7c3a0022", border: "1px solid #c47d0e88", borderRadius: "8px", padding: "10px 16px", marginBottom: "16px", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "13px", color: theme.accent }}>
