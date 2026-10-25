@@ -4,6 +4,7 @@ import autoTable from 'jspdf-autotable'
 import * as XLSX from 'xlsx'
 import { supabase } from '../lib/supabase'
 import { effectiveRolesOf } from '../lib/roles'
+import { salesOrders } from '../utils/proforma'
 import SitePicker, { useSites } from './SitePicker'
 import { siteName } from '../services/sites'
 import { Z } from '../lib/zIndex'
@@ -205,7 +206,7 @@ async function fetchWaybillRange(from, to) {
   return data || []
 }
 async function fetchOrdersRange(from, to) {
-  let q = supabase.from('orders').select('*, customer:customer_id(name,location), marketer:marketer_id(full_name), items:order_items(*), invoice:invoices(invoice_number,total_amount,issued_date,due_date)').order('created_at')
+  let q = supabase.from('orders').select('*, customer:customer_id(name,location), marketer:marketer_id(full_name), items:order_items(*), invoice:invoices(id,invoice_number,total_amount,status,issued_date,due_date)').order('created_at')
   if (from) q = q.gte('created_at', from + 'T00:00:00')
   if (to)   q = q.lte('created_at', to + 'T23:59:59')
   const { data, error } = await q
@@ -307,7 +308,7 @@ async function fetchSupplierTransactions(from, to) {
 }
 
 // ── REPORT GENERATORS ────────────────────────────────────────
-const GENERATORS = {
+export const GENERATORS = {
   // 1. Daily Production
   daily_production: async (params) => {
     const rows = await fetchProductionRange(params.date, params.date, params.site_id)
@@ -322,7 +323,7 @@ const GENERATORS = {
   // 5. Damage & Waste
   damage_waste: async (params) => fetchDamageRange(params.from, params.to, params.site_id),
   // 6. Sales
-  sales_report: async (params) => fetchOrdersRange(params.from, params.to),
+  sales_report: async (params) => salesOrders(await fetchOrdersRange(params.from, params.to)),
   // 7. Revenue
   revenue_report: async (params) => fetchPaymentsRange(params.from, params.to),
   // 8. Invoice
@@ -354,7 +355,8 @@ const GENERATORS = {
   // 11. AR Aging
   ar_aging: async (params) => {
     // Receivables aging must exclude drafts (quotations) and cancelled invoices.
-    const { data: invoices } = await supabase.from('invoices').select('*, order:order_id(customer:customer_id(name)), payments(amount_paid,status)').not('status', 'in', '("draft","cancelled")').lte('issued_date', params.date || today())
+    const { data: invoices, error } = await supabase.from('invoices').select('*, order:order_id(customer:customer_id(name)), payments(amount_paid,status)').not('status', 'in', '("draft","cancelled")').lte('issued_date', params.date || today())
+    if (error) throw error
     return invoices || []
   },
   // 12. Customer History
@@ -756,11 +758,11 @@ function renderPDF(reportId, data, params, period) {
     case 'sales_report': {
       const head = ['Date', 'Customer', 'Location', 'Marketer', 'Items', 'Value (₦)', 'Status']
       const body = data.map(o => {
-        const value = (o.items||[]).reduce((s,i)=>s+Number(i.subtotal||0),0)
+        const value = o.salesTotal
         const items = (o.items||[]).map(i=>`${i.block_type}(${i.quantity})`).join(', ')
         return [fmtDate(o.created_at), o.customer?.name||'—', o.customer?.location||'—', o.marketer?.full_name||'—', items, naira(value), o.status]
       })
-      const total = data.reduce((s,o)=>s+(o.items||[]).reduce((ss,i)=>ss+Number(i.subtotal||0),0),0)
+      const total = data.reduce((s,o)=>s+o.salesTotal,0)
       pdfTable(doc, startY, head, body, ['TOTAL','','','','',naira(total),''])
       break
     }
@@ -1027,7 +1029,8 @@ function renderExcel(reportId, data, params, period) {
       break
     case 'sales_report':
       excelExport(filename, report.name, period, ['Date','Customer','Location','Marketer','Value (₦)','Status'],
-        data.map(o=>[fmtDate(o.created_at),o.customer?.name||'—',o.customer?.location||'—',o.marketer?.full_name||'—',(o.items||[]).reduce((s,i)=>s+Number(i.subtotal||0),0),o.status]))
+        data.map(o=>[fmtDate(o.created_at),o.customer?.name||'—',o.customer?.location||'—',o.marketer?.full_name||'—',o.salesTotal,o.status]),
+        ['TOTAL','','','',data.reduce((s,o)=>s+o.salesTotal,0),''])
       break
     case 'revenue_report':
       excelExport(filename, report.name, period, ['Date','Customer','Invoice No','Amount Paid (₦)'],

@@ -9,6 +9,7 @@ export async function generateInvoicePDF(invoiceData, customer) {
   const {
     invoice_number,
     issued_date,
+    issued_at,
     items = [],
     delivery_cost = 0,
     include_vat = true,
@@ -19,6 +20,11 @@ export async function generateInvoicePDF(invoiceData, customer) {
   // A draft is a quotation → render as a PROFORMA INVOICE. Issued/paid render
   // the normal INVOICE. Same generator, one branch on status.
   const isProforma = status === 'draft';
+  const isCancelled = status === 'cancelled';
+  // issued_at exists in the live invoices catalog; the content guard stamps
+  // draft → issued. A cancelled document without that stamp was a proforma.
+  const cancelledProforma = isCancelled && !issued_at;
+  const cancellationNotice = 'This document was cancelled and no amount is owed.';
 
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const W   = doc.internal.pageSize.getWidth();
@@ -45,8 +51,11 @@ export async function generateInvoicePDF(invoiceData, customer) {
   doc.text('RC: 1838184', ml + 33, 19);
 
   doc.setFont('helvetica', 'bold'); doc.setTextColor(245, 166, 35);
-  doc.setFontSize(isProforma ? 15 : 22);
-  doc.text(isProforma ? 'PROFORMA INVOICE' : 'INVOICE', mr, 15, { align: 'right' });
+  doc.setFontSize(isCancelled ? 9 : isProforma ? 15 : 22);
+  const heading = isCancelled
+    ? (cancelledProforma ? ['PROFORMA', 'CANCELLED — NOT PAYABLE'] : 'CANCELLED — NOT PAYABLE')
+    : isProforma ? 'PROFORMA INVOICE' : 'INVOICE';
+  doc.text(heading, mr, isCancelled ? 12 : 15, { align: 'right' });
 
   doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(40);
   doc.text(`No: ${String(invoice_number || '—')}`, mr, 21, { align: 'right' });
@@ -55,13 +64,13 @@ export async function generateInvoicePDF(invoiceData, customer) {
   doc.setDrawColor(180); doc.setLineWidth(0.5); doc.line(ml, 30, mr, 30);
 
   // Proforma disclaimer — a quotation is not a demand for payment.
-  if (isProforma) {
+  if (isProforma || isCancelled) {
     doc.setFontSize(8.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(200, 50, 50);
-    doc.text(doc.splitTextToSize(PROFORMA_DISCLAIMER, W - 28), W / 2, 35, { align: 'center' });
+    doc.text(doc.splitTextToSize(isCancelled ? cancellationNotice : PROFORMA_DISCLAIMER, W - 28), W / 2, 35, { align: 'center' });
   }
 
   // ── BILL TO ───────────────────────────────────────────────────
-  const billY = isProforma ? 45 : 37;
+  const billY = isProforma || isCancelled ? 45 : 37;
   let leftY = billY;
   doc.setFontSize(8); doc.setFont('helvetica', 'bold'); doc.setTextColor(140);
   doc.text('BILL TO:', ml, leftY); leftY += 5;
@@ -131,7 +140,7 @@ export async function generateInvoicePDF(invoiceData, customer) {
   const tableEndY = doc.lastAutoTable.finalY + 6;
 
   // ── IMPORTANT NOTICES + AUTHORISED BY ────────────────────────
-  const notices = [
+  const notices = isCancelled ? [cancellationNotice] : [
     'Invoice valid for 48 HOURS from date of issue. After this, invoice becomes void.',
     'All prices are inclusive of VAT at 7.5%.',
     'No refunds except for reasonable and justifiable cause, submitted in writing within 48 hours of delivery.',
@@ -141,7 +150,7 @@ export async function generateInvoicePDF(invoiceData, customer) {
   ];
 
   doc.setFontSize(8); doc.setFont('helvetica', 'bold'); doc.setTextColor(40);
-  doc.text('IMPORTANT NOTICES:', ml, tableEndY + 5);
+  doc.text(isCancelled ? 'DOCUMENT STATUS:' : 'IMPORTANT NOTICES:', ml, tableEndY + 5);
 
   let noticeY = tableEndY + 10;
   doc.setFont('helvetica', 'normal'); doc.setTextColor(55);
@@ -163,21 +172,24 @@ export async function generateInvoicePDF(invoiceData, customer) {
   doc.setFontSize(8); doc.setFont('helvetica', 'italic'); doc.setTextColor(190);
   doc.text('Stamp & Signature', authX + (colW - 6) / 2, authBoxY + 6 + Math.max(authBoxH - 6, 28) / 2, { align: 'center' });
 
-  const sectionEndY = noticeY + 4;
+  const sectionEndY = isCancelled ? Math.max(noticeY + 4, authBoxY + 38) : noticeY + 4;
 
   // ── PAYMENT DETAILS ───────────────────────────────────────────
-  doc.setDrawColor(180); doc.setLineWidth(0.4); doc.line(ml, sectionEndY, mr, sectionEndY);
-  doc.setFontSize(8.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(40);
-  doc.text('PAYMENT DETAILS', ml, sectionEndY + 6);
+  let payY = sectionEndY;
+  if (!isCancelled) {
+    doc.setDrawColor(180); doc.setLineWidth(0.4); doc.line(ml, sectionEndY, mr, sectionEndY);
+    doc.setFontSize(8.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(40);
+    doc.text('PAYMENT DETAILS', ml, sectionEndY + 6);
 
-  let payY = sectionEndY + 12;
-  [['Account Name:', 'ABUJA PRECAST CONCRETE LTD'], ['Bank:', 'TAJ BANK PLC'], ['Account No:', '0001732895']].forEach(([label, value]) => {
-    doc.setFont('helvetica', 'normal'); doc.setTextColor(80); doc.setFontSize(9);
-    doc.text(label, ml, payY);
-    doc.setFont('helvetica', 'bold'); doc.setTextColor(20);
-    doc.text(value, ml + 32, payY);
-    payY += 5;
-  });
+    payY = sectionEndY + 12;
+    [['Account Name:', 'ABUJA PRECAST CONCRETE LTD'], ['Bank:', 'TAJ BANK PLC'], ['Account No:', '0001732895']].forEach(([label, value]) => {
+      doc.setFont('helvetica', 'normal'); doc.setTextColor(80); doc.setFontSize(9);
+      doc.text(label, ml, payY);
+      doc.setFont('helvetica', 'bold'); doc.setTextColor(20);
+      doc.text(value, ml + 32, payY);
+      payY += 5;
+    });
+  }
 
   // ── FOOTER ────────────────────────────────────────────────────
   const footerY = payY + 6;
@@ -188,5 +200,5 @@ export async function generateInvoicePDF(invoiceData, customer) {
   doc.text('1, Dutse Alhaji, Behind Tipper Garage, Beside Istanbul Quarry, Off Bwari Expressway, Bmuko Village, Abuja, Nigeria.', W / 2, footerY + 13, { align: 'center' });
   doc.text('Tel: 09055541433, 07030647949   |   Email: iabujaprecast@gmail.com', W / 2, footerY + 18, { align: 'center' });
 
-  doc.save(`${isProforma ? 'PROFORMA_' : ''}${invoice_number || 'invoice'}.pdf`);
+  doc.save(`${isCancelled ? 'CANCELLED_' : ''}${isProforma || cancelledProforma ? 'PROFORMA_' : ''}${invoice_number || 'invoice'}.pdf`);
 }
