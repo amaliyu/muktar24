@@ -233,3 +233,36 @@ export function StackTable({ headers, rightCols = [], children }) {
     </>
   )
 }
+
+// Phase 7 controls share these phone rules; desktop inline styles stay intact.
+const TOUCH_CSS = `
+@media (max-width: 768px) {
+  .phase7-touch :is(button, input, select, [role="button"]) {
+    min-height: 44px !important;
+    box-sizing: border-box;
+    max-width: 100%;
+  }
+  .phase7-touch button, .phase7-touch [role="button"], .phase7-touch input[type="checkbox"] {
+    min-width: 44px !important;
+  }
+  .phase7-touch button { white-space: normal; overflow-wrap: anywhere; }
+  .phase7-touch :is(input, select, textarea) { min-width: 0; }
+  .phase7-touch [style*="display: flex"]:has(> button),
+  .phase7-touch [style*="display: flex"]:has(> select) {
+    flex-wrap: wrap !important;
+  }
+  .phase7-touch [style*="gap: 6px"],
+  .phase7-touch [style*="gap: 4px"],
+  .phase7-touch [style*="gap: 2px"] { gap: 8px !important; }
+  .phase7-touch label:has(input[type="checkbox"]) { min-height: 44px !important; }
+}
+`
+
+export function withPhase7Touch(Page) {
+  return function Phase7TouchPage(props) {
+    return <div className="phase7-touch" style={{ display: 'contents' }}>
+      <style>{TOUCH_CSS}</style>
+      <Page {...props} />
+    </div>
+  }
+}

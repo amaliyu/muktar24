@@ -99,3 +99,6 @@ export function useLoad(fn, deps) {
 }
 
 export const NoAccess = () => <div style={ui.panel}>You do not have access to this page.</div>
+
+// Investors use the same phone controls as the other Phase 7 pages.
+export { withPhase7Touch } from '../site/siteUi'

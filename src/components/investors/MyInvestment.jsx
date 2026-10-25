@@ -1,3 +1,4 @@
+import { withPhase7Touch } from './investorUi'
 import { useState } from 'react'
 import { myInvestmentService } from '../../services/investors'
 import { fmtNaira2, monthLabel, buildInvestorStatement, tierForMultiple } from '../../utils/investorPools'
@@ -10,7 +11,7 @@ import { PageHeader, Fact, FactGrid, Empty, useLoad } from './investorUi'
 // (myInvestmentService); RLS limits each read further. It never calls
 // fn_site_capital_on or lists other investors.
 
-export default function MyInvestment({ userProfile }) {
+function MyInvestment({ userProfile }) {
   const [pdfErr, setPdfErr] = useState(null)
   const [data, err, loading, reload] = useLoad(async () => {
     const me = await myInvestmentService.myInvestor(userProfile.id)
@@ -106,3 +107,5 @@ export default function MyInvestment({ userProfile }) {
     </div>
   )
 }
+
+export default withPhase7Touch(MyInvestment)

@@ -3,7 +3,7 @@ import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { balanceSheetService, incomeStatementService, cashFlowService, openingBalancesService, financialAdjustmentsService } from '../services/financialService'
 import { hasRole } from '../lib/roles'
-import { fmtDate } from './site/siteUi'
+import { fmtDate, ConfirmDialog } from './site/siteUi'
 import { AlertTriangle, CheckCircle2, Download, TrendingDown, TrendingUp, X } from 'lucide-react'
 import { Ico, IconText, IconButton } from './Ico'
 
@@ -88,6 +88,9 @@ const BalanceSheetTab = ({ userProfile }) => {
   const [editVal, setEditVal] = useState({ amount: '', depreciation_amount: '', notes: '' })
   const [adjForm, setAdjForm] = useState({ account_name: '', amount: '', reason: '' })
   const [showAdjForm, setShowAdjForm] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState(null)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteNotice, setDeleteNotice] = useState('')
 
   const canEdit = hasRole(userProfile, ...FINANCIAL_EDIT_ROLES)
 
@@ -171,6 +174,20 @@ const BalanceSheetTab = ({ userProfile }) => {
       setAdjForm({ account_name: '', amount: '', reason: '' }); setShowAdjForm(false)
       load(asAt, setData)
     } catch(e) { setErr(e.message) }
+  }
+
+  const deleteAdjustment = async () => {
+    if (!deleteTarget || deleting) return
+    setDeleting(true); setErr(''); setDeleteNotice('')
+    try {
+      await financialAdjustmentsService.delete(deleteTarget.id)
+      setDeleteTarget(null)
+      setDeleteNotice('Adjustment deleted.')
+      await load(asAt, setData)
+    } catch (e) {
+      setDeleteTarget(null)
+      setErr(e.message || 'Could not delete adjustment')
+    } finally { setDeleting(false) }
   }
 
   const downloadPDF = async () => {
@@ -275,7 +292,14 @@ const BalanceSheetTab = ({ userProfile }) => {
         </div>
       </div>
 
-      {err && <div style={{ color: theme.red, marginBottom: '12px', fontSize: '12px' }}>{err}</div>}
+      {err && <div role="alert" style={{ color: theme.red, marginBottom: '12px', fontSize: '12px' }}>{err}</div>}
+      {deleteNotice && <div role="status" style={{ color: theme.green, marginBottom: '12px', fontSize: '12px' }}>{deleteNotice}</div>}
+      {deleteTarget && <ConfirmDialog
+        title="Delete adjustment?"
+        body={'Permanently delete the adjustment for ' + deleteTarget.account_name + '? This cannot be undone.'}
+        confirmLabel="Delete adjustment" danger busy={deleting}
+        onConfirm={deleteAdjustment} onCancel={() => setDeleteTarget(null)}
+      />}
       <SourceWarnings warnings={[...(data?.warnings || []), ...(compareData?.warnings || []).map(m => `Comparison date: ${m}`)]} />
       {loading && <div style={{ color: theme.textMuted, marginBottom: '12px' }}>Loading...</div>}
 
@@ -472,7 +496,7 @@ const BalanceSheetTab = ({ userProfile }) => {
                   <span>{adj.account_name} {adj.reason && <span style={{ color: theme.textMuted, fontSize: '11px' }}>— {adj.reason}</span>}</span>
                   <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                     <span style={{ fontWeight: '600' }}>{naira(adj.amount)}</span>
-                    <IconButton style={{ ...s.btn('danger'), padding: '2px 8px', fontSize: '10px' }} onClick={async () => { await financialAdjustmentsService.delete(adj.id); load(asAt, setData) }} aria-label={`Delete adjustment ${adj.account_name || adj.id}`}><Ico icon={X} /></IconButton>
+                    <IconButton style={{ ...s.btn('danger'), padding: '2px 8px', fontSize: '10px' }} onClick={() => { setErr(''); setDeleteNotice(''); setDeleteTarget(adj) }} aria-label={`Delete adjustment ${adj.account_name || adj.id}`}><Ico icon={X} /></IconButton>
                   </div>
                 </div>
               ))}

@@ -1,3 +1,4 @@
+import { withPhase7Touch } from './siteUi'
 import { useEffect, useMemo, useState } from 'react'
 import { useSites } from '../SitePicker'
 import { siteName } from '../../services/sites'
@@ -17,7 +18,7 @@ export const HANDOVER_WRITE_ROLES = ['md', 'production_manager', 'assistant_prod
 
 const emptyForm = (siteId = '') => ({ siteId, date: lagosToday(), blockType: '', qty: '', clientRep: '', notes: '', photo: null })
 
-export default function Handovers({ userProfile }) {
+function Handovers({ userProfile }) {
   const canWrite = hasRole(userProfile, ...HANDOVER_WRITE_ROLES)
   const isMD = userProfile?.role === 'md'
   const today = lagosToday()
@@ -347,3 +348,5 @@ export default function Handovers({ userProfile }) {
     </div>
   )
 }
+
+export default withPhase7Touch(Handovers)

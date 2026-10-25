@@ -1,3 +1,4 @@
+import { withPhase7Touch } from './siteUi'
 import { useEffect, useState } from 'react'
 import { investorsService } from '../../services/investors'
 import { lagosToday } from '../../services/siteContracts'
@@ -12,7 +13,7 @@ import { theme, ui, Pill, fmtNaira, fmtDate, ErrorBox, SkeletonRows, ConfirmDial
 
 export const bankLabel = (b) => (b ? `${b.bank_name || 'Bank'} — ${b.account_name || 'account'}` : '—')
 
-export default function SiteReceipts({ siteId, siteLabel, cycles, currentCycleId, canWrite, onChanged }) {
+function SiteReceipts({ siteId, siteLabel, cycles, currentCycleId, canWrite, onChanged }) {
   const [rows, setRows] = useState(null)
   const [banks, setBanks] = useState([])
   const [err, setErr] = useState(null)
@@ -152,3 +153,5 @@ const F = ({ id, label, children }) => (
     {children}
   </div>
 )
+
+export default withPhase7Touch(SiteReceipts)

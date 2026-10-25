@@ -1,3 +1,4 @@
+import { withPhase7Touch } from './investorUi'
 import { useState } from 'react'
 import { useSites } from '../SitePicker'
 import { siteName } from '../../services/sites'
@@ -14,7 +15,7 @@ import { POOL_READ_ROLES, PoolSitePicker, MonthSelect, PageHeader, Field, Fact, 
 
 const TYPE_COLOR = { receipt: theme.green, transfer_to_spv: theme.blue, investor_distribution_paid: theme.accent, apcl_share_paid: theme.textMuted }
 
-export default function SpvLedger({ userProfile }) {
+function SpvLedger({ userProfile }) {
   const canRead = hasRole(userProfile, ...POOL_READ_ROLES)
   const canWrite = hasRole(userProfile, 'md', 'accountant')
   const { sites } = useSites()
@@ -115,3 +116,5 @@ function TransferDialog({ form, setForm, siteId, siteLabel, onClose, onSaved }) 
     </ConfirmDialog>
   )
 }
+
+export default withPhase7Touch(SpvLedger)

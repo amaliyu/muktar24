@@ -1,3 +1,4 @@
+import { withPhase7Touch } from './investorUi'
 import { useEffect, useState } from 'react'
 import { useSites } from '../SitePicker'
 import { siteName } from '../../services/sites'
@@ -12,7 +13,7 @@ import { POOL_READ_ROLES, PoolSitePicker, PageHeader, Field, useLoad, NoAccess }
 // budget amount, not a fixed %). md edits; a month that is approved for the
 // site is locked (RLS refuses it; the grid shows it read-only).
 
-export default function ReserveBudget({ userProfile }) {
+function ReserveBudget({ userProfile }) {
   const canRead = hasRole(userProfile, ...POOL_READ_ROLES)
   const isMD = userProfile?.role === 'md'
   const { sites } = useSites()
@@ -108,3 +109,5 @@ export default function ReserveBudget({ userProfile }) {
     </div>
   )
 }
+
+export default withPhase7Touch(ReserveBudget)

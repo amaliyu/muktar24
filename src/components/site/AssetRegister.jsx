@@ -1,3 +1,4 @@
+import { withPhase7Touch } from './siteUi'
 import { useEffect, useMemo, useState } from 'react'
 import { useSites } from '../SitePicker'
 import { siteName } from '../../services/sites'
@@ -27,7 +28,7 @@ const CONDITION_COLOR = { good: theme.green, fair: theme.accent, needs_repair: t
 const STATUS_COLOR = { active: theme.green, down: theme.red, maintenance: theme.accent, retired: theme.textMuted }
 const label = (s) => (s ? String(s).replace(/_/g, ' ').replace(/^./, c => c.toUpperCase()) : '—')
 
-export default function AssetRegister({ userProfile }) {
+function AssetRegister({ userProfile }) {
   const canRead = hasRole(userProfile, ...ASSET_READ_ROLES)
   const canWrite = hasRole(userProfile, ...ASSET_WRITE_ROLES)
   const seeMoney = hasRole(userProfile, ...MONEY_ROLES)
@@ -506,3 +507,5 @@ function DetailDrawer({ asset: a, rows, sites, seeMoney, isMobile, investorOf, o
     </div>
   )
 }
+
+export default withPhase7Touch(AssetRegister)
