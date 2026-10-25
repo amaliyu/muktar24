@@ -1,3 +1,4 @@
+import { PROFORMA_DISCLAIMER } from './proforma'
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -56,11 +57,12 @@ export async function generateInvoicePDF(invoiceData, customer) {
   // Proforma disclaimer — a quotation is not a demand for payment.
   if (isProforma) {
     doc.setFontSize(8.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(200, 50, 50);
-    doc.text('This is a proforma invoice and is not a demand for payment.', W / 2, 34.5, { align: 'center' });
+    doc.text(doc.splitTextToSize(PROFORMA_DISCLAIMER, W - 28), W / 2, 35, { align: 'center' });
   }
 
   // ── BILL TO ───────────────────────────────────────────────────
-  let leftY = 37;
+  const billY = isProforma ? 45 : 37;
+  let leftY = billY;
   doc.setFontSize(8); doc.setFont('helvetica', 'bold'); doc.setTextColor(140);
   doc.text('BILL TO:', ml, leftY); leftY += 5;
 
@@ -74,9 +76,9 @@ export async function generateInvoicePDF(invoiceData, customer) {
   const supplyText  = 'FOR SUPPLY AND LOADING OF HOLLOW CONCRETE BLOCKS AND INTERLOCKS';
   const supplyLines = doc.splitTextToSize(supplyText, colW - 6);
   doc.setFontSize(9); doc.setFont('helvetica', 'bold'); doc.setTextColor(20);
-  doc.text(supplyLines, mid + 5, 37);
+  doc.text(supplyLines, mid + 5, billY);
 
-  const billEndY = Math.max(leftY, 37 + supplyLines.length * 4.5) + 4;
+  const billEndY = Math.max(leftY, billY + supplyLines.length * 4.5) + 4;
   doc.setDrawColor(200); doc.setLineWidth(0.3); doc.line(ml, billEndY, mr, billEndY);
 
   // ── ITEMS TABLE ───────────────────────────────────────────────
