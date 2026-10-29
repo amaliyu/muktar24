@@ -1230,7 +1230,8 @@ Status key: **DONE** = live and verified · **READY** = migration written + chec
    - Site scope: when a site is selected, revenue, cash and costs are all that site's; company view = all sites.
    - Historical "as at" dates use only records dated on or before that date.
 4. **P4 — LATER database items** (A3-3, 4, 8, 16, 17, 18, 20).
-5. Next audits (4 stock, 5 deletes/hidden errors, 6 role access) get added here as they arrive.
+5. **P2b — Audit 4A, stock owned by the database** (before 2B; production at Kado/Life Camp restarts the week of 2026-11-02). Design (planning chat, rejectable): every stock change — dispatch, waybill delete, production record/edit/delete, stock in/out, batch create/edit/delete, receipt edit/void, handover — becomes ONE database function that changes the balance with `balance = balance + delta` in the same transaction as its record, refuses to go below zero (no silent clamping), and rolls back entirely if any part fails. The app stops writing balances directly; balance columns become writable only by those functions. Planning chat writes the functions + tests; Codex switches the screens to call them; both go live together.
+6. Next audits (5 deletes/hidden errors, 6 role access) get added here as they arrive.
 
 ### Audit 1 — security (8 findings)
 | ID | Sev | Finding (verified live) | Status |
@@ -1296,3 +1297,20 @@ Also from audit 2 work: invoices — issued/paid now MD/Accountant-only to chang
 | A3-19 | Medium | costed loading entries can't be deleted (expense FK) | DONE 2026-10-29 |
 | A3-20 | Medium | editing an earlier trip can change its incentive rate | LATER (DB) |
 | A3-21 | Medium | salary across different-length months uses the first month's divisor | 3A |
+
+### Audit 4 — stock, production, batches, dispatch (13 findings; live check 2026-10-29: no negative balances, no production linked to two batches — holes are real in code, no damage found yet)
+| ID | Sev | Finding | Status |
+|---|---|---|---|
+| A4-1 | High | Store Officer waybill delete restores stock, delete itself refused (MD-only) and shown as success — repeatable | 4A (confirmed: App.jsx handleDeleteWaybill restores before delete; deliveries.js delete ignores 0 rows) |
+| A4-2 | High | Logistics dispatch reduces yard but not batch (batches_update excludes logistics; error ignored) | 4A (confirmed: batches.js reduceStock ignores update error) |
+| A4-3 | High | batch/movement delete adjusts stock before FK refuses the delete | 4A |
+| A4-4 | High | zero-clamping turns shortages into invented stock on reversal; negative issues accepted | 4A |
+| A4-5 | High | simultaneous entries overwrite each other (read-modify-write) | 4A |
+| A4-6 | High | production reversal ignores restore failures | 4A |
+| A4-7 | High | receipt-linked movement editable outside receipt void; void can go negative | 4A |
+| A4-8 | High | changing a batch's product leaves yard under the old product | 4A |
+| A4-9 | High | waybill keeps an old batch link after product/batch change | 4A |
+| A4-10 | High | materials issued to production and then recorded in production are deducted twice | 4A (needs one path: production record is the only deduction; "Stock Out → Production" removed or linked) |
+| A4-11 | Medium | item edits can change site/unit without transfer/conversion | 4A |
+| A4-12 | Medium | one production entry can back two batches | 4A (DB: allocated ≤ produced) |
+| A4-13 | Medium | client-site handovers reduce site yard but not batch remaining | 4A |
