@@ -1,3 +1,4 @@
+import { checkedWrite } from '../utils/checkedWrite'
 import { supabase } from '../lib/supabase';
 
 export const leaveService = {
@@ -10,7 +11,8 @@ export const leaveService = {
     const rows = data || [];
     const ids = [...new Set(rows.map(r => r.staff_id).filter(Boolean))];
     if (ids.length) {
-      const { data: staffRows } = await supabase.from('staff_public').select('id, full_name').in('id', ids);
+      const { data: staffRows, error: staffError } = await supabase.from('staff_public').select('id, full_name').in('id', ids);
+      if (staffError) throw staffError;
       const map = Object.fromEntries((staffRows || []).map(s => [s.id, s.full_name]));
       for (const row of rows) row.staff = { full_name: map[row.staff_id] || null };
     }
@@ -35,15 +37,13 @@ export const leaveService = {
       .insert({ staff_id, leave_type, is_paid, start_date, end_date, days, reason, requested_by, status: 'requested' })
       .select()
       .single();
-    if (error) throw error;
-    return data;
+    return checkedWrite({ data, error });
   },
 
   async advance(id, action, reason = null) {
     const { data, error } = await supabase.rpc('advance_leave_request',
       { p_req_id: id, p_action: action, p_reason: reason });
-    if (error) throw error;
-    return data;
+    return checkedWrite({ data, error });
   },
 
   async getUnpaidApprovedOverlapping(from, to) {

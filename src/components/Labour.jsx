@@ -1,3 +1,8 @@
+import { todayLagos } from '../utils/lagosDate'
+import { weeklyPayrollService } from '../services/weeklyPayroll'
+import { rosterService, rateChangeService } from '../services/labour'
+import { checkedWrite } from '../utils/checkedWrite'
+import { aggregateRosterWorkers, payrollSources, selectedPayrollRows } from '../utils/payrollMath'
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { hasRole } from '../lib/roles'
@@ -137,13 +142,6 @@ const statusColor = (s) => {
 const fmtDate = (d) => {
   if (!d) return '—'
   return new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
-}
-
-async function getOrCreateCategory(name) {
-  const { data } = await supabase.from('expense_categories').select('id').ilike('name', name).limit(1)
-  if (data?.[0]?.id) return data[0].id
-  const { data: c } = await supabase.from('expense_categories').insert({ name, is_active: true }).select('id').single()
-  return c?.id
 }
 
 // ── LABOUR POOL TAB ──────────────────────────────────────────────────────────
@@ -423,9 +421,10 @@ function DailyRosterTab({ pool, roles, userProfile }) {
     else if (action === 'md_approve') update = { md_status: 'approved', md_approved_by: userProfile?.full_name, md_approval_date: todayStr() }
     else if (action === 'md_reject') update = { md_status: 'rejected', md_approved_by: userProfile?.full_name, md_approval_date: todayStr(), notes: comment }
     else if (action === 'mark_paid') update = { payment_status: 'paid' }
-    const { error } = await supabase.from('daily_roster').update(update).eq('id', roster.id)
-    if (error) setAlert({ msg: error.message, type: 'error' })
-    else { setAlert({ msg: 'Updated successfully.', type: 'success' }); loadRosters(); setSelectedRoster(r => r ? { ...r, ...update } : null) }
+    try {
+      checkedWrite(await supabase.from('daily_roster').update(update).eq('id', roster.id).select('id'))
+      setAlert({ msg: 'Updated successfully.', type: 'success' }); await loadRosters(); setSelectedRoster(r => r ? { ...r, ...update } : null)
+    } catch (e) { setAlert({ msg: e.message, type: 'error' }) }
   }
 
   const handleDeleteConfirm = async () => {
@@ -438,23 +437,14 @@ function DailyRosterTab({ pool, roles, userProfile }) {
       return
     }
     setDeleting(true)
-    await supabase.from('daily_roster_entries').delete().eq('roster_id', deleteTarget.id)
-    const { error } = await supabase.from('daily_roster').delete().eq('id', deleteTarget.id)
-    if (error) { setAlert({ msg: error.message, type: 'error' }); setDeleting(false); return }
-    if (isApproved) {
-      try {
-        await supabase.from('audit_log').insert({
-          action: 'delete_roster', entity: 'daily_roster', entity_id: deleteTarget.id,
-          performed_by: userProfile?.full_name, performed_at: new Date().toISOString(),
-          reason: deleteReason, details: `Deleted approved roster for ${deleteTarget.roster_date}`,
-        })
-      } catch { /* audit_log table may not exist yet */ }
-    }
-    setDeleting(false)
-    setDeleteTarget(null)
-    setDeleteReason('')
-    setAlert({ msg: 'Roster deleted.', type: 'success' })
-    loadRosters()
+    try {
+      await rosterService.delete(deleteTarget.id)
+      setDeleteTarget(null)
+      setDeleteReason('')
+      setAlert({ msg: 'Roster deleted.', type: 'success' })
+      await loadRosters()
+    } catch (e) { setAlert({ msg: e.message, type: 'error' }) }
+    finally { setDeleting(false) }
   }
 
   const role = userProfile?.role
@@ -604,7 +594,7 @@ function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCanc
     supabase.from('daily_roster').select('id, site_id, entries:daily_roster_entries(labour_id)').eq('roster_date', date)
       .then(({ data, error }) => {
         if (!alive) return
-        if (error) { console.error('Could not check other rosters for this date:', error); setRosteredElsewhere({}); return }
+        if (error) { setErr('Could not check other rosters for this date: ' + error.message); setRosteredElsewhere({}); return }
         const map = {}
         for (const r of data || []) {
           if (editRoster && r.id === editRoster.id) continue
@@ -624,12 +614,16 @@ function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCanc
   const [entries, setEntries] = useState([])
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState('')
+  const [entriesLoaded, setEntriesLoaded] = useState(!editRoster)
 
   const activePool = pool.filter(w => w.is_active)
 
   useEffect(() => {
     if (!editRoster) return
-    supabase.from('daily_roster_entries').select('*').eq('roster_id', editRoster.id).then(({ data }) => {
+    setEntriesLoaded(false)
+    supabase.from('daily_roster_entries').select('*').eq('roster_id', editRoster.id).then(({ data, error }) => {
+      if (error) { setErr(error.message); return }
+      setEntriesLoaded(true)
       if (data) setEntries(data.map(e => ({
         labour_id: e.labour_id, role_id: e.role_id, base_rate: e.base_rate,
         attendance_type: e.attendance_type || 'full_day',
@@ -640,7 +634,7 @@ function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCanc
         advance_amount: e.advance_amount || 0,
         deduction_amount: e.deduction_amount || 0,
         deduction_reason: e.deduction_reason || '',
-        net_pay: e.net_pay || e.total_pay || 0,
+        net_pay: e.net_pay ?? e.total_pay ?? 0,
         notes: e.notes || '',
       })))
     })
@@ -719,6 +713,7 @@ function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCanc
   const toBePaidThisWeek = grandTotal - deferred
 
   const handleSave = async (submit = false) => {
+    if (!entriesLoaded) return setErr('Load the roster workers successfully before saving.')
     if (!date) return setErr('Date is required.')
     if (entries.length === 0) return setErr('Add at least one worker.')
     for (const e of entries) {
@@ -756,55 +751,19 @@ function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCanc
       total_pay: Number(e.total_pay || e.net_pay || 0), notes: e.notes,
     }))
 
-    if (isEdit) {
-      const wasSubmitted = editRoster.ico_status === 'submitted'
-      const { error: re } = await supabase.from('daily_roster').update({
-        roster_date: date, site_id: siteId, target_met: targetMet, total_daily_cost: grandTotal,
-        payment_week_ending: weekEnding, worker_count: entries.length,
-        ico_status: submit ? 'submitted' : wasSubmitted ? 'draft' : (editRoster.ico_status || 'draft'),
-        submitted_by: submit ? userProfile?.full_name : editRoster.submitted_by,
-        submitted_date: submit ? todayStr() : editRoster.submitted_date,
-      }).eq('id', editRoster.id)
-      if (re) { setSaving(false); return setErr(rosterError(re) || friendlyEntryError(re)) }
-      // Upsert the current set (kept workers UPDATED in place via the
-      // roster_id,labour_id unique key; new workers INSERTED) — no wholesale
-      // delete, so there is never a window where all entries are gone.
-      const { error: ue } = await supabase.from('daily_roster_entries')
-        .upsert(entryRows(editRoster.id), { onConflict: 'roster_id,labour_id' })
-      if (ue) { setSaving(false); return setErr(friendlyEntryError(ue)) }
-      // Then remove only the workers the user took off the roster: entries for
-      // this roster whose labour_id is not in the current set. (labourIds is
-      // guaranteed non-empty — empty rosters are blocked above.)
-      const { error: de } = await supabase.from('daily_roster_entries')
-        .delete().eq('roster_id', editRoster.id).not('labour_id', 'in', `(${labourIds.map(id => `"${id}"`).join(',')})`)
-      setSaving(false)
-      if (de) setErr(friendlyEntryError(de))
-      else onSave()
-    } else {
-      const { data: roster, error: re } = await supabase.from('daily_roster').insert({
-        roster_date: date, site_id: siteId, target_met: targetMet, total_daily_cost: grandTotal,
-        submitted_by: userProfile?.full_name, submitted_date: submit ? todayStr() : null,
-        ico_status: submit ? 'submitted' : 'draft', md_status: 'pending',
-        payment_week_ending: weekEnding, payment_status: 'unpaid', worker_count: entries.length,
-      }).select('id').single()
-      if (re) { setSaving(false); return setErr(rosterError(re) || friendlyEntryError(re)) }
-      const { error: ee } = await supabase.from('daily_roster_entries').insert(entryRows(roster.id))
-      if (ee) {
-        // The roster row went in first; without its entries it would linger as
-        // an empty roster carrying its auto-expense. It is brand-new, draft or
-        // submitted and unlinked, so the creator's daily_roster delete policy
-        // covers it. .select() makes an RLS no-op visible (Rule 10.4).
-        const { data: removed, error: de } = await supabase.from('daily_roster').delete().eq('id', roster.id).select('id')
-        setSaving(false)
-        const entryMsg = friendlyEntryError(ee)
-        if (de || !removed?.length) {
-          return setErr(`${entryMsg} — and the empty roster could not be removed (${de?.message || 'delete was not permitted'}). Delete the ${siteName(siteId, sites)} roster for ${date} from the list.`)
-        }
-        return setErr(entryMsg)
-      }
-      setSaving(false)
-      onSave()
+    const header = {
+      roster_date: date, site_id: siteId, target_met: targetMet, total_daily_cost: grandTotal,
+      payment_week_ending: weekEnding, worker_count: entries.length,
+      ico_status: submit ? 'submitted' : isEdit && editRoster.ico_status === 'submitted' ? 'draft' : (editRoster?.ico_status || 'draft'),
+      submitted_by: submit ? userProfile?.full_name : editRoster?.submitted_by || userProfile?.full_name,
+      submitted_date: submit ? todayStr() : editRoster?.submitted_date || null,
     }
+    try {
+      if (isEdit) await rosterService.saveEntriesFirst(editRoster.id, header, entryRows(editRoster.id))
+      else await rosterService.create({ ...header, md_status: 'pending', payment_status: 'unpaid' }, entryRows(null))
+      onSave()
+    } catch (e) { setErr(rosterError(e) || friendlyEntryError(e)) }
+    finally { setSaving(false) }
   }
 
   return (
@@ -948,9 +907,11 @@ function RosterDetail({ roster, sites = [], roles, pool, userProfile, onBack, on
   const [loading, setLoading] = useState(true)
   const [comment, setComment] = useState('')
   const [actioning, setActioning] = useState(false)
+  const [loadError, setLoadError] = useState('')
 
   useEffect(() => {
-    supabase.from('daily_roster_entries').select('*').eq('roster_id', roster.id).then(({ data }) => {
+    supabase.from('daily_roster_entries').select('*').eq('roster_id', roster.id).then(({ data, error }) => {
+      if (error) { setLoadError(error.message); setLoading(false); return }
       setEntries(data || [])
       setLoading(false)
     })
@@ -971,6 +932,7 @@ function RosterDetail({ roster, sites = [], roles, pool, userProfile, onBack, on
   return (
     <div>
       <button style={{ ...styles.btn('ghost'), marginBottom: '16px' }} onClick={onBack}><IconText icon={ArrowLeft}>Back to List</IconText></button>
+      {loadError && <AlertBar msg={loadError} type="error" onClose={() => setLoadError('')} />}
       {alert && <AlertBar msg={alert.msg} type={alert.type} onClose={clearAlert} />}
 
       <div style={{ ...styles.row, gap: '16px', marginBottom: '16px', flexWrap: 'wrap' }}>
@@ -1149,7 +1111,7 @@ function WeeklySummary({ rosters, sites = [], onBack }) {
 }
 
 // ── PAYROLL TAB ──────────────────────────────────────────────────────────────
-function generatePayrollPDF(payrollType, weekEnding, workers, totalAmount, payroll) {
+export function generatePayrollPDF(payrollType, weekEnding, workers, totalAmount, payroll) {
   const doc = new jsPDF()
   doc.setFontSize(14)
   doc.setFont('helvetica', 'bold')
@@ -1165,16 +1127,17 @@ function generatePayrollPDF(payrollType, weekEnding, workers, totalAmount, payro
   doc.text(`Type: ${payrollType === 'production' ? 'Production Labour' : 'Loading Labour'}   |   Total Workers: ${workers.length}   |   Total Amount: ₦${Math.round(totalAmount).toLocaleString()}`, 105, 42, { align: 'center' })
 
   const tableRows = workers.map(w => [
-    w.name, w.role || '—', w.days_or_blocks || '—',
+    w.name, w.role || '—', w.days_or_blocks ?? w.days ?? '—',
     `₦${Math.round(w.base_rate || 0).toLocaleString()}`,
     `₦${Math.round(w.bonus || 0).toLocaleString()}`,
-    `₦${Math.round(w.total_pay || 0).toLocaleString()}`,
+    naira(w.gross_pay ?? w.net_pay ?? w.total_pay), naira(w.deductions || 0),
+    `₦${Math.round(w.net_pay ?? w.total_pay ?? 0).toLocaleString()}`,
     w.bank || '—', w.account || '—',
   ])
-  tableRows.push(['', '', '', '', 'GRAND TOTAL', `₦${Math.round(totalAmount).toLocaleString()}`, '', ''])
+  tableRows.push(['', '', '', '', '', '', 'GRAND TOTAL', `₦${Math.round(totalAmount).toLocaleString()}`, '', ''])
 
   autoTable(doc, {
-    head: [['Name', 'Role', 'Days/Blocks', 'Base Rate', 'Bonus', 'Total Pay', 'Bank', 'Account No']],
+    head: [['Name', 'Role', 'Days/Blocks', 'Base Rate', 'Bonus', 'Gross', 'Deductions/advances', 'Net', 'Bank', 'Account No']],
     body: tableRows,
     startY: 48,
     styles: { fontSize: 8 },
@@ -1190,13 +1153,13 @@ function generatePayrollPDF(payrollType, weekEnding, workers, totalAmount, payro
   doc.save(`Payroll_${payrollType}_${weekEnding}.pdf`)
 }
 
-function generateBulkTransferXLSX(label, workers, pool) {
+export function generateBulkTransferXLSX(label, workers, pool) {
   const rows = workers.map(w => {
     const p = pool.find(x => x.id === w.id)
     return {
       'Account Name':   p?.bank_account_name || w.name,
       'Account Number': w.account,
-      'Amount':         Math.round(w.total_pay || 0),
+      'Amount':         Math.round(w.net_pay ?? w.total_pay ?? 0),
       'Bank':           w.bank,
     }
   })
@@ -1207,42 +1170,16 @@ function generateBulkTransferXLSX(label, workers, pool) {
   XLSX.writeFile(wb, `bulk-transfer-${label}.xlsx`)
 }
 
-function generatePaymentScheduleXLSX(payrollType, label, workers, pool) {
-  const LEFT_HEADERS = ['SN', 'NAMES', 'MON', 'TUES', 'WED', 'THURS', 'FRI', 'SAT', 'TOTAL PAY', 'CLEANING', 'LOAN', 'DEDUCTIONS', 'HAJIYA', 'MINUS', 'TOTAL']
-  const RIGHT_HEADERS = ['S/N', 'NAMES', 'ACCOUNT NAME', 'ACCOUNT NUMBER', 'BANK', 'AMOUNT']
-  const TOTAL_COLS = LEFT_HEADERS.length + 1 + RIGHT_HEADERS.length
-
-  const aoa = []
-  const titleRow = Array(TOTAL_COLS).fill('')
-  titleRow[0] = `Workers Wages — ${label}`
-  aoa.push(titleRow)
-  aoa.push([...LEFT_HEADERS, '', ...RIGHT_HEADERS])
-
-  workers.forEach((w, i) => {
-    const poolWorker = pool.find(p => p.id === w.id)
-    const accountName = poolWorker?.bank_account_name || '—'
-    const totalPay = Math.round(w.total_pay || 0)
-    aoa.push([
-      i + 1, w.name, '', '', '', '', '', '', totalPay, '', '', '', '', '', '',
-      '',
-      i + 1, w.name, accountName, w.account, w.bank, totalPay,
-    ])
-  })
-
-  const grandTotal = Math.round(workers.reduce((s, w) => s + Number(w.total_pay || 0), 0))
-  const totalsRow = Array(TOTAL_COLS).fill('')
-  totalsRow[1] = 'TOTAL'; totalsRow[8] = grandTotal; totalsRow[14] = grandTotal; totalsRow[21] = grandTotal
-  aoa.push(totalsRow)
-
-  const ws = XLSX.utils.aoa_to_sheet(aoa)
-  ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: TOTAL_COLS - 1 } }]
-  ws['!cols'] = [
-    { wch: 4 }, { wch: 22 },
-    { wch: 7 }, { wch: 7 }, { wch: 7 }, { wch: 7 }, { wch: 7 }, { wch: 7 },
-    { wch: 13 }, { wch: 10 }, { wch: 8 }, { wch: 12 }, { wch: 10 }, { wch: 20 }, { wch: 13 },
-    { wch: 3 },
-    { wch: 4 }, { wch: 22 }, { wch: 24 }, { wch: 16 }, { wch: 16 }, { wch: 14 },
-  ]
+export function generatePaymentScheduleXLSX(payrollType, label, workers, pool) {
+  const rows = workers.map((w, i) => ({
+    SN: i + 1, Name: w.name, Gross: Number(w.gross_pay ?? w.net_pay ?? w.total_pay ?? 0),
+    'Deductions/advances': Number(w.deductions || 0), Net: Number(w.net_pay ?? w.total_pay ?? 0),
+    'Account Name': pool.find(p => p.id === w.id)?.bank_account_name || w.name,
+    'Account Number': w.account, Bank: w.bank, Amount: Number(w.net_pay ?? w.total_pay ?? 0),
+  }))
+  const total = rows.reduce((sum, row) => sum + row.Net, 0)
+  rows.push({ Name: 'TOTAL', Gross: rows.reduce((s,r) => s+r.Gross,0), 'Deductions/advances': rows.reduce((s,r) => s+r['Deductions/advances'],0), Net: total, Amount: total })
+  const ws = XLSX.utils.json_to_sheet(rows)
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, ws, 'Payment Schedule')
   XLSX.writeFile(wb, `payment-schedule-${label}.xlsx`)
@@ -1269,7 +1206,7 @@ export function shiftDays(dateStr, days) {
   return d.toISOString().split('T')[0]
 }
 
-function WeeklyPayrollTab({ pool, roles, userProfile }) {
+export function WeeklyPayrollTab({ pool, roles, userProfile }) {
   const [subTab, setSubTab] = useState('production')
   const [rangeFrom, setRangeFrom] = useState(() => shiftDays(getLastSaturday(todayStr()), -6))
   const [rangeTo, setRangeTo] = useState(() => getLastSaturday(todayStr()))
@@ -1285,86 +1222,45 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
   const [checkedRosterIds, setCheckedRosterIds] = useState(new Set())
   const [checkedLogIds, setCheckedLogIds] = useState(new Set())
 
-  const loadRangeData = useCallback(async () => {
+  const [selectedPayrollId, setSelectedPayrollId] = useState(null)
+  const [rangePayrolls, setRangePayrolls] = useState({})
+  const [rangeError, setRangeError] = useState(false)
+  const requestId = useRef(0)
+  const loadRangeData = useCallback(async (overrideId) => {
     if (!rangeFrom || !rangeTo) return
-    setLoading(true)
-
-    // Step 1: fetch source rows for the range
-    const [rRes, lRes] = await Promise.all([
-      // All sites' rosters in the range — payroll is company-wide, never site-filtered.
-      supabase.from('daily_roster')
-        .select('*, entries:daily_roster_entries(*), site:site_id(name)')
-        .gte('roster_date', rangeFrom)
-        .lte('roster_date', rangeTo),
-      supabase.from('truck_loading_log')
-        .select('*, loaders:truck_loading_loaders(labour_id)')
-        .gte('date', rangeFrom)
-        .lte('date', rangeTo),
-    ])
-    const rosterData = rRes.data || []
-    const logData = lRes.data || []
-
-    // Step 2: detect payrolls via payroll_id linkage on the fetched rows —
-    // NOT by week_ending equality, so a widened or shifted range still finds
-    // a draft that was generated for a narrower window inside it.
-    const linkedIds = [...new Set([
-      ...rosterData.filter(r => r.payroll_id != null).map(r => r.payroll_id),
-      ...logData.filter(l => l.payroll_id != null).map(l => l.payroll_id),
-    ])]
-
-    let payrollData = []
-    if (linkedIds.length > 0) {
-      const { data } = await supabase.from('weekly_labour_payroll').select('*').in('id', linkedIds)
-      payrollData = data || []
-    }
-
-    // Warn if multiple drafts for the same type exist in this range (shouldn't normally happen)
-    for (const type of ['production', 'loading']) {
-      const drafts = payrollData.filter(p => p.payroll_type === type && p.status === 'draft')
-      if (drafts.length > 1) {
-        setAlert({ msg: `Multiple draft ${type} payrolls found in this range — contact an admin to resolve (IDs: ${drafts.map(d => d.id).join(', ')}).`, type: 'warning' })
-      }
-    }
-
-    setRosters(rosterData)
-    setLoadingLogs(logData)
-    setPayrollRecords(payrollData)
-
-    // Auto-select: draft rows → those already linked to the draft; else → unassigned rows
-    // Prefer draft payroll over other statuses when multiple payrolls touch this range
-    const prodRec = payrollData.find(p => p.payroll_type === 'production' && p.status === 'draft')
-      ?? payrollData.find(p => p.payroll_type === 'production')
-    const loadRec = payrollData.find(p => p.payroll_type === 'loading' && p.status === 'draft')
-      ?? payrollData.find(p => p.payroll_type === 'loading')
-    setCheckedRosterIds(new Set(
-      rosterData
-        .filter(r => prodRec?.status === 'draft' ? r.payroll_id === prodRec.id : r.payroll_id == null)
-        .map(r => r.id)
-    ))
-    setCheckedLogIds(new Set(
-      logData
-        .filter(l => loadRec?.status === 'draft' ? l.payroll_id === loadRec.id : l.payroll_id == null)
-        .map(l => l.id)
-    ))
-    setLoading(false)
-  }, [rangeFrom, rangeTo])
-
+    const request = ++requestId.current
+    setLoading(true); setRangeError(false)
+    try {
+      const data = await weeklyPayrollService.loadRange(rangeFrom, rangeTo, typeof overrideId === 'string' ? overrideId : selectedPayrollId)
+      if (request !== requestId.current) return
+      setRosters(data.rosters); setLoadingLogs(data.loads); setPayrollRecords(data.payrolls)
+      setRangePayrolls({ production: data.production, loading: data.loading })
+      setCheckedRosterIds(new Set(selectedPayrollRows(data.rosters, data.production).map(r => r.id)))
+      setCheckedLogIds(new Set(selectedPayrollRows(data.loads, data.loading).map(l => l.id)))
+    } catch (e) {
+      if (request !== requestId.current) return
+      setRangeError(true); setAlert({ msg: e.message, type: 'error' })
+      if (typeof overrideId === 'string') throw e
+    } finally { if (request === requestId.current) setLoading(false) }
+  }, [rangeFrom, rangeTo, selectedPayrollId])
   useEffect(() => { loadRangeData() }, [loadRangeData])
 
   const loadRecentPayrolls = useCallback(async () => {
     setRecentLoading(true)
-    const { data } = await supabase.from('weekly_labour_payroll')
+    const { data, error } = await supabase.from('weekly_labour_payroll')
       .select('*')
       .in('payroll_type', ['production', 'loading'])
       .order('week_ending', { ascending: false })
       .limit(40)
-    setRecentPayrolls(data || [])
+    if (error) setAlert({ msg: error.message, type: 'error' })
+    else setRecentPayrolls(data || [])
     setRecentLoading(false)
   }, [])
 
   useEffect(() => { loadRecentPayrolls() }, [loadRecentPayrolls, payrollRecords])
 
   const openPayroll = (p) => {
+    setSelectedPayrollId(p.id)
     if (p.payroll_type) setSubTab(p.payroll_type)
     const end = p.period_end || p.week_ending
     const start = p.period_start || shiftDays(end, -6)
@@ -1373,22 +1269,21 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
   }
 
   const shiftRange = (weeks) => {
+    setSelectedPayrollId(null)
     setRangeFrom(shiftWeek(rangeFrom, weeks))
     setRangeTo(shiftWeek(rangeTo, weeks))
   }
 
-  // Prefer draft payroll over other statuses when multiple payrolls touch this range
-  const prodPayroll = payrollRecords.find(p => p.payroll_type === 'production' && p.status === 'draft')
-    ?? payrollRecords.find(p => p.payroll_type === 'production')
-  const loadPayroll = payrollRecords.find(p => p.payroll_type === 'loading' && p.status === 'draft')
-    ?? payrollRecords.find(p => p.payroll_type === 'loading')
+  const prodPayroll = rangePayrolls.production
+  const loadPayroll = rangePayrolls.loading
   const currentPayroll = subTab === 'production' ? prodPayroll : loadPayroll
   const isDraftMode = currentPayroll?.status === 'draft'
 
   // Per-tab row selection state
   const currentCheckedIds = subTab === 'production' ? checkedRosterIds : checkedLogIds
   const setCurrentCheckedIds = subTab === 'production' ? setCheckedRosterIds : setCheckedLogIds
-  const sourceRows = subTab === 'production' ? rosters : loadingLogs
+  const sourceRows = payrollSources(subTab === 'production' ? rosters : loadingLogs, currentPayroll)
+  const canSelect = (!currentPayroll || isDraftMode) && hasRole(userProfile, ...PAYROLL_GENERATOR_ROLES)
 
   const toggleRow = (id) => {
     setCurrentCheckedIds(prev => {
@@ -1405,20 +1300,7 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
   }
 
   // Aggregate from checked rows only
-  const productionWorkers = (() => {
-    const map = {}
-    rosters.filter(r => checkedRosterIds.has(r.id)).forEach(r => {
-      ;(r.entries || []).forEach(e => {
-        const worker = pool.find(w => w.id === e.labour_id)
-        const role = roles.find(x => x.id === e.role_id)
-        if (!map[e.labour_id]) map[e.labour_id] = { id: e.labour_id, name: worker?.full_name || '?', role: role?.role_name || '?', days: 0, base_rate: e.base_rate, bonus: 0, total_pay: 0, bank: worker?.bank_name || '—', account: worker?.bank_account_number || '—' }
-        map[e.labour_id].days += 1
-        map[e.labour_id].bonus += e.bonus_applicable ? Number(e.target_bonus || 0) : 0
-        map[e.labour_id].total_pay += Number(e.total_pay || 0)
-      })
-    })
-    return Object.values(map)
-  })()
+  const productionWorkers = aggregateRosterWorkers(rosters.filter(r => checkedRosterIds.has(r.id)), pool, roles)
 
   const loadingWorkers = (() => {
     const map = {}
@@ -1435,99 +1317,35 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
     return Object.values(map)
   })()
 
-  const workers = subTab === 'production' ? productionWorkers : loadingWorkers
-  const totalAmount = workers.reduce((s, w) => s + Number(w.total_pay || 0), 0)
+  const workers = subTab === 'production' ? productionWorkers : loadingWorkers.map(w => ({ ...w, gross_pay: w.total_pay, deductions: 0, net_pay: w.total_pay }))
+  const totalAmount = workers.reduce((s, w) => s + Number(w.net_pay ?? w.total_pay ?? 0), 0)
 
-  const handleGeneratePayroll = async () => {
-    if (workers.length === 0) return setAlert({ msg: 'No workers in selection.', type: 'error' })
-    const isProduction = subTab === 'production'
-    const selectedIds = isProduction ? [...checkedRosterIds] : [...checkedLogIds]
-    if (selectedIds.length === 0) return setAlert({ msg: 'No rows selected.', type: 'error' })
+  const saveDraft = async () => {
+    if (!workers.length) return setAlert({ msg: 'No workers in selection.', type: 'error' })
     setActioning(true)
-
-    // Staleness guard: verify no selected row was claimed by another payroll since page load
-    const { data: staleRows } = isProduction
-      ? await supabase.from('daily_roster').select('id, payroll_id').in('id', selectedIds)
-      : await supabase.from('truck_loading_log').select('id, payroll_id').in('id', selectedIds)
-    if ((staleRows || []).some(r => r.payroll_id != null)) {
-      setActioning(false)
-      setAlert({ msg: 'Some rows were claimed by another payroll — reload and try again.', type: 'error' })
-      return
-    }
-
-    // INSERT new payroll record
-    const { data: newPayroll, error: insErr } = await supabase
-      .from('weekly_labour_payroll')
-      .insert({
-        payroll_type: subTab,
-        period_start: rangeFrom,
-        period_end: rangeTo,
-        week_ending: rangeTo,
-        total_amount: totalAmount,
-        worker_count: workers.length,
-        status: 'draft',
-        prepared_by: userProfile?.full_name,
-      })
-      .select()
-      .single()
-    if (insErr) { setActioning(false); setAlert({ msg: insErr.message, type: 'error' }); return }
-
-    // Link selected rows to the new payroll
-    const { error: linkErr } = await supabase
-      .from(isProduction ? 'daily_roster' : 'truck_loading_log')
-      .update({ payroll_id: newPayroll.id })
-      .in('id', selectedIds)
-    setActioning(false)
-    if (linkErr) {
-      setAlert({ msg: `Payroll created but row linking failed: ${linkErr.message}`, type: 'error' })
-    } else {
-      setAlert({ msg: 'Payroll generated.', type: 'success' })
-    }
-    loadRangeData()
+    try {
+      const result = await weeklyPayrollService.saveDraft({ payroll: currentPayroll || null, type: subTab,
+        from: rangeFrom, to: rangeTo, ids: [...currentCheckedIds], total: totalAmount,
+        workerCount: workers.length, preparedBy: userProfile?.full_name })
+      setSelectedPayrollId(result.payroll.id)
+      await loadRangeData(result.payroll.id)
+      setAlert({ msg: result.existing ? `An existing ${result.payroll.status} payroll was loaded for this week; no second payroll was created.` : 'Draft payroll and schedule saved.', type: result.existing ? 'warning' : 'success' })
+    } catch (e) { setAlert({ msg: e.message, type: 'error' }) }
+    finally { setActioning(false) }
   }
-
-  const handleUpdateDraft = async () => {
-    if (!currentPayroll || currentPayroll.status !== 'draft') return
-    if (workers.length === 0) return setAlert({ msg: 'No workers in selection.', type: 'error' })
-    setActioning(true)
-    const { error } = await supabase
-      .from('weekly_labour_payroll')
-      .update({ total_amount: totalAmount, worker_count: workers.length })
-      .eq('id', currentPayroll.id)
-    setActioning(false)
-    if (error) { setAlert({ msg: error.message, type: 'error' }) }
-    else { setAlert({ msg: 'Draft updated.', type: 'success' }); loadRangeData() }
-  }
+  const handleGeneratePayroll = saveDraft
+  const handleUpdateDraft = saveDraft
 
   const handlePayrollAction = async (action) => {
     if (!currentPayroll) return
+    if (action === 'ico_approve' && (workers.length === 0 || Math.abs(Number(currentPayroll.total_amount) - totalAmount) > 0.01 || Number(currentPayroll.worker_count) !== workers.length)) return setAlert({ msg: 'The draft totals do not match its schedule. Update Draft before approval.', type: 'error' })
     if (action === 'recall' && !recallReason.trim()) {
       setAlert({ msg: 'Enter a reason before recalling.', type: 'error' })
       return
     }
     setActioning(true)
-    const { error } = await supabase.rpc('advance_weekly_payroll', {
-      p_payroll_id: currentPayroll.id,
-      p_action: action,
-      p_reason: action === 'recall' ? recallReason.trim() : null,
-    })
-    if (error) { setActioning(false); setAlert({ msg: error.message, type: 'error' }); return }
-    if (action === 'mark_paid') {
-      const catId = await getOrCreateCategory('Labour Wages')
-      if (catId) {
-        const { error: expErr } = await supabase.from('expenses').insert({
-          category_id: catId,
-          description: `${subTab === 'production' ? 'Production' : 'Loading'} Labour Payroll — ${fmtDate(rangeFrom)} to ${fmtDate(rangeTo)}`,
-          amount: totalAmount, expense_date: todayStr(), status: 'approved', vendor: 'Labour Pool',
-        })
-        if (expErr) {
-          setActioning(false)
-          setAlert({ msg: 'Payroll marked paid — expense entry failed, please create it manually.', type: 'error' })
-          loadRangeData()
-          return
-        }
-      }
-    }
+    try { await weeklyPayrollService.advance(currentPayroll.id, action, action === 'recall' ? recallReason.trim() : null) }
+    catch (e) { setActioning(false); setAlert({ msg: e.message, type: 'error' }); return }
     if (action === 'recall') setRecallReason('')
     setActioning(false)
     setAlert({ msg: action === 'recall' ? 'Payroll recalled to draft — corrections can now be made.' : 'Updated.', type: 'success' })
@@ -1589,11 +1407,11 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
       <div style={{ ...styles.row, marginBottom: '16px', gap: '12px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
         <div>
           <label style={styles.label}>From</label>
-          <input type="date" style={{ ...styles.input, width: '148px' }} value={rangeFrom} onChange={e => setRangeFrom(e.target.value)} />
+          <input type="date" style={{ ...styles.input, width: '148px' }} value={rangeFrom} onChange={e => { setSelectedPayrollId(null); setRangeFrom(e.target.value) }} />
         </div>
         <div>
           <label style={styles.label}>To</label>
-          <input type="date" style={{ ...styles.input, width: '148px' }} value={rangeTo} onChange={e => setRangeTo(e.target.value)} />
+          <input type="date" style={{ ...styles.input, width: '148px' }} value={rangeTo} onChange={e => { setSelectedPayrollId(null); setRangeTo(e.target.value) }} />
         </div>
         <div style={{ display: 'flex', gap: '8px', paddingBottom: '1px' }}>
           <button style={{ ...styles.btn('ghost'), padding: '6px 10px' }} onClick={() => shiftRange(-1)}>‹</button>
@@ -1613,7 +1431,7 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
 
       {alert && <AlertBar msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
 
-      {loading ? <Spinner /> : (
+      {loading ? <Spinner /> : rangeError ? null : (
         <>
           {/* Summary cards */}
           <div style={{ ...styles.row, gap: '12px', marginBottom: '16px', flexWrap: 'wrap' }}>
@@ -1636,7 +1454,7 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
           {/* Source rows with checkboxes */}
           <div className="m-pad" style={{ ...styles.card, padding: 0, overflow: 'hidden', marginBottom: '12px' }}>
             <div style={{ padding: '10px 14px', borderBottom: `1px solid ${theme.border}`, fontSize: '11px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase' }}>
-              {subTab === 'production' ? 'Daily Roster Rows' : 'Truck Loading Logs'} — select rows to include
+              {subTab === 'production' ? 'Daily Roster Rows' : 'Truck Loading Logs'} — {canSelect ? 'select rows to include' : 'payroll schedule (read-only)'}
             </div>
             <div style={{ overflowX: 'auto' }}>
               {subTab === 'production' ? (
@@ -1644,20 +1462,20 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
                   <thead style={{ background: theme.surface }}>
                     <tr>
                       <th style={{ ...styles.th, width: '36px', paddingRight: '4px' }}>
-                        <input type="checkbox" checked={allChecked} onChange={toggleAll} />
+                        {canSelect && <input aria-label="Select all payroll rows" type="checkbox" checked={allChecked} onChange={toggleAll} />}
                       </th>
                       {['Date', 'Site', 'Workers', 'Total Cost', 'ICO', 'MD', 'Payment', 'Payroll'].map(h => <th key={h} style={styles.th}>{h}</th>)}
                     </tr>
                   </thead>
                   <tbody>
                     {rosters.length === 0 && <tr><td colSpan={9} style={{ ...styles.td, textAlign: 'center', color: theme.textMuted }}>No rosters in this range.</td></tr>}
-                    {rosters.map(r => {
+                    {payrollSources(rosters, prodPayroll).map(r => {
                       const isThisDraft = isDraftMode && r.payroll_id === currentPayroll?.id
                       const isOtherPayroll = r.payroll_id != null && !isThisDraft
                       return (
                         <tr key={r.id} style={{ opacity: isOtherPayroll ? 0.45 : 1 }}>
                           <td style={{ ...styles.td, paddingRight: '4px' }}>
-                            <input type="checkbox" checked={checkedRosterIds.has(r.id)} disabled={isOtherPayroll} onChange={() => !isOtherPayroll && toggleRow(r.id)} />
+                            {canSelect && <input aria-label={`Include roster ${r.roster_date}`} type="checkbox" checked={checkedRosterIds.has(r.id)} onChange={() => toggleRow(r.id)} />}
                           </td>
                           <td className="m-title" style={styles.td}>{fmtDate(r.roster_date)}</td>
                           <td style={styles.td}>{r.site?.name || '—'}</td>
@@ -1683,20 +1501,20 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
                   <thead style={{ background: theme.surface }}>
                     <tr>
                       <th style={{ ...styles.th, width: '36px', paddingRight: '4px' }}>
-                        <input type="checkbox" checked={allChecked} onChange={toggleAll} />
+                        {canSelect && <input aria-label="Select all payroll rows" type="checkbox" checked={allChecked} onChange={toggleAll} />}
                       </th>
                       {['Date', 'Waybill', 'Loaders', 'Amount', 'Payment', 'Payroll'].map(h => <th key={h} style={styles.th}>{h}</th>)}
                     </tr>
                   </thead>
                   <tbody>
                     {loadingLogs.length === 0 && <tr><td colSpan={7} style={{ ...styles.td, textAlign: 'center', color: theme.textMuted }}>No loading logs in this range.</td></tr>}
-                    {loadingLogs.map(l => {
+                    {payrollSources(loadingLogs, loadPayroll).map(l => {
                       const isThisDraft = isDraftMode && l.payroll_id === currentPayroll?.id
                       const isOtherPayroll = l.payroll_id != null && !isThisDraft
                       return (
                         <tr key={l.id} style={{ opacity: isOtherPayroll ? 0.45 : 1 }}>
                           <td style={{ ...styles.td, paddingRight: '4px' }}>
-                            <input type="checkbox" checked={checkedLogIds.has(l.id)} disabled={isOtherPayroll} onChange={() => !isOtherPayroll && toggleRow(l.id)} />
+                            {canSelect && <input aria-label={`Include load ${l.id}`} type="checkbox" checked={checkedLogIds.has(l.id)} onChange={() => toggleRow(l.id)} />}
                           </td>
                           <td className="m-title" style={styles.td}>{fmtDate(l.date)}</td>
                           <td style={styles.td}>{l.waybill_number || '—'}</td>
@@ -1722,11 +1540,11 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
           {/* Worker aggregate table */}
           <div className="m-pad" style={{ ...styles.card, padding: 0, overflow: 'hidden', marginBottom: '16px' }}>
             <div style={{ padding: '10px 14px', borderBottom: `1px solid ${theme.border}`, fontSize: '11px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase' }}>
-              Worker Summary (from checked rows)
+              Worker Summary (payroll selection)
             </div>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead style={{ background: theme.surface }}>
-                <tr>{['Name', 'Role', subTab === 'production' ? 'Days' : 'Blocks', 'Base Rate', 'Bonus', 'Total Pay', 'Bank', 'Account'].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
+                <tr>{['Name', 'Role', subTab === 'production' ? 'Days' : 'Blocks', 'Base Rate', 'Bonus', 'Gross', 'Deductions/advances', 'Net', 'Bank', 'Account'].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
               </thead>
               <tbody>
                 {workers.length === 0 && <tr><td colSpan={8} style={{ ...styles.td, textAlign: 'center', color: theme.textMuted }}>No workers — check rows above to include them.</td></tr>}
@@ -1737,14 +1555,14 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
                     <td style={styles.td}>{subTab === 'production' ? w.days : Math.round(w.days_or_blocks || 0)}</td>
                     <td style={styles.td}>{naira(w.base_rate)}</td>
                     <td style={styles.td}>{naira(w.bonus || 0)}</td>
-                    <td className="m-key" style={{ ...styles.td, fontWeight: '700', color: theme.accent }}>{naira(w.total_pay)}</td>
+                    <td style={styles.td}>{naira(w.gross_pay)}</td><td style={styles.td}>{naira(w.deductions)}</td><td className="m-key" style={{ ...styles.td, fontWeight: '700', color: theme.accent }}>{naira(w.net_pay)}</td>
                     <td style={styles.td}>{w.bank}</td>
                     <td style={styles.td}>{w.account}</td>
                   </tr>
                 ))}
                 {workers.length > 0 && (
                   <tr style={{ background: theme.surface }}>
-                    <td colSpan={5} style={{ ...styles.td, fontWeight: '700', textAlign: 'right' }}>Grand Total</td>
+                    <td colSpan={7} style={{ ...styles.td, fontWeight: '700', textAlign: 'right' }}>Grand Total</td>
                     <td style={{ ...styles.td, fontWeight: '700', color: theme.accent }}>{naira(totalAmount)}</td>
                     <td colSpan={2} />
                   </tr>
@@ -1768,7 +1586,7 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
               <button style={styles.btn('success')} onClick={() => handlePayrollAction('md_approve')} disabled={actioning}>MD Approve</button>
             )}
             {currentPayroll?.status === 'md_approved' && userProfile?.role === 'accountant' && (
-              <button style={styles.btn('success')} onClick={() => handlePayrollAction('mark_paid')} disabled={actioning}>Mark as Paid + Create Expense</button>
+              <button style={styles.btn('success')} onClick={() => handlePayrollAction('mark_paid')} disabled={actioning}>Mark as Paid</button>
             )}
             {currentPayroll && currentPayroll.status !== 'paid' && ['production_manager','assistant_production_manager','logistics_manager','hr_officer','ico','md'].includes(userProfile?.role) && (
               <>
@@ -1801,9 +1619,10 @@ function WeeklyPayrollTab({ pool, roles, userProfile }) {
 
 // ── MONTHLY FIXED TAB ────────────────────────────────────────────────────────
 
-function MonthlyFixedTab({ pool, roles, userProfile }) {
-  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7))
+export function MonthlyFixedTab({ pool, roles, userProfile }) {
+  const [month, setMonth] = useState(todayLagos().slice(0, 7))
   const [payrollRecords, setPayrollRecords] = useState([])
+  const [loadError, setLoadError] = useState(false)
   const [loading, setLoading] = useState(false)
   const [alert, setAlert] = useState(null)
   const [actioning, setActioning] = useState(false)
@@ -1813,7 +1632,8 @@ function MonthlyFixedTab({ pool, roles, userProfile }) {
   useEffect(() => {
     supabase.from('vehicles').select('id, vehicle_name, vehicle_number, monthly_rental_amount, owner_name, owner_phone')
       .eq('vehicle_type', 'Rental')
-      .then(({ data }) => setRentalVehicles(data || []))
+      .then(({ data, error }) => { if (error) setAlert({ msg: error.message, type: 'error' }); else setRentalVehicles(data || []) })
+      .catch(e => setAlert({ msg: e.message, type: 'error' }))
   }, [])
 
   // Build fixed workers dynamically from labour_pool (category = monthly_fixed)
@@ -1833,12 +1653,12 @@ function MonthlyFixedTab({ pool, roles, userProfile }) {
     })
   const totalFixed = fixedWorkers.reduce((s, w) => s + w.amount, 0)
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (strict = false) => {
     if (!month) return
-    setLoading(true)
-    const { data } = await supabase.from('weekly_labour_payroll').select('*').eq('payroll_type', 'monthly_fixed').ilike('week_ending', `${month}%`)
-    setPayrollRecords(data || [])
-    setLoading(false)
+    setLoading(true); setLoadError(false); setPayrollRecords([])
+    try { setPayrollRecords(await weeklyPayrollService.loadMonthly(month)) }
+    catch (e) { setLoadError(true); setAlert({ msg: e.message, type: 'error' }); if (strict === true) throw e }
+    finally { setLoading(false) }
   }, [month])
 
   useEffect(() => { loadData() }, [loadData])
@@ -1846,17 +1666,15 @@ function MonthlyFixedTab({ pool, roles, userProfile }) {
   const existingPayroll = payrollRecords[0]
 
   const handleGenerate = async () => {
+    if (loadError) return setAlert({ msg: 'Load this month successfully before generating a payroll.', type: 'error' })
     if (fixedWorkers.length === 0) return setAlert({ msg: 'No monthly fixed workers in Labour Pool. Add workers with category "monthly_fixed" first.', type: 'error' })
     setActioning(true)
-    const weekEnding = `${month}-28`
-    const { error: upErr } = await supabase.from('weekly_labour_payroll').upsert(
-      { week_ending: weekEnding, payroll_type: 'monthly_fixed', total_amount: totalFixed, worker_count: fixedWorkers.length, status: 'draft', prepared_by: userProfile?.full_name },
-      { onConflict: 'week_ending,payroll_type', ignoreDuplicates: true }
-    )
-    setActioning(false)
-    if (upErr) { setAlert({ msg: upErr.message, type: 'error' }); return }
-    setAlert({ msg: 'Monthly fixed payroll created.', type: 'success' })
-    loadData()
+    try {
+      const result = await weeklyPayrollService.createMonthly(month, totalFixed, fixedWorkers.length, userProfile?.full_name)
+      await loadData(true)
+      setAlert({ msg: result.existing ? 'An existing payroll for this month was loaded; no new payroll was created.' : 'Monthly fixed payroll created.', type: result.existing ? 'warning' : 'success' })
+    } catch (e) { setAlert({ msg: e.message, type: 'error' }) }
+    finally { setActioning(false) }
   }
 
   const handleAction = async (action) => {
@@ -1866,32 +1684,8 @@ function MonthlyFixedTab({ pool, roles, userProfile }) {
       return
     }
     setActioning(true)
-    const { error } = await supabase.rpc('advance_weekly_payroll', {
-      p_payroll_id: existingPayroll.id,
-      p_action: action,
-      p_reason: action === 'recall' ? recallReason.trim() : null,
-    })
-    if (error) {
-      setActioning(false)
-      setAlert({ msg: error.message, type: 'error' })
-      return
-    }
-    if (action === 'mark_paid') {
-      const catId = await getOrCreateCategory('Labour Wages')
-      if (catId) {
-        const { error: expErr } = await supabase.from('expenses').insert({
-          category_id: catId,
-          description: `Monthly Fixed Labour — ${month}`,
-          amount: totalFixed, expense_date: todayStr(), status: 'approved', vendor: 'Labour Pool',
-        })
-        if (expErr) {
-          setActioning(false)
-          setAlert({ msg: 'Payroll marked paid — expense entry failed, please create it manually.', type: 'error' })
-          loadData()
-          return
-        }
-      }
-    }
+    try { await weeklyPayrollService.advance(existingPayroll.id, action, action === 'recall' ? recallReason.trim() : null) }
+    catch (e) { setActioning(false); setAlert({ msg: e.message, type: 'error' }); return }
     if (action === 'recall') setRecallReason('')
     setActioning(false)
     setAlert({ msg: action === 'recall' ? 'Payroll recalled to draft.' : 'Updated.', type: 'success' })
@@ -1974,7 +1768,7 @@ function MonthlyFixedTab({ pool, roles, userProfile }) {
             <button style={styles.btn('success')} onClick={() => handleAction('md_approve')} disabled={actioning}>MD Approve</button>
           )}
           {existingPayroll?.status === 'md_approved' && userProfile?.role === 'accountant' && (
-            <button style={styles.btn('success')} onClick={() => handleAction('mark_paid')} disabled={actioning}>Mark as Paid + Create Expense</button>
+            <button style={styles.btn('success')} onClick={() => handleAction('mark_paid')} disabled={actioning}>Mark as Paid</button>
           )}
           {existingPayroll && existingPayroll.status !== 'paid' && ['production_manager','assistant_production_manager','logistics_manager','hr_officer','ico','md'].includes(userProfile?.role) && (
             <>
@@ -2014,8 +1808,9 @@ function LabourRatesTab({ roles, userProfile, onRefresh }) {
 
   const loadRequests = useCallback(async () => {
     setLoading(true)
-    const { data } = await supabase.from('labour_rate_change_requests').select('*').order('requested_date', { ascending: false })
-    setRequests(data || [])
+    const { data, error } = await supabase.from('labour_rate_change_requests').select('*').order('requested_date', { ascending: false })
+    if (error) setAlert({ msg: error.message, type: 'error' })
+    else setRequests(data || [])
     setLoading(false)
   }, [])
 
@@ -2023,21 +1818,17 @@ function LabourRatesTab({ roles, userProfile, onRefresh }) {
 
   const handleAction = async (req, action, comment) => {
     setActioning(a => ({ ...a, [req.id]: true }))
-    let update = {}
-    const role = userProfile?.role
-    if (action === 'ico_approve') update = { ico_status: 'approved', ico_reviewed_by: userProfile?.full_name, ico_review_date: todayStr(), ico_comments: comment, overall_status: 'md_review' }
-    else if (action === 'ico_reject') update = { ico_status: 'rejected', ico_reviewed_by: userProfile?.full_name, ico_review_date: todayStr(), ico_comments: comment, overall_status: 'rejected' }
-    else if (action === 'md_approve') {
-      update = { md_status: 'approved', md_approved_by: userProfile?.full_name, md_approval_date: todayStr(), md_comments: comment, overall_status: 'approved', effective_date: req.effective_date || todayStr() }
-      // Auto-update labour_roles
-      await supabase.from('labour_roles').update({ base_rate: req.proposed_rate, target_bonus: req.proposed_bonus, effective_date: req.effective_date || todayStr(), approved_by: userProfile?.full_name }).eq('id', req.role_id)
-    }
-    else if (action === 'md_reject') update = { md_status: 'rejected', md_approved_by: userProfile?.full_name, md_approval_date: todayStr(), md_comments: comment, overall_status: 'rejected' }
-
-    const { error } = await supabase.from('labour_rate_change_requests').update(update).eq('id', req.id)
-    setActioning(a => ({ ...a, [req.id]: false }))
-    if (error) setAlert({ msg: error.message, type: 'error' })
-    else { setAlert({ msg: 'Updated.', type: 'success' }); loadRequests(); onRefresh() }
+    try {
+      if (action.startsWith('ico_')) {
+        if (userProfile?.role !== 'ico') throw new Error('Only the ICO can review this request.')
+        await rateChangeService.icoReview(req.id, action === 'ico_approve' ? 'approved' : 'rejected', comment, userProfile?.full_name)
+      } else {
+        if (userProfile?.role !== 'md') throw new Error('Only the MD can decide this request.')
+        await rateChangeService.mdReview(req.id, action === 'md_approve' ? 'approved' : 'rejected', comment, userProfile?.full_name)
+      }
+      setAlert({ msg: 'Updated.', type: 'success' }); await loadRequests(); await onRefresh()
+    } catch (e) { setAlert({ msg: e.message, type: 'error' }) }
+    finally { setActioning(a => ({ ...a, [req.id]: false })) }
   }
 
   const pendingRequests = requests.filter(r => ['pending', 'ico_review', 'md_review'].includes(r.overall_status))
@@ -2183,16 +1974,17 @@ function ProposeRateForm({ roles, userProfile, onSave, onCancel }) {
     if (!roleId || !proposedRate) return setErr('Role and proposed rate are required.')
     if (!reason.trim()) return setErr('Please provide a reason.')
     setSaving(true)
-    const { error } = await supabase.from('labour_rate_change_requests').insert({
+    try {
+    await rateChangeService.create({
       role_id: roleId, current_rate: selectedRole?.base_rate || 0,
       proposed_rate: Number(proposedRate), current_bonus: selectedRole?.target_bonus || 0,
       proposed_bonus: Number(proposedBonus || 0), reason, requested_by: userProfile?.full_name,
       requested_date: todayStr(), overall_status: 'pending', ico_status: 'pending', md_status: 'pending',
       effective_date: effectiveDate,
     })
-    setSaving(false)
-    if (error) setErr(error.message)
-    else onSave()
+    onSave()
+    } catch (e) { setErr(e.message) }
+    finally { setSaving(false) }
   }
 
   return (

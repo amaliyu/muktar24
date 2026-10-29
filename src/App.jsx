@@ -1,10 +1,11 @@
+import { startSessionMonitor, CLOCK_WARNING } from './utils/sessionMonitor'
 import { siteContractsService } from './services/siteContracts'
 import { expenseCosts } from './utils/financialTotals'
 import { queryRows } from './utils/moneyQueries'
 import { monthEnd, todayLagos, periodRange, shiftDate } from './utils/lagosDate'
 import { INVOICE_LABELS, PROFORMA_SUBTITLE, isPendingOrder, owedInvoices, customerInvoiceStats, invoiceTotals } from './utils/proforma'
 import { closeProforma } from './services/proformas'
-import { useState, useEffect, Component } from "react";
+import { useState, useEffect, useRef, Component } from "react";
 import { AlertTriangle, ArrowLeft, ArrowRight, Banknote, BarChart3, Blocks, BookOpen, BookUser, Building2, Calculator, CalendarCheck, CalendarClock, CalendarDays, CalendarOff, Check, CheckCircle2, ChevronDown, ChevronUp, Circle, CircleUser, ClipboardCheck, ClipboardList, Contact, CornerDownRight, Download, Eye, Factory, FileSignature, FileText, FileUp, Fingerprint, Flag, Forklift, Gauge, Gavel, HandCoins, Handshake, HardHat, Hourglass, IdCard, Landmark, Layers, LayoutDashboard, Lock, Mail, MapPin, Menu, MessageSquare, Package, PackageCheck, Pencil, Phone, PiggyBank, Receipt, ScrollText, Settings, TrendingDown, TrendingUp, Truck, Undo2, Upload, User, UserCog, Users, Wallet, Wrench, X } from 'lucide-react';
 import { Ico, IconText, IconButton } from './components/Ico';
 import { supabase } from './lib/supabase';
@@ -17,7 +18,7 @@ import FinancialStatements from './components/FinancialStatements';
 import OpeningBalances from './components/OpeningBalances';
 import { productionService } from './services/production';
 import { staffService } from './services/staff';
-import Staff from './components/StaffHR';
+import Staff, { PayrollTab } from './components/StaffHR';
 import { ordersService, customersService, customerSitesService } from './services/orders';
 import { waybillsService } from './services/deliveries';
 import { invoicesService, paymentsService, orderPaymentsService } from './services/payments';
@@ -164,8 +165,8 @@ const APP_ROLES = [
 // Pages each role is allowed to access. 'all' = unrestricted.
 const ROLE_PAGES = {
   md:                 'all',
-  ico:                ['dashboard','investor_register','capital','terms','monthly_close','spv_ledger','reserve_budget','production','inventory','batches','maintenance','asset_register','site_contracts','material_receiving','handovers','waybills','vehicles','labour','truck_loading','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','advances','leave','payment_requests','messages'],
-  accountant:         ['dashboard','investor_register','capital','terms','monthly_close','spv_ledger','reserve_budget','asset_register','site_contracts','material_receiving','handovers','customers','orders','reports','kpi_dashboard','accounting','suppliers','products','my_profile','data_import','labour','waybills','advances','leave','payment_requests','truck_loading','trading_margin','messages'],
+  ico:                ['dashboard','payroll_approvals','investor_register','capital','terms','monthly_close','spv_ledger','reserve_budget','production','inventory','batches','maintenance','asset_register','site_contracts','material_receiving','handovers','waybills','vehicles','labour','truck_loading','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','advances','leave','payment_requests','messages'],
+  accountant:         ['dashboard','payroll_approvals','investor_register','capital','terms','monthly_close','spv_ledger','reserve_budget','asset_register','site_contracts','material_receiving','handovers','customers','orders','reports','kpi_dashboard','accounting','suppliers','products','my_profile','data_import','labour','waybills','advances','leave','payment_requests','truck_loading','trading_margin','messages'],
   board_member:       ['dashboard','investor_register','capital','terms','monthly_close','spv_ledger','reserve_budget','production','inventory','batches','maintenance','asset_register','site_contracts','handovers','waybills','vehicles','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','trading_margin','messages'],
   bdm:                ['dashboard','customers','orders','pending_register','daily_schedule','lpo_approvals','reports','kpi_dashboard','my_profile','payment_requests','trading_margin','messages'],
   store_officer:      ['dashboard','inventory','batches','maintenance','asset_register','site_contracts','material_receiving','handovers','waybills','pending_register','daily_schedule','products','reports','my_profile','messages'],
@@ -193,7 +194,7 @@ const ROLE_PAGES = {
 // (accounting, reports, kpi_dashboard, daily_schedule) are NOT listed here —
 // those buttons carry per-element data-ico-allow / data-board-allow instead,
 // so write actions stay hidden.
-const ICO_EXEMPT_PAGES   = ['dashboard', 'labour', 'truck_loading', 'schedule_approvals', 'advances', 'leave', 'my_hr', 'payment_requests', 'maintenance'];
+const ICO_EXEMPT_PAGES   = ['dashboard', 'payroll_approvals', 'labour', 'truck_loading', 'schedule_approvals', 'advances', 'leave', 'my_hr', 'payment_requests', 'maintenance'];
 const BOARD_EXEMPT_PAGES = ['dashboard', 'my_profile', 'my_hr', 'maintenance'];
 
 // ── UI HELPERS ───────────────────────────────────────────────
@@ -7940,7 +7941,7 @@ const MyProfile = ({ userProfile }) => {
 };
 
 // ── ADVANCES ──────────────────────────────────────────────────
-const AdvancesPage = ({ userProfile }) => {
+export const AdvancesPage = ({ userProfile }) => {
   const [advances, setAdvances] = useState([]);
   const [loading, setLoading] = useState(true);
   const [alert, setAlert] = useState(null);
@@ -8108,7 +8109,7 @@ const AdvancesPage = ({ userProfile }) => {
                     <td style={styles.td}>{(adv.outstanding_balance || 0) > 0 ? <strong style={{ color: theme.red }}>{naira(adv.outstanding_balance)}</strong> : <span style={{ color: theme.textMuted }}>—</span>}</td>
                     <td style={styles.td}>{adv.reason || '—'}</td>
                     <td style={styles.td}>{adv.requested_by || '—'}</td>
-                    <td style={styles.td}><span style={styles.badge(advStatusColor(status))}>{status}</span></td>
+                    <td style={styles.td}><span style={styles.badge(advStatusColor(status))}>{status}</span>{['ico_approved','md_approved','disbursed'].includes(status) && <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '6px' }}>Locked — approved. Reject and raise a new request to change it.</div>}</td>
                     <td style={styles.td}><div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>{actions.length ? actions : <span style={{ color: theme.textMuted, fontSize: '11px' }}>—</span>}</div></td>
                   </tr>
                 );
@@ -9245,7 +9246,7 @@ const calcLeaveDays = (start, end) => {
   return diff > 0 ? String(diff) : '';
 };
 
-const LeavePage = ({ userProfile }) => {
+export const LeavePage = ({ userProfile }) => {
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [alert, setAlert] = useState(null);
@@ -9441,7 +9442,7 @@ const LeavePage = ({ userProfile }) => {
                     <td style={styles.td}>{fmtDate(req.end_date)}</td>
                     <td style={styles.td}><strong>{req.days ?? '—'}</strong></td>
                     <td style={styles.td}>{req.reason || '—'}</td>
-                    <td style={styles.td}><span style={styles.badge(leaveStatusColor(status))}>{status}</span></td>
+                    <td style={styles.td}><span style={styles.badge(leaveStatusColor(status))}>{status}</span>{['ico_approved','md_approved'].includes(status) && <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '6px' }}>Locked — approved. Cancel and raise a new request to change it.</div>}</td>
                     <td style={styles.td}><div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>{actions.length ? actions : <span style={{ color: theme.textMuted, fontSize: '11px' }}>—</span>}</div></td>
                   </tr>
                 );
@@ -10417,6 +10418,7 @@ const TruckLoadingPage = ({ userProfile }) => {
       setLogAlert({ type: 'success', msg: `Trip #${result.trip_number_for_day ?? '?'} logged — Rate: ${naira(result.computed_rate_used)}, Total: ${naira(result.total_amount)}` });
       await loadLogs();
     } catch (e) {
+      if (e.loadCreated) { setShowLogForm(false); await loadLogs(); }
       if (e.code === '23505') setLogAlert({ type: 'error', msg: 'A log entry for this waybill already exists.' });
       else setLogAlert({ type: 'error', msg: e.message });
     }
@@ -10991,6 +10993,7 @@ const navItems = [
   ]},
   { section: "HR & Workforce", items: [
     { id: "staff", label: "Staff", icon: "staff" },
+    { id: "payroll_approvals", label: "Payroll approvals", icon: "accounting" },
     { id: "labour", label: "Labour", icon: "labour" },
     { id: "disciplinary", label: "Disciplinary", icon: "disciplinary" },
     { id: "attendance_kiosk", label: "Attendance Kiosk", icon: "attendance_kiosk" },
@@ -11477,6 +11480,10 @@ export default function App() {
   const [scheduleCount, setScheduleCount] = useState(0);
   const [unreadMsgCount, setUnreadMsgCount] = useState(0);
   const [showChangePwd, setShowChangePwd] = useState(false);
+  const [clockWarning, setClockWarning] = useState(false);
+  const clockWarned = useRef(false);
+  const sessionReceivedAt = useRef(performance.now());
+  const acceptSession = (next) => { sessionReceivedAt.current = performance.now(); setSession(next || null); };
   const [sessionWarning, setSessionWarning] = useState(false); // 15-min expiry warning
   const [sessionMinutes, setSessionMinutes] = useState(15);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -11485,11 +11492,11 @@ export default function App() {
   // ── Auth ──────────────────────────────────────────────────
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session || null);
+      acceptSession(session);
       if (session) loadProfile(session.user);
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session || null);
+      acceptSession(session);
       if (!session) { setUserProfile(null); }
     });
     return () => subscription.unsubscribe();
@@ -11511,26 +11518,14 @@ export default function App() {
 
   // ── Session expiry monitor ────────────────────────────────
   useEffect(() => {
-    if (!session) return;
-    const check = () => {
-      const expiresAt = session.expires_at; // unix timestamp (seconds)
-      if (!expiresAt) return;
-      const secsLeft = expiresAt - Math.floor(Date.now() / 1000);
-      const minsLeft = Math.floor(secsLeft / 60);
-      if (secsLeft <= 0) {
-        supabase.auth.signOut();
-        return;
-      }
-      if (secsLeft <= 900) { // 15 minutes
-        setSessionWarning(true);
-        setSessionMinutes(minsLeft);
-      } else {
-        setSessionWarning(false);
-      }
-    };
-    check();
-    const interval = setInterval(check, 60000);
-    return () => clearInterval(interval);
+    if (!session) { setSessionWarning(false); return; }
+    return startSessionMonitor({
+      session, receivedAt: sessionReceivedAt.current, auth: supabase.auth,
+      onSession: acceptSession,
+      onWarning: (show, minutes) => { setSessionWarning(show); setSessionMinutes(minutes); },
+      onClockWarning: () => { if (!clockWarned.current) { clockWarned.current = true; setClockWarning(true); } },
+      onRefreshFailure: () => setAuthMessage('Your session could not be refreshed. Please sign in again.'),
+    });
   }, [session]);
 
   // ── Mobile sidebar ────────────────────────────────────────
@@ -11545,7 +11540,15 @@ export default function App() {
   }, []);
 
   const handleExtendSession = async () => {
-    try { await supabase.auth.refreshSession(); setSessionWarning(false); } catch { /* ignore */ }
+    try {
+      const { data, error } = await supabase.auth.refreshSession();
+      if (error) throw error;
+      if (!data?.session) throw new Error('Session could not be refreshed.');
+      acceptSession(data.session); setSessionWarning(false);
+    } catch {
+      setAuthMessage('Your session could not be refreshed. Please sign in again.');
+      await supabase.auth.signOut();
+    }
   };
 
   // Attach the user's effective roles (primary + active grants) from the DB.
@@ -11693,6 +11696,7 @@ export default function App() {
     waybills: <MobileScope><Waybills userProfile={userProfile} /></MobileScope>,
     vehicles: <MobileScope fit><VehicleRegistry /></MobileScope>,
     staff: <MobileScope fit><Staff userProfile={userProfile} /></MobileScope>,
+    payroll_approvals: <MobileScope fit><PayrollTab userProfile={userProfile} approvalsOnly /></MobileScope>,
     customers: <MobileScope fit><Customers userProfile={userProfile} /></MobileScope>,
     orders: <MobileScope fit><Orders onNavigate={setActive} userProfile={userProfile} /></MobileScope>,
     pending_register: <MobileScope><PendingDeliveryRegister /></MobileScope>,
@@ -11804,6 +11808,7 @@ export default function App() {
         {isMobile && (
           <IconButton data-board-allow data-ico-allow aria-label="Open menu" onClick={() => setSidebarOpen(s => !s)} style={{ position: 'fixed', top: '10px', left: '12px', zIndex: Z.floating, width: '44px', height: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '8px', padding: 0, cursor: 'pointer', fontSize: '20px', color: theme.text, lineHeight: 1, boxShadow: '0 2px 8px rgba(0,0,0,0.3)' }}><Ico icon={Menu} size={20} /></IconButton>
         )}
+        {clockWarning && <div role="status" style={{ padding: "12px", marginBottom: "12px", color: theme.accent, border: `1px solid ${theme.accent}`, borderRadius: "8px" }}>{CLOCK_WARNING}<button data-ico-allow data-board-allow style={{ ...styles.btn("secondary"), marginLeft: "12px", minHeight: "44px" }} onClick={() => setClockWarning(false)}>Dismiss</button></div>}
         {sessionWarning && (
           <div style={{ background: "#7c3a0022", border: "1px solid #c47d0e88", borderRadius: "8px", padding: "10px 16px", marginBottom: "16px", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "13px", color: theme.accent }}>
             <span><Ico icon={AlertTriangle} size={20} style={{ marginRight: "8px" }} />Your session expires in <strong>{sessionMinutes} minute{sessionMinutes !== 1 ? 's' : ''}</strong>. Unsaved work may be lost.</span>
