@@ -1238,11 +1238,11 @@ Status key: **DONE** = live and verified · **READY** = migration written + chec
 | A1-1 | Critical | grant/revoke_user_role callable logged-out; MD check passed on NULL role | DONE 2026-10-25 (no misuse found: 2 grants, both by MD) |
 | A1-2 | Critical | order_items_delivery / disciplinary_self writable by anon | DONE 2026-10-25 |
 | A1-3 | High | 4 financial views anon-readable | DONE (anon) 2026-10-25; signed-in part → A1-8 views |
-| A1-4 | High | any user can add themselves to any conversation and read it | READY |
-| A1-5 | High | deactivated accounts keep working (5 inactive, 2 with live sessions; has_role ignores is_active) | READY — login ban + session end on deactivation |
-| A1-6 | Medium | payment-request attachments readable by every requester | READY — own requests only; MD/Acct/ICO/Board all |
-| A1-7 | Medium | weekly_labour_payroll, truck_loading_rates readable by all roles | READY — 8 operational/finance roles |
-| A1-8 | Medium | 10 definer functions callable logged-out; 3 payment views bypass RLS | READY |
+| A1-4 | High | any user can add themselves to any conversation and read it | DONE 2026-10-29 |
+| A1-5 | High | deactivated accounts keep working (5 inactive, 2 with live sessions; has_role ignores is_active) | DONE 2026-10-29 — login ban + session end on deactivation |
+| A1-6 | Medium | payment-request attachments readable by every requester | DONE 2026-10-29 — own requests only; MD/Acct/ICO/Board all |
+| A1-7 | Medium | weekly_labour_payroll, truck_loading_rates readable by all roles | DONE 2026-10-29 — 8 operational/finance roles |
+| A1-8 | Medium | 10 definer functions callable logged-out; 3 payment views bypass RLS | DONE 2026-10-29 |
 
 ### Audit 2 — money totals (23 findings)
 | ID | Sev | Finding | Status |
