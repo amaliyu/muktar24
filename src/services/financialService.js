@@ -1,3 +1,4 @@
+import { incomeNetProfit } from '../utils/financialTotals'
 import { supabase } from '../lib/supabase'
 import { deleteById } from '../utils/checkedDelete'
 
@@ -110,11 +111,7 @@ export const openingBalancesService = {
    * The cascade on opening_balance_history will remove its history rows too.
    */
   async delete(id) {
-    const { error } = await supabase
-      .from('opening_balances')
-      .delete()
-      .eq('id', id)
-    if (error) throw error
+    return deleteById(supabase, 'opening_balances', id)
   },
 }
 
@@ -279,6 +276,8 @@ export const balanceSheetService = {
       result.adjustments = await financialAdjustmentsService.getAll('balance_sheet')
     })
 
+    const income = await incomeStatementService.getData(asAtDate.slice(0, 4) + '-01-01', asAtDate)
+    result.ytdProfit = incomeNetProfit(income)
     return result
   },
 }
@@ -316,7 +315,7 @@ export const incomeStatementService = {
     await section(w, 'Customer payments (revenue)', async () => {
       result.payments = rowsOf(await supabase
         .from('payments')
-        .select('amount_paid, invoice:invoice_id!inner(status, order:order_id(order_items(block_type, quantity, unit_price)))')
+        .select('amount_paid, invoice:invoice_id!inner(status, order:order_id(id, order_items(block_type, quantity, unit_price)))')
         .eq('status', 'confirmed')
         .not('invoice.status', 'in', '("draft","cancelled")')
         .gte('payment_date', fromDate)
@@ -346,7 +345,7 @@ export const incomeStatementService = {
     await section(w, 'Payroll', async () => {
       result.payroll = rowsOf(await supabase
         .from('payroll_runs')
-        .select('total_amount, period_from, period_to')
+        .select('total_payroll, period_from, period_to')
         .gte('period_from', fromDate)
         .lte('period_to', toDate))
     })
@@ -400,7 +399,7 @@ export const cashFlowService = {
         incomeData.expenses.reduce((s, e) => s + Number(e.amount || 0), 0)
 
       const totalPayroll =
-        incomeData.payroll.reduce((s, pr) => s + Number(pr.total_amount || 0), 0)
+        incomeData.payroll.reduce((s, pr) => s + Number(pr.total_payroll || 0), 0)
 
       const adjustmentNet =
         incomeData.adjustments.reduce((s, adj) => s + Number(adj.amount || 0), 0)

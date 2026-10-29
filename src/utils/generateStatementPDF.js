@@ -1,3 +1,4 @@
+import { statementRows } from './customerStatement'
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -8,71 +9,8 @@ function fmtDate(dateStr) {
   return `${d}-${months[parseInt(m, 10) - 1]}-${y}`;
 }
 
-function buildRows(orders, waybills, fromDate, toDate, productMap = {}) {
-  const rows = [];
-
-  // Debit rows: one per invoice (VAT-inclusive total_amount)
-  for (const order of orders) {
-    for (const invoice of (order.invoices || [])) {
-      // Drafts (quotations) and cancelled invoices are not charges on the account.
-      if (invoice.status === 'draft' || invoice.status === 'cancelled') continue;
-      const d = invoice.issued_date;
-      if (!d) continue;
-      if (fromDate && d < fromDate) continue;
-      if (toDate   && d > toDate)   continue;
-      const amount = Number(invoice.total_amount || 0);
-      if (amount <= 0) continue;
-      rows.push({
-        type: 'debit',
-        date: d,
-        qty: 0,
-        unitLabel: '',
-        description: `INVOICE ${invoice.invoice_number || ''}`.trim(),
-        ref: invoice.invoice_number || '',
-        debit: amount,
-        credit: 0,
-        balance: 0,
-      });
-    }
-  }
-
-  // Credit rows: confirmed payments on invoices
-  for (const order of orders) {
-    for (const invoice of (order.invoices || [])) {
-      if (invoice.status === 'draft' || invoice.status === 'cancelled') continue;
-      for (const pay of (invoice.payments || [])) {
-        if (pay.status !== 'confirmed') continue;
-        const d = pay.payment_date;
-        if (!d) continue;
-        if (fromDate && d < fromDate) continue;
-        if (toDate   && d > toDate)   continue;
-        rows.push({
-          type: 'credit',
-          date: d,
-          qty: 0,
-          unitLabel: '',
-          description: 'PAYMENT',
-          ref: '',
-          debit: 0,
-          credit: Number(pay.amount_paid),
-          balance: 0,
-        });
-      }
-    }
-  }
-
-  rows.sort((a, b) => {
-    if (a.date !== b.date) return a.date < b.date ? -1 : 1;
-    return a.type === 'debit' ? -1 : 1;
-  });
-
-  let running = 0;
-  for (const r of rows) {
-    running += r.debit - r.credit;
-    r.balance = running;
-  }
-
-  return rows;
+export function buildRows(orders, waybills, fromDate, toDate) {
+  return statementRows(orders, fromDate, toDate)
 }
 
 const N = (n) => `N${Number(n || 0).toLocaleString()}`;
@@ -189,7 +127,7 @@ export async function generateStatementPDF(customer, orders, waybills, fromDate,
     : emptyMsg;
 
   // Totals row
-  const totalQty    = rows.reduce((s, r) => s + r.qty, 0);
+  const totalQty    = rows.reduce((s, r) => s + (r.qty || 0), 0);
   const totalDebit  = rows.reduce((s, r) => s + r.debit, 0);
   const totalCredit = rows.reduce((s, r) => s + r.credit, 0);
   const finalBal    = rows.length > 0 ? rows[rows.length - 1].balance : 0;

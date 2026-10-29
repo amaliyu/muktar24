@@ -1,3 +1,4 @@
+import { supplierTotals } from '../utils/supplierBalance'
 import React, { useState, useEffect } from 'react'
 import { suppliersService, supplierTransactionsService, supplierDocumentsService } from '../services/suppliers'
 import { expensesService } from '../services/accounting'
@@ -181,7 +182,7 @@ const TransactionsTab = ({ supplierId, companyName }) => {
 
   const totalPurchased = txns.filter(t => t.transaction_type === 'purchase').reduce((s, t) => s + Number(t.amount), 0)
   const totalPaid = txns.filter(t => t.transaction_type === 'payment').reduce((s, t) => s + Number(t.amount), 0)
-  const balance = totalPurchased - totalPaid
+  const balance = supplierTotals(txns).balance
 
   const handleAddPayment = async () => {
     if (!payForm.amount || !payForm.transaction_date) return setAlert({ type: 'error', msg: 'Date and amount required.' })

@@ -1,3 +1,6 @@
+import { statementRows, invoiceAging } from '../utils/customerStatement'
+import { supplierTotals } from '../utils/supplierBalance'
+import { todayLagos, monthStart, monthEnd, shiftDate } from '../utils/lagosDate'
 import React, { useState, useEffect, useCallback } from 'react'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
@@ -30,7 +33,7 @@ const styles = {
 const fmt  = n => Number(n || 0).toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const naira = n => '₦' + fmt(n)
 const fmtDate = d => d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'
-const today = () => new Date().toISOString().split('T')[0]
+const today = todayLagos
 
 const COMPANY = {
   name: 'Abuja Precast Concrete Limited',
@@ -190,7 +193,8 @@ async function fetchDamageRange(from, to, siteId) {
   const rows = data || []
   const ids = [...new Set(rows.map(r => r.recorded_by).filter(Boolean))]
   if (ids.length) {
-    const { data: profiles } = await supabase.from('user_profiles_directory').select('id, full_name').in('id', ids)
+    const { data: profiles, error: profileError } = await supabase.from('user_profiles_directory').select('id, full_name').in('id', ids)
+    if (profileError) throw profileError
     const nameMap = {}
     for (const p of profiles || []) nameMap[p.id] = p.full_name
     return rows.map(r => ({ ...r, recorder: r.recorded_by ? { id: r.recorded_by, full_name: nameMap[r.recorded_by] || null } : null }))
@@ -240,19 +244,22 @@ async function fetchAttendanceRange(from, to) {
   return data || []
 }
 async function fetchAllStaff() {
-  const { data } = await supabase.from('staff').select('*').eq('is_active', true).order('full_name')
+  const { data, error } = await supabase.from('staff').select('*').eq('is_active', true).order('full_name')
+  if (error) throw error
   return data || []
 }
 async function fetchPayrollStaff() {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('staff_payroll')
     .select('id, full_name, employee_number, staff_type, daily_rate, monthly_salary, bank_name, bank_account_number, bank_account_name')
     .eq('is_active', true)
     .order('full_name')
+  if (error) throw error
   return data || []
 }
 async function fetchAllVehicles() {
-  const { data } = await supabase.from('vehicles').select('*, driver:assigned_driver_id(full_name)').order('vehicle_number')
+  const { data, error } = await supabase.from('vehicles').select('*, driver:assigned_driver_id(full_name)').order('vehicle_number')
+  if (error) throw error
   return data || []
 }
 async function fetchMaintenanceRange(from, to) {
@@ -287,12 +294,14 @@ async function fetchStockMovements(from, to) {
   if (error) throw error
   return data || []
 }
-async function fetchCustomers() {
-  const { data } = await supabase.from('customers').select('*, added_by_staff:added_by(full_name)').order('name')
+export async function fetchCustomers() {
+  const { data, error } = await supabase.from('customers').select('*, added_by_staff:added_by(full_name)').order('name')
+  if (error) throw error
   return data || []
 }
 async function fetchSuppliers() {
-  const { data } = await supabase.from('suppliers').select('*').order('name')
+  const { data, error } = await supabase.from('suppliers').select('*').order('company_name')
+  if (error) throw error
   return data || []
 }
 async function fetchSupplierTransactions(from, to) {
@@ -330,7 +339,7 @@ export const GENERATORS = {
   invoice_report: async (params) => {
     // Drafts are quotations and cancelled invoices are void — neither is a
     // raised invoice, so exclude both from the invoice report.
-    let q = supabase.from('invoices').select('*, order:order_id(customer:customer_id(name), payments(*))').not('status', 'in', '("draft","cancelled")').order('issued_date')
+    let q = supabase.from('invoices').select('*, order:order_id(customer:customer_id(name)), payments(amount_paid, status)').not('status', 'in', '("draft","cancelled")').order('issued_date')
     if (params.from) q = q.gte('issued_date', params.from)
     if (params.to)   q = q.lte('issued_date', params.to)
     const { data, error } = await q
@@ -345,22 +354,22 @@ export const GENERATORS = {
   },
   // 10. Customer Statement
   customer_statement: async (params) => {
-    const [orders, payments] = await Promise.all([
-      fetchOrdersRange(params.from, params.to),
-      fetchPaymentsRange(params.from, params.to),
-    ])
-    const custOrders = params.customer_id ? orders.filter(o => o.customer_id === params.customer_id) : orders
-    return { orders: custOrders, payments }
+    // Load all earlier transactions too: the period starts with an opening balance.
+    let q = supabase.from('orders').select('id, customer_id, customer:customer_id(name), invoices(id, invoice_number, total_amount, issued_date, status, payments(amount_paid, status, payment_date))')
+    if (params.customer_id) q = q.eq('customer_id', params.customer_id)
+    const { data, error } = await q
+    if (error) throw error
+    return { rows: statementRows(data || [], params.from, params.to) }
   },
   // 11. AR Aging
   ar_aging: async (params) => {
     // Receivables aging must exclude drafts (quotations) and cancelled invoices.
-    const { data: invoices, error } = await supabase.from('invoices').select('*, order:order_id(customer:customer_id(name)), payments(amount_paid,status)').not('status', 'in', '("draft","cancelled")').lte('issued_date', params.date || today())
+    const { data: invoices, error } = await supabase.from('invoices').select('*, order:order_id(customer:customer_id(name)), payments(amount_paid,status,payment_date)').not('status', 'in', '("draft","cancelled")').lte('issued_date', params.date || today())
     if (error) throw error
-    return invoices || []
+    return (invoices || []).map(inv => ({ ...inv, asAt: params.date || today(), ...invoiceAging(inv, params.date || today()) }))
   },
   // 12. Customer History
-  customer_history: async (params) => fetchOrdersRange(params.from, params.to),
+  customer_history: async (params) => ({ orders: await fetchOrdersRange(params.from, params.to) }),
   // 13. New Customers
   new_customers: async (params) => {
     let q = supabase.from('customers').select('*, added_by_staff:added_by(full_name), orders(id,created_at,order_items(quantity,unit_price,subtotal))').order('created_at')
@@ -378,16 +387,18 @@ export const GENERATORS = {
   waybill_recon: async (params) => fetchWaybillRange(params.from, params.to),
   // 17. Pending Delivery
   pending_delivery: async () => {
-    const { data } = await supabase.from('orders').select('*, customer:customer_id(name), items:order_items(quantity,block_type,unit_price)').in('status', ['pending','in_progress'])
+    const { data, error } = await supabase.from('orders').select('*, customer:customer_id(name), items:order_items(quantity,block_type,unit_price)').in('status', ['pending','in_progress'])
+    if (error) throw error
     return data || []
   },
   // 18. Attendance
   attendance_report: async (params) => {
     const att = await fetchAttendanceRange(params.from, params.to)
     const ids = [...new Set(att.map(a => a.staff_id).filter(Boolean))]
-    const { data: staffRows } = ids.length
+    const { data: staffRows, error: staffError } = ids.length
       ? await supabase.from('staff_public').select('id, full_name').in('id', ids)
       : { data: [] }
+    if (staffError) throw staffError
     const nameMap = Object.fromEntries((staffRows || []).map(s => [s.id, s.full_name]))
     return att.map(a => ({ ...a, _staff_name: nameMap[a.staff_id] || null }))
   },
@@ -601,7 +612,7 @@ function supplierAging(purchaseTxns, totalPaid, asOfStr) {
   else b.d90 = balance
   return b
 }
-function supplierStatementRows(data) {
+export function supplierStatementRows(data) {
   const { suppliers = [], txns = [] } = data || {}
   const asOf = today()
   return suppliers.map(s => {
@@ -609,8 +620,9 @@ function supplierStatementRows(data) {
     const purchases = st.filter(t => t.transaction_type === 'purchase')
     const purchased = purchases.reduce((sum, t) => sum + Number(t.amount || 0), 0)
     const paid = st.filter(t => t.transaction_type === 'payment').reduce((sum, t) => sum + Number(t.amount || 0), 0)
-    const b = supplierAging(purchases, paid, asOf)
-    return { name: s.company_name || '—', purchased, paid, balance: purchased - paid, ...b }
+    const { returned, balance } = supplierTotals(st)
+    const b = supplierAging(purchases, paid + returned, asOf)
+    return { name: s.company_name || '—', purchased, paid, returned, balance, ...b }
   })
 }
 
@@ -701,7 +713,7 @@ function statementTable(doc, startY, rows, colorFor) {
 }
 
 // ── PDF RENDERERS ────────────────────────────────────────────
-function renderPDF(reportId, data, params, period) {
+export function renderPDF(reportId, data, params, period) {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
   const report = CATALOG.find(r => r.id === reportId)
   const startY = pdfHeader(doc, report.name, period)
@@ -776,7 +788,7 @@ function renderPDF(reportId, data, params, period) {
     case 'invoice_report': {
       const head = ['Invoice No', 'Customer', 'Issued', 'Due', 'Amount (₦)', 'Paid (₦)', 'Balance (₦)', 'Status']
       const body = data.map(inv => {
-        const paid = (inv.order?.payments||[]).filter(p=>p.status==='confirmed').reduce((s,p)=>s+Number(p.amount_paid),0)
+        const paid = (inv.payments||[]).filter(p=>p.status==='confirmed').reduce((s,p)=>s+Number(p.amount_paid),0)
         const bal = Number(inv.total_amount||0) - paid
         return [inv.invoice_number, inv.order?.customer?.name||'—', fmtDate(inv.issued_date), fmtDate(inv.due_date), naira(inv.total_amount), naira(paid), naira(bal), bal<=0?'Paid':'Outstanding']
       })
@@ -797,7 +809,11 @@ function renderPDF(reportId, data, params, period) {
       pdfTable(doc, startY, head, body)
       break
     }
-    case 'customer_statement':
+    case 'customer_statement': {
+      const head = ['Date', 'Description', 'Reference', 'Debit (₦)', 'Credit (₦)', 'Balance (₦)']
+      pdfTable(doc, startY, head, data.rows.map(r => [fmtDate(r.date), r.description, r.ref, naira(r.debit), naira(r.credit), naira(r.balance)]))
+      break
+    }
     case 'customer_history': {
       const { orders } = data
       const head = ['Date', 'Customer', 'Block Type', 'Qty', 'Unit Price', 'Subtotal']
@@ -809,9 +825,7 @@ function renderPDF(reportId, data, params, period) {
     case 'ar_aging': {
       const head = ['Customer', 'Invoice No', 'Issued', 'Amount (₦)', 'Paid (₦)', 'Balance (₦)', 'Days Outstanding', 'Aging Bucket']
       const body = data.map(inv => {
-        const paid = (inv.payments||[]).filter(p=>p.status==='confirmed').reduce((s,p)=>s+Number(p.amount_paid),0)
-        const bal = Number(inv.total_amount||0) - paid
-        const days = inv.issued_date ? Math.floor((new Date()-new Date(inv.issued_date))/(1000*60*60*24)) : 0
+        const { paid, balance: bal, days } = invoiceAging(inv, inv.asAt || params.date || today())
         const bucket = days <= 30 ? 'Current' : days <= 60 ? '31-60 days' : days <= 90 ? '61-90 days' : days <= 120 ? '91-120 days' : '120+ days'
         return [inv.order?.customer?.name||'—', inv.invoice_number, fmtDate(inv.issued_date), naira(inv.total_amount), naira(paid), naira(bal), days, bucket]
       }).filter(r => Number(r[5].replace(/[₦,]/g,'')) > 0)
@@ -1093,22 +1107,16 @@ function periodLabel(report, params) {
   return `Period: ${params.from || '—'} → ${params.to || '—'}`
 }
 
-function weekBounds(w) {
-  // w = '2025-W22'
+export function weekBounds(w) {
   const [year, week] = w.split('-W').map(Number)
-  const jan1 = new Date(year, 0, 1)
-  const doy = (week - 1) * 7 - jan1.getDay() + 1
-  const mon = new Date(year, 0, 1 + doy)
-  const sun = new Date(mon); sun.setDate(sun.getDate() + 6)
-  return [mon.toISOString().split('T')[0], sun.toISOString().split('T')[0]]
+  const jan4 = year + '-01-04'
+  const dow = new Date(jan4 + 'T00:00:00Z').getUTCDay() || 7
+  const monday = shiftDate(jan4, 1 - dow + (week - 1) * 7)
+  return [monday, shiftDate(monday, 6)]
 }
-function monthBounds(m) {
-  // m = '2025-05'
+export function monthBounds(m) {
   const [year, month] = m.split('-').map(Number)
-  const from = `${year}-${String(month).padStart(2,'0')}-01`
-  const last = new Date(year, month, 0).getDate()
-  const to   = `${year}-${String(month).padStart(2,'0')}-${last}`
-  return [from, to]
+  return [monthStart(year, month - 1), monthEnd(year, month - 1)]
 }
 
 // ── HISTORY HELPERS ──────────────────────────────────────────

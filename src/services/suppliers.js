@@ -1,3 +1,4 @@
+import { supplierTotals } from '../utils/supplierBalance'
 import { supabase } from '../lib/supabase'
 import { getSignedDocUrl, docStoragePath } from './storage'
 import { deleteById } from '../utils/checkedDelete'
@@ -70,11 +71,7 @@ export const supplierTransactionsService = {
       .from('supplier_transactions').select('transaction_type, amount').eq('supplier_id', supplierId)
     if (error) throw error
     if (!data) return 0
-    return data.reduce((sum, t) => {
-      if (t.transaction_type === 'purchase') return sum + Number(t.amount)
-      if (t.transaction_type === 'payment' || t.transaction_type === 'return') return sum - Number(t.amount)
-      return sum
-    }, 0)
+    return supplierTotals(data).balance
   },
 
   async getAllBalances() {
@@ -84,8 +81,7 @@ export const supplierTransactionsService = {
     const map = {}
     data.forEach(t => {
       if (!map[t.supplier_id]) map[t.supplier_id] = 0
-      if (t.transaction_type === 'purchase') map[t.supplier_id] += Number(t.amount)
-      if (t.transaction_type === 'payment' || t.transaction_type === 'return') map[t.supplier_id] -= Number(t.amount)
+      map[t.supplier_id] += supplierTotals([t]).balance
     })
     return map
   },
