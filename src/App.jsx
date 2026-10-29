@@ -1,3 +1,5 @@
+import { INVOICE_LABELS, PROFORMA_SUBTITLE, isPendingOrder, owedInvoices, customerInvoiceStats } from './utils/proforma'
+import { closeProforma } from './services/proformas'
 import { useState, useEffect, Component } from "react";
 import { AlertTriangle, ArrowLeft, ArrowRight, Banknote, BarChart3, Blocks, BookOpen, BookUser, Building2, Calculator, CalendarCheck, CalendarClock, CalendarDays, CalendarOff, Check, CheckCircle2, ChevronDown, ChevronUp, Circle, CircleUser, ClipboardCheck, ClipboardList, Contact, CornerDownRight, Download, Eye, Factory, FileSignature, FileText, FileUp, Fingerprint, Flag, Forklift, Gauge, Gavel, HandCoins, Handshake, HardHat, Hourglass, IdCard, Landmark, Layers, LayoutDashboard, Lock, Mail, MapPin, Menu, MessageSquare, Package, PackageCheck, Pencil, Phone, PiggyBank, Receipt, ScrollText, Settings, TrendingDown, TrendingUp, Truck, Undo2, Upload, User, UserCog, Users, Wallet, Wrench, X } from 'lucide-react';
 import { Ico, IconText, IconButton } from './components/Ico';
@@ -213,16 +215,16 @@ const cleanInvoiceError = (e) => {
 };
 
 const STATUS_BADGE = {
-  draft:     { label: 'Draft',     color: '#7c839e' },
-  issued:    { label: 'Issued',    color: '#5b8dee' },
-  paid:      { label: 'Paid',      color: '#2dd4a0' },
-  cancelled: { label: 'Cancelled', color: '#f06b6b' },
+  draft:     { label: INVOICE_LABELS.draft,     color: '#7c839e' },
+  issued:    { label: INVOICE_LABELS.issued,    color: '#5b8dee' },
+  paid:      { label: INVOICE_LABELS.paid,      color: '#2dd4a0' },
+  cancelled: { label: INVOICE_LABELS.cancelled, color: '#f06b6b' },
 };
 
 // Invoices that count toward an order's / customer's value, paid and receivable
 // figures — a draft is a quotation and a cancelled invoice is void, so both are
 // excluded. Pass the invoices array (e.g. liveInvoices(order.invoices)).
-const liveInvoices = (invoices) => (invoices || []).filter(inv => inv.status !== 'draft' && inv.status !== 'cancelled');
+const liveInvoices = owedInvoices;
 
 const InvoiceEditorModal = ({ editor, setEditor, onSave, saving }) => {
   // Active products power the line-item datalist (pick-or-type) and the
@@ -266,8 +268,8 @@ const InvoiceEditorModal = ({ editor, setEditor, onSave, saving }) => {
       <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: '12px', width: '100%', maxWidth: '720px' }}>
         <div style={{ padding: '20px 24px', borderBottom: `1px solid ${theme.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
-            <div style={{ fontSize: '16px', fontWeight: '700', color: theme.text }}>Draft Invoice Editor</div>
-            <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '2px' }}>Saves as a draft (proforma). It becomes a receivable only when issued.</div>
+            <div style={{ fontSize: '16px', fontWeight: '700', color: theme.text }}>Proforma (price quote)</div>
+            <div style={{ fontSize: '11px', color: theme.textMuted, marginTop: '2px' }}>Change quantities, prices or discount freely. Nothing is owed until you click Issue Invoice.</div>
           </div>
           <button style={{ ...styles.btn('secondary'), padding: '4px 10px' }} onClick={() => setEditor(null)}><IconText icon={X}>Close</IconText></button>
         </div>
@@ -320,7 +322,7 @@ const InvoiceEditorModal = ({ editor, setEditor, onSave, saving }) => {
             <div style={styles.formGroup}>
               <label style={styles.label}>VAT</label>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', paddingTop: '6px' }}>
-                <input type="checkbox" id="vat_toggle" checked={editor.include_vat} onChange={e => upd('include_vat', e.target.checked)} style={{ width: '16px', height: '16px', cursor: 'pointer' }} />
+                <input type="checkbox" id="vat_toggle" checked={editor.include_vat} onChange={e => upd('include_vat', e.target.checked)} style={{ width: '44px', height: '44px', flexShrink: 0, cursor: 'pointer' }} />
                 <label htmlFor="vat_toggle" style={{ ...styles.label, marginBottom: 0, cursor: 'pointer' }}>Include VAT (7.5%)</label>
               </div>
             </div>
@@ -346,7 +348,7 @@ const InvoiceEditorModal = ({ editor, setEditor, onSave, saving }) => {
           </div>
 
           <div style={styles.row}>
-            <button style={styles.btn('primary')} onClick={onSave} disabled={saving}>{saving ? 'Saving…' : 'Save Draft & Download Proforma'}</button>
+            <button style={styles.btn('primary')} onClick={onSave} disabled={saving}>{saving ? 'Saving…' : 'Save proforma & download PDF'}</button>
             <button style={styles.btn('secondary')} onClick={() => setEditor(null)}>Cancel</button>
           </div>
         </div>
@@ -509,7 +511,7 @@ const Dashboard = ({ onNavigate, onOpenSite, userProfile }) => {
         const damages  = waybills.reduce((s, w) => s + (w.quantity_damaged || 0), 0);
         const revenue  = orders.reduce((s, o) =>
           s + liveInvoices(o.invoices).flatMap(inv => inv.payments || []).filter(p => p.status === "confirmed").reduce((a, p) => a + p.amount_paid, 0), 0);
-        const pending  = orders.filter(o => o.status === "pending").length;
+        const pending  = orders.filter(isPendingOrder).length;
         setStats({ staff: staffList.length, produced, orders: orders.length, revenue, pending, waybills: waybills.length, damages, lpoQueue: 0, scheduleQueue: 0, pendingRegister: 0 });
         setRecent(orders.slice(0, 5));
       } catch {
@@ -1240,7 +1242,7 @@ const Production = ({ userProfile }) => {
 // ── ORDERS ────────────────────────────────────────────────────
 const emptyItem = () => ({ blockType: "9 Inch 3 Hole Block", quantity: "", unitPrice: "", unit: "pieces", sourceType: "manufactured", costBasis: "" });
 
-const Orders = ({ onNavigate, userProfile }) => {
+export const Orders = ({ onNavigate, userProfile }) => {
   const [orders, setOrders] = useState([]);
   const [staff, setStaff] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -1266,7 +1268,7 @@ const Orders = ({ onNavigate, userProfile }) => {
   const [lpoDocName, setLpoDocName] = useState("");
   const [lpoDocSize, setLpoDocSize] = useState(0);
   const [lpoDocUploading, setLpoDocUploading] = useState(false);
-  const [payForm, setPayForm] = useState({ amount: "", date: "" });
+  const [payForm, setPayForm] = useState({ invoiceId: "", amount: "", date: "" });
   const [orderEditMode, setOrderEditMode] = useState(false);
   const [orderEditItems, setOrderEditItems] = useState([]);
   const [orderEditMarketer, setOrderEditMarketer] = useState("");
@@ -1275,6 +1277,8 @@ const Orders = ({ onNavigate, userProfile }) => {
   const [invDeleteMsg, setInvDeleteMsg] = useState(null);
   const [orderDeleteMsg, setOrderDeleteMsg] = useState(null);
   const [issueTarget, setIssueTarget] = useState(null);
+  const [closeTarget, setCloseTarget] = useState(null);
+  const [closeReason, setCloseReason] = useState('');
   const [cancelTarget, setCancelTarget] = useState(null);
   const [cancelReason, setCancelReason] = useState('');
   const [invActioning, setInvActioning] = useState(false);
@@ -1312,6 +1316,12 @@ const Orders = ({ onNavigate, userProfile }) => {
   };
 
   useEffect(() => { load(); }, []);
+
+  useEffect(() => {
+    setShowPayForm(false);
+    setEditPayment(null);
+    setPayForm({ invoiceId: "", amount: "", date: "" });
+  }, [selected?.id]);
 
   useEffect(() => {
     if (!pickedCustomer) { setCustomerSites([]); setPickedSiteId(""); return; }
@@ -1411,7 +1421,7 @@ const Orders = ({ onNavigate, userProfile }) => {
   // Open the line-item editor. For a NEW invoice this creates a draft on save;
   // for an EXISTING (draft) invoice it loads the saved line items, falling back
   // to the order's own items when the invoice predates invoice_items.
-  const handleGenerateInvoice = async () => {
+  const handleGenerateInvoice = async (existingInvoice = null) => {
     if (!selected) return;
     setInvoicing(true);
     try {
@@ -1424,7 +1434,6 @@ const Orders = ({ onNavigate, userProfile }) => {
         unit_price: i.unit_price,
         unit: productMap[i.block_type] || "",
       }));
-      const existingInvoice = (selected.invoices || [])[0];
       if (existingInvoice) {
         // Read saved line items; fall back to order_items if none exist yet
         // (existing invoices have no invoice_items rows).
@@ -1484,6 +1493,7 @@ const Orders = ({ onNavigate, userProfile }) => {
       await generateInvoicePDF({
         invoice_number: invoice.invoice_number,
         issued_date: invoice.issued_date,
+        issued_at: invoice.issued_at,
         due_date: invoice.due_date,
         items: pdfItems,
         delivery_cost: Number(invoice.delivery_cost) || 0,
@@ -1499,6 +1509,7 @@ const Orders = ({ onNavigate, userProfile }) => {
   };
 
   const doIssueInvoice = async (invoice) => {
+    if (invActioning) return;
     setInvActioning(true);
     try {
       await invoicesService.issue(invoice.id);
@@ -1518,6 +1529,25 @@ const Orders = ({ onNavigate, userProfile }) => {
     } finally {
       setInvActioning(false);
     }
+  };
+
+  const doCloseProforma = async () => {
+    if (!closeTarget || invActioning) return;
+    const target = closeTarget;
+    const orderId = selected.id;
+    setInvActioning(true);
+    let result, failure;
+    try {
+      result = await closeProforma(target.id, orderId, userProfile, closeReason);
+    } catch (e) {
+      failure = e?.message || String(e);
+    }
+    setCloseTarget(null);
+    const newOrders = await load();
+    if (newOrders) setSelected(newOrders.find(o => o.id === orderId) || null);
+    if (failure) setAlert({ type: 'error', msg: failure + (newOrders ? '' : ' Refresh also failed; reload orders before trying again.') });
+    else if (newOrders) setAlert({ type: 'success', msg: 'Proforma ' + target.invoice_number + ' closed. ' + (result.orderCancelled ? 'Order cancelled too.' : 'Order left unchanged because it has another active invoice, payments or waybills.') });
+    setInvActioning(false);
   };
 
   const doCancelInvoice = async () => {
@@ -1589,7 +1619,7 @@ const Orders = ({ onNavigate, userProfile }) => {
       setInvoiceEditor(null);
       const newOrders = await load();
       if (newOrders) setSelected(newOrders.find(o => o.id === orderId) || null);
-      setAlert({ type: "success", msg: `Draft invoice ${invNum} saved. Proforma downloaded.` });
+      setAlert({ type: "success", msg: `Proforma ${invNum} saved. PDF downloaded. Nothing is owed until issued.` });
     } catch (e) {
       if (e.message?.includes('invoices_order_id_fkey')) {
         setInvoiceEditor(null);
@@ -1611,8 +1641,8 @@ const Orders = ({ onNavigate, userProfile }) => {
         await paymentsService.updatePayment(editPayment.id, { amount_paid: parseFloat(payForm.amount), payment_date: payForm.date });
         setAlert({ type: "success", msg: "Payment updated." });
       } else {
-        const invoice = selected?.invoices?.[0];
-        if (!invoice) return setAlert({ type: "error", msg: "Generate an invoice first." });
+        const invoice = selected?.invoices?.find(inv => inv.id === payForm.invoiceId && inv.status === 'issued');
+        if (!invoice) return setAlert({ type: "error", msg: "Select an issued invoice before recording a payment." });
         await paymentsService.recordPayment({ invoice_id: invoice.id, amount_paid: parseFloat(payForm.amount), payment_date: payForm.date, status: "confirmed" });
         // Check if order is now fully paid → add to pending delivery register
         try {
@@ -1630,7 +1660,7 @@ const Orders = ({ onNavigate, userProfile }) => {
       }
       const newOrders = await load();
       if (newOrders) setSelected(newOrders.find(o => o.id === selected?.id) || null);
-      setPayForm({ amount: "", date: "" });
+      setPayForm({ invoiceId: "", amount: "", date: "" });
       setShowPayForm(false);
       setEditPayment(null);
     } catch (e) {
@@ -1665,6 +1695,7 @@ const Orders = ({ onNavigate, userProfile }) => {
   };
 
   const handleDeleteOrderClick = async (order) => {
+    if (userProfile?.role !== 'md') return;
     setOrderDeleteMsg(null);
     try {
       const invoiceIds = (order.invoices || []).map(i => i.id);
@@ -1680,6 +1711,7 @@ const Orders = ({ onNavigate, userProfile }) => {
   };
 
   const handleDeleteInvoice = async (invoice) => {
+    if (userProfile?.role !== 'md') return;
     setInvDeleteMsg(null);
     try {
       const payments = await paymentsService.getByInvoice(invoice.id);
@@ -1742,22 +1774,30 @@ const Orders = ({ onNavigate, userProfile }) => {
 
   return (
     <div>
-      {confirmDelete && <ConfirmModal msg={confirmDelete.type === "payment" ? `Remove payment of ${naira(confirmDelete.amount_paid)} recorded on ${confirmDelete.payment_date}? This cannot be undone.` : `Delete order for ${confirmDelete.customer?.name}? This will also delete all invoices. This cannot be undone.`} onConfirm={() => confirmDelete.type === "payment" ? handleDeletePayment(confirmDelete.id) : handleDeleteOrder(confirmDelete.id)} onCancel={() => setConfirmDelete(null)} />}
-      {confirmDeleteInvoice && <ConfirmModal msg={`Delete invoice ${confirmDeleteInvoice.invoice_number}? This cannot be undone.`} onConfirm={() => doDeleteInvoice(confirmDeleteInvoice)} onCancel={() => setConfirmDeleteInvoice(null)} />}
-      {issueTarget && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: Z.modal, padding: "16px" }}>
-          <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: "12px", padding: "28px 32px", maxWidth: "440px", width: "100%" }}>
-            <div style={{ fontWeight: "700", fontSize: "15px", marginBottom: "10px", color: theme.text }}>Issue invoice {issueTarget.invoice_number}?</div>
-            <div style={{ fontSize: "13px", color: theme.textMuted, marginBottom: "24px", lineHeight: "1.55" }}>
-              Issuing <strong style={{ color: theme.text }}>locks</strong> the invoice — its line items, amounts and number can no longer be changed — and it becomes a firm <strong style={{ color: theme.text }}>receivable</strong> counting toward revenue and outstanding balances. To correct it later you would cancel and reissue.
-            </div>
-            <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
-              <button style={styles.btn("secondary")} onClick={() => setIssueTarget(null)} disabled={invActioning}>Not yet</button>
-              <button style={{ ...styles.btn("primary"), background: theme.green }} onClick={() => doIssueInvoice(issueTarget)} disabled={invActioning}>{invActioning ? "Issuing…" : "Issue Invoice"}</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {confirmDelete?.type === 'payment' && <ConfirmModal msg={`Remove payment of ${naira(confirmDelete.amount_paid)} recorded on ${confirmDelete.payment_date}? This cannot be undone.`} onConfirm={() => handleDeletePayment(confirmDelete.id)} onCancel={() => setConfirmDelete(null)} />}
+      {confirmDelete && confirmDelete.type !== 'payment' && userProfile?.role === 'md' && <ConfirmDialog
+        title="Delete order permanently (MD)" danger confirmLabel="Delete permanently (MD)"
+        body={`Delete order for ${confirmDelete.customer?.name}? Its invoices and all invoice history will be deleted. History will be lost. This cannot be undone.`}
+        onConfirm={() => handleDeleteOrder(confirmDelete.id)} onCancel={() => setConfirmDelete(null)} />}
+      {confirmDeleteInvoice && userProfile?.role === 'md' && <ConfirmDialog
+        title={`Delete ${confirmDeleteInvoice.status === 'draft' ? 'proforma' : 'invoice'} permanently (MD)`}
+        body={`Permanently delete ${confirmDeleteInvoice.invoice_number}? Its history will be lost. Close a proforma instead to keep it on record. This cannot be undone.`}
+        danger busy={invDeleting} confirmLabel="Delete permanently (MD)"
+        onConfirm={() => doDeleteInvoice(confirmDeleteInvoice)} onCancel={() => setConfirmDeleteInvoice(null)} />}
+      {issueTarget && <ConfirmDialog
+        title="Issue Invoice"
+        body={'Issue invoice ' + issueTarget.invoice_number + ' for ₦' + Number(issueTarget.total_amount).toLocaleString('en-NG', { maximumFractionDigits: 2 }) + '? The customer will owe this amount and it will appear in receivables.'}
+        confirmLabel="Issue Invoice" busy={invActioning}
+        onConfirm={() => doIssueInvoice(issueTarget)} onCancel={() => setIssueTarget(null)} />}
+      {closeTarget && <ConfirmDialog title="Close proforma"
+        body={'Close proforma ' + closeTarget.invoice_number + ' for ' + (selected?.customer?.name || 'this customer') + ' — customer did not proceed? The order will also be cancelled only if it has no other active invoice, payments or waybills.'}
+        confirmLabel="Close proforma" danger busy={invActioning}
+        onConfirm={doCloseProforma} onCancel={() => setCloseTarget(null)}>
+        <label style={styles.label} htmlFor="proforma-close-reason">Reason (optional)</label>
+        <textarea id="proforma-close-reason" style={{ ...styles.input, minHeight: '72px' }}
+          placeholder="Customer did not reply, Price too high, or other reason"
+          value={closeReason} onChange={e => setCloseReason(e.target.value)} />
+      </ConfirmDialog>}
       {cancelTarget && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: Z.modal, padding: "16px" }}>
           <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: "12px", padding: "28px 32px", maxWidth: "440px", width: "100%" }}>
@@ -1973,7 +2013,7 @@ const Orders = ({ onNavigate, userProfile }) => {
                     <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
                       {o.is_lpo && <span style={styles.badge(theme.blue)}>LPO</span>}
                       <span style={styles.badge(statusColor(o.status))}>{o.status}</span>
-                      {userProfile?.role === 'md' && <button style={{ ...styles.btn("danger"), padding: "3px 9px", fontSize: "11px" }} onClick={e => { e.stopPropagation(); handleDeleteOrderClick(o); }}>Delete</button>}
+                      {userProfile?.role === 'md' && <button style={{ ...styles.btn("danger"), padding: "3px 9px", fontSize: "11px" }} onClick={e => { e.stopPropagation(); handleDeleteOrderClick(o); }}>Delete order (MD)</button>}
                     </div>
                   </div>
                   <div style={{ marginTop: "8px", display: "flex", gap: "20px", fontSize: "12px", color: theme.textMuted }}>
@@ -1990,6 +2030,7 @@ const Orders = ({ onNavigate, userProfile }) => {
               const total = orderTotal(selected);
               const paid = orderPaid(selected);
               const qty = orderQty(selected);
+              const owed = liveInvoices(selected.invoices).reduce((s, inv) => s + Number(inv.total_amount || 0), 0) - paid;
               return (
                 <>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
@@ -2058,7 +2099,7 @@ const Orders = ({ onNavigate, userProfile }) => {
                   <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                     {[
                       { label: "Amount Paid", value: naira(paid), color: theme.green, pct: total ? (paid / total) * 100 : 0 },
-                      { label: "Balance Outstanding", value: naira(total - paid), color: theme.red, pct: total ? ((total - paid) / total) * 100 : 0 },
+                      { label: "Balance Outstanding", value: naira(owed), color: theme.red, pct: total ? Math.max(0, owed / total) * 100 : 0 },
                       { label: "Total Blocks Ordered", value: fmt(qty) + " blocks", color: theme.blue, pct: 100 },
                     ].map(row => (
                       <div key={row.label}>
@@ -2071,7 +2112,7 @@ const Orders = ({ onNavigate, userProfile }) => {
                     ))}
                   </div>
                   {(() => {
-                    const allPayments = (selected.invoices || []).flatMap(inv => (inv.payments || []).map(p => ({ ...p, _invoiceTotal: inv.total_amount, _invoiceNumber: inv.invoice_number })));
+                    const allPayments = (selected.invoices || []).flatMap(inv => (inv.payments || []).map(p => ({ ...p, _invoiceId: inv.id, _invoiceTotal: inv.total_amount, _invoiceNumber: inv.invoice_number })));
                     const totalConfirmed = allPayments.filter(pp => pp.status === "confirmed").reduce((s, pp) => s + Number(pp.amount_paid), 0);
                     return allPayments.length > 0 ? (
                       <div style={{ marginTop: "16px", marginBottom: "4px" }}>
@@ -2085,7 +2126,7 @@ const Orders = ({ onNavigate, userProfile }) => {
                               {p.status === "confirmed" && (
                                 <button style={{ ...styles.btn("primary"), padding: "3px 8px", fontSize: "11px" }} onClick={() => generatePaymentReceiptPDF({ payment: p, customer: selected.customer, invoiceNumber: p._invoiceNumber, invoiceTotal: p._invoiceTotal || null, totalPaidSoFar: totalConfirmed })}>Receipt</button>
                               )}
-                              {hasRole(userProfile, 'md', 'accountant') && <button style={{ ...styles.btn("secondary"), padding: "3px 8px", fontSize: "11px" }} onClick={() => { setEditPayment(p); setPayForm({ amount: String(p.amount_paid), date: p.payment_date }); setShowPayForm(true); }}>Edit</button>}
+                              {hasRole(userProfile, 'md', 'accountant') && <button style={{ ...styles.btn("secondary"), padding: "3px 8px", fontSize: "11px" }} onClick={() => { setEditPayment(p); setPayForm({ invoiceId: p._invoiceId, amount: String(p.amount_paid), date: p.payment_date }); setShowPayForm(true); }}>Edit</button>}
                               {userProfile?.role === 'md' && <button style={{ ...styles.btn("danger"), padding: "3px 8px", fontSize: "11px" }} onClick={() => setConfirmDelete({ ...p, type: "payment" })}>Remove</button>}
                             </div>
                           </div>
@@ -2096,36 +2137,36 @@ const Orders = ({ onNavigate, userProfile }) => {
                   <div style={{ marginTop: "16px" }}>
                     <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
                       {(selected.invoices || []).length === 0 ? (
-                        hasRole(userProfile, 'md', 'accountant', 'bdm') && <button style={styles.btn("primary")} onClick={handleGenerateInvoice} disabled={invoicing}>{invoicing ? "Opening…" : "Create Invoice (Draft)"}</button>
-                      ) : (() => {
-                        const inv = selected.invoices[0];
+                        hasRole(userProfile, 'md', 'accountant', 'bdm') && <button style={styles.btn("primary")} onClick={() => handleGenerateInvoice()} disabled={invoicing}>{invoicing ? "Opening…" : "Create proforma"}</button>
+                      ) : selected.invoices.map(inv => {
                         const status = inv.status || 'issued';
                         const badge = STATUS_BADGE[status] || STATUS_BADGE.issued;
                         const isDraft = status === 'draft';
-                        const hasPayments = (inv.payments || []).length > 0;
                         const isMD = userProfile?.role === 'md';
                         // invoice_items / draft-content writers per RLS
                         const canEditContent = isDraft && hasRole(userProfile, 'md', 'accountant', 'bdm');
-                        // Cancel: md/accountant, on a draft or issued invoice, never on paid
-                        const canCancel = (isDraft || status === 'issued') && hasRole(userProfile, 'md', 'accountant');
-                        // Delete matches RLS exactly: md unconditional; bdm only a draft with no payments
-                        const canDelete = isMD || (userProfile?.role === 'bdm' && isDraft && !hasPayments);
+                        // Issued cancellation remains md/accountant; drafts use Close proforma.
+                        const canCancel = (status === 'issued') && hasRole(userProfile, 'md', 'accountant');
+                        // Staff close quotes; only the primary MD sees permanent deletion.
+                        const canDelete = status !== 'cancelled' && isMD;
                         return (
-                        <>
+                        <div key={inv.id} style={{ width: "100%", minWidth: 0, display: "flex", flexWrap: "wrap", gap: "8px" }}>
                           <div style={{ width: "100%", display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", marginBottom: "6px" }}>
-                            <span style={{ fontSize: "12px", color: theme.textMuted }}>Invoice: <strong style={{ color: theme.accent }}>{inv.invoice_number}</strong></span>
+                            <span style={{ fontSize: "12px", color: theme.textMuted }}>{isDraft ? 'Proforma' : 'Invoice'}: <strong style={{ color: theme.accent }}>{inv.invoice_number}</strong></span>
                             <span style={{ fontSize: "11px", fontWeight: "700", padding: "2px 8px", borderRadius: "10px", background: badge.color + '22', color: badge.color, textTransform: "uppercase", letterSpacing: "0.04em" }}>{badge.label}</span>
                             {status === 'cancelled' && inv.cancellation_reason && <span style={{ fontSize: "11px", color: theme.textMuted }}>· {inv.cancellation_reason}</span>}
+                            {isDraft && <div style={{ width: "100%", fontSize: "12px", color: theme.textMuted }}>{PROFORMA_SUBTITLE}</div>}
                           </div>
-                          <button style={styles.btn("primary")} onClick={() => handleDownloadInvoicePDF(inv)} disabled={invoicing}>{invoicing ? "Downloading…" : (isDraft ? "Download Proforma PDF" : "Download Invoice PDF")}</button>
-                          {canEditContent && <button style={styles.btn("secondary")} onClick={handleGenerateInvoice} disabled={invoicing}>Edit Line Items</button>}
+                          <button style={styles.btn("primary")} onClick={() => handleDownloadInvoicePDF(inv)} disabled={invoicing}>{invoicing ? "Downloading…" : (status === 'cancelled' ? "Download cancelled PDF" : isDraft ? "Download Proforma PDF" : "Download Invoice PDF")}</button>
+                          {canEditContent && <button style={styles.btn("secondary")} onClick={() => handleGenerateInvoice(inv)} disabled={invoicing}>Edit Line Items</button>}
                           {canEditContent && <button style={{ ...styles.btn("primary"), background: theme.green }} onClick={() => setIssueTarget(inv)} disabled={invActioning}>Issue Invoice</button>}
-                          {!isDraft && status !== 'cancelled' && hasRole(userProfile, 'md', 'accountant') && <button style={styles.btn("secondary")} onClick={() => setShowPayForm(!showPayForm)}>+ Record Payment</button>}
+                          {inv.status === 'issued' && hasRole(userProfile, 'md', 'accountant') && <button style={styles.btn("secondary")} onClick={() => { setEditPayment(null); setPayForm({ invoiceId: inv.id, amount: "", date: "" }); setShowPayForm(true); }}>+ Record Payment</button>}
+                          {canEditContent && <button style={{ ...styles.btn("danger"), minHeight: "44px", maxWidth: "100%", whiteSpace: "normal" }} onClick={() => { setCloseTarget(inv); setCloseReason(""); }} disabled={invActioning}>Close proforma — customer did not proceed</button>}
                           {canCancel && <button style={styles.btn("secondary")} onClick={() => { setCancelTarget(inv); setCancelReason(''); }} disabled={invActioning}>Cancel Invoice</button>}
-                          {canDelete && <button style={{ ...styles.btn("danger"), opacity: invDeleting ? 0.6 : 1 }} disabled={invDeleting} onClick={() => handleDeleteInvoice(inv)}>Delete Invoice</button>}
-                        </>
+                          {canDelete && <button style={{ ...styles.btn("danger"), opacity: invDeleting ? 0.6 : 1 }} disabled={invDeleting} onClick={() => handleDeleteInvoice(inv)}>Delete permanently (MD)</button>}
+                        </div>
                         );
-                      })()}
+                      })}
                       <button style={styles.btn("secondary")} onClick={() => onNavigate("waybills")}>View Waybills</button>
                     </div>
                     {invDeleteMsg && (
@@ -2137,19 +2178,20 @@ const Orders = ({ onNavigate, userProfile }) => {
                     {showPayForm && (
                       <div style={{ marginTop: "12px", padding: "14px", background: theme.surface, borderRadius: "8px", border: `1px solid ${theme.border}` }}>
                         <div style={{ fontSize: "11px", fontWeight: "700", color: theme.textMuted, marginBottom: "10px", textTransform: "uppercase", letterSpacing: "0.06em" }}>{editPayment ? "Edit Payment" : "Record Payment"}</div>
+                        <div style={{ fontSize: "12px", color: theme.textMuted, marginBottom: "10px" }}>Invoice: {selected.invoices.find(inv => inv.id === payForm.invoiceId)?.invoice_number}</div>
                         <div style={styles.row}>
                           <div style={{ flex: 1 }}>
-                            <label style={styles.label}>Amount (₦)</label>
-                            <input style={styles.input} type="number" inputMode="decimal" placeholder="e.g. 500000" value={payForm.amount} onChange={e => setPayForm({ ...payForm, amount: e.target.value })} />
+                            <label style={styles.label} htmlFor="order-payment-amount">Amount (₦)</label>
+                            <input id="order-payment-amount" style={styles.input} type="number" inputMode="decimal" placeholder="e.g. 500000" value={payForm.amount} onChange={e => setPayForm({ ...payForm, amount: e.target.value })} />
                           </div>
                           <div style={{ flex: 1 }}>
-                            <label style={styles.label}>Payment Date</label>
-                            <input style={styles.input} type="date" value={payForm.date} onChange={e => setPayForm({ ...payForm, date: e.target.value })} />
+                            <label style={styles.label} htmlFor="order-payment-date">Payment Date</label>
+                            <input id="order-payment-date" style={styles.input} type="date" value={payForm.date} onChange={e => setPayForm({ ...payForm, date: e.target.value })} />
                           </div>
                         </div>
                         <div style={{ ...styles.row, marginTop: "10px" }}>
                           <button style={styles.btn("primary")} onClick={handleRecordPayment}>{editPayment ? "Update Payment" : "Confirm Payment"}</button>
-                          <button style={styles.btn("secondary")} onClick={() => { setShowPayForm(false); setEditPayment(null); setPayForm({ amount: "", date: "" }); }}>Cancel</button>
+                          <button style={styles.btn("secondary")} onClick={() => { setShowPayForm(false); setEditPayment(null); setPayForm({ invoiceId: "", amount: "", date: "" }); }}>Cancel</button>
                         </div>
                       </div>
                     )}
@@ -2925,19 +2967,7 @@ const Customers = ({ userProfile }) => {
     return !q || [c.name, c.phone, c.location, c.company_name].some(f => f?.toLowerCase().includes(q));
   });
 
-  const getStats = (c) => {
-    const orders = c.orders || [];
-    // A draft is a quotation and a cancelled invoice is void — neither counts
-    // toward what a customer owes (liveInvoices). Fall back to order line items
-    // only when the order has no live invoice (same as before for un-invoiced).
-    const totalValue = orders.reduce((s, o) => {
-      const invoiced = liveInvoices(o.invoices).reduce((si, inv) => si + Number(inv.total_amount ?? 0), 0);
-      const itemTotal = (o.order_items || []).reduce((si, i) => si + Number(i.subtotal ?? i.quantity * i.unit_price), 0);
-      return s + (invoiced !== 0 ? invoiced : itemTotal);
-    }, 0);
-    const totalPaid = orders.reduce((s, o) => s + liveInvoices(o.invoices).flatMap(inv => inv.payments || []).filter(p => p.status === "confirmed").reduce((sp, p) => sp + Number(p.amount_paid), 0), 0);
-    return { totalValue, totalPaid, outstanding: totalValue - totalPaid, orderCount: orders.length };
-  };
+  const getStats = customerInvoiceStats;
 
   const startEdit = (c) => {
     setForm({ name: c.name || "", company_name: c.company_name || "", phone: c.phone || "", email: c.email || "", location: c.location || "", how_heard: c.how_heard || "", added_by: c.added_by || "", date_registered: c.date_registered || today });

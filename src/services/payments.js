@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase'
+import { requireUpdatedRow } from '../utils/proforma'
 
 export const paymentsService = {
   async getByInvoice(invoiceId) {
@@ -121,8 +122,9 @@ export const invoicesService = {
   // issued_at is auto-set by the content guard on draft→issued, so we only
   // write status here.
   async issue(id) {
-    const { error } = await supabase.from('invoices').update({ status: 'issued' }).eq('id', id)
-    if (error) throw error
+    requireUpdatedRow(await supabase.from('invoices').update({ status: 'issued' })
+      .eq('id', id).eq('status', 'draft').select('id'),
+    'Invoice was not issued. It may no longer be a proforma, or your role cannot update it.')
   },
 
   // cancelled_at is NOT auto-set, so we record it along with who/why.

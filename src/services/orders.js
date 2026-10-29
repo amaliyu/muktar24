@@ -10,7 +10,7 @@ export const ordersService = {
         marketer:marketer_id(id, full_name),
         site:site_id(id, site_name, site_address),
         order_items(*),
-        invoices(id, invoice_number, total_amount, issued_date, due_date, status, delivery_cost, discount, include_vat, created_by_name, cancellation_reason, cancelled_by_name, payments(id, amount_paid, payment_date, status))
+        invoices(id, invoice_number, total_amount, issued_date, issued_at, due_date, status, delivery_cost, discount, include_vat, created_by_name, cancellation_reason, cancelled_by_name, payments(id, amount_paid, payment_date, status))
       `)
       .order('created_at', { ascending: false })
     if (from) query = query.gte('created_at', from)
@@ -29,7 +29,7 @@ export const ordersService = {
         marketer:marketer_id(id, full_name),
         site:site_id(id, site_name, site_address),
         order_items(*),
-        invoices(id, invoice_number, total_amount, issued_date, due_date, status, delivery_cost, discount, include_vat, created_by_name, cancellation_reason, cancelled_by_name, payments(id, amount_paid, payment_date, status))
+        invoices(id, invoice_number, total_amount, issued_date, issued_at, due_date, status, delivery_cost, discount, include_vat, created_by_name, cancellation_reason, cancelled_by_name, payments(id, amount_paid, payment_date, status))
       `)
       .eq('marketer_id', userId)
       .order('created_at', { ascending: false })
