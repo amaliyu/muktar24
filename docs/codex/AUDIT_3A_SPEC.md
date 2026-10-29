@@ -28,7 +28,9 @@ FIX EACH ITEM (file:line refer to main d878706; re-find them):
 13. Advances (A3-7): approved/disbursed advances show amount/instalments/balance read-only with "Locked — approved. Reject and raise a new request to change it."
 14. Swallowed errors in these files: every `const { data } = await supabase…` in Labour.jsx, StaffHR.jsx payroll/leave/advance sections and src/services/attendance.js, labour.js, advances.js must check error and show it (Rule 10.5).
 
-TESTS: npm test and npm run build must pass; report the count before/after (main is 269). Add tests for items 1, 2, 3, 4, 7, 8b, 10 (cap), 11 (overlap counted once).
+15. Sign-in loop on phones with a wrong clock (live incident 2026-10-29: the ICO was signed out within 1 second of every login, 8 times): src/App.jsx session-expiry monitor (~11513–11533) signs out when session.expires_at (server time) is behind the PHONE's clock, so a phone whose date/time is ahead by more than the token lifetime is logged out instantly. Never call signOut from a local-clock comparison. Instead: remember the time the session was received and expires_in, warn 15 minutes before (receivedAt + expires_in), and on "expiry" call supabase.auth.refreshSession(); sign out only if that refresh fails. If the gap between the phone clock and the server's expires_at looks wrong by more than 5 minutes, show once: "Your phone's date/time looks wrong — set it to automatic." Test: a session whose expires_at is in the past by the local clock but valid by expires_in must NOT sign out.
+
+TESTS: npm test and npm run build must pass; report the count before/after (main is 269). Add tests for items 1, 2, 3, 4, 7, 8b, 10 (cap), 11 (overlap counted once), 15.
 
 PR BODY: base commit; per item what changed + files + test names; exact ROLE_PAGES change (item 9); anything not verified; and this preview checklist for the MD (Rule 7 — LIVE database: only open screens; do not approve, pay or generate real payrolls):
 - Labour → Weekly payroll: an approved/paid week shows its own workers and Net column; no new expense appears when viewing.
