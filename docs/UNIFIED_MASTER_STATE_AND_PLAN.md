@@ -1231,7 +1231,7 @@ Status key: **DONE** = live and verified · **READY** = migration written + chec
    - Historical "as at" dates use only records dated on or before that date.
 4. **P4 — LATER database items** (A3-3, 4, 8, 16, 17, 18, 20).
 5. **P2b — Audit 4A, stock owned by the database** (before 2B; production at Kado/Life Camp restarts the week of 2026-11-02). Design (planning chat, rejectable): every stock change — dispatch, waybill delete, production record/edit/delete, stock in/out, batch create/edit/delete, receipt edit/void, handover — becomes ONE database function that changes the balance with `balance = balance + delta` in the same transaction as its record, refuses to go below zero (no silent clamping), and rolls back entirely if any part fails. The app stops writing balances directly; balance columns become writable only by those functions. Planning chat writes the functions + tests; Codex switches the screens to call them; both go live together.
-6. Next audits (5 deletes/hidden errors, 6 role access) get added here as they arrive.
+6. Next audit (6 role access) gets added here when it arrives.
 
 ### Audit 1 — security (8 findings)
 | ID | Sev | Finding (verified live) | Status |
@@ -1314,3 +1314,16 @@ Also from audit 2 work: invoices — issued/paid now MD/Accountant-only to chang
 | A4-11 | Medium | item edits can change site/unit without transfer/conversion | 4A |
 | A4-12 | Medium | one production entry can back two batches | 4A (DB: allocated ≤ produced) |
 | A4-13 | Medium | client-site handovers reduce site yard but not batch remaining | 4A |
+
+### Audit 5 — deletes & hidden errors (9 findings; mostly overlaps earlier audits)
+| ID | Sev | Finding | Status |
+|---|---|---|---|
+| A5-1 | Critical | production delete proceeds when material reversal fails | 4A (= A4-6) |
+| A5-2 | High | non-MD order edit duplicates lines | DONE DB (= A2-1); app → 2A |
+| A5-3 | High | loader replacement doesn't confirm the old crew was removed | 3A (atomic replace); paid/approved crews already locked (A3-2) |
+| A5-4 | High | stock balance changes even when movement edit/delete fails | 4A (= A4-3/A4-7) |
+| A5-5 | High | batch edit/delete continues after finished-goods failure | 4A (= A4-3/A4-8) |
+| A5-6 | High | Reports fetchers return [] on query failure; suppliers ordered by `name` | 2A item 10 |
+| A5-7 | Medium | invoice line replacement doesn't confirm old lines removed | 2A item 2 (live check: invoice_items delete allowed for the same roles that write; 0 of 15 invoices with lines mismatched) |
+| A5-8 | Medium | batch stock updates ignore errors | 4A (= A4-2) |
+| A5-9 | Medium | invoice/order/opening-balance/batch deletes without row check | 2A items 2 + 15; batch → 4A |
