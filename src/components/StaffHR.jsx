@@ -1,3 +1,4 @@
+import { salaryLine, capAdvanceDeduction } from '../utils/payrollMath'
 import { useState, useEffect, useRef } from 'react';
 import { staffService } from '../services/staff';
 import { hasRole } from '../lib/roles';
@@ -1646,15 +1647,17 @@ const LeaveBalancesTab = ({ userProfile }) => {
 };
 
 // ── PAYROLL TAB ───────────────────────────────────────────────
-const PayrollTab = ({ userProfile }) => {
+export const PayrollTab = ({ userProfile, approvalsOnly = false }) => {
+  const canPrepare = !approvalsOnly && ["hr_officer", "md"].includes(userProfile?.role);
   const today = new Date().toISOString().split("T")[0];
   const firstOfMonth = today.slice(0, 8) + "01";
-  const [view, setView] = useState("new");
+  const [view, setView] = useState(canPrepare ? "new" : "history");
   const [step, setStep] = useState(1);
   const [periodFrom, setPeriodFrom] = useState(firstOfMonth);
   const [periodTo, setPeriodTo] = useState(today);
   const [preparedBy, setPreparedBy] = useState("Admin");
   const [calcLines, setCalcLines] = useState([]);
+  const [advanceOptions, setAdvanceOptions] = useState({});
   const [calcLoading, setCalcLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [alert, setAlert] = useState(null);
@@ -1676,7 +1679,8 @@ const PayrollTab = ({ userProfile }) => {
   useEffect(() => { if (view === "history") loadRuns(); }, [view]);
 
   const handleCalculate = async () => {
-    if (!periodFrom || !periodTo) return setAlert({ type: "error", msg: "Select a period." });
+    if (!canPrepare) return;
+    if (!periodFrom || !periodTo || periodFrom > periodTo) return setAlert({ type: "error", msg: "Select a period." });
     setCalcLoading(true); setAlert(null);
     try {
       const [allStaff, attendanceCounts, advanceMap, unpaidLeaveMap] = await Promise.all([
@@ -1685,31 +1689,10 @@ const PayrollTab = ({ userProfile }) => {
         advancesService.getOutstandingByStaff(),
         leaveService.getUnpaidApprovedOverlapping(periodFrom, periodTo),
       ]);
-      const periodFromDate = new Date(periodFrom), periodToDate = new Date(periodTo);
-      const lines = allStaff.map(s => {
-        const daysPresent = attendanceCounts[s.id] || 0;
-        let amountDue = 0, leaveDeduction = 0;
-        if (s.staff_type === "daily") {
-          amountDue = daysPresent * (s.daily_rate || 0);
-        } else {
-          const daysInMonth = new Date(periodFromDate.getFullYear(), periodFromDate.getMonth() + 1, 0).getDate();
-          const daysInPeriod = Math.round((periodToDate - periodFromDate) / 86400000) + 1;
-          amountDue = ((s.monthly_salary || 0) / daysInMonth) * daysInPeriod;
-          const leaveRows = unpaidLeaveMap[s.id] || [];
-          const totalUnpaidDays = leaveRows.reduce((sum, lr) => {
-            const overlap = Math.floor((Math.min(new Date(lr.end_date), periodToDate) - Math.max(new Date(lr.start_date), periodFromDate)) / 86400000) + 1;
-            return sum + Math.max(0, overlap);
-          }, 0);
-          leaveDeduction = Math.round(totalUnpaidDays * ((s.monthly_salary || 0) / daysInMonth));
-        }
-        const adv = advanceMap[s.id];
-        const roundedDue = Math.round(amountDue);
-        leaveDeduction = Math.min(leaveDeduction, roundedDue);                                   // leave can't exceed gross
-        let advance_deduction = adv ? Math.min(adv.installment_amount, adv.outstanding_balance) : 0;
-        advance_deduction = Math.max(0, Math.min(advance_deduction, roundedDue - leaveDeduction)); // advance absorbs remainder, never negative
-        const deductions = advance_deduction + leaveDeduction;
-        return { staff_id: s.id, full_name: s.full_name, role: s.staffRole?.role_name || s.role || "—", staff_type: s.staff_type, days_present: daysPresent, daily_rate: s.daily_rate || 0, monthly_salary: s.monthly_salary || 0, amount_due: roundedDue, deductions, advance_deduction, leave_deduction: leaveDeduction };
-      });
+      await payrollService.checkOverlap(periodFrom, periodTo);
+      setAdvanceOptions(advanceMap);
+      const lines = allStaff.map(staff => salaryLine(staff, attendanceCounts[staff.id] || 0,
+        periodFrom, periodTo, unpaidLeaveMap[staff.id] || [], advanceMap[staff.id] || []));
       setCalcLines(lines);
       setStep(2);
     } catch (e) { setAlert({ type: "error", msg: "Calculation failed: " + e.message }); }
@@ -1723,14 +1706,17 @@ const PayrollTab = ({ userProfile }) => {
   const grandTotal = totalDaily + totalPerm;
 
   const handleApprove = async () => {
+    if (!canPrepare) return;
+    if (calcLines.some(l => Number(l.advance_deduction) > 0 && !l.salary_advance_id)) return setAlert({ type: "error", msg: "Choose the advance for each advance deduction." });
     setSaving(true); setAlert(null);
     try {
       const run = { period_from: periodFrom, period_to: periodTo, run_date: today, total_daily_wages: totalDaily, total_permanent_salaries: totalPerm, total_payroll: grandTotal, prepared_by: preparedBy, status: "draft" };
-      const lines = calcLines.map(l => ({ staff_id: l.staff_id, staff_type: l.staff_type, days_present: l.days_present, daily_rate: l.daily_rate, monthly_salary: l.monthly_salary, amount_due: l.amount_due, deductions: l.deductions || 0, advance_deduction: l.advance_deduction ?? l.deductions ?? 0 }));
+      const lines = calcLines.map(l => ({ staff_id: l.staff_id, staff_type: l.staff_type, days_present: l.days_present, daily_rate: l.daily_rate, monthly_salary: l.monthly_salary, amount_due: l.amount_due, deductions: l.deductions || 0, advance_deduction: l.advance_deduction || 0, salary_advance_id: l.salary_advance_id || null }));
       await payrollService.createRun(run, lines);
       setAlert({ type: "success", msg: `Payroll run submitted for approval — ${naira(grandTotal)} total for ${calcLines.length} staff.` });
       setStep(1); setCalcLines([]); setView("history"); loadRuns();
     } catch (e) {
+      if (e.runCreated) { setStep(1); setCalcLines([]); setView("history"); await loadRuns(); }
       const msg = e.message?.includes('not active') || e.message?.includes('not eligible')
         ? 'This staff member is not active and cannot be added to payroll.'
         : 'Failed to save payroll: ' + e.message;
@@ -1739,14 +1725,15 @@ const PayrollTab = ({ userProfile }) => {
   };
 
   const openRun = async (run) => {
-    setSelectedRun(run);
+    setSelectedRun(null); setRunLines([]); setPaymentEdits({});
     try {
-      const { lines } = await payrollService.getRunWithLines(run.id);
+      const { run: freshRun, lines } = await payrollService.getRunWithLines(run.id);
+      setSelectedRun(freshRun);
       setRunLines(lines);
       const edits = {};
       lines.forEach(l => {
         const net = Math.max(0, (l.amount_due || 0) - (l.deductions || 0));
-        edits[l.id] = { amount_paid: String(l.amount_paid || net), payment_date: l.payment_date || today, payment_method: l.payment_method || "cash" };
+        edits[l.id] = { amount_paid: String(l.amount_paid ?? net), payment_date: l.payment_date || today, payment_method: l.payment_method || "cash" };
       });
       setPaymentEdits(edits);
     } catch (e) { setAlert({ type: "error", msg: e.message }); }
@@ -1764,12 +1751,13 @@ const PayrollTab = ({ userProfile }) => {
   };
 
   const handleRecordPayments = async () => {
+    if (selectedRun?.status !== "md_approved" || userProfile?.role !== "accountant") return setAlert({ type: "error", msg: "Only the accountant records payments on an MD-approved run. The approver cannot also mark it paid." });
     setSaving(true);
     try {
-      await Promise.all(runLines.map(l => {
+      for (const l of runLines) {
         const e = paymentEdits[l.id] || {};
-        return payrollService.updateLine(l.id, { amount_paid: parseFloat(e.amount_paid) || 0, payment_date: e.payment_date || today, payment_method: e.payment_method || "cash" });
-      }));
+        await payrollService.updateLine(l.id, { amount_paid: parseFloat(e.amount_paid) || 0, payment_date: e.payment_date || today, payment_method: e.payment_method || "cash" });
+      }
       await payrollService.advanceRun(selectedRun.id, 'mark_paid');
       setAlert({ type: "success", msg: "Payments recorded — payroll marked as PAID." });
       loadRuns(); setSelectedRun(null);
@@ -1790,12 +1778,12 @@ const PayrollTab = ({ userProfile }) => {
     <div>
       {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
       <div style={{ display: "flex", gap: "8px", marginBottom: "20px" }}>
-        {[["new","New Payroll Run"],["history","Payroll History"]].map(([v, label]) => (
+        {(canPrepare ? [["new","New Payroll Run"],["history","Payroll History"]] : [["history","Payroll History"]]).map(([v, label]) => (
           <button key={v} style={{ ...styles.btn(view === v ? "primary" : "secondary"), fontSize: "13px" }} onClick={() => { setView(v); setSelectedRun(null); }}>{label}</button>
         ))}
       </div>
 
-      {view === "new" && (
+      {canPrepare && view === "new" && (
         <div>
           <div style={{ display: "flex", gap: "6px", marginBottom: "20px" }}>
             {[["1","Select Period"],["2","Review"],["3","Approve"]].map(([n, label]) => (
@@ -1867,6 +1855,27 @@ const PayrollTab = ({ userProfile }) => {
                   </table>
                 </div>
               )}
+              <div style={styles.card}>
+                <div style={styles.sectionTitle}>Advance deductions</div>
+                {calcLines.filter(l => (advanceOptions[l.staff_id] || []).length > 0).map(line => {
+                  const choices = advanceOptions[line.staff_id] || [];
+                  const change = (advance, requested) => setCalcLines(lines => lines.map(l => l.staff_id === line.staff_id ? { ...l, ...capAdvanceDeduction(l, advance, requested) } : l));
+                  const chosen = choices.find(a => a.id === line.salary_advance_id);
+                  return <div key={line.staff_id} className="m-form" style={{ ...styles.row, flexWrap: "wrap", marginBottom: "16px" }}>
+                    <strong>{line.full_name}</strong>
+                    <select aria-label={`Advance for ${line.full_name}`} style={{ ...styles.input, maxWidth: "340px", minHeight: "44px" }} value={line.salary_advance_id || ""} onChange={e => {
+                      const advance = choices.find(a => a.id === e.target.value);
+                      change(advance, advance?.installment_amount || 0);
+                    }}>
+                      <option value="">No advance deduction — choose an advance to repay</option>
+                      {choices.map(a => <option key={a.id} value={a.id}>Advance {a.disbursed_date || a.id} — balance {naira(a.outstanding_balance)}</option>)}
+                    </select>
+                    <input aria-label={`Advance deduction for ${line.full_name}`} style={{ ...styles.input, maxWidth: "180px", minHeight: "44px" }} type="number" min="0" max={chosen?.outstanding_balance || 0} disabled={!chosen} value={line.advance_deduction} onChange={e => change(chosen, e.target.value)} />
+                    <span style={{ fontSize: "12px", color: theme.textMuted }}>Maximum: {naira(Math.min(chosen?.outstanding_balance || 0, line.amount_due - line.leave_deduction))}</span>
+                    {line.advance_cap_note && <span role="status" style={{ fontSize: "12px", color: theme.accent }}>{line.advance_cap_note}</span>}
+                  </div>;
+                })}
+              </div>
               <div style={styles.row}>
                 <button style={styles.btn("primary")} onClick={() => setStep(3)}><IconText icon={ArrowRight} iconRight>Approve Payroll</IconText></button>
                 <button style={styles.btn("secondary")} onClick={() => setStep(1)}><IconText icon={ArrowLeft}>Back</IconText></button>
@@ -1943,7 +1952,7 @@ const PayrollTab = ({ userProfile }) => {
           {(() => {
             const role = userProfile?.role;
             const status = selectedRun.status;
-            const canRecall = ['ico','md','accountant'].includes(role) && ['ico_approved','md_approved'].includes(status);
+            const canRecall = !approvalsOnly && ['ico','md','accountant'].includes(role) && ['ico_approved','md_approved'].includes(status);
             if (status === 'paid' || (!canRecall && !(status === 'draft' && role === 'ico') && !(status === 'ico_approved' && role === 'md'))) return null;
             return (
               <div style={{ ...styles.card, marginBottom: "16px", display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
@@ -1985,7 +1994,10 @@ const PayrollTab = ({ userProfile }) => {
           <div style={styles.card}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
               <div style={styles.sectionTitle}>Payment Details</div>
-              {selectedRun.status === 'md_approved' && ['accountant','md'].includes(userProfile?.role) && (
+              {selectedRun.status === 'md_approved' && userProfile?.role === 'md' && (
+                <div><button style={styles.btn("secondary")} disabled title="The MD who approved this run cannot also mark it paid; the accountant must complete payment.">Mark paid (accountant)</button><div style={{ fontSize: "12px", color: theme.textMuted }}>The MD who approved this run cannot also mark it paid; the accountant must complete payment.</div></div>
+              )}
+              {selectedRun.status === 'md_approved' && userProfile?.role === 'accountant' && (
                 <button style={styles.btn("primary")} onClick={handleRecordPayments} disabled={saving}>{saving ? "Saving…" : "Record Payments & Mark Paid"}</button>
               )}
             </div>
@@ -1994,7 +2006,7 @@ const PayrollTab = ({ userProfile }) => {
               <tbody>
                 {runLines.map(l => {
                   const e = paymentEdits[l.id] || {};
-                  const editable = selectedRun.status !== "paid";
+                  const editable = selectedRun.status === "md_approved" && userProfile?.role === "accountant";
                   const leaveDeductionDerived = (l.deductions || 0) - (l.advance_deduction || 0);
                   return (
                     <tr key={l.id}>

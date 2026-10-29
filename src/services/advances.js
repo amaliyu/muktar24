@@ -1,3 +1,4 @@
+import { checkedWrite } from '../utils/checkedWrite'
 import { supabase } from '../lib/supabase';
 
 export const advancesService = {
@@ -10,7 +11,8 @@ export const advancesService = {
     const rows = data || [];
     const ids = [...new Set(rows.map(r => r.staff_id).filter(Boolean))];
     if (ids.length) {
-      const { data: staffRows } = await supabase.from('staff_public').select('id, full_name').in('id', ids);
+      const { data: staffRows, error: staffError } = await supabase.from('staff_public').select('id, full_name').in('id', ids);
+      if (staffError) throw staffError;
       const map = Object.fromEntries((staffRows || []).map(s => [s.id, s.full_name]));
       for (const row of rows) row.staff = { full_name: map[row.staff_id] || null };
     }
@@ -36,26 +38,24 @@ export const advancesService = {
       .insert({ staff_id, amount, reason, installments, installment_amount, outstanding_balance: amount, requested_by, status: 'requested' })
       .select()
       .single();
-    if (error) throw error;
-    return data;
+    return checkedWrite({ data, error });
   },
 
   async advance(id, action, reason = null) {
     const { data, error } = await supabase.rpc('advance_salary_advance',
       { p_adv_id: id, p_action: action, p_reason: reason });
-    if (error) throw error;
-    return data;
+    return checkedWrite({ data, error });
   },
 
   async getOutstandingByStaff() {
     const { data, error } = await supabase
       .from('salary_advances')
-      .select('staff_id, installment_amount, outstanding_balance')
+      .select('id, staff_id, installment_amount, outstanding_balance, disbursed_date')
       .eq('status', 'disbursed')
       .gt('outstanding_balance', 0);
     if (error) throw error;
     const map = {};
-    for (const row of data || []) map[row.staff_id] = row;
+    for (const row of data || []) (map[row.staff_id] ||= []).push(row);
     return map;
   },
 };
