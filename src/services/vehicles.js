@@ -1,6 +1,7 @@
+import { checkedWrite } from '../utils/checkedWrite'
 import { supabase } from '../lib/supabase'
 import { getSignedDocUrl, docStoragePath } from './storage'
-import { deleteById } from '../utils/checkedDelete'
+import { deleteById, deleteWhere } from '../utils/checkedDelete'
 
 const today = () => new Date().toISOString().split('T')[0]
 const plusDays = (d) => { const dt = new Date(); dt.setDate(dt.getDate() + d); return dt.toISOString().split('T')[0] }
@@ -126,20 +127,24 @@ export const fuelLogService = {
     await deleteById(supabase, 'vehicle_fuel_log', id)
   },
 
-  async deleteByWaybill(waybillId) {
-    const { error } = await supabase.from('vehicle_fuel_log').delete().eq('waybill_id', waybillId)
+  async getByWaybill(waybillId) {
+    const { data, error } = await supabase.from('vehicle_fuel_log').select('id').eq('waybill_id', waybillId)
     if (error) throw error
+    return data || []
+  },
+
+  async deleteByWaybill(waybillId) {
+    return deleteWhere(supabase, 'vehicle_fuel_log', 'waybill_id', waybillId)
   },
 
   async upsertForWaybill(vehicleId, waybillId, date, litres, dispensedBy) {
-    await supabase.from('vehicle_fuel_log').delete().eq('waybill_id', waybillId)
+    await deleteWhere(supabase, 'vehicle_fuel_log', 'waybill_id', waybillId)
     if (!litres || litres <= 0) return
-    const { error } = await supabase.from('vehicle_fuel_log').insert({
+    checkedWrite(await supabase.from('vehicle_fuel_log').insert({
       vehicle_id: vehicleId, waybill_id: waybillId,
       date, litres_dispensed: litres,
       purpose: 'delivery', dispensed_by: dispensedBy || null,
-    })
-    if (error) throw error
+    }).select('id'))
   },
 }
 

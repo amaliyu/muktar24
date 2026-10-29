@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase'
-import { finishedGoodsService } from './finishedGoods'
+import { deleteById } from '../utils/checkedDelete'
+import { checkedWrite } from '../utils/checkedWrite'
 import { isFactorySite } from './sites'
 
 export const batchesService = {
@@ -33,11 +34,12 @@ export const batchesService = {
   },
 
   async getNextNumber() {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('batches')
       .select('batch_number')
       .order('created_at', { ascending: false })
       .limit(1)
+    if (error) throw error
     if (!data || data.length === 0) return 'APC-BATCH-001'
     const match = data[0].batch_number?.match(/(\d+)$/)
     const next = match ? parseInt(match[1], 10) + 1 : 1
@@ -45,94 +47,67 @@ export const batchesService = {
   },
 
   async create(batch, productionLogIds = []) {
-    const { data, error } = await supabase
-      .from('batches')
-      .insert(batch)
-      .select()
-      .single()
-    if (error) throw error
-
-    if (productionLogIds.length > 0) {
-      await supabase.from('batch_production_links').insert(
-        productionLogIds.map(pid => ({ batch_id: data.id, production_log_id: pid }))
-      )
+    const result = await supabase.from('batches').insert(batch).select().single()
+    const data = checkedWrite(result)
+    if (productionLogIds.length) {
+      try {
+        const links = await supabase.from('batch_production_links').insert(
+          productionLogIds.map(pid => ({ batch_id: data.id, production_log_id: pid }))
+        ).select('id')
+        checkedWrite(links, productionLogIds.length)
+      } catch (error) {
+        let message = error.message
+        if (error.code === '23505') {
+          try {
+            const batches = await batchesService.getAll()
+            const existing = batches.find(b => b.id !== data.id && b.links?.some(l => productionLogIds.includes(l.production_log_id)))
+            if (existing) message = `That production entry is already in batch ${existing.batch_number}.`
+          } catch (lookupError) {
+            message += ` Could not identify the existing batch: ${lookupError.message}`
+          }
+        }
+        const failure = new Error(`Batch ${data.batch_number} exists, but its production links were not saved. ${message}`)
+        failure.batchCreated = data
+        throw failure
+      }
     }
     return data
   },
 
-  // Dutse yard stock (finished_goods_stock) belongs to the factory only. A batch
-  // at a client site never touches it (Phase 7A). delta > 0 increases, < 0
-  // decreases. Returns true when the yard was adjusted, false when skipped.
-  async adjustYardStock(siteId, sites, blockType, delta) {
-    if (!delta || !isFactorySite(siteId, sites)) return false
-    if (delta > 0) await finishedGoodsService.increase(blockType, delta)
-    else await finishedGoodsService.decrease(blockType, Math.abs(delta))
-    return true
-  },
-
-  // Create path used by the Batches page: insert (retrying once with a fresh
-  // number on a batch_number collision), then add to Dutse yard stock only for
-  // a factory batch. A yard-stock failure doesn't undo the batch; it is
-  // returned as yardError so the page can show it.
-  async createBatch({ batch, productionLogIds = [], sites = [] }) {
+  async createBatch({ batch, productionLogIds = [] }) {
     let batchNumber = batch.batch_number || await batchesService.getNextNumber()
     let created
     try {
       created = await batchesService.create({ ...batch, batch_number: batchNumber }, productionLogIds)
     } catch (e) {
-      if (e.code !== '23505') throw e
+      // Link failures happen AFTER creation and must never create a second batch.
+      if (e.batchCreated || e.code !== '23505') throw e
       batchNumber = await batchesService.getNextNumber()
       created = await batchesService.create({ ...batch, batch_number: batchNumber }, productionLogIds)
     }
-    let yardUpdated = false
-    let yardError = null
-    try {
-      yardUpdated = await batchesService.adjustYardStock(batch.site_id, sites, batch.block_type, Number(batch.qty_accepted))
-    } catch (e) {
-      console.error('Finished goods (yard) update failed for batch', batchNumber, e)
-      yardError = e
-    }
-    return { batch: created, batchNumber, yardUpdated, yardError }
-  },
-
-  async restoreStock(id, qty) {
-    const { data } = await supabase.from('batches').select('qty_remaining').eq('id', id).single()
-    const newQty = (Number(data?.qty_remaining) || 0) + qty
-    await supabase.from('batches').update({ qty_remaining: newQty, status: 'active' }).eq('id', id)
-  },
-
-  async reduceStock(id, qty) {
-    const { data, error } = await supabase
-      .from('batches')
-      .select('qty_remaining, block_type')
-      .eq('id', id)
-      .single()
-    if (error) throw error
-
-    const newQty = Math.max(0, (Number(data.qty_remaining) || 0) - qty)
-    await supabase.from('batches')
-      .update({ qty_remaining: newQty, status: newQty === 0 ? 'exhausted' : 'active' })
-      .eq('id', id)
-    return { ...data, qty_remaining: newQty }
+    return { batch: created, batchNumber }
   },
 
   async update(id, updates) {
-    const { error } = await supabase.from('batches').update(updates).eq('id', id)
-    if (error) throw error
+    return checkedWrite(await supabase.from('batches').update(updates).eq('id', id).select('id'))
   },
 
-  // Advisory curing sign-off (UI-level gate only — does not touch status,
-  // stock, or quantity). Records who verified curing and when.
   async markCured(id, userId) {
-    const { error } = await supabase.from('batches')
-      .update({ cured_verified: true, cured_verified_by: userId || null, cured_verified_at: new Date().toISOString() })
-      .eq('id', id)
-    if (error) throw error
+    return batchesService.update(id, {
+      cured_verified: true, cured_verified_by: userId || null, cured_verified_at: new Date().toISOString(),
+    })
   },
 
   async delete(id) {
-    await supabase.from('batch_production_links').delete().eq('batch_id', id)
-    const { error } = await supabase.from('batches').delete().eq('id', id)
-    if (error) throw error
+    // Links cascade only if the parent delete succeeds. A refused delete leaves
+    // both the batch and its links intact.
+    try {
+      return await deleteById(supabase, 'batches', id)
+    } catch (e) {
+      if (e.code === '23503' && /damage_log/i.test(`${e.message} ${e.details || ''}`)) {
+        throw new Error('Batch has damage records — delete or move those first.')
+      }
+      throw e
+    }
   },
 }

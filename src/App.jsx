@@ -1,3 +1,4 @@
+import { siteContractsService } from './services/siteContracts'
 import { expenseCosts } from './utils/financialTotals'
 import { queryRows } from './utils/moneyQueries'
 import { monthEnd, todayLagos, periodRange, shiftDate } from './utils/lagosDate'
@@ -764,7 +765,7 @@ export const Dashboard = ({ onNavigate, onOpenSite, userProfile }) => {
                 {finishedGoods.map(fg => (
                   <div key={fg.id} style={{ background: theme.surface, borderRadius: "8px", padding: "12px 18px", flex: 1, minWidth: "120px", textAlign: "center" }}>
                     <div style={{ fontSize: "12px", color: theme.textMuted, marginBottom: "4px" }}>{fg.block_type}</div>
-                    <div style={{ fontSize: "24px", fontWeight: "700", color: theme.accent }}>{Number(fg.quantity_in_yard || 0).toLocaleString()}</div>
+                    <div style={{ fontSize: "24px", fontWeight: "700", color: Number(fg.quantity_in_yard) < 0 ? theme.red : theme.accent }}>{Number(fg.quantity_in_yard || 0).toLocaleString()}{Number(fg.quantity_in_yard) < 0 ? " — Shortage" : ""}</div>
                     <div style={{ fontSize: "12px", color: theme.textMuted }}>{fg.unit || 'pieces'}</div>
                   </div>
                 ))}
@@ -860,25 +861,15 @@ const Production = ({ userProfile }) => {
     return () => { alive = false; };
   }, [showForm, form.siteId]);
 
-  // Run the site-scoped stock deduction; never blocks the production save, but
-  // every miss or failure is shown (no silent catch).
+  // Production is the only deduction path; write errors stop the save flow.
   const deductStock = async (entryData, reference) => {
-    const where = siteName(entryData.site_id, sites);
-    try {
-      const { missing } = await inventoryService.autoDeductProduction({
-        siteId: entryData.site_id,
-        cementBags: entryData.cement_bags,
-        graniteDustKg: entryData.granite_dust_kg,
-        chippingsKg: entryData.chippings_kg,
-        dieselLitres: entryData.diesel_litres,
-        date: entryData.date,
-        reference,
-      });
-      setStockWarning(missing.length ? missing.map(m => `No ${m} stock item set up for ${where} — not deducted`) : null);
-    } catch (e) {
-      console.error("Production stock deduction failed:", e);
-      setStockWarning([`Stock deduction failed for ${where}: ${e.message}. Production was saved; check stock manually.`]);
-    }
+    const { missing } = await inventoryService.autoDeductProduction({
+      siteId: entryData.site_id, cementBags: entryData.cement_bags,
+      graniteDustKg: entryData.granite_dust_kg, chippingsKg: entryData.chippings_kg,
+      dieselLitres: entryData.diesel_litres, date: entryData.date, reference,
+    });
+    setStockWarning(missing.length ? missing.map(m => `No ${m} stock item set up for ${siteName(entryData.site_id, sites)} — not deducted`) : null);
+    await inventoryService.getAllItems();
   };
 
   const load = async () => {
@@ -959,6 +950,7 @@ const Production = ({ userProfile }) => {
         if (dup) { setDupWarning(dup); return; }
       } catch (e) { console.error("Duplicate-entry check failed, proceeding:", e); }
     }
+    let savedProduction = null;
     setSaving(true);
     setAlert(null);
     setStockWarning(null);
@@ -979,25 +971,20 @@ const Production = ({ userProfile }) => {
       };
       if (editTarget) {
         await productionService.update(editTarget.id, entryData, userProfile?.id);
+        savedProduction = editTarget;
         await productionService.clearDamages(editTarget.id);
         if (dmgProd > 0) await productionService.logDamage({ date: form.date, block_type: form.blockType, stage: "production", quantity_damaged: dmgProd, production_log_id: editTarget.id, site_id: siteId });
         if (dmgStack > 0) await productionService.logDamage({ date: form.date, block_type: form.blockType, stage: "stacking", quantity_damaged: dmgStack, production_log_id: editTarget.id, site_id: siteId });
         // Reverse-then-apply (Rule 10.7): undo the old movements by reference,
         // then deduct the new quantities at the (possibly changed) site.
         const ref = `PROD-${editTarget.id.slice(0, 8)}`;
-        let reversed = true;
-        try {
-          await inventoryService.reverseProductionMovements(ref);
-        } catch (e) {
-          reversed = false;
-          console.error("Reversing old production movements failed:", e);
-          setStockWarning([`Could not reverse the old stock deduction (${e.message}). Stock was not re-deducted; check stock manually.`]);
-        }
-        if (reversed) await deductStock(entryData, ref);
+        await inventoryService.reverseProductionMovements(ref);
+        await deductStock(entryData, ref);
         await load();
         setAlert({ type: "success", msg: "Production entry updated and movement log adjusted." });
       } else {
         const entry = await productionService.create(entryData);
+        savedProduction = entry;
         if (dmgProd > 0) await productionService.logDamage({ date: form.date, block_type: form.blockType, stage: "production", quantity_damaged: dmgProd, production_log_id: entry.id, site_id: siteId });
         if (dmgStack > 0) await productionService.logDamage({ date: form.date, block_type: form.blockType, stage: "stacking", quantity_damaged: dmgStack, production_log_id: entry.id, site_id: siteId });
         await deductStock(entryData, `PROD-${entry.id.slice(0, 8)}`);
@@ -1008,7 +995,8 @@ const Production = ({ userProfile }) => {
       setShowForm(false);
       setEditTarget(null);
     } catch (e) {
-      setAlert({ type: "error", msg: "Failed to save. " + e.message });
+      if (savedProduction) { setShowForm(false); setEditTarget(null); await load(); }
+      setAlert({ type: "error", msg: (savedProduction ? "Production saved, but a follow-up step failed. " : "Failed to save. ") + e.message });
     } finally {
       setSaving(false);
     }
@@ -1016,9 +1004,10 @@ const Production = ({ userProfile }) => {
 
   const handleDelete = async (record) => {
     try {
-      // deleteEntry reverses this entry's raw-material stock movements before
-      // removing the row (and cascades damage_log + batch_production_links).
+      // The database reverses material movements in the parent delete transaction.
       await productionService.deleteEntry(record.id);
+      await inventoryService.getAllItems();
+      await load();
       setRecords(prev => prev.filter(r => r.id !== record.id));
       setAlert({ type: "success", msg: "Production entry deleted and raw material stock restored." });
     } catch (e) {
@@ -2217,15 +2206,13 @@ export const Orders = ({ onNavigate, userProfile }) => {
 };
 
 // ── WAYBILLS ──────────────────────────────────────────────────
-const Waybills = ({ userProfile }) => {
+export const Waybills = ({ userProfile }) => {
   const [waybills, setWaybills] = useState([]);
   const [staff, setStaff] = useState([]);
   const [vehicles, setVehicles] = useState([]);
   const [activeBatches, setActiveBatches] = useState([]);
   const [batchMap, setBatchMap] = useState({});
-  const [batchSiteMap, setBatchSiteMap] = useState({});
   const [batchLoadError, setBatchLoadError] = useState(null);
-  const { sites: wbSites } = useSites();
   const [activeOrders, setActiveOrders] = useState([]);
   const [scheduleItems, setScheduleItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -2245,7 +2232,7 @@ const Waybills = ({ userProfile }) => {
   const isDriverRole = userProfile?.role === 'driver';
   const driverStaffId = userProfile?.staff_id;
 
-  const load = async () => {
+  const load = async (strict = false) => {
     setLoading(true);
     try {
       const fetchWaybills = isDriverRole && driverStaffId
@@ -2263,34 +2250,36 @@ const Waybills = ({ userProfile }) => {
       setVehicles(v);
       setLoaderAssignments(a);
       setWbPool(pool);
-    } catch {
-      setAlert({ type: "error", msg: "Could not load waybills." });
+    } catch (e) {
+      if (strict) { setLoading(false); throw e; }
+      setAlert({ type: "error", msg: "Could not load waybills. " + e.message });
     }
     if (isDriverRole) { setLoading(false); return; } // drivers don't need orders/batches/schedules
     try {
       setBatchLoadError(null);
+      await finishedGoodsService.getAll();
       const [orders, activeBatches, allBatches, approvedScheds] = await Promise.all([
-        ordersService.getForDelivery().catch(() => []),
+        ordersService.getForDelivery(),
         // Dutse (factory) batches only — a client-site batch must never be
         // loadable here, or it would decrease Dutse yard stock. The error is
         // surfaced, not swallowed: an empty picker must not hide a failed load.
         batchesService.getActive({ siteId: DUTSE_SITE_ID }).catch(e => {
-          console.error("Could not load batches for waybill picker:", e);
+          if (strict) throw e;
           setBatchLoadError(e.message || "unknown error");
           return [];
         }),
-        batchesService.getAll().catch(() => []),
-        schedulesService.getApproved().catch(() => []),
+        batchesService.getAll(),
+        schedulesService.getApproved(),
       ]);
       setActiveOrders(orders.filter(o => ["invoiced", "in_progress", "lpo_approved"].includes(o.status)));
       setActiveBatches(batchesService.factoryBatchesOnly(activeBatches));
       setBatchMap(Object.fromEntries(allBatches.map(b => [b.id, b.batch_number])));
-      setBatchSiteMap(Object.fromEntries(allBatches.map(b => [b.id, b.site_id])));
       const today = new Date().toISOString().split("T")[0];
       const items = approvedScheds.filter(s => s.schedule_date === today).flatMap(s => (s.items || []).map(it => ({ ...it, scheduleDate: s.schedule_date, scheduleId: s.id })));
       setScheduleItems(items);
-    } catch {
-      // silently fail — waybills still display, dropdown will be empty
+    } catch (e) {
+      if (strict) { setLoading(false); throw e; }
+      setAlert({ type: "error", msg: "Could not reload stock or waybill options: " + e.message });
     }
     setLoading(false);
   };
@@ -2325,6 +2314,7 @@ const Waybills = ({ userProfile }) => {
     if (!editTarget && !selectedOrderId) return setAlert({ type: "error", msg: "Select a customer with an active invoice before recording a waybill." });
     if (!form.waybillDate || !form.quantityLoaded) return setAlert({ type: "error", msg: "Date and quantity loaded are required." });
     // batch is optional — blocks dispatched from yard stock without a specific batch
+    let savedWaybill = null;
     setSaving(true);
     setAlert(null);
     try {
@@ -2348,93 +2338,43 @@ const Waybills = ({ userProfile }) => {
         notes: form.notes || null,
       };
 
+      let saved;
       if (editTarget) {
-        const oldLoaded = Number(editTarget.quantity_loaded) || 0;
-        const newLoaded = parseInt(form.quantityLoaded) || 0;
-        // Reverse old effects
-        try {
-          await finishedGoodsService.increase(editTarget.block_type, oldLoaded);
-          if (editTarget.batch_id) await batchesService.restoreStock(editTarget.batch_id, oldLoaded);
-          await productionService.deleteTransitDamage(editTarget.waybill_number);
-        } catch { /* non-blocking */ }
-        // Save updated waybill
-        await waybillsService.update(editTarget.id, { ...waybillData, batch_id: form.batchId || editTarget.batch_id || null });
-        // Sync fuel log for this waybill
-        try {
-          if (form.vehicleId || editTarget.vehicle_id) {
-            await fuelLogService.upsertForWaybill(form.vehicleId || editTarget.vehicle_id, editTarget.id, form.waybillDate, dieselLitres, soName);
-          }
-        } catch { /* non-blocking */ }
-        // Sync loaders if user explicitly set them
-        if (waybillLoaders !== null) {
-          try {
-            const logRow = await truckLoadingService.getLogByWaybill(editTarget.id);
-            if (logRow) await truckLoadingService.syncLoaders(logRow.id, waybillLoaders);
-          } catch { /* non-blocking */ }
-        }
-        // Apply new effects
-        try {
-          await finishedGoodsService.decrease(form.blockType, newLoaded);
-          if (form.batchId) await batchesService.reduceStock(form.batchId, newLoaded);
-          if (damaged > 0) {
-            await productionService.logDamage({ date: form.waybillDate, block_type: form.blockType, stage: "delivery", quantity_damaged: damaged, notes: `Transit damage on waybill ${editTarget.waybill_number}` });
-          }
-          if (editTarget.order_id) {
-            const pending = await pendingDeliveryService.getByOrder(editTarget.order_id);
-            for (const entry of pending) {
-              if (entry.block_type === form.blockType) await pendingDeliveryService.resyncFromWaybills(entry);
-            }
-          }
-        } catch { /* non-blocking */ }
-        await load();
-        setAlert({ type: "success", msg: `Waybill ${editTarget.waybill_number} updated and stock adjusted.` });
+        await waybillsService.update(editTarget.id, { ...waybillData, batch_id: form.batchId || null });
+        saved = editTarget;
       } else {
         let waybillNumber = `APC-WB-${String(await waybillsService.getNextNumber()).padStart(3, "0")}`;
-        const qtyLoaded = parseInt(form.quantityLoaded) || 0;
-        const qtyReceived = parseInt(form.quantityReceived) || 0;
-        let created;
-        try {
-          created = await waybillsService.create({ ...waybillData, batch_id: form.batchId || null, waybill_number: waybillNumber, receiver_name: selectedOrder?.customer?.name || null, order_id: selectedOrder?.id || null });
-        } catch (createErr) {
-          if (createErr.code === '23505') {
-            waybillNumber = `APC-WB-${String(await waybillsService.getNextNumber()).padStart(3, "0")}`;
-            created = await waybillsService.create({ ...waybillData, batch_id: form.batchId || null, waybill_number: waybillNumber, receiver_name: selectedOrder?.customer?.name || null, order_id: selectedOrder?.id || null });
-          } else {
-            throw createErr;
-          }
+        const create = () => waybillsService.create({ ...waybillData, batch_id: form.batchId || null, waybill_number: waybillNumber, receiver_name: selectedOrder?.customer?.name || null, order_id: selectedOrder?.id || null });
+        try { saved = await create(); }
+        catch (e) {
+          if (e.code !== '23505') throw e;
+          waybillNumber = `APC-WB-${String(await waybillsService.getNextNumber()).padStart(3, "0")}`;
+          saved = await create();
         }
-        if (damaged > 0) {
-          await productionService.logDamage({ date: form.waybillDate, block_type: form.blockType, stage: "delivery", quantity_damaged: damaged, notes: `Transit damage on waybill ${waybillNumber}` });
-        }
-        // Auto-create fuel log entry if diesel was given
-        try {
-          if (form.vehicleId && dieselLitres > 0) {
-            await fuelLogService.upsertForWaybill(form.vehicleId, created.id, form.waybillDate, dieselLitres, soName);
-          }
-        } catch { /* non-blocking */ }
-        // Sync loaders if user explicitly set them (trigger may have already populated from standing crew)
-        if (waybillLoaders !== null) {
-          try {
-            const logRow = await truckLoadingService.getLogByWaybill(created.id);
-            if (logRow) await truckLoadingService.syncLoaders(logRow.id, waybillLoaders);
-          } catch { /* non-blocking */ }
-        }
-        // Side effects (non-blocking)
-        try {
-          if (qtyLoaded > 0) await finishedGoodsService.decrease(form.blockType, qtyLoaded);
-          if (form.batchId && qtyLoaded > 0) await batchesService.reduceStock(form.batchId, qtyLoaded);
-          if (qtyReceived > 0 && selectedOrder) {
-            const pending = await pendingDeliveryService.getByOrder(selectedOrder.id);
-            const match = pending.find(p => p.block_type === form.blockType);
-            if (match) {
-              const synced = await pendingDeliveryService.resyncFromWaybills(match);
-              if (!synced) await pendingDeliveryService.updateDelivered(match.id, qtyReceived);
-            }
-          }
-        } catch { /* side effects optional */ }
-        await load();
-        setAlert({ type: "success", msg: `Waybill ${waybillNumber} recorded for ${selectedOrder?.customer?.name}${damaged > 0 ? " — transit damage logged automatically." : ""}${form.vehicleId && dieselLitres > 0 ? ` · ${dieselLitres}L fuel logged to vehicle.` : "."}` });
       }
+      savedWaybill = saved;
+      // Saving the waybill is the ONLY yard/batch stock change (DB ledger).
+      if (editTarget) await productionService.deleteTransitDamage(saved.waybill_number);
+      if (damaged > 0) {
+        await productionService.logDamage({ date: form.waybillDate, block_type: form.blockType, stage: "delivery", quantity_damaged: damaged, waybill_id: saved.id, notes: `Transit damage on waybill ${saved.waybill_number}` });
+      }
+      if (form.vehicleId || editTarget?.vehicle_id) {
+        await fuelLogService.upsertForWaybill(form.vehicleId || editTarget.vehicle_id, saved.id, form.waybillDate, dieselLitres, soName);
+      }
+      if (waybillLoaders !== null) {
+        const logRow = await truckLoadingService.getLogByWaybill(saved.id);
+        if (!logRow) throw new Error('The loading log could not be found; the loader selection was not saved.');
+        await truckLoadingService.syncLoaders(logRow.id, waybillLoaders);
+      }
+      const orderId = editTarget?.order_id || selectedOrder?.id;
+      if (orderId) {
+        const pending = await pendingDeliveryService.getByOrder(orderId);
+        for (const entry of pending) {
+          if ([form.blockType, editTarget?.block_type].includes(entry.block_type)) await pendingDeliveryService.resyncFromWaybills(entry);
+        }
+      }
+      await load(true);
+      setAlert({ type: "success", msg: `Waybill ${saved.waybill_number} saved.` });
       setForm(emptyForm);
       setSelectedOrderId("");
       setShowForm(false);
@@ -2442,55 +2382,44 @@ const Waybills = ({ userProfile }) => {
       setWaybillLoaders(null);
       setLoaderSearch('');
     } catch (e) {
-      setAlert({ type: "error", msg: "Failed to save waybill. " + e.message });
+      if (savedWaybill) {
+        // Close the create form: the stock-affecting record already exists.
+        setShowForm(false);
+        setEditTarget(null);
+        await load();
+      }
+      setAlert({ type: "error", msg: savedWaybill ? `Waybill ${savedWaybill.waybill_number} saved, but a follow-up step failed: ${e.message}` : "Failed to save waybill. " + e.message });
     } finally {
       setSaving(false);
     }
   };
 
   const handleDeleteWaybill = async (waybill) => {
-    // Each reversal step is attempted as before, but a failure is recorded and
-    // named in the result instead of being dropped (§10.5).
-    const failed = [];
-    const done = [];
-    const step = async (label, fn) => {
-      try { await fn(); done.push(label); } catch (e) { failed.push(`${label} (${e?.message || e})`); }
-    };
+    let deleted = false;
     try {
-      // Step 1 — Restore finished goods stock
-      await step('finished goods stock restore', () => finishedGoodsService.increase(waybill.block_type, waybill.quantity_loaded));
-      // Step 2 — Restore batch stock
-      if (waybill.batch_id) await step('batch stock restore', () => batchesService.restoreStock(waybill.batch_id, waybill.quantity_loaded));
-      // Step 3 — Reverse transit damage log entry
-      await step('transit damage reversal', () => productionService.deleteTransitDamage(waybill.waybill_number));
-      // Step 3b — Delete linked fuel log entry
-      await step('fuel log removal', () => fuelLogService.deleteByWaybill(waybill.id));
-      // Step 4 — Delete the waybill record
-      try {
-        await waybillsService.delete(waybill.id);
-      } catch (e) {
-        throw new Error(`${e.message}${done.length ? ` — already done before the failure: ${done.join(', ')}; check stock before retrying` : ''}`);
-      }
-      // Step 5 — Resync pending delivery register (waybill is now gone so recount is accurate)
-      await step('pending delivery register resync', async () => {
-        if (waybill.order_id) {
-          const pending = await pendingDeliveryService.getByOrder(waybill.order_id);
-          for (const entry of pending) {
-            if (entry.block_type === waybill.block_type) await pendingDeliveryService.resyncFromWaybills(entry);
-          }
+      if (userProfile?.role !== 'md') throw new Error('Not deleted — only the MD can delete a waybill.');
+      // Capture the ids before the FK clears waybill_id. Do no cleanup until
+      // the checked parent delete succeeds; a refused delete changes nothing.
+      const fuelRows = await fuelLogService.getByWaybill(waybill.id);
+      await waybillsService.delete(waybill.id);
+      deleted = true;
+      await productionService.deleteTransitDamage(waybill.waybill_number);
+      for (const fuel of fuelRows) await fuelLogService.delete(fuel.id);
+      if (waybill.order_id) {
+        const pending = await pendingDeliveryService.getByOrder(waybill.order_id);
+        for (const entry of pending) {
+          if (entry.block_type === waybill.block_type) await pendingDeliveryService.resyncFromWaybills(entry);
         }
-      });
-      await load();
-      setAlert(failed.length
-        ? { type: "error", msg: `Waybill ${waybill.waybill_number} deleted, but these steps failed and need fixing by hand: ${failed.join('; ')}.` }
-        : { type: "success", msg: `Waybill ${waybill.waybill_number} deleted — finished goods, batch and pending delivery register all reversed.` });
+      }
+      await load(true);
+      setAlert({ type: "success", msg: `Waybill ${waybill.waybill_number} deleted.` });
     } catch (e) {
-      setAlert({ type: "error", msg: "Failed to delete waybill. " + e.message });
+      if (deleted) await load();
+      setAlert({ type: "error", msg: deleted ? `Waybill ${waybill.waybill_number} deleted, but a follow-up step failed: ${e.message}` : e.message });
     } finally {
       setConfirmDelete(null);
     }
   };
-
   const totalLoaded = waybills.reduce((s, w) => s + (w.quantity_loaded || 0), 0);
   const totalDamaged = waybills.reduce((s, w) => s + (w.quantity_damaged || 0), 0);
   const damageRate = totalLoaded > 0 ? ((totalDamaged / totalLoaded) * 100).toFixed(2) : "0.00";
@@ -2509,18 +2438,10 @@ const Waybills = ({ userProfile }) => {
 
   return (
     <div>
-      {confirmDelete && <ConfirmModal
-        msg={<div>
-          <div style={{ fontWeight: "700", marginBottom: "8px" }}>Delete Waybill {confirmDelete.waybill_number}?</div>
-          <div style={{ fontSize: "12px", color: theme.textMuted, marginBottom: "10px" }}>This will:</div>
-          <ul style={{ fontSize: "12px", color: theme.textMuted, paddingLeft: "18px", lineHeight: "1.9", margin: 0 }}>
-            <li>Restore <strong style={{ color: theme.text }}>{Number(confirmDelete.quantity_loaded).toLocaleString()} {confirmDelete.block_type}</strong> blocks to finished goods stock</li>
-            {confirmDelete.batch_id && <li>Restore <strong style={{ color: theme.text }}>{Number(confirmDelete.quantity_loaded).toLocaleString()}</strong> blocks to batch <strong style={{ color: theme.text }}>{batchMap[confirmDelete.batch_id] || "—"}</strong></li>}
-            <li>Remove <strong style={{ color: theme.text }}>{Number(confirmDelete.quantity_received).toLocaleString()}</strong> blocks from {confirmDelete.receiver_name || "customer"}'s delivered count</li>
-            {(confirmDelete.quantity_damaged > 0) && <li>Reverse <strong style={{ color: theme.red }}>{confirmDelete.quantity_damaged}</strong> transit damage record</li>}
-          </ul>
-          <div style={{ fontSize: "12px", color: theme.red, marginTop: "10px" }}>This action cannot be undone.</div>
-        </div>}
+      {confirmDelete && <ConfirmDialog
+        title={`Delete waybill ${confirmDelete.waybill_number}?`}
+        body={`Delete this waybill and return its ${Number(confirmDelete.quantity_loaded).toLocaleString()} loaded blocks to yard stock${confirmDelete.batch_id ? " and its batch" : ""}. This cannot be undone.`}
+        confirmLabel="Delete waybill" danger
         onConfirm={() => handleDeleteWaybill(confirmDelete)}
         onCancel={() => setConfirmDelete(null)}
       />}
@@ -2578,7 +2499,7 @@ const Waybills = ({ userProfile }) => {
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Block Type</label>
-              <ProductSelect value={form.blockType} onChange={(name) => setForm({ ...form, blockType: name })} style={styles.input} />
+              <ProductSelect value={form.blockType} onChange={(name) => setForm({ ...form, blockType: name, batchId: "" })} style={styles.input} />
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Quantity Loaded *</label>
@@ -2590,22 +2511,13 @@ const Waybills = ({ userProfile }) => {
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Batch Number</label>
-              {form.batchId && batchSiteMap[form.batchId] && !isFactorySite(batchSiteMap[form.batchId], wbSites) ? (
-                // Should never happen (waybills only offer Dutse batches), but an
-                // existing waybill on a client-site batch is shown, not hidden.
-                <>
-                  <div style={{ ...styles.input, color: theme.textMuted }}>{batchMap[form.batchId] || form.batchId} — {siteName(batchSiteMap[form.batchId], wbSites)}</div>
-                  <div style={{ fontSize: "12px", color: theme.red, marginTop: "4px" }}>This waybill references a client-site batch, which should not be on a Dutse waybill. Batch is read-only here; tell the MD.</div>
-                </>
-              ) : (
-                <select style={styles.input} value={form.batchId} onChange={e => setForm({ ...form, batchId: e.target.value })}>
-                  <option value="">— Select batch (optional) —</option>
-                  {activeBatches.filter(b => !form.blockType || b.block_type === form.blockType).map(b => (
-                    <option key={b.id} value={b.id}>{b.batch_number} — {b.block_type} ({Number(b.qty_remaining).toLocaleString()} remaining)</option>
-                  ))}
-                  {form.batchId && !activeBatches.some(b => b.id === form.batchId) && <option value={form.batchId}>{batchMap[form.batchId] || "Current batch"} (not active)</option>}
-                </select>
-              )}
+              <select aria-label="Batch Number" style={styles.input} value={form.batchId} onChange={e => setForm({ ...form, batchId: e.target.value })}>
+                <option value="">— No batch (yard stock) —</option>
+                {activeBatches.filter(b => b.site_id === DUTSE_SITE_ID && b.status === 'active' && b.block_type === form.blockType).map(b => (
+                  <option key={b.id} value={b.id}>{b.batch_number} — {b.block_type} ({Number(b.qty_remaining).toLocaleString()} remaining{Number(b.qty_remaining) < 0 ? ' — Shortage' : ''})</option>
+                ))}
+              </select>
+              {form.batchId && !activeBatches.some(b => b.id === form.batchId && b.block_type === form.blockType) && <div style={{ fontSize: "12px", color: theme.textMuted }}>Current link: {batchMap[form.batchId] || "Unknown batch"}. Select yard stock above to clear it.</div>}
               {batchLoadError && <div style={{ fontSize: "12px", color: theme.red, marginTop: "4px" }}>Could not load batches ({batchLoadError}).</div>}
             </div>
             {scheduleItems.length > 0 && (
@@ -2613,7 +2525,7 @@ const Waybills = ({ userProfile }) => {
                 <label style={styles.label}>Link to Schedule Item (today)</label>
                 <select style={styles.input} value={form.scheduleItemId} onChange={e => {
                   const item = scheduleItems.find(i => i.id === e.target.value);
-                  setForm(f => ({ ...f, scheduleItemId: e.target.value, ...(item ? { blockType: item.block_type, quantityLoaded: String(item.qty_scheduled) } : {}) }));
+                  setForm(f => ({ ...f, scheduleItemId: e.target.value, ...(item ? { blockType: item.block_type, batchId: "", quantityLoaded: String(item.qty_scheduled) } : {}) }));
                 }}>
                   <option value="">— Optional: link to today's approved schedule —</option>
                   {scheduleItems.map(i => <option key={i.id} value={i.id}>{i.customer?.name || "Customer"} · {i.block_type} · {Number(i.qty_scheduled).toLocaleString()} blocks</option>)}
@@ -2777,7 +2689,7 @@ const Waybills = ({ userProfile }) => {
                         generateWaybillPDF({ waybill_number: w.waybill_number, physical_waybill_number: w.physical_waybill_number || "", date: w.waybill_date, customer_name: w.receiver_name, customer_location: w.order?.customer?.location || "", block_type: w.block_type, quantity_loaded: w.quantity_loaded, batch_number: batchMap[w.batch_id] || "", driver_name: driver?.full_name || "", truck_number: w.truck_number || "", notes: w.notes || "" });
                       }}>PDF</button>
                       <button style={{ ...styles.btn("secondary"), padding: "4px 10px", fontSize: "12px" }} onClick={() => startEditWaybill(w)}>Edit</button>
-                      <button style={{ ...styles.btn("danger"), padding: "4px 10px", fontSize: "12px" }} onClick={() => setConfirmDelete(w)}>Delete</button>
+                      {userProfile?.role === "md" && <button style={{ ...styles.btn("danger"), padding: "4px 10px", fontSize: "12px" }} onClick={() => setConfirmDelete(w)}>Delete</button>}
                     </div>
                   </td>
                 </tr>
@@ -3376,9 +3288,9 @@ const Reports = ({ userProfile }) => <ReportsEngine userProfile={userProfile} />
 
 // ── INVENTORY ─────────────────────────────────────────────────
 const UNITS = ["bags", "kg", "litres", "units", "tonnes", "metres", "packs"];
-const ISSUED_TO = ["Production", "Maintenance", "Logistics", "Administration", "Other"];
+export const ISSUED_TO = ["Maintenance", "Logistics", "Administration", "Other"];
 
-const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
+export const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
   // Whoever is logged in is recorded as the person who entered the movement —
   // no free text, no override (deliberate accountability requirement).
   const recordedBy = userProfile?.full_name || userProfile?.email || null;
@@ -3408,13 +3320,13 @@ const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
   const today = new Date().toISOString().split("T")[0];
   const emptyItem = { name: "", unit: "bags", current_stock: "", reorder_level: "", unit_cost: "", supplier: "", date_added: today, site_id: DUTSE_SITE_ID, owner: "apcl", material: "" };
   const emptyIn  = { itemId: "", quantity: "", unit: "kg", unitCost: "", supplierId: "", supplier: "", date: today, notes: "" };
-  const emptyOut = { itemId: "", quantity: "", unit: "kg", issuedTo: "Production", reference: "", date: today, notes: "" };
+  const emptyOut = { itemId: "", quantity: "", unit: "kg", issuedTo: "Maintenance", reference: "", date: today, notes: "" };
 
   const [itemForm, setItemForm]   = useState(emptyItem);
   const [inForm,   setInForm]     = useState(emptyIn);
   const [outForm,  setOutForm]    = useState(emptyOut);
 
-  const load = async () => {
+  const load = async (strict = false) => {
     setLoading(true);
     try {
       const [its, sups] = await Promise.all([inventoryService.getAllItems(), suppliersService.getActive().catch(() => [])]);
@@ -3422,13 +3334,14 @@ const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
       setSuppliersList(sups);
       if (onLowStockChange) onLowStockChange(its.filter(i => Number(i.current_stock) <= Number(i.reorder_level)).length);
     } catch (e) {
+      if (strict) throw e;
       setAlert({ type: "error", msg: "Could not load inventory: " + e.message });
     } finally {
       setLoading(false);
     }
   };
 
-  const loadMovements = async () => {
+  const loadMovements = async (strict = false) => {
     try {
       const m = await inventoryService.getMovements({
         itemId: movFilter.itemId || null,
@@ -3438,6 +3351,7 @@ const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
       });
       setMovements(m);
     } catch (e) {
+      if (strict) throw e;
       setAlert({ type: "error", msg: "Could not load movements: " + e.message });
     }
   };
@@ -3448,23 +3362,27 @@ const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
   const lowStockItems = items.filter(i => Number(i.current_stock) <= Number(i.reorder_level));
   const { sites } = useSites();
 
-  const startEditItem = (item) => {
+  const [itemHistory, setItemHistory] = useState(null);
+  const startEditItem = async (item) => {
+    setItemHistory(null);
     setItemForm({ name: item.name, unit: item.unit, current_stock: String(item.current_stock), reorder_level: String(item.reorder_level), unit_cost: String(item.unit_cost || ""), supplier: item.supplier || "", date_added: item.date_added || item.created_at?.split("T")[0] || today, site_id: item.site_id || DUTSE_SITE_ID, owner: item.owner || "apcl", material: item.material || "" });
     setEditItem(item);
     setShowItemForm(true);
+    try { setItemHistory(await inventoryService.hasMovements(item.id)); }
+    catch (e) { setAlert({ type: "error", msg: "Could not check item stock history: " + e.message }); }
   };
 
   const handleSaveItem = async () => {
     if (!itemForm.name || !itemForm.unit) return setAlert({ type: "error", msg: "Item name and unit are required." });
     setSaving(true);
     try {
-      const payload = { name: itemForm.name, unit: itemForm.unit, current_stock: Number(itemForm.current_stock) || 0, reorder_level: Number(itemForm.reorder_level) || 0, unit_cost: Number(itemForm.unit_cost) || 0, supplier: itemForm.supplier || null, date_added: itemForm.date_added || today, site_id: itemForm.site_id || DUTSE_SITE_ID, owner: itemForm.owner || "apcl", material: itemForm.material || null };
+      const payload = { name: itemForm.name, unit: itemForm.unit, reorder_level: Number(itemForm.reorder_level) || 0, unit_cost: Number(itemForm.unit_cost) || 0, supplier: itemForm.supplier || null, date_added: itemForm.date_added || today, site_id: itemForm.site_id || DUTSE_SITE_ID, owner: itemForm.owner || "apcl", material: itemForm.material || null };
       if (editItem) {
         await inventoryService.updateItem(editItem.id, payload);
       } else {
         await inventoryService.createItem(payload);
       }
-      await load();
+      await load(true);
       setShowItemForm(false);
       setItemForm(emptyItem);
       setEditItem(null);
@@ -3486,7 +3404,7 @@ const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
     setConfirmDelete(null);
     try {
       await inventoryService.deleteItem(item.id);
-      await load();
+      await load(true);
       setAlert({ type: "success", msg: `${item.name} removed from registry.` });
     } catch (e) {
       setAlert({ type: "error", msg: "Failed to delete item. " + e.message });
@@ -3501,6 +3419,7 @@ const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
     if (inTarget && !isFactorySite(inTarget.site_id, sites)) return setAlert({ type: "error", msg: "Deliveries to a client site are recorded in Material Receiving, not Stock In." });
     if (suppliersList.length > 0 && !inForm.supplierId) return setAlert({ type: "error", msg: "Please select a supplier from the list." });
     setSaving(true);
+    let received = false;
     try {
       // Storage is always the item's base unit (kg). If the item is kg and the
       // user entered tonnes, convert to kg (× 1000, decimals preserved).
@@ -3508,21 +3427,21 @@ const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
       const qtyBase = (inItem?.unit === 'kg' && inForm.unit === 'tonnes') ? Number(inForm.quantity) * 1000 : Number(inForm.quantity);
       const supplierName = inForm.supplierId ? (suppliersList.find(s => s.id === inForm.supplierId)?.company_name || inForm.supplier) : inForm.supplier;
       const movement = await inventoryService.stockIn({ itemId: inForm.itemId, quantity: qtyBase, unitCost: Number(inForm.unitCost) || 0, supplier: supplierName, staffName: recordedBy, date: inForm.date, notes: inForm.notes });
+      received = true;
       if (inForm.supplierId && qtyBase > 0) {
         const totalCost = qtyBase * (Number(inForm.unitCost) || 0);
         if (totalCost > 0) {
           const item = items.find(i => i.id === inForm.itemId);
-          try {
-            await supplierTransactionsService.create({ supplier_id: inForm.supplierId, transaction_date: inForm.date, transaction_type: 'purchase', amount: totalCost, description: `Stock in: ${item?.name || 'item'} × ${qtyBase.toLocaleString()} ${item?.unit || ''}`.trim(), linked_stock_movement_id: movement?.id || null });
-          } catch { /* non-blocking */ }
+          await supplierTransactionsService.create({ supplier_id: inForm.supplierId, transaction_date: inForm.date, transaction_type: 'purchase', amount: totalCost, description: `Stock in: ${item?.name || 'item'} × ${qtyBase.toLocaleString()} ${item?.unit || ''}`.trim(), linked_stock_movement_id: movement?.id || null });
         }
       }
-      await load();
-      if (tab === "movements") await loadMovements();
+      await load(true);
+      if (tab === "movements") await loadMovements(true);
       setInForm(emptyIn);
       setAlert({ type: "success", msg: `Stock received${inForm.supplierId ? ' and supplier transaction recorded.' : '!'}` });
     } catch (e) {
-      setAlert({ type: "error", msg: "Failed to record stock in. " + e.message });
+      if (received) { setInForm(emptyIn); await load(); }
+      setAlert({ type: "error", msg: (received ? "Stock received, but a follow-up step failed. " : "Failed to record stock in. ") + e.message });
     } finally {
       setSaving(false);
     }
@@ -3536,9 +3455,9 @@ const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
       const outItem = items.find(i => i.id === outForm.itemId);
       const qtyBase = (outItem?.unit === 'kg' && outForm.unit === 'tonnes') ? Number(outForm.quantity) * 1000 : Number(outForm.quantity);
       await inventoryService.stockOut({ itemId: outForm.itemId, quantity: qtyBase, issuedTo: outForm.issuedTo, staffName: recordedBy, reference: outForm.reference, date: outForm.date, notes: outForm.notes });
-      await load();
-      if (tab === "movements") await loadMovements();
       setOutForm(emptyOut);
+      await load(true);
+      if (tab === "movements") await loadMovements(true);
       setAlert({ type: "success", msg: "Stock issued and inventory updated!" });
     } catch (e) {
       setAlert({ type: "error", msg: "Failed to record stock out. " + e.message });
@@ -3567,8 +3486,8 @@ const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
         ? { date: movEditForm.date, quantity: Number(movEditForm.quantity), unit_cost: Number(movEditForm.unitCost) || null, total_cost: Number(movEditForm.quantity) * (Number(movEditForm.unitCost) || 0) || null, supplier: movEditForm.supplier || null, staff_name: movEditForm.staffName || null, notes: movEditForm.notes || null }
         : { date: movEditForm.date, quantity: Number(movEditForm.quantity), issued_to: movEditForm.issuedTo || null, staff_name: movEditForm.staffName || null, notes: movEditForm.notes || null };
       await inventoryService.editMovement(movEditTarget.id, movEditTarget, newData);
-      await load();
-      await loadMovements();
+      await load(true);
+      await loadMovements(true);
       setMovEditTarget(null);
       setAlert({ type: "success", msg: "Movement updated and stock adjusted." });
     } catch (e) {
@@ -3587,8 +3506,8 @@ const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
         catch (e) { throw new Error(`The movement was not deleted because its linked supplier transaction could not be removed: ${e.message}. Nothing was changed.`); }
       }
       await inventoryService.deleteMovement(m.id, m);
-      await load();
-      await loadMovements();
+      await load(true);
+      await loadMovements(true);
       setAlert({ type: "success", msg: "Movement deleted and stock reversed." });
     } catch (e) {
       setAlert({ type: "error", msg: e.message });
@@ -3648,7 +3567,7 @@ const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
               <div key={i.id} style={{ background: "rgba(240,107,107,0.12)", border: `1px solid ${theme.red}55`, borderRadius: "6px", padding: "5px 10px", fontSize: "12px" }}>
                 <strong style={{ color: theme.red }}>{i.name}</strong>
                 <span style={{ color: theme.text, marginLeft: "6px" }}>@ {itemSiteLabel(i)}</span>
-                <span style={{ color: theme.textMuted, marginLeft: "6px" }}>{Number(i.current_stock).toLocaleString()} {i.unit} left (min: {Number(i.reorder_level).toLocaleString()})</span>
+                <span style={{ color: Number(i.current_stock) < 0 ? theme.red : theme.textMuted, marginLeft: "6px" }}>{Number(i.current_stock) < 0 ? "Shortage: " : ""}{Number(i.current_stock).toLocaleString()} {i.unit} left (min: {Number(i.reorder_level).toLocaleString()})</span>
               </div>
             ))}
           </div>
@@ -3681,7 +3600,7 @@ const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
               <div className="m-form" style={styles.grid(3)}>
                 <div style={styles.formGroup}>
                   <label style={styles.label}>Site *</label>
-                  <SitePicker value={itemForm.site_id} onChange={v => setItemForm({ ...itemForm, site_id: v })} style={styles.input} />
+                  <SitePicker disabled={!!editItem && itemHistory !== false} value={itemForm.site_id} onChange={v => setItemForm({ ...itemForm, site_id: v })} style={styles.input} />
                 </div>
                 <div style={styles.formGroup}>
                   <label style={styles.label}>Owner *</label>
@@ -3706,13 +3625,14 @@ const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
                 </div>
                 <div style={styles.formGroup}>
                   <label style={styles.label}>Unit of Measure *</label>
-                  <select style={styles.input} value={itemForm.unit} onChange={e => setItemForm({ ...itemForm, unit: e.target.value })}>
+                  <select disabled={!!editItem && itemHistory !== false} style={styles.input} value={itemForm.unit} onChange={e => setItemForm({ ...itemForm, unit: e.target.value })}>
                     {UNITS.map(u => <option key={u}>{u}</option>)}
                   </select>
                 </div>
                 <div style={styles.formGroup}>
                   <label style={styles.label}>Current Stock</label>
-                  <input style={styles.input} type="number" inputMode="decimal" placeholder="0" value={itemForm.current_stock} onChange={e => setItemForm({ ...itemForm, current_stock: e.target.value })} />
+                  <div style={{ ...styles.input, color: Number(itemForm.current_stock) < 0 ? theme.red : theme.textMuted }}>{Number(itemForm.current_stock || 0).toLocaleString()}{Number(itemForm.current_stock) < 0 ? " — Shortage" : ""}</div>
+                  <div style={{ fontSize: "12px", color: theme.textMuted }}>Record stock through Stock In or Stock Out.</div>
                 </div>
                 <div style={styles.formGroup}>
                   <label style={styles.label}>Reorder Level</label>
@@ -3731,6 +3651,7 @@ const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
                   <input style={styles.input} type="date" value={itemForm.date_added} onChange={e => setItemForm({ ...itemForm, date_added: e.target.value })} />
                 </div>
               </div>
+              {editItem && itemHistory === true && <div style={{ fontSize: "12px", color: theme.textMuted, marginBottom: "12px" }}>Locked — this item has stock history. Create a new item instead.</div>}
               <div className="m-buttons" style={styles.row}>
                 <button style={styles.btn("primary")} onClick={handleSaveItem} disabled={saving}>{saving ? "Saving…" : editItem ? "Update Item" : "Add to Registry"}</button>
                 <button style={styles.btn("secondary")} onClick={() => { setShowItemForm(false); setEditItem(null); setItemForm(emptyItem); }}>Cancel</button>
@@ -3764,7 +3685,7 @@ const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
                         <td style={styles.td}>{itemSiteLabel(item)}</td>
                         <td style={styles.td}>{item.material || "—"}</td>
                         <td style={styles.td}>{item.unit}</td>
-                        <td className="m-key" style={styles.td}><strong style={{ color: isLow ? theme.red : theme.accent }}>{Number(item.current_stock).toLocaleString()}</strong></td>
+                        <td className="m-key" style={styles.td}><strong style={{ color: isLow ? theme.red : theme.accent }}>{Number(item.current_stock).toLocaleString()}{Number(item.current_stock) < 0 ? " — Shortage" : ""}</strong></td>
                         <td style={styles.td}>{Number(item.reorder_level).toLocaleString()}</td>
                         <td style={styles.td}>₦{Number(item.unit_cost || 0).toLocaleString()}</td>
                         <td style={styles.td}>{item.owner === "client" ? <span style={{ color: theme.textMuted }}>Client's stock</span> : <strong style={{ color: theme.accent }}>₦{Math.round(value).toLocaleString()}</strong>}</td>
@@ -3916,6 +3837,7 @@ const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
               <input style={styles.input} placeholder="Optional notes" value={outForm.notes} onChange={e => setOutForm({ ...outForm, notes: e.target.value })} />
             </div>
           </div>
+          <div style={{ fontSize: "12px", color: theme.textMuted, marginBottom: "12px" }}>Materials used in production are deducted automatically when production is recorded.</div>
           <div className="m-buttons" style={styles.row}>
             <button style={styles.btn("primary")} onClick={handleStockOut} disabled={saving}>{saving ? "Recording…" : "Record Stock Out"}</button>
             <button style={styles.btn("secondary")} onClick={() => setOutForm(emptyOut)}>Clear</button>
@@ -4043,7 +3965,9 @@ const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
                         <td style={styles.td}>{m.staff_name || "—"}</td>
                         <td style={styles.td}><span style={{ fontSize: "12px", color: theme.textMuted }}>{m.notes || ""}</span></td>
                         <td className="m-actions" style={styles.td}>
-                          {isAuto ? (
+                          {m.reference?.startsWith("RCPT-") ? (
+                            <span style={{ fontSize: "12px", color: theme.textMuted }}>From delivery record — void it in Material Receiving</span>
+                          ) : isAuto ? (
                             <span style={{ fontSize: "12px", color: theme.textMuted, fontStyle: "italic" }}>Auto — edit via Production Log</span>
                           ) : canWriteMovement ? (
                             <div style={{ display: "flex", gap: "8px" }}>
@@ -4802,9 +4726,10 @@ const ScheduleApprovals = () => {
 };
 
 // ── BATCHES ────────────────────────────────────────────────────
-const Batches = ({ userProfile }) => {
+export const Batches = ({ userProfile }) => {
   const [batches, setBatches] = useState([]);
   const [productions, setProductions] = useState([]);
+  const [siteYard, setSiteYard] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [alert, setAlert] = useState(null);
@@ -4834,13 +4759,14 @@ const Batches = ({ userProfile }) => {
   const { sites } = useSites();
   const [siteFilter, setSiteFilter] = useState("");
 
-  const load = async () => {
+  const load = async (strict = false) => {
     setLoading(true);
     try {
-      const [b, p] = await Promise.all([batchesService.getAll(), productionService.getAll()]);
+      const [b, p, yard] = await Promise.all([batchesService.getAll(), productionService.getAll(), siteContractsService.listYard()]);
       setBatches(b);
       setProductions(p);
-    } catch (e) { setAlert({ type: "error", msg: "Could not load batches: " + e.message }); }
+      setSiteYard(yard);
+    } catch (e) { if (strict) throw e; setAlert({ type: "error", msg: "Could not load batches: " + e.message }); }
     finally { setLoading(false); }
     // Products power the block-type dropdown and the curing standard per batch.
     // Loaded separately and non-blocking: a failure here must not break the
@@ -4868,33 +4794,30 @@ const Batches = ({ userProfile }) => {
     setSaving(true);
     try {
       const siteId = form.siteId || DUTSE_SITE_ID;
-      // Adds to Dutse yard stock only for a factory batch (Phase 7A).
-      const { batchNumber, yardUpdated, yardError } = await batchesService.createBatch({
+      // The database moves stock in the same transaction as the batch insert.
+      const { batchNumber } = await batchesService.createBatch({
         batch: {
           site_id: siteId, product_id: form.productId || null, block_type: form.blockType, date_cured: form.dateCured,
-          qty_accepted: parseInt(form.qtyAccepted), qty_remaining: parseInt(form.qtyAccepted),
-          status: "active", notes: form.notes || null, created_by: form.createdBy || null,
+          qty_accepted: parseInt(form.qtyAccepted),
+          notes: form.notes || null, created_by: form.createdBy || null,
         },
         productionLogIds: form.linkedProds,
         sites,
       });
-      await load();
       setShowForm(false);
       setForm(emptyForm);
-      if (yardError) {
-        setAlert({ type: "error", msg: `Batch ${batchNumber} created, but Dutse yard stock could not be updated (${yardError.message}). Adjust finished goods manually.` });
-      } else if (yardUpdated) {
-        setAlert({ type: "success", msg: `Batch ${batchNumber} created. Finished goods stock updated.` });
-      } else {
-        setAlert({ type: "success", msg: `Batch ${batchNumber} recorded at ${siteName(siteId, sites)}. Not added to Dutse yard stock.` });
-      }
-    } catch (e) { setAlert({ type: "error", msg: "Failed to create batch: " + e.message }); }
+      await load(true);
+      setAlert({ type: "success", msg: `Batch ${batchNumber} recorded at ${siteName(siteId, sites)}.` });
+    } catch (e) {
+      if (e.batchCreated) { setShowForm(false); setForm(emptyForm); await load(); }
+      setAlert({ type: "error", msg: e.message });
+    }
     finally { setSaving(false); }
   };
 
   const startEdit = (b) => {
     setEditTarget(b);
-    setEditForm({ blockType: b.block_type, dateCured: b.date_cured, qtyAccepted: String(b.qty_accepted), createdBy: b.created_by || "", notes: b.notes || "" });
+    setEditForm({ siteId: b.site_id || DUTSE_SITE_ID, blockType: b.block_type, dateCured: b.date_cured, qtyAccepted: String(b.qty_accepted), createdBy: b.created_by || "", notes: b.notes || "" });
     setExpandedId(null);
   };
 
@@ -4902,25 +4825,16 @@ const Batches = ({ userProfile }) => {
     if (!editForm.qtyAccepted || !editForm.dateCured) return setAlert({ type: "error", msg: "Quantity and date are required." });
     setSaving(true);
     try {
-      const oldQty = Number(editTarget.qty_accepted);
-      const newQty = parseInt(editForm.qtyAccepted);
-      const diff = newQty - oldQty;
-      const newRemaining = Math.max(0, Number(editTarget.qty_remaining) + diff);
       await batchesService.update(editTarget.id, {
+        site_id: editForm.siteId,
         block_type: editForm.blockType,
+        product_id: editForm.blockType === editTarget.block_type ? editTarget.product_id || null : products.find(p => p.name === editForm.blockType)?.id || null,
         date_cured: editForm.dateCured,
-        qty_accepted: newQty,
-        qty_remaining: newRemaining,
-        status: newRemaining === 0 ? "exhausted" : "active",
+        qty_accepted: parseInt(editForm.qtyAccepted),
         created_by: editForm.createdBy || null,
         notes: editForm.notes || null,
       });
-      if (diff !== 0) {
-        // Yard stock only moves for a factory batch; a client-site batch is skipped.
-        try { await batchesService.adjustYardStock(editTarget.site_id, sites, editForm.blockType, diff); }
-        catch (e) { console.error("Finished goods (yard) adjustment failed on batch edit:", e); }
-      }
-      await load();
+      await load(true);
       setEditTarget(null);
       setAlert({ type: "success", msg: "Batch updated." });
     } catch (e) { setAlert({ type: "error", msg: "Failed to update: " + e.message }); }
@@ -4931,10 +4845,8 @@ const Batches = ({ userProfile }) => {
     // Confirmed in-app first (ConfirmDialog below, opened via setConfirmDel).
     setDeleting(b.id);
     try {
-      try { await batchesService.adjustYardStock(b.site_id, sites, b.block_type, -Number(b.qty_remaining)); }
-      catch (e) { console.error("Finished goods (yard) adjustment failed on batch delete:", e); }
       await batchesService.delete(b.id);
-      await load();
+      await load(true);
       setAlert({ type: "success", msg: `Batch ${b.batch_number} deleted.` });
     } catch (e) { setAlert({ type: "error", msg: "Failed to delete: " + e.message }); }
     finally { setDeleting(null); }
@@ -4961,11 +4873,8 @@ const Batches = ({ userProfile }) => {
         notes: dmgForm.notes || null,
         recorded_by: userProfile?.id || null,
       });
-      await batchesService.reduceStock(dmgTarget.id, qty);
-      try { await batchesService.adjustYardStock(dmgTarget.site_id, sites, dmgTarget.block_type, -qty); }
-      catch (e) { console.error("Finished goods (yard) adjustment failed on batch damage:", e); }
-      await load();
       setDmgTarget(null);
+      await load(true);
       setAlert({ type: "success", msg: `${qty} damaged block(s) logged against ${dmgTarget.batch_number}.` });
     } catch (e) { setAlert({ type: "error", msg: "Failed to log damage: " + e.message }); }
     finally { setDmgSaving(false); }
@@ -4975,7 +4884,7 @@ const Batches = ({ userProfile }) => {
     setCuringId(b.id);
     try {
       await batchesService.markCured(b.id, userProfile?.id || null);
-      await load();
+      await load(true);
       setAlert({ type: "success", msg: `Batch ${b.batch_number} marked as cured.` });
     } catch (e) { setAlert({ type: "error", msg: "Failed to mark cured: " + e.message }); }
     finally { setCuringId(null); }
@@ -4995,10 +4904,22 @@ const Batches = ({ userProfile }) => {
   };
 
   // Only production from the batch's own site can be linked to it.
-  const filteredProds = productions.filter(p => p.block_type === form.blockType && p.site_id === (form.siteId || DUTSE_SITE_ID));
+  const linkedIds = new Set(batches.flatMap(b => (b.links || []).map(l => l.production_log_id)));
+  const filteredProds = productions.filter(p => !linkedIds.has(p.id) && p.block_type === form.blockType && p.site_id === (form.siteId || DUTSE_SITE_ID));
   const shownBatches = siteFilter ? batches.filter(b => b.site_id === siteFilter) : batches;
   const scopeLabel = siteFilter ? siteName(siteFilter, sites) : "All sites";
-  const totalInYard = shownBatches.filter(b => b.status === "active").reduce((s, b) => s + Number(b.qty_remaining || 0), 0);
+  const remainingFor = (b) => isFactorySite(b.site_id, sites)
+    ? Number(b.qty_remaining || 0)
+    : Number(siteYard.find(y => y.site_id === b.site_id && y.block_type === b.block_type)?.in_yard || 0);
+  // Site yard is shared by all batches of a product: count it once per site/product.
+  const clientKeys = new Set();
+  const totalInYard = shownBatches.reduce((sum, b) => {
+    if (isFactorySite(b.site_id, sites)) return sum + remainingFor(b);
+    const key = `${b.site_id}:${b.block_type}`;
+    if (clientKeys.has(key)) return sum;
+    clientKeys.add(key);
+    return sum + remainingFor(b);
+  }, 0);
 
   return (
     <div>
@@ -5025,6 +4946,7 @@ const Batches = ({ userProfile }) => {
             <div style={{ fontWeight: "700", fontSize: "15px", marginBottom: "4px" }}>Edit Batch — {editTarget.batch_number}</div>
             <div style={{ fontSize: "12px", color: theme.textMuted, marginBottom: "18px" }}>Site: {siteName(editTarget.site_id, sites)}{isFactorySite(editTarget.site_id, sites) ? "" : " · not in Dutse yard stock"}</div>
             <div className="m-form" style={styles.grid(2)}>
+              <div style={styles.formGroup}><label style={styles.label}>Site</label><SitePicker value={editForm.siteId} onChange={v => setEditForm({ ...editForm, siteId: v })} style={styles.input} /></div>
               <div style={styles.formGroup}><label style={styles.label}>Block Type</label><ProductSelect value={editForm.blockType} onChange={(name) => setEditForm(f => ({ ...f, blockType: name }))} style={styles.input} /></div>
               <div style={styles.formGroup}><label style={styles.label}>Batch Date *</label><input style={styles.input} type="date" value={editForm.dateCured} onChange={e => setEditForm(f => ({ ...f, dateCured: e.target.value }))} /></div>
               <div style={styles.formGroup}><label style={styles.label}>Qty Accepted *</label><input style={styles.input} type="number" inputMode="numeric" value={editForm.qtyAccepted} onChange={e => setEditForm(f => ({ ...f, qtyAccepted: e.target.value }))} /></div>
@@ -5049,7 +4971,7 @@ const Batches = ({ userProfile }) => {
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: Z.modal, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
           <div style={{ background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: "12px", padding: "24px", width: "100%", maxWidth: "460px" }}>
             <div style={{ fontWeight: "700", fontSize: "15px", marginBottom: "4px" }}>Log Curing/Yard Damage</div>
-            <div style={{ fontSize: "12px", color: theme.textMuted, marginBottom: "18px" }}>Batch {dmgTarget.batch_number} · {dmgTarget.block_type} · {Number(dmgTarget.qty_remaining).toLocaleString()} remaining</div>
+            <div style={{ fontSize: "12px", color: theme.textMuted, marginBottom: "18px" }}>Batch {dmgTarget.batch_number} · {dmgTarget.block_type} · <span style={{ color: remainingFor(dmgTarget) < 0 ? theme.red : theme.textMuted }}>{remainingFor(dmgTarget).toLocaleString()}{remainingFor(dmgTarget) < 0 ? " — Shortage" : ""}</span> {isFactorySite(dmgTarget.site_id, sites) ? "remaining" : "Site yard (after handovers)"}</div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Quantity Damaged *</label>
               <input style={styles.input} type="number" inputMode="numeric" min="1" placeholder="e.g. 30" value={dmgForm.qty} onChange={e => setDmgForm(f => ({ ...f, qty: e.target.value }))} />
@@ -5077,7 +4999,7 @@ const Batches = ({ userProfile }) => {
 
       <div className="m-grid" style={styles.grid(3)}>
         <StatCard label="Active Batches" value={shownBatches.filter(b => b.status === "active").length} sub={`With stock remaining · ${scopeLabel}`} accent={theme.green} />
-        <StatCard label="Blocks Remaining" value={fmt(totalInYard)} sub={`Across active batches · ${scopeLabel}`} accent={theme.accent} />
+        <StatCard label="Blocks Remaining" value={<span style={{ color: totalInYard < 0 ? theme.red : theme.text }}>{fmt(totalInYard)}{totalInYard < 0 ? " — Shortage" : ""}</span>} sub={`Factory remaining + client site yards · ${scopeLabel}`} accent={totalInYard < 0 ? theme.red : theme.accent} />
         <StatCard label="Exhausted Batches" value={shownBatches.filter(b => b.status === "exhausted").length} sub={`Fully delivered · ${scopeLabel}`} accent={theme.textMuted} />
       </div>
 
@@ -5126,7 +5048,7 @@ const Batches = ({ userProfile }) => {
                 {filteredProds.map(p => {
                   const linked = form.linkedProds.includes(p.id);
                   return (
-                    <div key={p.id} onClick={() => toggleProdLink(p.id)} style={{ padding: "5px 10px", borderRadius: "6px", fontSize: "12px", cursor: "pointer", border: `1px solid ${linked ? theme.accent : theme.border}`, background: linked ? "rgba(245,166,35,0.08)" : "transparent", color: linked ? theme.accent : theme.textMuted }}>
+                    <div key={p.id} onClick={() => toggleProdLink(p.id)} style={{ minHeight: "44px", display: "flex", alignItems: "center", padding: "5px 10px", borderRadius: "6px", fontSize: "12px", cursor: "pointer", border: `1px solid ${linked ? theme.accent : theme.border}`, background: linked ? "rgba(245,166,35,0.08)" : "transparent", color: linked ? theme.accent : theme.textMuted }}>
                       {fmtDate(p.date)} · {p.block_type} · {p.quantity_produced?.toLocaleString()} blocks
                     </div>
                   );
@@ -5149,8 +5071,11 @@ const Batches = ({ userProfile }) => {
         {loading ? <Spinner /> : shownBatches.length === 0 ? (
           <div style={{ textAlign: "center", padding: "40px", color: theme.textMuted }}>{batches.length === 0 ? "No batches created yet." : `No batches at ${scopeLabel}.`}</div>
         ) : shownBatches.map(b => {
-          const delivered = b.qty_accepted - b.qty_remaining;
-          const pct = b.qty_accepted > 0 ? Math.round((delivered / b.qty_accepted) * 100) : 0;
+          const factory = isFactorySite(b.site_id, sites);
+          const remaining = remainingFor(b);
+          const balanceLabel = factory ? "Remaining" : "Site yard (after handovers)";
+          const delivered = factory ? b.qty_accepted - b.qty_remaining : null;
+          const pct = factory && b.qty_accepted > 0 ? Math.round((delivered / b.qty_accepted) * 100) : 0;
           const isOpen = expandedId === b.id;
           const ci = curingInfo(b);
           return (
@@ -5173,7 +5098,7 @@ const Batches = ({ userProfile }) => {
                 <div className="m-col" style={{ textAlign: "right", display: "flex", gap: "8px", alignItems: "center" }}>
                   <div>
                     <div style={{ fontSize: "13px" }}>Accepted: <strong style={{ color: theme.accent }}>{Number(b.qty_accepted).toLocaleString()}</strong></div>
-                    <div style={{ fontSize: "13px" }}>Remaining: <strong style={{ color: b.status === "active" ? theme.green : theme.textMuted }}>{Number(b.qty_remaining).toLocaleString()}</strong></div>
+                    <div style={{ fontSize: "13px" }}>{balanceLabel}: <strong style={{ color: remaining < 0 ? theme.red : theme.green }}>{remaining.toLocaleString()}{remaining < 0 ? " — Shortage" : ""}</strong></div>
                   </div>
                   <div className="m-buttons" style={{ display: "flex", gap: "8px" }} onClick={e => e.stopPropagation()}>
                     {canWriteBatch && ci && ci.state === "curing" && ci.ready && (
@@ -5191,15 +5116,15 @@ const Batches = ({ userProfile }) => {
                 <div style={{ padding: "12px 16px", borderTop: `1px solid ${theme.border}`, background: theme.surface }}>
                   <div style={{ fontSize: "12px", fontWeight: "700", color: theme.textMuted, marginBottom: "10px", textTransform: "uppercase", letterSpacing: "0.05em" }}>Batch Reconciliation</div>
                   <div className="m-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: "10px", marginBottom: "12px" }}>
-                    {[["Total Accepted", b.qty_accepted, theme.accent], ["Total Delivered", delivered, theme.green], ["Remaining in Batch", b.qty_remaining, b.status === "active" ? theme.blue : theme.textMuted], ["Delivery Rate", pct + "%", theme.green]].map(([label, val, color]) => (
+                    {[["Total Accepted", b.qty_accepted, theme.accent], ...(factory ? [["Total Delivered", delivered, theme.green]] : []), [balanceLabel, remaining, remaining < 0 ? theme.red : theme.blue], ...(factory ? [["Delivery Rate", pct + "%", theme.green]] : [])].map(([label, val, color]) => (
                       <div key={label} style={{ background: theme.card, borderRadius: "6px", padding: "10px 12px" }}>
                         <div style={{ fontSize: "12px", color: theme.textMuted }}>{label}</div>
-                        <div style={{ fontSize: "18px", fontWeight: "700", color }}>{Number(val).toLocaleString()}</div>
+                        <div style={{ fontSize: "18px", fontWeight: "700", color }}>{typeof val === "number" ? val.toLocaleString() : val}{typeof val === "number" && val < 0 ? " — Shortage" : ""}</div>
                       </div>
                     ))}
                   </div>
-                  <div style={styles.progressBar()}><div style={styles.progressFill(pct, theme.green)} /></div>
-                  <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "4px" }}>{pct}% of batch delivered</div>
+                  {factory && <><div style={styles.progressBar()}><div style={styles.progressFill(pct, theme.green)} /></div>
+                  <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "4px" }}>{pct}% of batch delivered</div></>}
                   {(b.links || []).length > 0 && (
                     <div style={{ marginTop: "12px" }}>
                       <div style={{ fontSize: "11px", fontWeight: "700", color: theme.textMuted, marginBottom: "6px", textTransform: "uppercase" }}>Linked Production Entries ({b.links.length})</div>
