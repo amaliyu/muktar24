@@ -1,3 +1,5 @@
+import { deleteWhere } from '../utils/checkedDelete'
+import { checkedWrite } from '../utils/checkedWrite'
 import { supabase } from '../lib/supabase'
 
 export const NIGERIAN_BANKS = [
@@ -290,20 +292,20 @@ export const truckLoadingService = {
   },
 
   async syncLoaders(loadingLogId, loaderIds) {
-    await supabase.from('truck_loading_loaders').delete().eq('loading_log_id', loadingLogId)
+    await deleteWhere(supabase, 'truck_loading_loaders', 'loading_log_id', loadingLogId)
     if (loaderIds.length > 0) {
-      const { error } = await supabase.from('truck_loading_loaders')
-        .insert(loaderIds.map(lid => ({ loading_log_id: loadingLogId, labour_id: lid })))
-      if (error) throw error
+      checkedWrite(await supabase.from('truck_loading_loaders')
+        .insert(loaderIds.map(lid => ({ loading_log_id: loadingLogId, labour_id: lid }))).select('id'), loaderIds.length)
     }
   },
 
   async getLogByWaybill(waybillId) {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('truck_loading_log')
       .select('id')
       .eq('waybill_id', waybillId)
       .maybeSingle()
+    if (error) throw error
     return data
   },
 }

@@ -5,7 +5,7 @@ vi.mock('../lib/supabase', async () => {
   const { createSupabaseMock } = await import('../test/supabaseMock')
   const mock = createSupabaseMock((table, ops) => {
     if (table === 'inventory_items' && ops[0][0] === 'select') return { data: state.items, error: null }
-    return { data: null, error: null }
+    return { data: [{ id: "movement" }], error: null }
   })
   state.calls = mock.calls
   return { supabase: mock.supabase }
@@ -46,11 +46,9 @@ describe('inventoryService.autoDeductProduction (site + material)', () => {
       date: '2026-10-26', reference: 'PROD-abcd1234',
     })
     expect(res.missing).toEqual([])
-    expect(itemUpdates()).toEqual([
-      expect.objectContaining({ id: 'd-cement', current_stock: 490 }),
-      expect.objectContaining({ id: 'd-dust', current_stock: 8800 }),
-      expect.objectContaining({ id: 'd-chip', current_stock: 3900 }),
-      expect.objectContaining({ id: 'd-diesel', current_stock: 295 }),
+    expect(itemUpdates()).toEqual([])
+    expect(movementInserts().map(m => [m.item_id, m.quantity])).toEqual([
+      ['d-cement', 10], ['d-dust', 200], ['d-chip', 100], ['d-diesel', 5],
     ])
     for (const m of movementInserts()) {
       expect(m).toMatchObject({ site_id: DUTSE, movement_type: 'out', reference: 'PROD-abcd1234' })
@@ -64,11 +62,7 @@ describe('inventoryService.autoDeductProduction (site + material)', () => {
     })
     // chippings had qty 0, so it is neither deducted nor reported
     expect(res.missing).toEqual(['dust', 'diesel'])
-    const touched = itemUpdates().map(u => u.id)
-    expect(touched).toEqual(['k-cement'])
-    expect(touched).not.toContain('d-dust')
-    expect(touched).not.toContain('d-diesel')
-    expect(touched).not.toContain('k-diesel-untagged')
+    expect(itemUpdates()).toEqual([])
     expect(movementInserts()).toHaveLength(1)
     expect(movementInserts()[0]).toMatchObject({ item_id: 'k-cement', site_id: KADO, quantity: 20 })
   })

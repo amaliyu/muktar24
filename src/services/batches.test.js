@@ -11,12 +11,7 @@ vi.mock('../lib/supabase', async () => {
   state.calls = mock.calls
   return { supabase: mock.supabase }
 })
-vi.mock('./finishedGoods', () => ({
-  finishedGoodsService: { increase: vi.fn(), decrease: vi.fn() },
-}))
-
 import { batchesService } from './batches'
-import { finishedGoodsService } from './finishedGoods'
 
 const DUTSE = '00000000-0000-4000-8000-000000000001'
 const KADO = '00000000-0000-4000-8000-000000000002'
@@ -29,33 +24,30 @@ const batch = (siteId) => ({
   qty_accepted: 2500, qty_remaining: 2500, status: 'active', notes: null, created_by: null,
 })
 
-describe('batchesService.createBatch — Dutse yard stock', () => {
-  beforeEach(() => vi.clearAllMocks())
+describe('batchesService.createBatch — database owns stock', () => {
+  beforeEach(() => { vi.clearAllMocks(); state.calls.length = 0 })
 
-  it('adds a Dutse (factory) batch to finished goods stock', async () => {
+  it('inserts a factory batch without any yard balance write', async () => {
     const res = await batchesService.createBatch({ batch: batch(DUTSE), sites: SITES })
-    expect(finishedGoodsService.increase).toHaveBeenCalledWith('9 Inch 3 Hole Block', 2500)
-    expect(res).toMatchObject({ batchNumber: 'APC-BATCH-008', yardUpdated: true, yardError: null })
+    expect(res).toMatchObject({ batchNumber: 'APC-BATCH-008', batch: { site_id: DUTSE } })
+    expect(state.calls.every(c => c.table === 'batches')).toBe(true)
   })
 
-  it('skips finished goods stock for a client-site batch', async () => {
+  it('inserts a client-site batch without any yard balance write', async () => {
     const res = await batchesService.createBatch({ batch: batch(KADO), sites: SITES })
-    expect(finishedGoodsService.increase).not.toHaveBeenCalled()
-    expect(finishedGoodsService.decrease).not.toHaveBeenCalled()
-    expect(res).toMatchObject({ yardUpdated: false, yardError: null })
     expect(res.batch).toMatchObject({ site_id: KADO })
+    expect(state.calls.every(c => c.table === 'batches')).toBe(true)
   })
 
-  it('treats the Dutse id as factory even before sites have loaded', async () => {
+  it('does not need loaded sites to create a factory batch', async () => {
     await batchesService.createBatch({ batch: batch(DUTSE), sites: [] })
-    expect(finishedGoodsService.increase).toHaveBeenCalledTimes(1)
+    expect(state.calls.filter(c => c.ops[0][0] === 'insert')).toHaveLength(1)
   })
 
-  it('adjustYardStock skips a client site on edit and decreases for Dutse', async () => {
-    expect(await batchesService.adjustYardStock(KADO, SITES, '6 Inch Block', -100)).toBe(false)
-    expect(finishedGoodsService.decrease).not.toHaveBeenCalled()
-    expect(await batchesService.adjustYardStock(DUTSE, SITES, '6 Inch Block', -100)).toBe(true)
-    expect(finishedGoodsService.decrease).toHaveBeenCalledWith('6 Inch Block', 100)
+  it('exposes no app-side batch balance mutators', () => {
+    expect(batchesService.adjustYardStock).toBeUndefined()
+    expect(batchesService.restoreStock).toBeUndefined()
+    expect(batchesService.reduceStock).toBeUndefined()
   })
 })
 

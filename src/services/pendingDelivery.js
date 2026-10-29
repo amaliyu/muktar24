@@ -1,3 +1,4 @@
+import { checkedWrite } from '../utils/checkedWrite'
 import { supabase } from '../lib/supabase'
 import { waybillsService } from './deliveries'
 
@@ -27,17 +28,18 @@ export const pendingDeliveryService = {
       .insert(entry)
       .select()
       .single()
-    if (error) throw error
+    checkedWrite({ data, error })
     return data
   },
 
   async updateDelivered(id, additionalQty) {
-    const { data: current } = await supabase
+    const { data: current, error: fetchError } = await supabase
       .from('pending_delivery_register')
       .select('delivered_qty, total_qty')
       .eq('id', id)
       .single()
 
+    if (fetchError) throw fetchError
     const newDelivered = (Number(current?.delivered_qty) || 0) + additionalQty
     const newRemaining = Math.max(0, (Number(current?.total_qty) || 0) - newDelivered)
     const newStatus = newRemaining === 0 ? 'completed' : 'partially_delivered'
@@ -48,16 +50,17 @@ export const pendingDeliveryService = {
       .eq('id', id)
       .select()
       .single()
-    if (error) throw error
+    checkedWrite({ data, error })
     return data
   },
 
   async setDelivered(id, deliveredQty) {
-    const { data: current } = await supabase
+    const { data: current, error: fetchError } = await supabase
       .from('pending_delivery_register')
       .select('total_qty')
       .eq('id', id)
       .single()
+    if (fetchError) throw fetchError
     const delivered = Math.max(0, Number(deliveredQty) || 0)
     const remaining = Math.max(0, (Number(current?.total_qty) || 0) - delivered)
     const status = remaining === 0 ? 'completed' : delivered > 0 ? 'partially_delivered' : 'awaiting_schedule'
@@ -67,7 +70,7 @@ export const pendingDeliveryService = {
       .eq('id', id)
       .select()
       .single()
-    if (error) throw error
+    checkedWrite({ data, error })
     return data
   },
 
@@ -85,7 +88,6 @@ export const pendingDeliveryService = {
     const delivered = waybills
       .filter(w => w.block_type === entry.block_type)
       .reduce((s, w) => s + (Number(w.quantity_received) || 0), 0)
-    if (delivered === 0) return null // nothing linked, skip
     return pendingDeliveryService.setDelivered(entry.id, delivered)
   },
 

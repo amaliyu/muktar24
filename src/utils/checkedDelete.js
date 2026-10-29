@@ -25,10 +25,10 @@ export async function deleteWhere(client, table, column, value) {
 }
 
 // Delete exactly one row by id; throws unless that row was removed.
-export async function deleteById(client, table, id) {
+export async function deleteById(client, table, id, emptyMessage) {
   const { data, error } = await client.from(table).delete().eq('id', id).select('id')
   if (error) throw error
-  if (!data?.length) throw new Error('nothing was removed — you may not have permission to delete it, or it was already deleted')
+  if (!data?.length) throw new Error(emptyMessage || 'nothing was removed — you may not have permission to delete it, or it was already deleted')
   return data.length
 }
 

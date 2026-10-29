@@ -1,4 +1,6 @@
 import { supabase } from '../lib/supabase'
+import { deleteById, deleteWhere } from '../utils/checkedDelete'
+import { checkedWrite } from '../utils/checkedWrite'
 
 export const inventoryService = {
   async getAllItems() {
@@ -21,9 +23,9 @@ export const inventoryService = {
     const { data, error } = await supabase
       .from('inventory_items')
       .insert({ ...item, updated_at: new Date().toISOString() })
-      .select()
+      .select('id')
       .single()
-    if (error) throw error
+    checkedWrite({ data, error })
     return data
   },
 
@@ -32,15 +34,14 @@ export const inventoryService = {
       .from('inventory_items')
       .update({ ...updates, updated_at: new Date().toISOString() })
       .eq('id', id)
-      .select()
+      .select('id')
       .single()
-    if (error) throw error
+    checkedWrite({ data, error })
     return data
   },
 
   async deleteItem(id) {
-    const { error } = await supabase.from('inventory_items').delete().eq('id', id)
-    if (error) throw error
+    return deleteById(supabase, 'inventory_items', id)
   },
 
   async getMovements({ itemId = null, siteId = null, from = null, to = null } = {}) {
@@ -58,18 +59,17 @@ export const inventoryService = {
     return data || []
   },
 
-  async stockIn({ itemId, quantity, unitCost, supplier, staffName, date, notes }) {
-    const { data: item, error: fetchErr } = await supabase
-      .from('inventory_items')
-      .select('current_stock')
-      .eq('id', itemId)
-      .single()
-    if (fetchErr) throw fetchErr
+  async hasMovements(itemId) {
+    const { data, error } = await supabase.from('stock_movements').select('id').eq('item_id', itemId).limit(1)
+    if (error) throw error
+    return !!data?.length
+  },
 
-    const newStock = (Number(item.current_stock) || 0) + Number(quantity)
-    await supabase.from('inventory_items')
-      .update({ current_stock: newStock, unit_cost: Number(unitCost) || 0, supplier: supplier || null, updated_at: new Date().toISOString() })
-      .eq('id', itemId)
+  async stockIn({ itemId, quantity, unitCost, supplier, staffName, date, notes }) {
+    const metadata = await supabase.from('inventory_items')
+      .update({ unit_cost: Number(unitCost) || 0, supplier: supplier || null, updated_at: new Date().toISOString() })
+      .eq('id', itemId).select('id')
+    checkedWrite(metadata)
 
     const { data, error } = await supabase.from('stock_movements')
       .insert({
@@ -81,25 +81,13 @@ export const inventoryService = {
         staff_name: staffName || null,
         date, notes: notes || null,
       })
-      .select()
+      .select('id')
       .single()
-    if (error) throw error
+    checkedWrite({ data, error })
     return data
   },
 
   async stockOut({ itemId, quantity, issuedTo, staffName, reference, date, notes }) {
-    const { data: item, error: fetchErr } = await supabase
-      .from('inventory_items')
-      .select('current_stock')
-      .eq('id', itemId)
-      .single()
-    if (fetchErr) throw fetchErr
-
-    const newStock = Math.max(0, (Number(item.current_stock) || 0) - Number(quantity))
-    await supabase.from('inventory_items')
-      .update({ current_stock: newStock, updated_at: new Date().toISOString() })
-      .eq('id', itemId)
-
     const { data, error } = await supabase.from('stock_movements')
       .insert({
         item_id: itemId, movement_type: 'out',
@@ -109,9 +97,9 @@ export const inventoryService = {
         reference: reference || null,
         date, notes: notes || null,
       })
-      .select()
+      .select('id')
       .single()
-    if (error) throw error
+    checkedWrite({ data, error })
     return data
   },
 
@@ -138,86 +126,29 @@ export const inventoryService = {
     for (const { material, qty } of wanted) {
       const item = atSite(material)
       if (!item) { missing.push(material); continue }
-      const newStock = Math.max(0, (Number(item.current_stock) || 0) - qty)
-      const { error: updErr } = await supabase.from('inventory_items')
-        .update({ current_stock: newStock, updated_at: new Date().toISOString() })
-        .eq('id', item.id)
-      if (updErr) throw updErr
-      const { error: movErr } = await supabase.from('stock_movements').insert({
+      const { data, error: movErr } = await supabase.from('stock_movements').insert({
         item_id: item.id, site_id: siteId, movement_type: 'out',
         quantity: qty, issued_to: 'Production',
         staff_name: 'Auto', reference, date,
         notes: 'Auto-deducted from production log',
-      })
-      if (movErr) throw movErr
+      }).select('id')
+      checkedWrite({ data, error: movErr })
       deducted.push({ material, itemId: item.id, qty })
     }
     return { deducted, missing }
   },
 
-  async deleteMovement(id, movement) {
-    const { data: item, error: fetchErr } = await supabase
-      .from('inventory_items').select('current_stock').eq('id', movement.item_id).single()
-    if (fetchErr) throw fetchErr
-    const currentStock = Number(item?.current_stock) || 0
-    const stockAfter = movement.movement_type === 'in'
-      ? currentStock - Number(movement.quantity)
-      : currentStock + Number(movement.quantity)
-    if (stockAfter < 0) throw new Error(`Cannot delete — would result in negative stock of ${Math.abs(stockAfter)} units`)
-    await supabase.from('inventory_items')
-      .update({ current_stock: stockAfter, updated_at: new Date().toISOString() })
-      .eq('id', movement.item_id)
-    const { error } = await supabase.from('stock_movements').delete().eq('id', id)
-    if (error) throw error
+  async deleteMovement(id) {
+    return deleteById(supabase, 'stock_movements', id)
   },
 
   async editMovement(id, oldMovement, newData) {
-    const { data: item, error: fetchErr } = await supabase
-      .from('inventory_items').select('current_stock').eq('id', oldMovement.item_id).single()
-    if (fetchErr) throw fetchErr
-    const currentStock = Number(item?.current_stock) || 0
-    const afterUndo = oldMovement.movement_type === 'in'
-      ? currentStock - Number(oldMovement.quantity)
-      : currentStock + Number(oldMovement.quantity)
-    // A movement's type is immutable across an edit (this form can't turn a
-    // stock-in into a stock-out), and newData doesn't carry movement_type — so
-    // re-apply the new quantity using the authoritative type from oldMovement.
-    // Using newData.movement_type here (always undefined) made this always
-    // subtract, double-deducting on every stock-in edit.
-    const newStock = oldMovement.movement_type === 'in'
-      ? afterUndo + Number(newData.quantity)
-      : afterUndo - Number(newData.quantity)
-    if (newStock < 0) throw new Error(`Cannot edit — would result in negative stock of ${Math.abs(newStock)} units`)
-    await supabase.from('inventory_items')
-      .update({ current_stock: newStock, updated_at: new Date().toISOString() })
-      .eq('id', oldMovement.item_id)
-    const { data, error } = await supabase.from('stock_movements')
-      .update(newData)
-      .eq('id', id)
-      .select('*, item:item_id(name, unit), site:site_id(name)')
-      .single()
-    if (error) throw error
-    return data
+    const result = await supabase.from('stock_movements').update(newData).eq('id', id).select('id')
+    return checkedWrite(result)
   },
 
   async reverseProductionMovements(reference) {
-    const { data: movements } = await supabase
-      .from('stock_movements')
-      .select('item_id, quantity, movement_type')
-      .eq('reference', reference)
-    if (!movements?.length) return
-
-    for (const m of movements) {
-      if (m.movement_type === 'out') {
-        const { data: item } = await supabase
-          .from('inventory_items').select('current_stock').eq('id', m.item_id).single()
-        const restored = (Number(item?.current_stock) || 0) + Number(m.quantity)
-        await supabase.from('inventory_items')
-          .update({ current_stock: restored, updated_at: new Date().toISOString() })
-          .eq('id', m.item_id)
-      }
-    }
-
-    await supabase.from('stock_movements').delete().eq('reference', reference)
+    // The movement ledger reverses the balance in the deletion transaction.
+    return deleteWhere(supabase, 'stock_movements', 'reference', reference)
   },
 }

@@ -1,4 +1,6 @@
 import { supabase } from '../lib/supabase'
+import { deleteById } from '../utils/checkedDelete'
+import { checkedWrite } from '../utils/checkedWrite'
 
 export const waybillsService = {
   async getAll({ from, to } = {}) {
@@ -37,7 +39,7 @@ export const waybillsService = {
       .insert(waybill)
       .select()
       .single()
-    if (error) throw error
+    checkedWrite({ data, error })
     return data
   },
 
@@ -73,12 +75,10 @@ export const waybillsService = {
   },
 
   async delete(id) {
-    const { error } = await supabase.from('waybills').delete().eq('id', id)
-    if (error) throw error
+    return deleteById(supabase, 'waybills', id, 'Not deleted — only the MD can delete a waybill.')
   },
 
   async update(id, data) {
-    const { error } = await supabase.from('waybills').update(data).eq('id', id)
-    if (error) throw error
+    return checkedWrite(await supabase.from('waybills').update(data).eq('id', id).select('id'))
   },
 }
