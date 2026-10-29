@@ -1,4 +1,7 @@
-import { INVOICE_LABELS, PROFORMA_SUBTITLE, isPendingOrder, owedInvoices, customerInvoiceStats } from './utils/proforma'
+import { expenseCosts } from './utils/financialTotals'
+import { queryRows } from './utils/moneyQueries'
+import { monthEnd, todayLagos, periodRange, shiftDate } from './utils/lagosDate'
+import { INVOICE_LABELS, PROFORMA_SUBTITLE, isPendingOrder, owedInvoices, customerInvoiceStats, invoiceTotals } from './utils/proforma'
 import { closeProforma } from './services/proformas'
 import { useState, useEffect, Component } from "react";
 import { AlertTriangle, ArrowLeft, ArrowRight, Banknote, BarChart3, Blocks, BookOpen, BookUser, Building2, Calculator, CalendarCheck, CalendarClock, CalendarDays, CalendarOff, Check, CheckCircle2, ChevronDown, ChevronUp, Circle, CircleUser, ClipboardCheck, ClipboardList, Contact, CornerDownRight, Download, Eye, Factory, FileSignature, FileText, FileUp, Fingerprint, Flag, Forklift, Gauge, Gavel, HandCoins, Handshake, HardHat, Hourglass, IdCard, Landmark, Layers, LayoutDashboard, Lock, Mail, MapPin, Menu, MessageSquare, Package, PackageCheck, Pencil, Phone, PiggyBank, Receipt, ScrollText, Settings, TrendingDown, TrendingUp, Truck, Undo2, Upload, User, UserCog, Users, Wallet, Wrench, X } from 'lucide-react';
@@ -464,16 +467,17 @@ const StatCard = ({ label, value, sub, accent, pct }) => (
 );
 
 // ── DASHBOARD ─────────────────────────────────────────────────
-const Dashboard = ({ onNavigate, onOpenSite, userProfile }) => {
+export const Dashboard = ({ onNavigate, onOpenSite, userProfile }) => {
   const role = userProfile?.role || 'staff';
   const can = (...roles) => roles.includes(role);
   const isDriver = role === 'driver';
 
-  const firstOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
-  const todayIso = new Date().toISOString().split('T')[0];
-  const weekStart = (() => { const d = new Date(); d.setDate(d.getDate() - d.getDay()); return d.toISOString().split('T')[0]; })();
+  const firstOfMonth = periodRange('month').from;
+  const todayIso = todayLagos();
+  const weekStart = (() => { const today = todayLagos(); return shiftDate(today, -new Date(today + 'T00:00:00Z').getUTCDay()); })();
   const [dateRange, setDateRange] = useState({ from: firstOfMonth, to: todayIso });
 
+  const [dashboardError, setDashboardError] = useState('');
   const [stats, setStats] = useState({ staff: 0, produced: 0, orders: 0, revenue: 0, pending: 0, waybills: 0, damages: 0, lpoQueue: 0, scheduleQueue: 0, pendingRegister: 0, blocksLoadedWeek: 0, activeLoadersToday: 0, pendingPayroll: 0, rosterHeadcountToday: 0 });
   const [finishedGoods, setFinishedGoods] = useState([]);
   const [recent, setRecent] = useState([]);
@@ -485,10 +489,11 @@ const Dashboard = ({ onNavigate, onOpenSite, userProfile }) => {
   useEffect(() => {
     if (!userProfile) return;
     const load = async () => {
+      setLoading(true); setDashboardError('');
       if (isDriver) {
         const staffId = userProfile?.staff_id;
         if (staffId) {
-          const today = new Date().toISOString().split('T')[0];
+          const today = todayLagos();
           const waybills = await waybillsService.getAllForDriver(staffId).catch(() => []);
           setMyWaybillsToday(waybills.filter(w => w.waybill_date === today).length);
         }
@@ -501,21 +506,20 @@ const Dashboard = ({ onNavigate, onOpenSite, userProfile }) => {
       const needsWaybills = can('md', 'board_member', 'ico', 'store_officer', 'logistics_manager');
 
       try {
-        const [staffList, productions, orders, waybills] = await Promise.all([
+        const [staffList, productions, orders, waybills, revenue] = await Promise.all([
           needsStaff    ? staffService.getPublicList()                        : Promise.resolve([]),
           productionService.getAll({ from: dateRange.from, to: dateRange.to }),
           needsOrders   ? ordersService.getAll({ from: dateRange.from, to: dateRange.to })   : Promise.resolve([]),
           needsWaybills ? waybillsService.getAll({ from: dateRange.from, to: dateRange.to }) : Promise.resolve([]),
+          needsOrders ? ordersService.getCashReceived(dateRange) : Promise.resolve(0),
         ]);
         const produced = productions.reduce((s, p) => s + (p.quantity_produced || 0), 0);
         const damages  = waybills.reduce((s, w) => s + (w.quantity_damaged || 0), 0);
-        const revenue  = orders.reduce((s, o) =>
-          s + liveInvoices(o.invoices).flatMap(inv => inv.payments || []).filter(p => p.status === "confirmed").reduce((a, p) => a + p.amount_paid, 0), 0);
         const pending  = orders.filter(isPendingOrder).length;
         setStats({ staff: staffList.length, produced, orders: orders.length, revenue, pending, waybills: waybills.length, damages, lpoQueue: 0, scheduleQueue: 0, pendingRegister: 0 });
         setRecent(orders.slice(0, 5));
-      } catch {
-        // show zeros on error
+      } catch (e) {
+        setDashboardError('Revenue could not be loaded: ' + (e?.message || e));
       }
 
       const needsFG            = can('md', 'board_member', 'ico', 'store_officer', 'logistics_manager', 'production_manager', 'assistant_production_manager');
@@ -528,9 +532,9 @@ const Dashboard = ({ onNavigate, onOpenSite, userProfile }) => {
           schedulesService.getSubmitted(),
           pendingDeliveryService.getAll(),
           needsFG            ? finishedGoodsService.getAll()                                                                                                                                                       : Promise.resolve([]),
-          needsFG            ? productsService.getActive().catch(() => [])                                                                                                                                         : Promise.resolve([]),
+          needsFG            ? productsService.getActive()                                                                                                                                         : Promise.resolve([]),
           needsVehicleAlerts ? vehiclesService.getExpiringOrExpired(30).catch(() => [])                                                                                                                            : Promise.resolve([]),
-          needsRentals       ? supabase.from('vehicles').select('id, vehicle_name, vehicle_number, monthly_rental_amount, owner_name').eq('vehicle_type', 'Rental').then(r => r.data || []).catch(() => [])        : Promise.resolve([]),
+          needsRentals       ? supabase.from('vehicles').select('id, vehicle_name, vehicle_number, monthly_rental_amount, owner_name').eq('vehicle_type', 'Rental').then(r => queryRows(r, 'Rental costs')) : Promise.resolve([]),
         ]);
         const productUnitMap = Object.fromEntries(prods.map(p => [p.name, p.unit]));
         setStats(s => ({ ...s, lpoQueue: lpos.length, scheduleQueue: scheds.length, pendingRegister: pendReg.length }));
@@ -548,8 +552,8 @@ const Dashboard = ({ onNavigate, onOpenSite, userProfile }) => {
         const needsLabour = can('production_manager', 'assistant_production_manager', 'logistics_manager', 'hr_officer', 'ico', 'md', 'board_member');
         if (needsLabour) {
           const [labourLoadLogs, labourPayroll, labourRoster] = await Promise.all([
-            supabase.from('truck_loading_log').select('quantity_loaded, date, loaders:truck_loading_loaders(labour_id)').gte('date', weekStart).lte('date', todayIso).then(r => r.data || []).catch(() => []),
-            supabase.from('weekly_labour_payroll').select('id', { count: 'exact', head: true }).in('status', ['draft', 'ico_approved', 'md_approved']).then(r => r.count || 0).catch(() => 0),
+            supabase.from('truck_loading_log').select('quantity_loaded, date, loaders:truck_loading_loaders(labour_id)').gte('date', weekStart).lte('date', todayIso).then(r => queryRows(r, 'Loading costs')),
+            supabase.from('weekly_labour_payroll').select('id', { count: 'exact', head: true }).in('status', ['draft', 'ico_approved', 'md_approved']).then(r => { if (r.error) throw r.error; return r.count ?? 0; }),
             // One roster per SITE per day now, so sum every site's roster for today.
             // A failed query shows "—" (null), never a false 0.
             supabase.from('daily_roster').select('entries:daily_roster_entries(id)').eq('roster_date', todayIso)
@@ -563,7 +567,7 @@ const Dashboard = ({ onNavigate, onOpenSite, userProfile }) => {
           const activeLoaderSet = new Set(labourLoadLogs.filter(r => r.date === todayIso).flatMap(r => (r.loaders || []).map(l => l.labour_id)));
           setStats(s => ({ ...s, blocksLoadedWeek, activeLoadersToday: activeLoaderSet.size, pendingPayroll: labourPayroll, rosterHeadcountToday: labourRoster }));
         }
-      } catch { /* workflow tables may not exist yet */ } finally {
+      } catch (e) { setDashboardError(prev => prev || 'Dashboard could not be loaded: ' + (e?.message || e)); } finally {
         setLoading(false);
       }
     };
@@ -611,7 +615,7 @@ const Dashboard = ({ onNavigate, onOpenSite, userProfile }) => {
 
   const row2 = [
     can('md', 'board_member', 'ico', 'accountant') &&
-      <StatCard key="revenue" label="Revenue Collected" value={naira(stats.revenue)} sub="Confirmed payments" accent={theme.green} />,
+      <StatCard key="revenue" label="Cash received" value={naira(stats.revenue)} sub="Confirmed payments" accent={theme.green} />,
     can('md', 'board_member', 'ico', 'accountant', 'bdm', 'marketer') &&
       <StatCard key="pending" label="Pending Orders" value={stats.pending} sub="Awaiting processing" accent={theme.accent} />,
     can('md', 'board_member', 'ico', 'logistics_manager', 'production_manager', 'assistant_production_manager') &&
@@ -630,6 +634,8 @@ const Dashboard = ({ onNavigate, onOpenSite, userProfile }) => {
   const showLpo      = can('md', 'ico', 'bdm') && stats.lpoQueue > 0;
   const showSchedule = can('md', 'ico') && stats.scheduleQueue > 0;
   const showPending  = can('md', 'board_member', 'ico', 'bdm', 'store_officer', 'logistics_manager') && stats.pendingRegister > 0;
+
+  if (dashboardError) return <div role="alert" style={{ color: theme.red, overflowWrap: 'anywhere' }}>{dashboardError}<button style={styles.btn("secondary")} onClick={() => setDateRange(r => ({ ...r }))}>Retry</button></div>;
 
   return (
     <div>
@@ -702,7 +708,7 @@ const Dashboard = ({ onNavigate, onOpenSite, userProfile }) => {
               <div style={{ fontSize: "13px", fontWeight: "700", color: theme.red, marginBottom: "10px" }}><IconText icon={Truck} size={20}>Vehicle Document Alerts ({vehicleAlerts.length})</IconText></div>
               <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                 {vehicleAlerts.map(v => {
-                  const todayStr = new Date().toISOString().split('T')[0];
+                  const todayStr = todayLagos();
                   const in14 = new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0];
                   const insExpired  = v.insurance_expiry_date && v.insurance_expiry_date < todayStr;
                   const rwExpired   = v.road_worthiness_expiry_date && v.road_worthiness_expiry_date < todayStr;
@@ -1297,11 +1303,12 @@ export const Orders = ({ onNavigate, userProfile }) => {
   const load = async () => {
     setLoading(true);
     try {
+      if (isMarketerRole && !userProfile.staff_id) throw new Error('Your login is not linked to a staff record — ask HR');
       const fetchOrders = isMarketerRole
-        ? ordersService.getAllForMarketer(userProfile.id)
+        ? ordersService.getAllForMarketer(userProfile.staff_id)
         : ordersService.getAll();
       const fetchCustomers = isMarketerRole
-        ? customersService.getAllForMarketer(userProfile.id)
+        ? customersService.getAllForMarketer(userProfile.staff_id)
         : customersService.getAll();
       const [o, s, c] = await Promise.all([fetchOrders, staffService.getPublicActive(), fetchCustomers]);
       setOrders(o);
@@ -1332,12 +1339,10 @@ export const Orders = ({ onNavigate, userProfile }) => {
     }).catch(() => { setCustomerSites([]); setPickedSiteId(""); });
   }, [pickedCustomer?.id]);
 
-  const orderTotal = (order) => {
-    const invoiced = liveInvoices(order.invoices).reduce((s, inv) => s + Number(inv.total_amount ?? 0), 0);
-    const itemTotal = (order.order_items || []).reduce((s, i) => s + (i.subtotal || i.quantity * i.unit_price), 0);
-    return invoiced !== 0 ? invoiced : itemTotal;
-  };
-  const orderPaid = (order) => liveInvoices(order.invoices).flatMap(inv => inv.payments || []).filter(p => p.status === "confirmed").reduce((s, p) => s + p.amount_paid, 0);
+  const orderTotal = order => invoiceTotals(order.invoices).totalValue;
+  const orderPaid = order => invoiceTotals(order.invoices).totalPaid;
+  const quoteValue = order => (order.invoices || []).filter(i => i.status === 'draft').reduce((n, i) => n + Number(i.total_amount || 0), 0);
+  const isQuote = order => !owedInvoices(order.invoices).length && (order.invoices || []).some(i => i.status === 'draft');
   const orderQty = (order) => (order.order_items || []).reduce((s, i) => s + i.quantity, 0);
 
   const updateItem = (idx, field, val) => {
@@ -1746,6 +1751,7 @@ export const Orders = ({ onNavigate, userProfile }) => {
   };
 
   const startOrderEdit = (order) => {
+    if (owedInvoices(order.invoices).length) return;
     setOrderEditItems((order.order_items || []).map(i => ({ blockType: i.block_type, quantity: String(i.quantity), unitPrice: String(i.unit_price), sourceType: i.source_type || 'manufactured', costBasis: i.cost_basis != null ? String(i.cost_basis) : '' })));
     setOrderEditMarketer(order.marketer_id || "");
     setOrderEditMode(true);
@@ -2017,7 +2023,7 @@ export const Orders = ({ onNavigate, userProfile }) => {
                     </div>
                   </div>
                   <div style={{ marginTop: "8px", display: "flex", gap: "20px", fontSize: "12px", color: theme.textMuted }}>
-                    <span>Value: <strong style={{ color: theme.text }}>{naira(total)}</strong></span>
+                    <span>{isQuote(o) ? <>Quote {naira(quoteValue(o))} — not owed</> : <>Value: <strong style={{ color: theme.text }}>{naira(total)}</strong></>}</span>
                     <span>Paid: <strong style={{ color: theme.green }}>{naira(paid)}</strong></span>
                   </div>
                 </div>
@@ -2035,9 +2041,11 @@ export const Orders = ({ onNavigate, userProfile }) => {
                 <>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
                     <div style={styles.sectionTitle}>Customer Statement — {selected.customer?.name}</div>
-                    {!orderEditMode && canWriteOrder && <button style={{ ...styles.btn("secondary"), padding: "4px 12px", fontSize: "12px" }} onClick={() => startOrderEdit(selected)}>Edit Order</button>}
+                    {!orderEditMode && canWriteOrder && !owedInvoices(selected.invoices).length && <button style={{ ...styles.btn("secondary"), padding: "4px 12px", fontSize: "12px" }} onClick={() => startOrderEdit(selected)}>Edit order lines</button>}
                   </div>
                   <div style={{ marginBottom: "12px", fontSize: "13px", color: theme.textMuted }}>{selected.customer?.location} · {selected.customer?.phone}</div>
+                  {owedInvoices(selected.invoices).length > 0 && <div role="status" style={{ fontSize: "13px", marginBottom: "12px", overflowWrap: "anywhere" }}>Locked — this order has an issued invoice. Cancel the invoice (MD/Accountant) to change it.</div>}
+                  {isQuote(selected) && <div style={{ marginBottom: "12px" }}>Quote {naira(quoteValue(selected))} — not owed</div>}
                   {orderEditMode ? (
                     <div style={{ marginBottom: "16px", padding: "14px", background: theme.surface, borderRadius: "8px", border: `1px solid ${theme.accent}44` }}>
                       <div style={{ fontSize: "12px", fontWeight: "700", color: theme.textMuted, marginBottom: "10px", textTransform: "uppercase", letterSpacing: "0.06em" }}>Edit Order Items</div>
@@ -2888,7 +2896,7 @@ const CustomerForm = ({ form, setForm, staff, saving, onSubmit, onCancel, submit
 );
 
 // ── CUSTOMERS ─────────────────────────────────────────────────
-const Customers = ({ userProfile }) => {
+export const Customers = ({ userProfile }) => {
   const [customers, setCustomers] = useState([]);
   const [staff, setStaff] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -2924,15 +2932,17 @@ const Customers = ({ userProfile }) => {
   const load = async () => {
     setLoading(true);
     try {
+      if (isMarketer && !userProfile.staff_id) throw new Error('Your login is not linked to a staff record — ask HR');
       const fetchCustomers = isMarketer
-        ? customersService.getAllWithStatsForMarketer(userProfile.id)
+        ? customersService.getAllWithStatsForMarketer(userProfile.staff_id)
         : customersService.getAllWithStats();
       const [c, s] = await Promise.all([fetchCustomers, staffService.getPublicList()]);
       setCustomers(c);
       setStaff(s);
       return c;
-    } catch {
-      setAlert({ type: "error", msg: "Could not load customers." });
+    } catch (e) {
+      setCustomers([]); setSelected(null);
+      setAlert({ type: "error", msg: "Could not load customers: " + (e?.message || String(e)) });
     } finally {
       setLoading(false);
     }
@@ -3242,13 +3252,14 @@ const Customers = ({ userProfile }) => {
                     </thead>
                     <tbody>
                       {orders.map(o => {
-                        const val = (o.order_items || []).reduce((s, i) => s + Number(i.subtotal ?? i.quantity * i.unit_price), 0);
-                        const paid = (o.invoices || []).flatMap(inv => inv.payments || []).filter(p => p.status === "confirmed").reduce((s, p) => s + Number(p.amount_paid), 0);
+                        const { totalValue: val, totalPaid: paid } = invoiceTotals(o.invoices);
+                        const quote = !owedInvoices(o.invoices).length && (o.invoices || []).some(i => i.status === 'draft');
+                        const quoteAmount = (o.invoices || []).filter(i => i.status === 'draft').reduce((n, i) => n + Number(i.total_amount || 0), 0);
                         return (
                           <tr key={o.id}>
                             <td style={styles.td}>{fmtDay(o.created_at)}</td>
                             <td style={styles.td}>{(o.order_items || []).map(i => i.block_type).join(", ") || "—"}</td>
-                            <td style={styles.td}><strong style={{ color: theme.accent }}>{naira(val)}</strong></td>
+                            <td style={styles.td}><strong style={{ color: theme.accent }}>{quote ? `Quote ${naira(quoteAmount)} — not owed` : naira(val)}</strong></td>
                             <td style={styles.td}><span style={{ color: theme.green }}>{naira(paid)}</span></td>
                             <td style={styles.td}><span style={styles.badge(statusColor(o.status))}>{o.status}</span></td>
                           </tr>
@@ -5350,8 +5361,8 @@ const Products = () => {
 };
 
 // ── ACCOUNTING ────────────────────────────────────────────────
-const BookkeepingTab = () => {
-  const today = new Date().toISOString().split('T')[0];
+export const BookkeepingTab = () => {
+  const today = todayLagos();
   const [date, setDate] = useState(today);
   const [payments, setPayments] = useState([]);
   const [incomeList, setIncomeList] = useState([]);
@@ -5361,6 +5372,8 @@ const BookkeepingTab = () => {
   const [incomeForm, setIncomeForm] = useState({ source: '', description: '', amount: '' });
   const [expenseForm, setExpenseForm] = useState({ category_id: '', description: '', amount: '', vendor: '', supplierId: '' });
   const [err, setErr] = useState('');
+  const [dataError, setDataError] = useState('');
+  const [refresh, setRefresh] = useState(0);
   const [ok, setOk] = useState('');
   const [acctSuppliers, setAcctSuppliers] = useState([]);
   const [showCatManager, setShowCatManager] = useState(false);
@@ -5369,15 +5382,15 @@ const BookkeepingTab = () => {
   const [catErr, setCatErr] = useState('');
 
   useEffect(() => {
-    setLoading(true);
+    setLoading(true); setDataError('');
     Promise.all([
       accountingService.getConfirmedPayments(date, date),
       incomeRecordsService.getAll(date, date),
       expensesService.getAll(date, date),
       expenseCategoriesService.getActive(),
     ]).then(([p, ir, ex, cats]) => { setPayments(p); setIncomeList(ir); setExpenses(ex); setCategories(cats); })
-      .catch(e => setErr(e?.message || 'An error occurred')).finally(() => setLoading(false));
-  }, [date]);
+      .catch(e => setDataError(e?.message || 'An error occurred')).finally(() => setLoading(false));
+  }, [date, refresh]);
 
   useEffect(() => { suppliersService.getActive().then(setAcctSuppliers).catch(e => setErr('Could not load the supplier list: ' + (e?.message || e))); }, []);
 
@@ -5462,6 +5475,8 @@ const BookkeepingTab = () => {
   const totalIncome = totalPaymentsAmt + totalOtherIncome;
   const totalExpenses = expenses.filter(e => e.status !== 'rejected').reduce((s, e) => s + Number(e.amount || 0), 0);
   const net = totalIncome - totalExpenses;
+
+  if (dataError) return <div role="alert" style={{ color: theme.red, overflowWrap: "anywhere" }}>Bookkeeping could not be loaded: {dataError}<button style={styles.btn("secondary")} onClick={() => setRefresh(n => n + 1)}>Retry</button></div>;
 
   return (
     <div>
@@ -5648,9 +5663,9 @@ const BookkeepingTab = () => {
 
 const PLTab = () => {
   const now = new Date();
-  const firstOfMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+  const firstOfMonth = periodRange('month', now).from;
   const [from, setFrom] = useState(firstOfMonth);
-  const [to, setTo] = useState(now.toISOString().split('T')[0]);
+  const [to, setTo] = useState(todayLagos(now));
   const [payments, setPayments] = useState([]);
   const [incomeRecords, setIncomeRecords] = useState([]);
   const [expenses, setExpenses] = useState([]);
@@ -5659,7 +5674,7 @@ const PLTab = () => {
   const [pdfLoading, setPdfLoading] = useState(false);
 
   const load = () => {
-    setLoading(true);
+    setLoading(true); setErr('');
     Promise.all([
       accountingService.getConfirmedPayments(from, to),
       incomeRecordsService.getAll(from, to),
@@ -5690,6 +5705,8 @@ const PLTab = () => {
     try { await generatePLStatementPDF({ fromDate: from || null, toDate: to || null, payments, incomeRecords, expenses: approvedExpenses }); }
     catch (e) { setErr(e?.message || 'An error occurred'); } finally { setPdfLoading(false); }
   };
+
+  if (err) return <div role="alert" style={{ color: theme.red, overflowWrap: 'anywhere' }}>Revenue could not be loaded: {err}<button style={styles.btn('secondary')} onClick={load}>Retry</button></div>;
 
   return (
     <div>
@@ -5770,15 +5787,14 @@ class CostTabErrorBoundary extends Component {
   }
 }
 
-const CostTab = () => {
+export const CostTab = () => {
   const now = new Date();
-  const firstOfMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+  const firstOfMonth = periodRange('month', now).from;
   const [from, setFrom] = useState(firstOfMonth);
-  const [to, setTo] = useState(now.toISOString().split('T')[0]);
+  const [to, setTo] = useState(todayLagos(now));
   const [expenses, setExpenses] = useState([]);
   const [productionLogs, setProductionLogs] = useState([]);
   const [products, setProducts] = useState([]);
-  const [labourCost, setLabourCost] = useState(0);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
   const [pdfLoading, setPdfLoading] = useState(false);
@@ -5787,21 +5803,14 @@ const CostTab = () => {
     setLoading(true);
     setErr('');
     try {
-      const [ex, pl, pr, labourRes] = await Promise.all([
+      const [ex, pl, pr] = await Promise.all([
         expensesService.getAll(from, to),
         accountingService.getProductionTotals(from, to),
-        productsService.getActive().catch(() => []),
-        supabase.from('weekly_labour_payroll')
-          .select('total_amount')
-          .in('status', ['paid', 'md_approved'])
-          .gte('week_ending', from)
-          .lte('week_ending', to),
+        productsService.getActive(),
       ]);
       setExpenses(Array.isArray(ex) ? ex : []);
       setProductionLogs(Array.isArray(pl) ? pl : []);
       setProducts(Array.isArray(pr) ? pr : []);
-      const labourData = labourRes?.data || [];
-      setLabourCost(labourData.reduce((s, r) => s + Number(r.total_amount || 0), 0));
     } catch (e) {
       setErr(e?.message || 'Failed to load cost analysis');
     } finally {
@@ -5814,8 +5823,7 @@ const CostTab = () => {
   const safeExpenses = Array.isArray(expenses) ? expenses : [];
   const safeProductionLogs = Array.isArray(productionLogs) ? productionLogs : [];
   const safeProducts = Array.isArray(products) ? products : [];
-  const rawExpenses = safeExpenses.filter(e => e.status !== 'rejected').reduce((s, e) => s + Number(e.amount || 0), 0);
-  const totalExpenses = rawExpenses + labourCost;
+  const { rawExpenses, labourCost, totalExpenses } = expenseCosts(safeExpenses);
   const productTotals = {};
   for (const log of safeProductionLogs) {
     productTotals[log.block_type] = (productTotals[log.block_type] || 0) + Number(log.quantity_produced || 0);
@@ -5830,6 +5838,8 @@ const CostTab = () => {
     try { await generateCostAnalysisPDF({ fromDate: from || null, toDate: to || null, productTotals, totalExpenses, products }); }
     catch (e) { setErr(e?.message || 'An error occurred'); } finally { setPdfLoading(false); }
   };
+
+  if (err) return <div role="alert" style={{ color: theme.red, overflowWrap: 'anywhere' }}>Cost analysis could not be loaded: {err}<button style={styles.btn('secondary')} onClick={load}>Retry</button></div>;
 
   return (
     <div>
@@ -5861,7 +5871,7 @@ const CostTab = () => {
           {Object.entries(productTotals).length > 0 && totalExpenses === 0 && (
             <div style={{ ...styles.card, marginBottom: '16px', borderLeft: `4px solid ${theme.accent}`, color: theme.textMuted, fontSize: '13px' }}>
               <strong style={{ color: theme.text }}>No expense or labour records found for selected period.</strong>
-              {' '}Record expenses in Daily Bookkeeping to see cost analysis. Labour costs pull from paid payroll entries in Labour Management.
+              {' '}Record expenses in Daily Bookkeeping to see cost analysis. Paid payroll costs are included once through the expense ledger.
             </div>
           )}
           <div style={styles.card}>
@@ -5910,17 +5920,19 @@ const CostTab = () => {
   );
 };
 
-const ReceivablesTab = () => {
+export const ReceivablesTab = () => {
   const [receivables, setReceivables] = useState([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
+  const [dataError, setDataError] = useState('');
+  const [refresh, setRefresh] = useState(0);
   const [pdfLoading, setPdfLoading] = useState(false);
 
   useEffect(() => {
-    setLoading(true);
+    setLoading(true); setDataError('');
     accountingService.getReceivables()
-      .then(setReceivables).catch(e => setErr(e?.message || 'An error occurred')).finally(() => setLoading(false));
-  }, []);
+      .then(setReceivables).catch(e => setDataError(e?.message || 'An error occurred')).finally(() => setLoading(false));
+  }, [refresh]);
 
   const rows = [];
   const bucketTotals = { '0–30': 0, '31–60': 0, '61–90': 0, '90+': 0 };
@@ -5949,6 +5961,8 @@ const ReceivablesTab = () => {
     try { await generateReceivablesPDF(receivables); }
     catch (e) { setErr(e?.message || 'An error occurred'); } finally { setPdfLoading(false); }
   };
+
+  if (dataError) return <div role="alert" style={{ color: theme.red, overflowWrap: "anywhere" }}>Receivables could not be loaded: {dataError}<button style={styles.btn("secondary")} onClick={() => setRefresh(n => n + 1)}>Retry</button></div>;
 
   return (
     <div>
@@ -6007,7 +6021,7 @@ const ReceivablesTab = () => {
 
 const ManagementTab = () => {
   const now = new Date();
-  const defaultMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const defaultMonth = todayLagos(now).slice(0, 7);
   const [month, setMonth] = useState(defaultMonth);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -6015,14 +6029,14 @@ const ManagementTab = () => {
   const [pdfLoading, setPdfLoading] = useState(false);
 
   const load = async (m) => {
-    setLoading(true);
+    setLoading(true); setErr(''); setData(null);
     const [y, mo] = m.split('-').map(Number);
     const currFrom = `${y}-${String(mo).padStart(2, '0')}-01`;
-    const currTo = new Date(y, mo, 0).toISOString().split('T')[0];
+    const currTo = monthEnd(y, mo - 1);
     const prevMo = mo === 1 ? 12 : mo - 1;
     const prevY = mo === 1 ? y - 1 : y;
     const prevFrom = `${prevY}-${String(prevMo).padStart(2, '0')}-01`;
-    const prevTo = new Date(prevY, prevMo, 0).toISOString().split('T')[0];
+    const prevTo = monthEnd(prevY, prevMo - 1);
 
     try {
       const [cp, ci, ce, pp, pi, pe] = await Promise.all([
@@ -6166,7 +6180,7 @@ const SEED_ACCOUNTS = [
   { bank_name: 'TAJ Bank PLC', account_name: 'Abuja Precast Concrete LTD (Operations)', account_number: '0001733191', account_type: 'expense', current_balance: 0 },
 ];
 
-const BankAccountsTab = ({ userProfile }) => {
+export const BankAccountsTab = ({ userProfile }) => {
   const [accounts, setAccounts] = useState([]);
   const [selected, setSelected] = useState(null);
   const [transactions, setTransactions] = useState([]);
@@ -6201,6 +6215,7 @@ const BankAccountsTab = ({ userProfile }) => {
   const [allCustomers, setAllCustomers] = useState([]);
   const [creatingPayment, setCreatingPayment] = useState(false);
   const [err, setErr] = useState('');
+  const [accountsError, setAccountsError] = useState('');
   const [ok, setOk] = useState('');
   const [reconUnverified, setReconUnverified] = useState(false);
   const [reconWarnAcked, setReconWarnAcked] = useState(false);
@@ -6250,6 +6265,7 @@ const BankAccountsTab = ({ userProfile }) => {
       })
       .catch(e => {
         const msg = e?.message || '';
+        setAccountsError(msg || 'Failed to load bank accounts.');
         if (msg.toLowerCase().includes('fetch') || msg.toLowerCase().includes('network')) {
           setErr('Connection error — check your internet and refresh the page.');
         } else {
@@ -6370,7 +6386,7 @@ const BankAccountsTab = ({ userProfile }) => {
       const acct = accounts.find(a => a.id === importAcct);
       const batch = await bankImportBatchesService.create({
         bank_account_id: importAcct,
-        import_date: new Date().toISOString().split('T')[0],
+        import_date: todayLagos(),
         file_name: importFile?.name || '',
         file_type: importFile?.name?.toLowerCase().endsWith('.pdf') ? 'pdf' : 'excel',
         total_transactions: preview.length,
@@ -6585,6 +6601,8 @@ const BankAccountsTab = ({ userProfile }) => {
     const s = txSearch.toLowerCase();
     return t.description?.toLowerCase().includes(s) || String(t.debit).includes(s) || String(t.credit).includes(s);
   });
+
+  if (accountsError) return <div role="alert" style={{ color: theme.red, overflowWrap: "anywhere" }}>Bank balances could not be loaded: {accountsError}</div>;
 
   return (
     <div>
@@ -7360,7 +7378,7 @@ const ReconciliationTab = () => {
       const acct = accounts.find(a => a.id === accountId);
       const rec = await bankReconciliationsService.create({
         bank_account_id: accountId,
-        reconciliation_date: new Date().toISOString().split('T')[0],
+        reconciliation_date: todayLagos(),
         period_from: periodFrom,
         period_to: periodTo,
         opening_balance_system: result.system.openingBalance,
@@ -7500,7 +7518,7 @@ const ReconciliationTab = () => {
 
 // ── RECEIPTS TAB ──────────────────────────────────────────────
 const ReceiptsTab = () => {
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayLagos();
   const [receipts, setReceipts] = useState([]);
   const [approvedExpenses, setApprovedExpenses] = useState([]);
   const [loading, setLoading] = useState(false);

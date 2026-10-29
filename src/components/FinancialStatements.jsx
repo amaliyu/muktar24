@@ -1,3 +1,5 @@
+import { cashBalances, incomeNetProfit, productReceipts } from '../utils/financialTotals'
+import { monthStart, monthEnd, todayLagos, dateParts } from '../utils/lagosDate'
 import React, { useState, useEffect, useCallback } from 'react'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
@@ -22,11 +24,9 @@ const FINANCIAL_EDIT_ROLES = ['md', 'accountant']
 
 const naira = n => `₦${Math.round(Number(n) || 0).toLocaleString()}`
 const fmt   = n => Math.round(Number(n) || 0).toLocaleString()
-const today = () => new Date().toISOString().split('T')[0]
-const firstOfYear = () => `${new Date().getFullYear()}-01-01`
-const firstOfMonth = () => {
-  const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`
-}
+const today = todayLagos
+const firstOfYear = () => `${dateParts()[0]}-01-01`
+const firstOfMonth = () => { const [y, m] = dateParts(); return monthStart(y, m - 1) }
 
 const s = {
   card: { background: theme.card, border: `1px solid ${theme.border}`, borderRadius: '10px', padding: '18px', marginBottom: '14px' },
@@ -65,13 +65,12 @@ async function addPdfHeader(doc, title, subtitle) {
 }
 
 // ── BALANCE SHEET ──────────────────────────────────────────────────
-// Sources that failed to load. The statement still renders from the rest,
-// so the gap must be visible — a missing source would otherwise read as ₦0.
+// A failed source blocks the statement totals; show the missing source explicitly.
 const SourceWarnings = ({ warnings }) => {
   if (!warnings?.length) return null
   return (
     <div role="alert" style={{ background: theme.red + '18', border: `1px solid ${theme.red}44`, borderRadius: '8px', padding: '10px 14px', marginBottom: '12px', fontSize: '13px', color: theme.red }}>
-      <strong>Incomplete — figures below leave out:</strong>
+      <strong>Figures unavailable — these sources could not be loaded:</strong>
       <ul style={{ margin: '6px 0 0', paddingLeft: '18px' }}>{warnings.map((m, i) => <li key={i}>{m}</li>)}</ul>
     </div>
   )
@@ -97,7 +96,7 @@ const BalanceSheetTab = ({ userProfile }) => {
   const load = useCallback(async (date, setFn) => {
     setLoading(true); setErr('')
     try { const d = await balanceSheetService.getData(date); setFn(d) }
-    catch (e) { setErr(e.message) }
+    catch (e) { setFn(null); setErr(e.message) }
     finally { setLoading(false) }
   }, [])
 
@@ -105,7 +104,7 @@ const BalanceSheetTab = ({ userProfile }) => {
   useEffect(() => { if (compareDate) load(compareDate, setCompareData); else setCompareData(null) }, [compareDate]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const calcBS = (d) => {
-    if (!d) return null
+    if (!d || d.warnings?.length) return null
     const obs = d.openingBalances || []
 
     // Fixed Assets
@@ -522,28 +521,19 @@ const IncomeStatementTab = ({ userProfile }) => {
   useEffect(() => {
     setLoading(true); setErr('')
     incomeStatementService.getData(from, to)
-      .then(setData).catch(e => setErr(e.message)).finally(() => setLoading(false))
+      .then(setData).catch(e => { setData(null); setErr(e.message) }).finally(() => setLoading(false))
   }, [from, to])
 
   const calc = (d) => {
-    if (!d) return null
+    if (!d || d.warnings?.length) return null
     const payments = d.payments || []
     const incomeRecords = d.incomeRecords || []
     const expenses = d.expenses || []
 
     // Revenue by block type
-    const revByBlock = {}
-    payments.forEach(p => {
-      const items = p.invoice?.order?.order_items || []
-      items.forEach(item => {
-        if (!revByBlock[item.block_type]) revByBlock[item.block_type] = 0
-        revByBlock[item.block_type] += Number(item.unit_price||0) * Number(item.quantity||0)
-      })
-    })
-    // Fallback: if no order items linked, use raw payment amounts
+    const revByBlock = productReceipts(payments)
     const totalPayments = payments.reduce((s, p) => s + Number(p.amount_paid||0), 0)
-    const totalBlockRev = Object.values(revByBlock).reduce((s, v) => s + v, 0)
-    const blockRevAdjusted = totalBlockRev > 0 ? revByBlock : null
+    const blockRevAdjusted = Object.keys(revByBlock).length ? revByBlock : null
     const otherIncome = incomeRecords.reduce((s, r) => s + Number(r.amount||0), 0)
     const totalRevenue = totalPayments + otherIncome
 
@@ -571,7 +561,7 @@ const IncomeStatementTab = ({ userProfile }) => {
     const grossMargin = totalRevenue > 0 ? ((grossProfit / totalRevenue) * 100).toFixed(1) : 0
     const operatingProfit = grossProfit - totalOpEx
     const taxAdj = (d.adjustments||[]).filter(a => a.account_name.toLowerCase().includes('tax')).reduce((s, a) => s + Number(a.amount||0), 0)
-    const netProfit = operatingProfit - taxAdj
+    const netProfit = incomeNetProfit(d)
     const netMargin = totalRevenue > 0 ? ((netProfit / totalRevenue) * 100).toFixed(1) : 0
 
     return { blockRevAdjusted, totalPayments, otherIncome, totalRevenue, expByParent, cogsTotal, opExpGroups, totalOpEx, grossProfit, grossMargin, operatingProfit, taxAdj, netProfit, netMargin, adjustments: d.adjustments||[], expenses }
@@ -670,7 +660,8 @@ const IncomeStatementTab = ({ userProfile }) => {
           <div style={s.card}>
             {/* Revenue */}
             <div style={{ fontWeight: '800', fontSize: '13px', color: theme.text, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '10px' }}>Revenue</div>
-            {is.blockRevAdjusted
+            <div style={{ fontSize: "12px", color: theme.textMuted }}>Cash received in the period, allocated by each order’s product line values; instalments grouped once per order. Includes VAT, delivery and discount proportionally.</div>
+             {is.blockRevAdjusted
               ? Object.entries(is.blockRevAdjusted).map(([bt, val]) => (
                   <div key={bt} style={s.row(1)}><span>{bt}</span><span style={{ fontWeight: '600' }}>{naira(val)}</span></div>
                 ))
@@ -734,11 +725,11 @@ const CashFlowTab = ({ userProfile }) => {
   useEffect(() => {
     setLoading(true); setErr('')
     cashFlowService.getData(from, to)
-      .then(setData).catch(e => setErr(e.message)).finally(() => setLoading(false))
+      .then(setData).catch(e => { setData(null); setErr(e.message) }).finally(() => setLoading(false))
   }, [from, to])
 
   const calc = (d) => {
-    if (!d) return null
+    if (!d || d.warnings?.length) return null
     const obs = d.openingBalances || []
     const adjs = d.adjustments || []
     const opAdjs = adjs.filter(a => a.statement_type === 'cashflow' && (!a.account_name.toLowerCase().includes('invest') && !a.account_name.toLowerCase().includes('loan') && !a.account_name.toLowerCase().includes('capital')))
@@ -757,12 +748,11 @@ const CashFlowTab = ({ userProfile }) => {
     const netCashFin = finAdjTotal
 
     const netChange = netCashOps + netCashInv + netCashFin
-    const openingCash = Number(d.bankOpening||0)
-    const closingCash = Number(d.bankClosing||0)
-    const cashFromBanks = (d.bankAccounts||[]).reduce((s, b) => s + Number(b.current_balance||0), 0)
+    const { openingCash, closingCash, bankAccounts } = cashBalances(d)
+    const cashFromBanks = closingCash
     const cashOnHand = obs.find(o => o.account_name?.toLowerCase().includes('cash on hand'))?.amount || 0
 
-    return { netProfit, depreciation, opAdjs, opAdjTotal, netCashOps, invAdjs, invAdjTotal, netCashInv, finAdjs, finAdjTotal, netCashFin, netChange, openingCash, closingCash, cashFromBanks, cashOnHand, bankAccounts: d.bankAccounts||[] }
+    return { netProfit, depreciation, opAdjs, opAdjTotal, netCashOps, invAdjs, invAdjTotal, netCashInv, finAdjs, finAdjTotal, netCashFin, netChange, openingCash, closingCash, cashFromBanks, cashOnHand, bankAccounts }
   }
 
   const cf = calc(data)
@@ -870,7 +860,7 @@ const CashFlowTab = ({ userProfile }) => {
 
           <div style={{ height: '14px' }} />
           <div style={s.sectionTitle}>Reconciliation — Cash & Bank Balances</div>
-          {cf.bankAccounts.map(b => <div key={b.id} style={s.row(1)}><span>Cash at Bank — {b.account_name}</span><span style={{ fontWeight: '600' }}>{naira(b.current_balance)}</span></div>)}
+          {cf.bankAccounts.map(b => <div key={b.account_id} style={s.row(1)}><span>Cash at Bank — {b.account_name}</span><span style={{ fontWeight: '600' }}>{naira(b.current_balance)}</span></div>)}
           <div style={s.row(1)}><span>Cash on Hand</span><span style={{ fontWeight: '600' }}>{naira(cf.cashOnHand)}</span></div>
           <div style={s.totalRow(theme.green)}><span>Total Cash</span><span>{naira(cf.cashFromBanks + cf.cashOnHand)}</span></div>
 
@@ -900,14 +890,15 @@ const CashFlowTab = ({ userProfile }) => {
 // ── MANAGEMENT ACCOUNTS ────────────────────────────────────────────
 const ManagementAccountsTab = ({ userProfile }) => {
   const now = new Date()
-  const [month, setMonth] = useState(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`)
+  const [month, setMonth] = useState(todayLagos(now).slice(0, 7))
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState('')
 
   const from = `${month}-01`
-  const toDate = new Date(month + '-01'); toDate.setMonth(toDate.getMonth()+1); toDate.setDate(0)
-  const to = toDate.toISOString().split('T')[0]
+  const [year, monthNumber] = month.split('-').map(Number)
+  const toDate = monthEnd(year, monthNumber - 1)
+  const to = toDate
 
   useEffect(() => {
     setLoading(true); setErr('')
@@ -917,10 +908,9 @@ const ManagementAccountsTab = ({ userProfile }) => {
       cashFlowService.getData(from, to),
       // Previous month
       (() => {
-        const prev = new Date(month + '-01'); prev.setMonth(prev.getMonth()-1)
-        const pFrom = prev.toISOString().split('T')[0].slice(0,7)+'-01'
-        const pEnd = new Date(pFrom); pEnd.setMonth(pEnd.getMonth()+1); pEnd.setDate(0)
-        return incomeStatementService.getData(pFrom, pEnd.toISOString().split('T')[0])
+        const pFrom = monthStart(year, monthNumber - 2)
+        const pEnd = monthEnd(year, monthNumber - 2)
+        return incomeStatementService.getData(pFrom, pEnd)
       })(),
     ]).then(([is, bs, cf, prevIs]) => {
       const warnings = [['Income statement', is], ['Balance sheet', bs], ['Cash flow', cf], ['Previous month', prevIs]]
@@ -932,7 +922,7 @@ const ManagementAccountsTab = ({ userProfile }) => {
   }, [from, to])
 
   const calcIs = (d) => {
-    if (!d) return null
+    if (!d || d.warnings?.length) return null
     const payments = d.payments || []
     const incomeRecords = d.incomeRecords || []
     const expenses = d.expenses || []

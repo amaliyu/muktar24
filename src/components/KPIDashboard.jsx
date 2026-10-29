@@ -1,3 +1,5 @@
+import { settledRows, queryRows } from '../utils/moneyQueries'
+import { todayLagos, periodRange, dateParts, monthStart } from '../utils/lagosDate'
 import React, { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import SitePicker from './SitePicker'
@@ -17,7 +19,7 @@ const theme = {
 const naira = n => `₦${Math.round(Number(n) || 0).toLocaleString()}`
 const fmt   = n => Number(n || 0).toLocaleString()
 const pct   = (a, b) => b ? ((a / b) * 100).toFixed(1) + '%' : '0%'
-const today = () => new Date().toISOString().split('T')[0]
+const today = todayLagos
 
 const s = {
   page:    { padding: '20px', maxWidth: '1400px', margin: '0 auto' },
@@ -143,26 +145,7 @@ const KPICard = ({ label, value, sub, accent, trend, target, targetVal, children
 )
 
 // ── DATE RANGE HELPERS ─────────────────────────────────────────────
-const getRange = (preset) => {
-  const d = new Date(), y = d.getFullYear(), m = d.getMonth()
-  const iso = dt => dt.toISOString().split('T')[0]
-  if (preset === 'today') return { from: today(), to: today() }
-  if (preset === 'week') {
-    const dow = d.getDay(), mon = new Date(d); mon.setDate(d.getDate() - (dow === 0 ? 6 : dow - 1))
-    return { from: iso(mon), to: today() }
-  }
-  if (preset === 'month') return { from: `${y}-${String(m + 1).padStart(2, '0')}-01`, to: today() }
-  if (preset === 'lastmonth') {
-    const lm = new Date(y, m - 1, 1), lme = new Date(y, m, 0)
-    return { from: iso(lm), to: iso(lme) }
-  }
-  if (preset === 'quarter') {
-    const qStart = new Date(y, Math.floor(m / 3) * 3, 1)
-    return { from: iso(qStart), to: today() }
-  }
-  if (preset === 'year') return { from: `${y}-01-01`, to: today() }
-  return { from: '', to: '' }
-}
+const getRange = periodRange
 
 const prevPeriod = (from, to) => {
   const diff = (new Date(to) - new Date(from))
@@ -176,6 +159,7 @@ const PALETTE = [theme.accent, theme.blue, theme.green, theme.purple, theme.red,
 
 // ── MAIN COMPONENT ─────────────────────────────────────────────────
 export default function KPIDashboard() {
+  const [loadError, setLoadError] = useState('')
   const [tab, setTab]         = useState('overview')
   const [preset, setPreset]   = useState('month')
   const [range, setRange]     = useState(getRange('month'))
@@ -197,7 +181,7 @@ export default function KPIDashboard() {
 
   const load = useCallback(async () => {
     if (!range.from || !range.to) return
-    setLoading(true)
+    setLoading(true); setLoadError(''); setData({})
     try {
       const { from, to } = range
       const { from: pFrom, to: pTo } = prevPeriod(from, to)
@@ -242,19 +226,23 @@ export default function KPIDashboard() {
         // Bank accounts
         supabase.from('bank_accounts').select('account_name,current_balance'),
         // Monthly production (last 12 months)
-        bySite(supabase.from('production_log').select('date,quantity_produced').gte('date', new Date(new Date().setFullYear(new Date().getFullYear() - 1)).toISOString().split('T')[0])),
+        bySite(supabase.from('production_log').select('date,quantity_produced').gte('date', monthStart(dateParts()[0] - 1, dateParts()[1] - 1))),
         // Monthly revenue (last 12 months)
-        supabase.from('payments').select('amount_paid,payment_date').eq('status','confirmed').gte('payment_date', new Date(new Date().setFullYear(new Date().getFullYear() - 1)).toISOString().split('T')[0]),
+        supabase.from('payments').select('amount_paid,payment_date').eq('status','confirmed').gte('payment_date', monthStart(dateParts()[0] - 1, dateParts()[1] - 1)),
       ])
 
-      const g = r => r.status === 'fulfilled' ? (r.value.data || []) : []
+      const g = (r, label = 'Dashboard data') => settledRows(r, label)
 
+      const sources = [prodCurr, prodPrev, dmgLog, payCurr, payPrev, invoices, orders, customers, waybills, pendingReg, attendance, staff, expenses, bankAccts, monthlyProd, monthlyRev]
+      const labels = ['Production', 'Previous production', 'Damage', 'Revenue', 'Previous revenue', 'Invoices', 'Orders', 'Customers', 'Waybills', 'Pending deliveries', 'Attendance', 'Staff', 'Expenses', 'Bank balances', 'Monthly production', 'Monthly revenue']
+      sources.forEach((r, i) => g(r, labels[i]))
       // Resolve staff_type for attendance rows via staff_public (no base-staff embed)
       const attendanceRows = g(attendance)
       const attStaffIds = [...new Set(attendanceRows.map(a => a.staff_id).filter(Boolean))]
-      const { data: attStaffRows } = attStaffIds.length
+      const attStaffResult = attStaffIds.length
         ? await supabase.from('staff_public').select('id,staff_type').in('id', attStaffIds)
         : { data: [] }
+      const attStaffRows = queryRows(attStaffResult, 'Attendance')
       const attStaffTypeMap = Object.fromEntries((attStaffRows || []).map(s => [s.id, s.staff_type]))
       const attendanceWithType = attendanceRows.map(a => ({ ...a, _staff_type: attStaffTypeMap[a.staff_id] || null }))
 
@@ -268,7 +256,7 @@ export default function KPIDashboard() {
         monthlyProd: g(monthlyProd), monthlyRev: g(monthlyRev),
         range, pRange: { from: pFrom, to: pTo },
       })
-    } finally { setLoading(false) }
+    } catch (e) { setLoadError(e.message); setData({}) } finally { setLoading(false) }
   }, [range, siteId])
 
   useEffect(() => { load() }, [load])
@@ -362,8 +350,8 @@ export default function KPIDashboard() {
       const m = monthBucket(p.payment_date); if (m) monthlyRevMap[m] = (monthlyRevMap[m] || 0) + Number(p.amount_paid)
     })
     const last12 = Array.from({ length: 12 }, (_, i) => {
-      const d = new Date(); d.setMonth(d.getMonth() - 11 + i)
-      return d.toISOString().slice(0, 7)
+      const [y, m] = dateParts()
+      return monthStart(y, m - 12 + i).slice(0, 7)
     })
     const prodTrend = last12.map(m => ({ label: m.slice(5), value: monthlyProdMap[m] || 0 }))
     const revTrend  = last12.map(m => ({ label: m.slice(5), value: monthlyRevMap[m] || 0 }))
@@ -463,6 +451,8 @@ export default function KPIDashboard() {
 
   // ── RENDER ───────────────────────────────────────────────────────
   const PRESETS = [['today','Today'],['week','This Week'],['month','This Month'],['lastmonth','Last Month'],['quarter','This Quarter'],['year','This Year'],['custom','Custom']]
+
+  if (loadError) return <div role="alert" style={{ color: theme.red, overflowWrap: 'anywhere' }}>{loadError}<button style={{ minHeight: 44 }} onClick={load}>Retry</button></div>
 
   return (
     <div style={s.page}>

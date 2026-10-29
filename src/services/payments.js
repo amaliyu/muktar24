@@ -1,3 +1,4 @@
+import { deleteById } from '../utils/checkedDelete'
 import { supabase } from '../lib/supabase'
 import { requireUpdatedRow } from '../utils/proforma'
 
@@ -72,13 +73,12 @@ export const invoicesService = {
   },
 
   async update(id, data) {
-    const { error } = await supabase.from('invoices').update(data).eq('id', id)
-    if (error) throw error
+    return requireUpdatedRow(await supabase.from('invoices').update(data).eq('id', id).select('id'), 'Invoice was not updated — your role may not have permission, or it was removed.')
   },
 
   // ── Line items (invoice_items) ──────────────────────────────────
-  // The DB blocks writes to invoice_items unless the parent invoice is a
-  // draft (invoice_items_guard). subtotal is GENERATED — never write it.
+  // invoice_items_guard locks paid lines; the UI exposes editing on drafts only.
+  // subtotal is GENERATED — never write it.
   async getItems(invoiceId) {
     const { data, error } = await supabase
       .from('invoice_items')
@@ -89,8 +89,9 @@ export const invoicesService = {
     return data || []
   },
 
-  // Replace-all is safe because the DB blocks it for non-drafts anyway, but we
-  // read the existing rows first and only rewrite when they've actually changed
+  // Read the existing rows first and only rewrite when they have changed.
+  // Verify the delete result before inserting so an RLS no-op cannot duplicate lines.
+  // Compare the saved and desired values
   // to avoid pointless churn. `items` are the editor rows
   // ({ description|block_type, quantity, unit_price }).
   async saveItems(invoiceId, items) {
@@ -108,8 +109,11 @@ export const invoicesService = {
       sort_order: Number(r.sort_order) || 0,
     })).sort((a, b) => a.sort_order - b.sort_order)
     if (JSON.stringify(norm(existing)) === JSON.stringify(norm(desired))) return
-    const { error: delErr } = await supabase.from('invoice_items').delete().eq('invoice_id', invoiceId)
+    const { data: removed, error: delErr } = await supabase.from('invoice_items').delete().eq('invoice_id', invoiceId).select('id')
     if (delErr) throw delErr
+    if (removed?.length !== existing.length || existing.some(row => !removed.some(r => r.id === row.id))) {
+      throw new Error('Invoice lines were not fully removed — no replacement lines were inserted. Reload and check your permissions.')
+    }
     if (desired.length) {
       const { error: insErr } = await supabase
         .from('invoice_items')
@@ -129,13 +133,12 @@ export const invoicesService = {
 
   // cancelled_at is NOT auto-set, so we record it along with who/why.
   async cancel(id, { cancelled_by_name, cancellation_reason }) {
-    const { error } = await supabase.from('invoices').update({
+    return requireUpdatedRow(await supabase.from('invoices').update({
       status: 'cancelled',
       cancelled_at: new Date().toISOString(),
       cancelled_by_name: cancelled_by_name || null,
       cancellation_reason: cancellation_reason || null,
-    }).eq('id', id)
-    if (error) throw error
+    }).eq('id', id).select('id'), 'Invoice was not cancelled — your role may not have permission, or it was removed.')
   },
 
   async getByOrder(orderId) {
@@ -148,8 +151,7 @@ export const invoicesService = {
   },
 
   async delete(id) {
-    const { error } = await supabase.from('invoices').delete().eq('id', id)
-    if (error) throw error
+    return deleteById(supabase, 'invoices', id)
   },
 }
 

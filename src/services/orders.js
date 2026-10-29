@@ -1,6 +1,17 @@
+import { requireUpdatedRow } from '../utils/proforma'
+import { deleteById, deleteWhere } from '../utils/checkedDelete'
 import { supabase } from '../lib/supabase'
 
 export const ordersService = {
+  async getCashReceived({ from, to } = {}) {
+    let q = supabase.from('payments').select('amount_paid, payment_date')
+      .eq('status', 'confirmed')
+    if (from) q = q.gte('payment_date', from)
+    if (to) q = q.lte('payment_date', to)
+    const { data, error } = await q
+    if (error) throw error
+    return (data || []).reduce((n, p) => n + Number(p.amount_paid || 0), 0)
+  },
   async getAll({ from, to } = {}) {
     let query = supabase
       .from('orders')
@@ -20,7 +31,8 @@ export const ordersService = {
     return data || []
   },
 
-  async getAllForMarketer(userId) {
+  async getAllForMarketer(staffId) {
+    if (!staffId) throw new Error('Your login is not linked to a staff record — ask HR')
     const { data, error } = await supabase
       .from('orders')
       .select(`
@@ -31,7 +43,7 @@ export const ordersService = {
         order_items(*),
         invoices(id, invoice_number, total_amount, issued_date, issued_at, due_date, status, delivery_cost, discount, include_vat, created_by_name, cancellation_reason, cancelled_by_name, payments(id, amount_paid, payment_date, status))
       `)
-      .eq('marketer_id', userId)
+      .eq('marketer_id', staffId)
       .order('created_at', { ascending: false })
     if (error) throw error
     return data || []
@@ -46,7 +58,7 @@ export const ordersService = {
         marketer:marketer_id(id, full_name),
         order_items(*),
         invoices(*, payments(*)),
-        deliveries(*, waybills(*))
+        waybills(*)
       `)
       .eq('id', id)
       .single()
@@ -102,28 +114,34 @@ export const ordersService = {
   },
 
   async updateOrder(id, { marketerId, items }) {
-    const { error: e1 } = await supabase.from('orders').update({ marketer_id: marketerId || null }).eq('id', id)
-    if (e1) throw e1
-    const { error: e2 } = await supabase.from('order_items').delete().eq('order_id', id)
-    if (e2) throw e2
-    const { error } = await supabase.from('order_items').insert(items.map(i => ({ ...i, order_id: id })))
+    // Replace lines first: an RPC refusal must not write the marketer either.
+    const { data, error } = await supabase.rpc('replace_order_items', {
+      p_order_id: id,
+      p_items: items.map(({ block_type, quantity, unit_price, source_type, cost_basis }) => ({
+        block_type, quantity, unit_price, source_type: source_type || 'manufactured', cost_basis: cost_basis ?? null,
+      })),
+    })
     if (error) throw error
+    if (data !== items.length) throw new Error('Order lines were not fully replaced. Reload the order before continuing.')
+    requireUpdatedRow(await supabase.from('orders').update({ marketer_id: marketerId || null })
+      .eq('id', id).select('id'), 'Order lines were replaced, but the marketer was not updated. You may not have permission.')
   },
 
   async delete(id) {
-    const { data: invoices } = await supabase.from('invoices').select('id').eq('order_id', id)
+    const { data: invoices, error: invoiceError } = await supabase.from('invoices').select('id').eq('order_id', id)
+    if (invoiceError) throw invoiceError
     if (invoices?.length) {
       const invoiceIds = invoices.map(i => i.id)
-      const { data: pmts } = await supabase.from('payments').select('id').in('invoice_id', invoiceIds)
+      const { data: pmts, error: paymentError } = await supabase.from('payments').select('id').in('invoice_id', invoiceIds)
+      if (paymentError) throw paymentError
       if (pmts?.length) {
         const err = new Error(`${pmts.length} payment(s) exist against this order's invoices and must be removed first.`)
         err.code = 'PAYMENTS_EXIST'
         throw err
       }
-      await supabase.from('invoices').delete().eq('order_id', id)
+      await deleteWhere(supabase, 'invoices', 'order_id', id)
     }
-    const { error } = await supabase.from('orders').delete().eq('id', id)
-    if (error) throw error
+    return deleteById(supabase, 'orders', id)
   },
 }
 
@@ -137,11 +155,12 @@ export const customersService = {
     return data || []
   },
 
-  async getAllForMarketer(userId) {
+  async getAllForMarketer(staffId) {
+    if (!staffId) throw new Error('Your login is not linked to a staff record — ask HR')
     const { data, error } = await supabase
       .from('customers')
       .select('*')
-      .eq('added_by', userId)
+      .eq('added_by', staffId)
       .order('name')
     if (error) throw error
     return data || []
@@ -164,7 +183,8 @@ export const customersService = {
     return data || []
   },
 
-  async getAllWithStatsForMarketer(userId) {
+  async getAllWithStatsForMarketer(staffId) {
+    if (!staffId) throw new Error('Your login is not linked to a staff record — ask HR')
     const { data, error } = await supabase
       .from('customers')
       .select(`
@@ -176,7 +196,7 @@ export const customersService = {
           invoices(id, total_amount, status, payments(amount_paid, status))
         )
       `)
-      .eq('added_by', userId)
+      .eq('added_by', staffId)
       .order('created_at', { ascending: false })
     if (error) throw error
     return data || []
@@ -225,16 +245,18 @@ export const customersService = {
     const { data: orders, error } = await q;
     if (error) throw error;
 
-    const { data: cust } = await supabase
+    const { data: cust, error: customerError } = await supabase
       .from('customers').select('name').eq('id', customerId).single();
+    if (customerError) throw customerError;
 
     let waybills = [];
     if (cust?.name) {
-      const { data: wbs } = await supabase
+      const { data: wbs, error: waybillError } = await supabase
         .from('waybills')
         .select('*')
         .eq('receiver_name', cust.name)
         .order('waybill_date', { ascending: true });
+      if (waybillError) throw waybillError;
       waybills = wbs || [];
     }
 

@@ -4,12 +4,12 @@ import userEvent from '@testing-library/user-event'
 
 const svc = vi.hoisted(() => ({
   orders: vi.fn(), record: vi.fn(), payments: vi.fn(), items: vi.fn(), pdf: vi.fn(),
-  deleteInvoice: vi.fn(), deleteOrder: vi.fn(),
+  deleteInvoice: vi.fn(), deleteOrder: vi.fn(), updateOrder: vi.fn(),
 }))
 vi.mock('./lib/supabase', () => ({ supabase: {} }))
 vi.mock('pdfjs-dist', () => ({ GlobalWorkerOptions: {} }))
 vi.mock('./services/orders', () => ({
-  ordersService: { getAll: svc.orders, delete: svc.deleteOrder },
+  ordersService: { getAll: svc.orders, delete: svc.deleteOrder, updateOrder: svc.updateOrder },
   customersService: { getAll: async () => [] }, customerSitesService: {},
 }))
 vi.mock('./services/staff', () => ({ staffService: { getPublicActive: async () => [] } }))
@@ -48,6 +48,36 @@ async function savePayment() {
   fireEvent.change(screen.getByLabelText('Payment Date'), { target: { value: '2026-10-25' } })
   await userEvent.click(screen.getByRole('button', { name: 'Confirm Payment', exact: true }))
 }
+
+it('1: issued order lines show Locked and cannot enter the editor', async () => {
+  await openOrder([invoice('issued', 'issued')])
+  expect(screen.getByText('Locked — this order has an issued invoice. Cancel the invoice (MD/Accountant) to change it.')).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Edit order lines' })).toBeNull()
+})
+
+it('1: successful order edit reloads; database refusal is shown without reload', async () => {
+  await openOrder([invoice('quote', 'draft')])
+  await userEvent.click(screen.getByRole('button', { name: 'Edit order lines' }))
+  svc.updateOrder.mockRejectedValueOnce(new Error('Exact RPC refusal'))
+  await userEvent.click(screen.getByRole('button', { name: /Save Changes/i }))
+  expect(await screen.findByText(/Exact RPC refusal/)).toBeInTheDocument()
+  expect(svc.orders).toHaveBeenCalledTimes(1)
+  svc.updateOrder.mockResolvedValueOnce(undefined)
+  await userEvent.click(screen.getByRole('button', { name: /Save Changes/i }))
+  await waitFor(() => expect(svc.orders).toHaveBeenCalledTimes(2))
+})
+
+it('2: BDM has no issued invoice edit, cancel or record-payment action', async () => {
+  await openOrder([invoice('issued', 'issued')], 'bdm')
+  expect(screen.queryByRole('button', { name: 'Edit Line Items' })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Cancel Invoice' })).toBeNull()
+  expect(screen.queryByRole('button', { name: '+ Record Payment', exact: true })).toBeNull()
+})
+
+it('3: draft-only order shows its quote value explicitly as not owed', async () => {
+  await openOrder([invoice('quote', 'draft', { total_amount: 2500 })])
+  expect(screen.getAllByText('Quote ₦2,500 — not owed').length).toBeGreaterThan(0)
+})
 
 it('saves against the clicked issued invoice after a cancelled proforma, never invoices[0]', async () => {
   await openOrder([invoice('closed-quote', 'cancelled'), invoice('issued-invoice', 'issued')])
@@ -111,4 +141,12 @@ it('passes the issued timestamp through the cancelled PDF action', async () => {
   await waitFor(() => expect(svc.pdf).toHaveBeenCalledWith(
     expect.objectContaining({ status: 'cancelled', issued_at }), expect.anything(),
   ))
+})
+
+
+it('2: BDM retains proforma edit, issue and close actions', async () => {
+  await openOrder([invoice('quote', 'draft')], 'bdm')
+  expect(screen.getByRole('button', { name: 'Edit Line Items' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Issue Invoice', exact: true })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Close proforma — customer did not proceed' })).toBeInTheDocument()
 })

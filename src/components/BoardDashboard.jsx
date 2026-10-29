@@ -1,3 +1,5 @@
+import { settledRows } from '../utils/moneyQueries'
+import { todayLagos, monthStart, monthEnd, dateParts, shiftDate } from '../utils/lagosDate'
 import React, { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import jsPDF from 'jspdf'
@@ -16,23 +18,11 @@ const theme = {
 const naira  = (n) => `₦${Math.round(Number(n) || 0).toLocaleString()}`
 const fmt    = (n) => Number(n || 0).toLocaleString()
 const today  = () => new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })
-const isoToday = () => new Date().toISOString().split('T')[0]
+const isoToday = todayLagos
 
-const firstOfMonth = () => {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
-}
-const firstOfLastMonth = () => {
-  const d = new Date()
-  d.setDate(1)
-  d.setMonth(d.getMonth() - 1)
-  return d.toISOString().split('T')[0]
-}
-const lastOfLastMonth = () => {
-  const d = new Date()
-  d.setDate(0)
-  return d.toISOString().split('T')[0]
-}
+const firstOfMonth = () => { const [y, m] = dateParts(); return monthStart(y, m - 1) }
+const firstOfLastMonth = () => { const [y, m] = dateParts(); return monthStart(y, m - 2) }
+const lastOfLastMonth = () => { const [y, m] = dateParts(); return monthEnd(y, m - 2) }
 const monthLabel = (isoStr) => {
   if (!isoStr) return ''
   const [y, m] = isoStr.split('-')
@@ -41,10 +31,8 @@ const monthLabel = (isoStr) => {
 const last12MonthStarts = () => {
   const months = []
   for (let i = 11; i >= 0; i--) {
-    const d = new Date()
-    d.setDate(1)
-    d.setMonth(d.getMonth() - i)
-    months.push(d.toISOString().split('T')[0].substring(0, 7))
+    const [y, m] = dateParts()
+    months.push(monthStart(y, m - 1 - i).slice(0, 7))
   }
   return months
 }
@@ -185,6 +173,7 @@ const SectionHeader = ({ title }) => (
 
 // ── Main Component ────────────────────────────────────────────────────
 export default function BoardDashboard({ userProfile }) {
+  const [loadError, setLoadError] = useState('')
   const [loading, setLoading] = useState(true)
   const [d, setD] = useState({
     revThisMonth:     0,
@@ -206,7 +195,7 @@ export default function BoardDashboard({ userProfile }) {
   })
 
   const load = useCallback(async () => {
-    setLoading(true)
+    setLoading(true); setLoadError('')
     try {
       const thisMonthStart = firstOfMonth()
       const lastMonthStart = firstOfLastMonth()
@@ -214,9 +203,9 @@ export default function BoardDashboard({ userProfile }) {
       const todayISO       = isoToday()
       const months12       = last12MonthStarts()
       const twelveMonthsAgo = months12[0] + '-01'
-      const thirtyDaysFromNow = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0]
-      const sixtyDaysAgo  = new Date(Date.now() - 60 * 86400000).toISOString().split('T')[0]
-      const threeMonthsAgo = new Date(Date.now() - 90 * 86400000).toISOString().split('T')[0]
+      const thirtyDaysFromNow = shiftDate(todayLagos(), 30)
+      const sixtyDaysAgo  = shiftDate(todayLagos(), -60)
+      const threeMonthsAgo = shiftDate(todayLagos(), -90)
 
       const results = await Promise.allSettled([
         // 0: Current month confirmed payments
@@ -251,7 +240,9 @@ export default function BoardDashboard({ userProfile }) {
         supabase.from('lpo_orders').select('id').eq('status', 'pending'),
       ])
 
-      const get = (i) => results[i]?.status === 'fulfilled' ? (results[i].value.data || []) : []
+      const labels = ['Revenue', 'Previous revenue', 'Income', 'Expenses', 'Bank balances', 'Receivables', 'Production', 'Orders', 'Monthly revenue', 'Monthly production', 'Expense categories', 'Customer receipts', 'Vehicles', 'Stock', 'Approvals']
+      const rows = results.map((r, i) => settledRows(r, labels[i]))
+      const get = i => rows[i]
 
       // Current month revenue
       const revThisMonth = get(0).reduce((s, p) => s + Number(p.amount_paid || 0), 0)
@@ -376,7 +367,7 @@ export default function BoardDashboard({ userProfile }) {
         overdueReceivables, expiringDocs, lowStock, pendingApprovals,
       })
     } catch (err) {
-      console.error('BoardDashboard load error:', err)
+      setLoadError(err.message)
     } finally {
       setLoading(false)
     }
@@ -494,6 +485,8 @@ export default function BoardDashboard({ userProfile }) {
     : 0
 
   // ── Render ────────────────────────────────────────────────────────
+  if (loadError) return <div role="alert" style={{ color: theme.red, overflowWrap: 'anywhere' }}>{loadError}<button style={{ minHeight: 44 }} onClick={load}>Retry</button></div>
+
   if (loading) {
     return (
       <div style={{ padding: '48px', textAlign: 'center', color: theme.textMuted, fontSize: '14px', fontFamily: "'DM Sans','Segoe UI',sans-serif" }}>
