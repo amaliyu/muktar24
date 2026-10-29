@@ -1231,7 +1231,7 @@ Status key: **DONE** = live and verified · **READY** = migration written + chec
    - Historical "as at" dates use only records dated on or before that date.
 4. **P4 — LATER database items** (A3-3, 4, 8, 16, 17, 18, 20).
 5. **P2b — Audit 4A, stock owned by the database** (before 2B; production at Kado/Life Camp restarts the week of 2026-11-02). Design (planning chat, rejectable): every stock change — dispatch, waybill delete, production record/edit/delete, stock in/out, batch create/edit/delete, receipt edit/void, handover — becomes ONE database function that changes the balance with `balance = balance + delta` in the same transaction as its record, refuses to go below zero (no silent clamping), and rolls back entirely if any part fails. The app stops writing balances directly; balance columns become writable only by those functions. Planning chat writes the functions + tests; Codex switches the screens to call them; both go live together.
-6. Next audit (6 role access) gets added here when it arrives.
+6. All six audits recorded (2026-10-29). Further audits (bank reconciliation, Phase 7 SPV maths — flagged as not covered by audit 2) to be requested later.
 
 ### Audit 1 — security (8 findings)
 | ID | Sev | Finding (verified live) | Status |
@@ -1327,3 +1327,15 @@ Also from audit 2 work: invoices — issued/paid now MD/Accountant-only to chang
 | A5-7 | Medium | invoice line replacement doesn't confirm old lines removed | 2A item 2 (live check: invoice_items delete allowed for the same roles that write; 0 of 15 invoices with lines mismatched) |
 | A5-8 | Medium | batch stock updates ignore errors | 4A (= A4-2) |
 | A5-9 | Medium | invoice/order/opening-balance/batch deletes without row check | 2A items 2 + 15; batch → 4A |
+
+### Audit 6 — role access (6 findings)
+| ID | Sev | Finding | Status |
+|---|---|---|---|
+| A6-1 | High | weekly_labour_payroll readable by every role | DONE 2026-10-29 (= A1-7) |
+| A6-2 | High | marketers could read every invoice, invoice line and payment | DONE 2026-10-29 — marketer sees only their own orders' documents (orders.marketer_id = their staff id) |
+| A6-3 | High | marketers could read every customer and site | DONE 2026-10-29 — own customers (added_by) or customers on their orders. Decision by planning chat, rejectable: portfolios private; BDM/MD/Accountant still see all. No marketer login active today |
+| A6-4 | Medium | board could list all staff-document records | DONE 2026-10-29 — MD, HR, ICO and the staff member only |
+| A6-5 | Medium | BDM opens Reports/KPI but can't read expenses | 2B (BDM sees no profit/cost figures; hide those views for BDM) |
+| A6-6 | Medium | invoice/order updates broader than the UI | DONE 2026-10-27 (invoice status/delete controls; order lines via replace_order_items) |
+Found while checking A6-2: the app loads a marketer's orders/customers by their login id, but orders.marketer_id and customers.added_by hold the STAFF id — a marketer would see an empty list. LATER (no marketer login active); fix in the next Orders PR: use userProfile.staff_id.
+Tests 2026-10-29 (rolled back): MD and BDM still see all 102 invoices / 55 payments / 126 customers; board sees 0 staff documents, ICO 2.
