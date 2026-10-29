@@ -1220,7 +1220,7 @@ Method (MD, 2026-10-29): the MD brings each ChatGPT audit report here one at a t
 Status key: **DONE** = live and verified · **READY** = migration written + checked against live definitions, waiting to be applied · **2A / 3A** = in that Codex PR prompt · **2B** = accounting-basis PR (decision made 2026-10-29) · **LATER** = medium, queued.
 
 ### Priority order (work top-down)
-1. **P1 — apply READY migrations:** `audit1_remaining_access_fixes` (A1-4..8) then `audit3_payroll_approval_locks` (A3-1,2,7,10,11,12,19). Files waiting outside the repo until applied; committed to `supabase/migrations/` only once live.
+1. **P1 — DONE 2026-10-29:** `audit1_remaining_access_fixes` (A1-4..8) and `audit3_payroll_approval_locks` (A3-1,2,7,10,11,12,19) applied and tested (rolled-back tests: 10/10 locks hold, drafts still save, loading expense follows quantity edits).
 2. **P2 — merge PR #130**, then send Codex **Audit 2A** (14 money-screen bugs), then **Audit 3A** (payroll app fixes).
 3. **P3 — Audit 2B (accounting basis, DECIDED 2026-10-29)** → Codex after 2A merges. MD: **revenue counts when blocks are delivered.** Planning-chat rules that follow (stated to MD, rejectable):
    - Revenue (P&L, Financial Statements, Board, KPI) = delivered quantity × order price (v_delivered_revenue), by waybill_date. Cash received is shown separately as "Cash received", never as revenue.
@@ -1275,24 +1275,24 @@ Also from audit 2 work: invoices — issued/paid now MD/Accountant-only to chang
 ### Audit 3 — payroll, roster, loading, advances, leave (21 findings)
 | ID | Sev | Finding | Status |
 |---|---|---|---|
-| A3-1 | High | payroll can be inserted already approved/paid | READY (insert must be draft) |
-| A3-2 | High | approval doesn't freeze salary lines, roster workers, loaders | READY (lock triggers; payment fields still recordable while MD-approved) |
+| A3-1 | High | payroll can be inserted already approved/paid | DONE 2026-10-29 (insert must be draft) |
+| A3-2 | High | approval doesn't freeze salary lines, roster workers, loaders | DONE 2026-10-29 (lock triggers; payment fields still recordable while MD-approved) |
 | A3-3 | High | paid work can enter another weekly payroll (7 paid rosters unlinked) | 3A + LATER (DB uniqueness) |
 | A3-4 | High | salary payroll periods can overlap (1 overlapping pair exists) | 3A + LATER (DB constraint) |
 | A3-5 | High | approved payroll loses its own schedule (selection switches to unassigned rows) | 3A |
 | A3-6 | High | weekly payroll uses total_pay not net_pay (4 entries differ) | 3A |
-| A3-7 | High | approved/disbursed advances financially editable | READY |
+| A3-7 | High | approved/disbursed advances financially editable | DONE 2026-10-29 |
 | A3-8 | High | advance recovery not tied to a specific advance | LATER (DB) + 3A |
 | A3-9 | High | marking weekly payroll paid adds a second labour expense | 3A |
-| A3-10 | High | loading quantity edits don't update the expense (18 wrong, net ₦13,140 understated; 20 wrong dates) | READY (trigger + data correction) |
-| A3-11 | High | production manager can change live labour rates / approval fields directly | READY (MD-only rates; ICO then MD order enforced) |
-| A3-12 | High | approved leave dates/paid status editable; overlapping unpaid leave double-charged | READY (lock); overlap → 3A |
+| A3-10 | High | loading quantity edits don't update the expense (18 wrong, net ₦13,140 understated; 20 wrong dates) | DONE 2026-10-29 (trigger + data correction) |
+| A3-11 | High | production manager can change live labour rates / approval fields directly | DONE 2026-10-29 (MD-only rates; ICO then MD order enforced) |
+| A3-12 | High | approved leave dates/paid status editable; overlapping unpaid leave double-charged | DONE 2026-10-29 (lock); overlap → 3A |
 | A3-13 | Medium | ICO/accountant can't reach staff payroll actions; accountant can't record line payment | 3A + DB grant (LATER) |
 | A3-14 | Medium | loading saves silently drop the crew for PM/APM (136 unpaid logs without loaders) | 3A + DB policy (LATER) |
 | A3-15 | Medium | monthly fixed payroll can't load/generate (ILIKE on date, missing conflict key) | 3A + DB constraint (LATER) |
 | A3-16 | Medium | roster edits/deletes not atomic (4 headers disagree with workers) | 3A + LATER |
 | A3-17 | Medium | roster date/zero-cost changes don't correct the expense (2 wrong dates) | LATER (DB) |
 | A3-18 | Medium | new salary lines have no expense until a later header update (18 lines) | LATER (DB) |
-| A3-19 | Medium | costed loading entries can't be deleted (expense FK) | READY |
+| A3-19 | Medium | costed loading entries can't be deleted (expense FK) | DONE 2026-10-29 |
 | A3-20 | Medium | editing an earlier trip can change its incentive rate | LATER (DB) |
 | A3-21 | Medium | salary across different-length months uses the first month's divisor | 3A |
