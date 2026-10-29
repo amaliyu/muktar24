@@ -1217,12 +1217,18 @@ AS BUILT — DB (applied 2026-10-23 via the SQL Editor after a rolled-back test 
 
 Method (MD, 2026-10-29): the MD brings each ChatGPT audit report here one at a time; the planning chat verifies every finding against the live database and code, records it below, and fixes Critical/High items in the background in priority order. Database changes only through the planning chat (Rule §6); app changes through Codex PRs reviewed by the planning chat before merge.
 
-Status key: **DONE** = live and verified · **READY** = migration written + checked against live definitions, waiting to be applied · **2A / 3A** = in that Codex PR prompt · **DECIDE** = needs an MD decision first · **LATER** = medium, queued.
+Status key: **DONE** = live and verified · **READY** = migration written + checked against live definitions, waiting to be applied · **2A / 3A** = in that Codex PR prompt · **2B** = accounting-basis PR (decision made 2026-10-29) · **LATER** = medium, queued.
 
 ### Priority order (work top-down)
 1. **P1 — apply READY migrations:** `audit1_remaining_access_fixes` (A1-4..8) then `audit3_payroll_approval_locks` (A3-1,2,7,10,11,12,19). Files waiting outside the repo until applied; committed to `supabase/migrations/` only once live.
 2. **P2 — merge PR #130**, then send Codex **Audit 2A** (14 money-screen bugs), then **Audit 3A** (payroll app fixes).
-3. **P3 — MD decision: accounting basis** (revenue on delivery vs on cash; which expenses count in P&L) → unlocks the DECIDE items in audit 2.
+3. **P3 — Audit 2B (accounting basis, DECIDED 2026-10-29)** → Codex after 2A merges. MD: **revenue counts when blocks are delivered.** Planning-chat rules that follow (stated to MD, rejectable):
+   - Revenue (P&L, Financial Statements, Board, KPI) = delivered quantity × order price (v_delivered_revenue), by waybill_date. Cash received is shown separately as "Cash received", never as revenue.
+   - Customer balance (balance sheet, Board, Reports, AR): per customer, delivered value − confirmed payments; a positive result is a trade receivable, a negative result is a **customer deposit** (liability). Invoices stay the collection document and drive aging; proformas never count.
+   - Expenses in profit = approved only; pending shown separately as "awaiting approval"; rejected never.
+   - Finished-goods stock valued at production cost per block (same basis as Production Cost Analysis), never at selling price; payables from the supplier ledger (purchases − payments − returns) on every screen.
+   - Site scope: when a site is selected, revenue, cash and costs are all that site's; company view = all sites.
+   - Historical "as at" dates use only records dated on or before that date.
 4. **P4 — LATER database items** (A3-3, 4, 8, 16, 17, 18, 20).
 5. Next audits (4 stock, 5 deletes/hidden errors, 6 role access) get added here as they arrive.
 
@@ -1244,26 +1250,26 @@ Status key: **DONE** = live and verified · **READY** = migration written + chec
 | A2-1 | High | non-MD order edit duplicated lines (RLS delete no-op) | DONE DB 2026-10-27 (replace_order_items RPC; 10 duplicate lines on 6 orders removed, MD-approved); app call → 2A |
 | A2-2 | High | v_delivered_revenue counted a delivery once per duplicate line (₦5.35m overstated) | DONE 2026-10-27 |
 | A2-3 | High | proformas shown as customer debt (fallback to order value) | partly #130; rest → 2A |
-| A2-4 | High | profit screens use incompatible revenue definitions | DECIDE |
+| A2-4 | High | profit screens use incompatible revenue definitions | 2B |
 | A2-5 | High | failed dashboard queries shown as ₦0 | 2A |
 | A2-6 | High | dashboard revenue filtered by order date not payment date | 2A |
 | A2-7 | High | Financial Statements opening/closing cash always ₦0 (wrong field names) | 2A |
-| A2-8 | High | historical balance sheet shows current positions | DECIDE (historic stock needs DB support) |
+| A2-8 | High | historical balance sheet shows current positions | 2B (historic stock may need DB support) |
 | A2-9 | High | balance-sheet current-year profit always ₦0 | 2A |
-| A2-10 | High | assets/liabilities differ between Financial Statements and Reports | DECIDE |
-| A2-11 | Medium | receivable totals treat credits differently | DECIDE |
-| A2-12 | Medium | expense approval filters inconsistent (pending/approved/rejected) | DECIDE |
+| A2-10 | High | assets/liabilities differ between Financial Statements and Reports | 2B |
+| A2-11 | Medium | receivable totals treat credits differently | 2B |
+| A2-12 | Medium | expense approval filters inconsistent (pending/approved/rejected) | 2B |
 | A2-13 | Medium | payroll double-counted in Cost Analysis; payroll_runs.total_amount doesn't exist | 2A |
-| A2-14 | Medium | adjustments don't reliably hit the right statement/period | DECIDE |
+| A2-14 | Medium | adjustments don't reliably hit the right statement/period | 2B |
 | A2-15 | Medium | historical customer balances use wrong cut-offs | 2A |
 | A2-16 | Medium | Trading Margin repeated orders per invoice, included quotes | DONE 2026-10-27 |
 | A2-17 | Medium | Invoice Report query fails (payments joined to orders) | 2A |
 | A2-18 | Medium | Supplier Statement empty (orders by nonexistent `name`) | 2A |
 | A2-19 | Medium | supplier returns ignored in some balances | 2A |
 | A2-20 | Medium | product revenue repeats order per instalment | 2A |
-| A2-21 | Medium | KPI profit mixes site and company scope | DECIDE |
+| A2-21 | Medium | KPI profit mixes site and company scope | 2B |
 | A2-22 | Medium | Lagos timezone shifts month boundaries | 2A |
-| A2-23 | Medium | customer statement/history broken; "deposits held" meaningless | 2A (statement/history); DECIDE (deposits) |
+| A2-23 | Medium | customer statement/history broken; "deposits held" meaningless | 2A (statement/history); 2B (deposits) |
 Also from audit 2 work: invoices — issued/paid now MD/Accountant-only to change or cancel, nothing returns to proforma, delete MD-only — DONE 2026-10-27. Open: Mohr Engineering APC-INV-2026-2413 ₦4,601,000 should be ₦2,386,500 (MD to confirm quantities, then cancel & reissue); Mr Festus invoice says 1,000 blocks, 1,200 delivered and ₦1,320,000 paid (MD to confirm).
 
 ### Audit 3 — payroll, roster, loading, advances, leave (21 findings)
