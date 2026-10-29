@@ -1212,3 +1212,81 @@ AS BUILT — DB (applied 2026-10-23 via the SQL Editor after a rolled-back test 
   - The Term Sheet/Memorandum/Pitch describe the investor's QTJ4-26B with Bilaad as its anchor and a 2,880/day planning rate. Confirmed deployment puts the QTJ4-26B at Kado (Sequoia, full supply) and the QTJ4-40 at Life Camp (Bilaad); the QTJ4-26B is rated 4,430–5,000/day. The investor pack's anchor economics and capacity figures need re-basing before the SPV closes.
 - **Machine ownership wording:** Sequoia §10 calls the plant "APCL's property", while Term Sheet §5 places it in the SPV. Check this with counsel before the SPV is formed.
 - **This master document was last updated 2026-08-07 (PR #110); the repo is at PR #121.** Bring §1 session history up to date for PRs #111–#121 when this section is merged.
+
+## 12. AUDIT BACKLOG — ChatGPT read-only audits (from 2026-10-25)
+
+Method (MD, 2026-10-29): the MD brings each ChatGPT audit report here one at a time; the planning chat verifies every finding against the live database and code, records it below, and fixes Critical/High items in the background in priority order. Database changes only through the planning chat (Rule §6); app changes through Codex PRs reviewed by the planning chat before merge.
+
+Status key: **DONE** = live and verified · **READY** = migration written + checked against live definitions, waiting to be applied · **2A / 3A** = in that Codex PR prompt · **DECIDE** = needs an MD decision first · **LATER** = medium, queued.
+
+### Priority order (work top-down)
+1. **P1 — apply READY migrations:** `audit1_remaining_access_fixes` (A1-4..8) then `audit3_payroll_approval_locks` (A3-1,2,7,10,11,12,19). Files waiting outside the repo until applied; committed to `supabase/migrations/` only once live.
+2. **P2 — merge PR #130**, then send Codex **Audit 2A** (14 money-screen bugs), then **Audit 3A** (payroll app fixes).
+3. **P3 — MD decision: accounting basis** (revenue on delivery vs on cash; which expenses count in P&L) → unlocks the DECIDE items in audit 2.
+4. **P4 — LATER database items** (A3-3, 4, 8, 16, 17, 18, 20).
+5. Next audits (4 stock, 5 deletes/hidden errors, 6 role access) get added here as they arrive.
+
+### Audit 1 — security (8 findings)
+| ID | Sev | Finding (verified live) | Status |
+|---|---|---|---|
+| A1-1 | Critical | grant/revoke_user_role callable logged-out; MD check passed on NULL role | DONE 2026-10-25 (no misuse found: 2 grants, both by MD) |
+| A1-2 | Critical | order_items_delivery / disciplinary_self writable by anon | DONE 2026-10-25 |
+| A1-3 | High | 4 financial views anon-readable | DONE (anon) 2026-10-25; signed-in part → A1-8 views |
+| A1-4 | High | any user can add themselves to any conversation and read it | READY |
+| A1-5 | High | deactivated accounts keep working (5 inactive, 2 with live sessions; has_role ignores is_active) | READY — login ban + session end on deactivation |
+| A1-6 | Medium | payment-request attachments readable by every requester | READY — own requests only; MD/Acct/ICO/Board all |
+| A1-7 | Medium | weekly_labour_payroll, truck_loading_rates readable by all roles | READY — 8 operational/finance roles |
+| A1-8 | Medium | 10 definer functions callable logged-out; 3 payment views bypass RLS | READY |
+
+### Audit 2 — money totals (23 findings)
+| ID | Sev | Finding | Status |
+|---|---|---|---|
+| A2-1 | High | non-MD order edit duplicated lines (RLS delete no-op) | DONE DB 2026-10-27 (replace_order_items RPC; 10 duplicate lines on 6 orders removed, MD-approved); app call → 2A |
+| A2-2 | High | v_delivered_revenue counted a delivery once per duplicate line (₦5.35m overstated) | DONE 2026-10-27 |
+| A2-3 | High | proformas shown as customer debt (fallback to order value) | partly #130; rest → 2A |
+| A2-4 | High | profit screens use incompatible revenue definitions | DECIDE |
+| A2-5 | High | failed dashboard queries shown as ₦0 | 2A |
+| A2-6 | High | dashboard revenue filtered by order date not payment date | 2A |
+| A2-7 | High | Financial Statements opening/closing cash always ₦0 (wrong field names) | 2A |
+| A2-8 | High | historical balance sheet shows current positions | DECIDE (historic stock needs DB support) |
+| A2-9 | High | balance-sheet current-year profit always ₦0 | 2A |
+| A2-10 | High | assets/liabilities differ between Financial Statements and Reports | DECIDE |
+| A2-11 | Medium | receivable totals treat credits differently | DECIDE |
+| A2-12 | Medium | expense approval filters inconsistent (pending/approved/rejected) | DECIDE |
+| A2-13 | Medium | payroll double-counted in Cost Analysis; payroll_runs.total_amount doesn't exist | 2A |
+| A2-14 | Medium | adjustments don't reliably hit the right statement/period | DECIDE |
+| A2-15 | Medium | historical customer balances use wrong cut-offs | 2A |
+| A2-16 | Medium | Trading Margin repeated orders per invoice, included quotes | DONE 2026-10-27 |
+| A2-17 | Medium | Invoice Report query fails (payments joined to orders) | 2A |
+| A2-18 | Medium | Supplier Statement empty (orders by nonexistent `name`) | 2A |
+| A2-19 | Medium | supplier returns ignored in some balances | 2A |
+| A2-20 | Medium | product revenue repeats order per instalment | 2A |
+| A2-21 | Medium | KPI profit mixes site and company scope | DECIDE |
+| A2-22 | Medium | Lagos timezone shifts month boundaries | 2A |
+| A2-23 | Medium | customer statement/history broken; "deposits held" meaningless | 2A (statement/history); DECIDE (deposits) |
+Also from audit 2 work: invoices — issued/paid now MD/Accountant-only to change or cancel, nothing returns to proforma, delete MD-only — DONE 2026-10-27. Open: Mohr Engineering APC-INV-2026-2413 ₦4,601,000 should be ₦2,386,500 (MD to confirm quantities, then cancel & reissue); Mr Festus invoice says 1,000 blocks, 1,200 delivered and ₦1,320,000 paid (MD to confirm).
+
+### Audit 3 — payroll, roster, loading, advances, leave (21 findings)
+| ID | Sev | Finding | Status |
+|---|---|---|---|
+| A3-1 | High | payroll can be inserted already approved/paid | READY (insert must be draft) |
+| A3-2 | High | approval doesn't freeze salary lines, roster workers, loaders | READY (lock triggers; payment fields still recordable while MD-approved) |
+| A3-3 | High | paid work can enter another weekly payroll (7 paid rosters unlinked) | 3A + LATER (DB uniqueness) |
+| A3-4 | High | salary payroll periods can overlap (1 overlapping pair exists) | 3A + LATER (DB constraint) |
+| A3-5 | High | approved payroll loses its own schedule (selection switches to unassigned rows) | 3A |
+| A3-6 | High | weekly payroll uses total_pay not net_pay (4 entries differ) | 3A |
+| A3-7 | High | approved/disbursed advances financially editable | READY |
+| A3-8 | High | advance recovery not tied to a specific advance | LATER (DB) + 3A |
+| A3-9 | High | marking weekly payroll paid adds a second labour expense | 3A |
+| A3-10 | High | loading quantity edits don't update the expense (18 wrong, net ₦13,140 understated; 20 wrong dates) | READY (trigger + data correction) |
+| A3-11 | High | production manager can change live labour rates / approval fields directly | READY (MD-only rates; ICO then MD order enforced) |
+| A3-12 | High | approved leave dates/paid status editable; overlapping unpaid leave double-charged | READY (lock); overlap → 3A |
+| A3-13 | Medium | ICO/accountant can't reach staff payroll actions; accountant can't record line payment | 3A + DB grant (LATER) |
+| A3-14 | Medium | loading saves silently drop the crew for PM/APM (136 unpaid logs without loaders) | 3A + DB policy (LATER) |
+| A3-15 | Medium | monthly fixed payroll can't load/generate (ILIKE on date, missing conflict key) | 3A + DB constraint (LATER) |
+| A3-16 | Medium | roster edits/deletes not atomic (4 headers disagree with workers) | 3A + LATER |
+| A3-17 | Medium | roster date/zero-cost changes don't correct the expense (2 wrong dates) | LATER (DB) |
+| A3-18 | Medium | new salary lines have no expense until a later header update (18 lines) | LATER (DB) |
+| A3-19 | Medium | costed loading entries can't be deleted (expense FK) | READY |
+| A3-20 | Medium | editing an earlier trip can change its incentive rate | LATER (DB) |
+| A3-21 | Medium | salary across different-length months uses the first month's divisor | 3A |
