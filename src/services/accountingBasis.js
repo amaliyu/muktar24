@@ -19,10 +19,24 @@ const dates = (query, column, from, to) => {
 }
 
 async function deliveries(from, to, siteId) {
-  // One row per waybill, prices resolved by the database view.
-  let q = dates(supabase.from('v_delivered_revenue').select('*'), 'waybill_date', from, to)
-  if (siteId) q = q.eq('site_id', siteId)
-  return checked(q)
+  // The view does not expose site_id/customer_id. Resolve these from orders
+  // without multiplying the one-waybill view rows.
+  const rows = await checked(dates(
+    supabase.from('v_delivered_revenue').select('*'),
+    'waybill_date', from, to
+  ))
+  const ids = [...new Set(rows.map(row => row.order_id).filter(Boolean))]
+  if (!ids.length) return []
+  const orders = await checked(supabase.from('orders')
+    .select('id, customer_id, site_id').in('id', ids))
+  const orderById = new Map(orders.map(row => [row.id, row]))
+  if (orderById.size !== ids.length) {
+    throw new Error('Some delivery orders are unavailable; accounting figures cannot be verified')
+  }
+  return rows.map(row => ({
+    ...row, customer_id: orderById.get(row.order_id).customer_id,
+    site_id: orderById.get(row.order_id).site_id,
+  })).filter(row => !siteId || row.site_id === siteId)
 }
 
 async function payments(from, to, siteId) {
