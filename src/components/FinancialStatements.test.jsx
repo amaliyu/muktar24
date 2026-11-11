@@ -1,3 +1,4 @@
+import { emptyBalance } from '../test/accountingFixtures'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -22,7 +23,7 @@ beforeEach(() => {
   db.delete.mockReturnValue({ eq: db.eq })
   db.eq.mockReturnValue({ select: db.select })
   db.select.mockResolvedValue({ data: [], error: null })
-  db.load.mockResolvedValue({ adjustments: [adjustment] })
+  db.load.mockResolvedValue(emptyBalance({ adjustments: [adjustment] }))
 })
 
 async function requestDelete() {
@@ -57,7 +58,7 @@ describe('financial adjustment deletion', () => {
   it('only reports success and reloads after a deleted row is returned', async () => {
     db.select.mockResolvedValue({ data: [{ id: 'adj-1' }], error: null })
     await requestDelete()
-    db.load.mockResolvedValue({ adjustments: [] })
+    db.load.mockResolvedValue(emptyBalance())
     await userEvent.click(screen.getByRole('button', { name: 'Delete adjustment', exact: true }))
     expect(await screen.findByRole('status')).toHaveTextContent('Adjustment deleted.')
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Delete adjustment Test adjustment' })).toBeNull())

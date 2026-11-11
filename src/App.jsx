@@ -1,3 +1,5 @@
+import AccountingSummary from './components/AccountingSummary'
+import { accountingBasisService } from './services/accountingBasis'
 import { startSessionMonitor, CLOCK_WARNING } from './utils/sessionMonitor'
 import { siteContractsService } from './services/siteContracts'
 import { expenseCosts } from './utils/financialTotals'
@@ -508,17 +510,18 @@ export const Dashboard = ({ onNavigate, onOpenSite, userProfile }) => {
       const needsWaybills = can('md', 'board_member', 'ico', 'store_officer', 'logistics_manager');
 
       try {
-        const [staffList, productions, orders, waybills, revenue] = await Promise.all([
+        const [staffList, productions, orders, waybills, revenue, delivered] = await Promise.all([
           needsStaff    ? staffService.getPublicList()                        : Promise.resolve([]),
           productionService.getAll({ from: dateRange.from, to: dateRange.to }),
           needsOrders   ? ordersService.getAll({ from: dateRange.from, to: dateRange.to })   : Promise.resolve([]),
           needsWaybills ? waybillsService.getAll({ from: dateRange.from, to: dateRange.to }) : Promise.resolve([]),
-          needsOrders ? ordersService.getCashReceived(dateRange) : Promise.resolve(0),
+          needsOrders ? accountingBasisService.payments(dateRange.from, dateRange.to).then(rows => accountingBasisService.cashReceived(rows, dateRange)) : Promise.resolve(0),
+          can('md', 'board_member', 'ico', 'accountant') ? accountingBasisService.deliveries(dateRange.from, dateRange.to).then(rows => accountingBasisService.deliveredRevenue(rows, dateRange).revenue) : Promise.resolve(0),
         ]);
         const produced = productions.reduce((s, p) => s + (p.quantity_produced || 0), 0);
         const damages  = waybills.reduce((s, w) => s + (w.quantity_damaged || 0), 0);
         const pending  = orders.filter(isPendingOrder).length;
-        setStats({ staff: staffList.length, produced, orders: orders.length, revenue, pending, waybills: waybills.length, damages, lpoQueue: 0, scheduleQueue: 0, pendingRegister: 0 });
+        setStats({ staff: staffList.length, produced, orders: orders.length, revenue, delivered, pending, waybills: waybills.length, damages, lpoQueue: 0, scheduleQueue: 0, pendingRegister: 0 });
         setRecent(orders.slice(0, 5));
       } catch (e) {
         setDashboardError('Revenue could not be loaded: ' + (e?.message || e));
@@ -616,6 +619,7 @@ export const Dashboard = ({ onNavigate, onOpenSite, userProfile }) => {
   ].filter(Boolean);
 
   const row2 = [
+      ...(can('md', 'board_member', 'ico', 'accountant') ? [<StatCard key="delivered" label="Delivered (revenue)" value={naira(stats.delivered)} sub="Revenue counts when blocks are delivered. Cash received is shown separately." accent={theme.green} />] : []),
     can('md', 'board_member', 'ico', 'accountant') &&
       <StatCard key="revenue" label="Cash received" value={naira(stats.revenue)} sub="Confirmed payments" accent={theme.green} />,
     can('md', 'board_member', 'ico', 'accountant', 'bdm', 'marketer') &&
@@ -5289,6 +5293,8 @@ const Products = () => {
 // ── ACCOUNTING ────────────────────────────────────────────────
 export const BookkeepingTab = () => {
   const today = todayLagos();
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [summaryRefresh,setSummaryRefresh] = useState(0);
   const [date, setDate] = useState(today);
   const [payments, setPayments] = useState([]);
   const [incomeList, setIncomeList] = useState([]);
@@ -5346,15 +5352,16 @@ export const BookkeepingTab = () => {
       if (sid && amount > 0) {
         try {
           await supplierTransactionsService.create({ supplier_id: sid, transaction_date: date, transaction_type: 'purchase', amount, description: expenseForm.description, linked_expense_id: rec.id });
-        } catch { /* non-blocking */ }
+        } catch (e) { setErr('Expense saved, but supplier ledger could not be updated: '+e.message); }
       }
       setExpenseForm({ category_id: '', description: '', amount: '', vendor: '', supplierId: '' });
+      setSummaryRefresh(n=>n+1);
       setOk(status === 'pending' ? 'Submitted for MD approval (≥₦50,000)' : 'Expense recorded');
     } catch (e) { setErr(e?.message || 'An error occurred'); }
   };
 
   const approveExpense = async (id, status) => {
-    try { await expensesService.updateStatus(id, status, 'MD'); setExpenses(p => p.map(e => e.id === id ? { ...e, status } : e)); }
+    try { await expensesService.updateStatus(id, status, 'MD'); setExpenses(p => p.map(e => e.id === id ? { ...e, status } : e)); setSummaryRefresh(n=>n+1); }
     catch (e) { setErr(e?.message || 'An error occurred'); }
   };
 
@@ -5396,12 +5403,6 @@ export const BookkeepingTab = () => {
     } catch (e) { setCatErr(e.message); }
   };
 
-  const totalPaymentsAmt = payments.reduce((s, p) => s + Number(p.amount_paid || 0), 0);
-  const totalOtherIncome = incomeList.reduce((s, r) => s + Number(r.amount || 0), 0);
-  const totalIncome = totalPaymentsAmt + totalOtherIncome;
-  const totalExpenses = expenses.filter(e => e.status !== 'rejected').reduce((s, e) => s + Number(e.amount || 0), 0);
-  const net = totalIncome - totalExpenses;
-
   if (dataError) return <div role="alert" style={{ color: theme.red, overflowWrap: "anywhere" }}>Bookkeeping could not be loaded: {dataError}<button style={styles.btn("secondary")} onClick={() => setRefresh(n => n + 1)}>Retry</button></div>;
 
   return (
@@ -5411,20 +5412,10 @@ export const BookkeepingTab = () => {
           <label style={styles.label}>Date</label>
           <input type="date" style={{ ...styles.input, width: '160px' }} value={date} onChange={e => setDate(e.target.value)} />
         </div>
-        <div style={{ display: 'flex', gap: '12px', flex: 1 }}>
-          {[
-            { label: 'Total Income', val: totalIncome, color: theme.green },
-            { label: 'Total Expenses', val: totalExpenses, color: theme.red },
-            { label: 'Net', val: net, color: net >= 0 ? theme.green : theme.red },
-          ].map(({ label, val, color }) => (
-            <div key={label} style={{ ...styles.statCard(color), flex: 1, padding: '14px 16px' }}>
-              <div style={styles.statLabel}>{label}</div>
-              <div style={{ ...styles.statValue, fontSize: '17px', color }}>{naira(val)}</div>
-            </div>
-          ))}
-        </div>
+        <AccountingSummary title="Bookkeeping summary" from={date} to={date} refresh={refresh + summaryRefresh + expenses.length + incomeList.length} />
       </div>
 
+      {deleteTarget && <ConfirmDialog title="Delete record?" body="Permanently delete this record?" danger confirmLabel="Delete" onCancel={()=>setDeleteTarget(null)} onConfirm={async()=>{ const target=deleteTarget; setDeleteTarget(null); await ({income:deleteIncome,expense:deleteExpense,category:deleteCategory}[target.kind])(target.id); }} />}
       {err && <Alert msg={err} onClose={() => setErr('')} />}
       {ok && <Alert msg={ok} type="success" onClose={() => setOk('')} />}
       {loading && <Spinner />}
@@ -5470,7 +5461,7 @@ export const BookkeepingTab = () => {
                   </div>
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                     <span style={{ fontSize: '13px', fontWeight: '600', color: theme.green }}>{naira(r.amount)}</span>
-                    <IconButton style={{ ...styles.btn('danger'), padding: '2px 8px', fontSize: '10px' }} onClick={() => deleteIncome(r.id)} aria-label={`Delete income record ${r.id}`}><Ico icon={X} /></IconButton>
+                    <IconButton style={{ ...styles.btn('danger'), padding: '2px 8px', fontSize: '10px' }} onClick={() => setDeleteTarget({kind:'income',id:r.id})} aria-label={`Delete income record ${r.id}`}><Ico icon={X} /></IconButton>
                   </div>
                 </div>
               ))}
@@ -5508,7 +5499,7 @@ export const BookkeepingTab = () => {
                       </div>
                       <div style={{ display: 'flex', gap: '4px' }}>
                         <button style={{ ...styles.btn('secondary'), padding: '2px 8px', fontSize: '10px' }} onClick={() => toggleCategory(c)}>{c.is_active ? 'Disable' : 'Enable'}</button>
-                        <button style={{ ...styles.btn('danger'), padding: '2px 8px', fontSize: '10px' }} onClick={() => deleteCategory(c.id)}>Delete</button>
+                        <button style={{ ...styles.btn('danger'), padding: '2px 8px', fontSize: '10px' }} onClick={() => setDeleteTarget({kind:'category',id:c.id})}>Delete</button>
                       </div>
                     </div>
                   ))}
@@ -5575,7 +5566,7 @@ export const BookkeepingTab = () => {
                     </div>
                   )}
                   {e.status !== 'pending' && (
-                    <button style={{ ...styles.btn('danger'), padding: '2px 8px', fontSize: '10px', marginTop: '4px' }} onClick={() => deleteExpense(e.id)}>Delete</button>
+                    <button style={{ ...styles.btn('danger'), padding: '2px 8px', fontSize: '10px', marginTop: '4px' }} onClick={() => setDeleteTarget({kind:'expense',id:e.id})}>Delete</button>
                   )}
                 </div>
               ))}
@@ -5588,114 +5579,12 @@ export const BookkeepingTab = () => {
 };
 
 const PLTab = () => {
-  const now = new Date();
-  const firstOfMonth = periodRange('month', now).from;
-  const [from, setFrom] = useState(firstOfMonth);
-  const [to, setTo] = useState(todayLagos(now));
-  const [payments, setPayments] = useState([]);
-  const [incomeRecords, setIncomeRecords] = useState([]);
-  const [expenses, setExpenses] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState('');
-  const [pdfLoading, setPdfLoading] = useState(false);
-
-  const load = () => {
-    setLoading(true); setErr('');
-    Promise.all([
-      accountingService.getConfirmedPayments(from, to),
-      incomeRecordsService.getAll(from, to),
-      expensesService.getAll(from, to),
-    ]).then(([p, ir, ex]) => { setPayments(p); setIncomeRecords(ir); setExpenses(ex); })
-      .catch(e => setErr(e?.message || 'An error occurred')).finally(() => setLoading(false));
-  };
-
-  useEffect(() => { load(); }, []);
-
-  const totalPaymentsAmt = payments.reduce((s, p) => s + Number(p.amount_paid || 0), 0);
-  const totalOtherIncome = incomeRecords.reduce((s, r) => s + Number(r.amount || 0), 0);
-  const totalRevenue = totalPaymentsAmt + totalOtherIncome;
-  const approvedExpenses = expenses.filter(e => e.status !== 'rejected');
-  const totalExpenses = approvedExpenses.reduce((s, e) => s + Number(e.amount || 0), 0);
-  const netProfit = totalRevenue - totalExpenses;
-
-  const expensesByGroup = {};
-  for (const e of approvedExpenses) {
-    const group = e.category?.parent_category || 'General';
-    const cat = e.category?.name || 'Uncategorised';
-    if (!expensesByGroup[group]) expensesByGroup[group] = {};
-    expensesByGroup[group][cat] = (expensesByGroup[group][cat] || 0) + Number(e.amount || 0);
-  }
-
-  const downloadPdf = async () => {
-    setPdfLoading(true);
-    try { await generatePLStatementPDF({ fromDate: from || null, toDate: to || null, payments, incomeRecords, expenses: approvedExpenses }); }
-    catch (e) { setErr(e?.message || 'An error occurred'); } finally { setPdfLoading(false); }
-  };
-
-  if (err) return <div role="alert" style={{ color: theme.red, overflowWrap: 'anywhere' }}>Revenue could not be loaded: {err}<button style={styles.btn('secondary')} onClick={load}>Retry</button></div>;
-
-  return (
-    <div>
-      <div style={{ ...styles.row, alignItems: 'flex-end', marginBottom: '20px', gap: '12px' }}>
-        <div><label style={styles.label}>From</label><input type="date" style={{ ...styles.input, width: '150px' }} value={from} onChange={e => setFrom(e.target.value)} /></div>
-        <div><label style={styles.label}>To</label><input type="date" style={{ ...styles.input, width: '150px' }} value={to} onChange={e => setTo(e.target.value)} /></div>
-        <button style={styles.btn('secondary')} onClick={load}>Load</button>
-        <button data-board-allow style={{ ...styles.btn('primary'), marginLeft: 'auto' }} onClick={downloadPdf} disabled={pdfLoading}>{pdfLoading ? 'Generating…' : <IconText icon={Download}>Download PDF</IconText>}</button>
-      </div>
-      {err && <Alert msg={err} onClose={() => setErr('')} />}
-      {loading ? <Spinner /> : (
-        <div style={styles.row}>
-          <div style={{ flex: 1 }}>
-            <div style={{ ...styles.card, borderTop: `3px solid ${theme.green}`, marginBottom: '16px' }}>
-              <div style={{ ...styles.sectionTitle, color: theme.green }}>Revenue</div>
-              <table style={styles.table}>
-                <tbody>
-                  <tr><td style={styles.td}>Customer Payments</td><td style={{ ...styles.td, textAlign: 'right', fontWeight: '600', color: theme.green }}>{naira(totalPaymentsAmt)}</td></tr>
-                  <tr><td style={styles.td}>Other Income</td><td style={{ ...styles.td, textAlign: 'right', fontWeight: '600', color: theme.green }}>{naira(totalOtherIncome)}</td></tr>
-                  <tr>
-                    <td style={{ ...styles.td, fontWeight: '700', color: theme.green }}>TOTAL REVENUE</td>
-                    <td style={{ ...styles.td, textAlign: 'right', fontWeight: '700', fontSize: '15px', color: theme.green }}>{naira(totalRevenue)}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <div style={{ ...styles.card, borderTop: `3px solid ${theme.red}`, marginBottom: '16px' }}>
-              <div style={{ ...styles.sectionTitle, color: theme.red }}>Expenses</div>
-              <table style={styles.table}>
-                <tbody>
-                  {Object.entries(expensesByGroup).map(([group, cats]) => {
-                    const groupTotal = Object.values(cats).reduce((a, v) => a + v, 0);
-                    return [
-                      <tr key={`g-${group}`} style={{ background: theme.surface }}>
-                        <td style={{ ...styles.td, fontWeight: '700', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{group}</td>
-                        <td style={{ ...styles.td, textAlign: 'right', fontWeight: '700' }}>{naira(groupTotal)}</td>
-                      </tr>,
-                      ...Object.entries(cats).map(([cat, amt]) => (
-                        <tr key={`c-${cat}`}>
-                          <td style={{ ...styles.td, paddingLeft: '24px', color: theme.textMuted, fontSize: '12px' }}>{cat}</td>
-                          <td style={{ ...styles.td, textAlign: 'right', fontSize: '12px' }}>{naira(amt)}</td>
-                        </tr>
-                      )),
-                    ];
-                  })}
-                  <tr>
-                    <td style={{ ...styles.td, fontWeight: '700', color: theme.red }}>TOTAL EXPENSES</td>
-                    <td style={{ ...styles.td, textAlign: 'right', fontWeight: '700', fontSize: '15px', color: theme.red }}>{naira(totalExpenses)}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <div style={{ ...styles.card, background: netProfit >= 0 ? theme.green + '11' : theme.red + '11', border: `1px solid ${netProfit >= 0 ? theme.green : theme.red}44` }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontWeight: '700', fontSize: '14px', color: netProfit >= 0 ? theme.green : theme.red }}>{netProfit >= 0 ? 'NET PROFIT' : 'NET LOSS'}</span>
-                <span style={{ fontWeight: '700', fontSize: '22px', color: netProfit >= 0 ? theme.green : theme.red }}>{naira(Math.abs(netProfit))}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
+  const [from, setFrom] = useState(periodRange('month').from);
+  const [to, setTo] = useState(todayLagos());
+  return <div><div style={{display:'flex', gap:12, flexWrap:'wrap'}}>
+    <label>From<input type="date" style={styles.input} value={from} onChange={e=>setFrom(e.target.value)} /></label>
+    <label>To<input type="date" style={styles.input} value={to} onChange={e=>setTo(e.target.value)} /></label>
+  </div><AccountingSummary from={from} to={to} /></div>;
 };
 
 class CostTabErrorBoundary extends Component {
@@ -5946,155 +5835,12 @@ export const ReceivablesTab = () => {
 };
 
 const ManagementTab = () => {
-  const now = new Date();
-  const defaultMonth = todayLagos(now).slice(0, 7);
-  const [month, setMonth] = useState(defaultMonth);
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState('');
-  const [pdfLoading, setPdfLoading] = useState(false);
-
-  const load = async (m) => {
-    setLoading(true); setErr(''); setData(null);
-    const [y, mo] = m.split('-').map(Number);
-    const currFrom = `${y}-${String(mo).padStart(2, '0')}-01`;
-    const currTo = monthEnd(y, mo - 1);
-    const prevMo = mo === 1 ? 12 : mo - 1;
-    const prevY = mo === 1 ? y - 1 : y;
-    const prevFrom = `${prevY}-${String(prevMo).padStart(2, '0')}-01`;
-    const prevTo = monthEnd(prevY, prevMo - 1);
-
-    try {
-      const [cp, ci, ce, pp, pi, pe] = await Promise.all([
-        accountingService.getConfirmedPayments(currFrom, currTo),
-        incomeRecordsService.getAll(currFrom, currTo),
-        expensesService.getAll(currFrom, currTo),
-        accountingService.getConfirmedPayments(prevFrom, prevTo),
-        incomeRecordsService.getAll(prevFrom, prevTo),
-        expensesService.getAll(prevFrom, prevTo),
-      ]);
-
-      const summarise = (payments, incomeRecs, exps) => {
-        const revenue = payments.reduce((s, p) => s + Number(p.amount_paid || 0), 0) + incomeRecs.reduce((s, r) => s + Number(r.amount || 0), 0);
-        const expenses = exps.filter(e => e.status !== 'rejected').reduce((s, e) => s + Number(e.amount || 0), 0);
-        const customerAmts = {};
-        for (const p of payments) {
-          const name = p.invoice?.order?.customer?.name || 'Unknown';
-          customerAmts[name] = (customerAmts[name] || 0) + Number(p.amount_paid || 0);
-        }
-        const topCustomers = Object.entries(customerAmts).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([name, amount]) => ({ name, amount }));
-        const catAmts = {};
-        for (const e of exps.filter(ex => ex.status !== 'rejected')) {
-          const name = e.category?.name || 'Uncategorised';
-          catAmts[name] = (catAmts[name] || 0) + Number(e.amount || 0);
-        }
-        const topExpenses = Object.entries(catAmts).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([name, amount]) => ({ name, amount }));
-        return { revenue, expenses, transactions: payments.length + incomeRecs.length, topCustomers, topExpenses };
-      };
-
-      setData({ current: summarise(cp, ci, ce), previous: summarise(pp, pi, pe) });
-    } catch (e) { setErr(e?.message || 'An error occurred'); } finally { setLoading(false); }
-  };
-
-  useEffect(() => { load(month); }, []);
-
-  const monthLabel = (m) => {
-    const [y, mo] = m.split('-');
-    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    return `${months[parseInt(mo, 10) - 1]} ${y}`;
-  };
-
-  const prevMonth = (m) => {
-    const [y, mo] = m.split('-').map(Number);
-    const pm = mo === 1 ? 12 : mo - 1;
-    const py = mo === 1 ? y - 1 : y;
-    return `${py}-${String(pm).padStart(2, '0')}`;
-  };
-
-  const changeVal = (curr, prev) => {
-    if (!prev) return { label: '—', color: theme.textMuted };
-    const diff = curr - prev;
-    const pct = ((diff / prev) * 100).toFixed(1);
-    return { label: `${diff >= 0 ? '+' : ''}${pct}%`, color: diff >= 0 ? theme.green : theme.red };
-  };
-
-  const downloadPdf = async () => {
-    if (!data) return;
-    setPdfLoading(true);
-    try {
-      await generateManagementAccountsPDF({ monthLabel: monthLabel(month), prevMonthLabel: monthLabel(prevMonth(month)), current: data.current, previous: data.previous });
-    } catch (e) { setErr(e?.message || 'An error occurred'); } finally { setPdfLoading(false); }
-  };
-
-  return (
-    <div>
-      <div style={{ ...styles.row, alignItems: 'flex-end', marginBottom: '20px', gap: '12px' }}>
-        <div>
-          <label style={styles.label}>Month</label>
-          <input type="month" style={{ ...styles.input, width: '160px' }} value={month} onChange={e => setMonth(e.target.value)} />
-        </div>
-        <button style={styles.btn('secondary')} onClick={() => load(month)}>Load</button>
-        <button style={{ ...styles.btn('primary'), marginLeft: 'auto' }} onClick={downloadPdf} disabled={pdfLoading || !data}>{pdfLoading ? 'Generating…' : <IconText icon={Download}>Download PDF</IconText>}</button>
-      </div>
-      {err && <Alert msg={err} onClose={() => setErr('')} />}
-      {loading ? <Spinner /> : !data ? null : (
-        <>
-          <div style={{ ...styles.grid(4), marginBottom: '20px' }}>
-            {[
-              { label: 'Revenue', curr: data.current.revenue, prev: data.previous.revenue, color: theme.green, better: 'higher' },
-              { label: 'Expenses', curr: data.current.expenses, prev: data.previous.expenses, color: theme.red, better: 'lower' },
-              { label: 'Net Profit', curr: data.current.revenue - data.current.expenses, prev: data.previous.revenue - data.previous.expenses, color: theme.blue, better: 'higher' },
-              { label: 'Transactions', curr: data.current.transactions, prev: data.previous.transactions, color: theme.accent, better: 'higher' },
-            ].map(({ label, curr, prev, color, better }) => {
-              const cv = changeVal(curr, prev);
-              const isPositive = better === 'higher' ? curr >= prev : curr <= prev;
-              return (
-                <div key={label} style={styles.statCard(color)}>
-                  <div style={styles.statLabel}>{label}</div>
-                  <div style={{ ...styles.statValue, fontSize: '18px', color }}>{label === 'Transactions' ? fmt(curr) : naira(curr)}</div>
-                  <div style={{ fontSize: '11px', marginTop: '4px', color: isPositive ? theme.green : theme.red, fontWeight: '600' }}>{cv.label} vs {monthLabel(prevMonth(month))}</div>
-                </div>
-              );
-            })}
-          </div>
-          <div style={styles.row}>
-            <div style={{ flex: 1, ...styles.card }}>
-              <div style={styles.sectionTitle}>Top 5 Customers — {monthLabel(month)}</div>
-              <table style={styles.table}>
-                <tbody>
-                  {data.current.topCustomers.length === 0
-                    ? <tr><td style={{ ...styles.td, color: theme.textMuted }}>No data</td></tr>
-                    : data.current.topCustomers.map((c, i) => (
-                      <tr key={i}>
-                        <td style={{ ...styles.td, width: '28px', color: theme.textMuted, fontSize: '11px' }}>#{i + 1}</td>
-                        <td style={{ ...styles.td, fontWeight: '600' }}>{c.name}</td>
-                        <td style={{ ...styles.td, textAlign: 'right', fontWeight: '700', color: theme.green }}>{naira(c.amount)}</td>
-                      </tr>
-                    ))}
-                </tbody>
-              </table>
-            </div>
-            <div style={{ flex: 1, ...styles.card }}>
-              <div style={styles.sectionTitle}>Top 5 Expenses — {monthLabel(month)}</div>
-              <table style={styles.table}>
-                <tbody>
-                  {data.current.topExpenses.length === 0
-                    ? <tr><td style={{ ...styles.td, color: theme.textMuted }}>No data</td></tr>
-                    : data.current.topExpenses.map((e, i) => (
-                      <tr key={i}>
-                        <td style={{ ...styles.td, width: '28px', color: theme.textMuted, fontSize: '11px' }}>#{i + 1}</td>
-                        <td style={{ ...styles.td, fontWeight: '600' }}>{e.name}</td>
-                        <td style={{ ...styles.td, textAlign: 'right', fontWeight: '700', color: theme.red }}>{naira(e.amount)}</td>
-                      </tr>
-                    ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </>
-      )}
-    </div>
-  );
+  const [month, setMonth] = useState(todayLagos().slice(0,7));
+  const [y,m] = month.split('-').map(Number);
+  return <div><label>Month<input type="month" style={styles.input} value={month} onChange={e=>setMonth(e.target.value)} /></label>
+    <AccountingSummary title="Management Accounts" from={month+'-01'} to={monthEnd(y,m-1)} />
+    <h3>Previous month</h3><AccountingSummary title="Previous month" from={monthStart(y,m-2)} to={monthEnd(y,m-2)} />
+  </div>;
 };
 
 // ── BANK ACCOUNTS TAB ─────────────────────────────────────────
@@ -11704,7 +11450,7 @@ export default function App() {
     lpo_approvals: <MobileScope fit><LPOApprovals /></MobileScope>,
     schedule_approvals: <MobileScope fit><ScheduleApprovals /></MobileScope>,
     reports: <MobileScope fit><Reports userProfile={userProfile} /></MobileScope>,
-    kpi_dashboard: <MobileScope fit><KPIDashboard /></MobileScope>,
+    kpi_dashboard: <MobileScope fit><KPIDashboard userProfile={userProfile} /></MobileScope>,
     trading_margin: <MobileScope fit><TradingMarginReport /></MobileScope>,
     products: <MobileScope fit><Products /></MobileScope>,
     suppliers: <MobileScope fit><SupplierRegistry /></MobileScope>,

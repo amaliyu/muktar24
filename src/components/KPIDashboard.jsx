@@ -1,6 +1,9 @@
+import MobileScope from './MobileScope'
+import { accountingBasisService } from '../services/accountingBasis'
+import { ACCOUNTING_EXPLANATION, financialBreakdown } from '../utils/accountingBasis'
 import { settledRows, queryRows } from '../utils/moneyQueries'
 import { todayLagos, periodRange, dateParts, monthStart } from '../utils/lagosDate'
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import SitePicker from './SitePicker'
 import jsPDF from 'jspdf'
@@ -27,7 +30,7 @@ const s = {
   label:   { fontSize: '10px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '6px' },
   val:     { fontSize: '26px', fontWeight: '800', color: theme.text, lineHeight: 1.1 },
   sub:     { fontSize: '11px', color: theme.textMuted, marginTop: '4px' },
-  grid:    cols => ({ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: '14px' }),
+  grid:    cols => ({ display: 'grid', gridTemplateColumns: `repeat(auto-fit, minmax(min(100%, 220px), 1fr))`, gap: '14px' }),
   row:     { display: 'flex', gap: '10px', alignItems: 'center' },
   input:   { background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '7px', padding: '8px 12px', color: theme.text, fontSize: '13px', outline: 'none' },
   btn:     (v='secondary') => ({ padding: '8px 16px', borderRadius: '7px', border: `1px solid ${v==='primary'?theme.accent:v==='danger'?theme.red:theme.border}`, background: v==='primary'?theme.accent+'22':v==='danger'?theme.red+'22':'transparent', color: v==='primary'?theme.accent:v==='danger'?theme.red:theme.text, fontWeight: '600', fontSize: '12px', cursor: 'pointer' }),
@@ -158,7 +161,9 @@ const prevPeriod = (from, to) => {
 const PALETTE = [theme.accent, theme.blue, theme.green, theme.purple, theme.red, '#e67e22', '#1abc9c']
 
 // ── MAIN COMPONENT ─────────────────────────────────────────────────
-export default function KPIDashboard() {
+function KPIDashboardContent({ userProfile }) {
+  const loadVersion = useRef(0)
+  const canSeeCosts = userProfile?.role !== 'bdm'
   const [loadError, setLoadError] = useState('')
   const [tab, setTab]         = useState('overview')
   const [preset, setPreset]   = useState('month')
@@ -180,11 +185,17 @@ export default function KPIDashboard() {
   }
 
   const load = useCallback(async () => {
+    const version = ++loadVersion.current
     if (!range.from || !range.to) return
     setLoading(true); setLoadError(''); setData({})
     try {
       const { from, to } = range
       const { from: pFrom, to: pTo } = prevPeriod(from, to)
+      const [basis, previousBasis, trendSource] = await Promise.all([
+        accountingBasisService.metrics(from,to,siteId,canSeeCosts),
+        accountingBasisService.metrics(pFrom,pTo,siteId,canSeeCosts),
+        accountingBasisService.deliveries(monthStart(dateParts()[0]-1,dateParts()[1]-1),to,siteId),
+      ]);
       // Site filter (Phase 7A) — only the tables that carry site_id are scoped:
       // production_log, damage_log, expenses. Sales, cash, deliveries and staff
       // stay company-wide.
@@ -205,8 +216,8 @@ export default function KPIDashboard() {
         // Damage log
         bySite(supabase.from('damage_log').select('date,block_type,stage,quantity_damaged').gte('date', from).lte('date', to)),
         // Payments current + prev
-        supabase.from('payments').select('amount_paid,payment_date,invoice_id,invoice:invoice_id(order:order_id(customer:customer_id(id,name)))').eq('status','confirmed').gte('payment_date', from).lte('payment_date', to),
-        supabase.from('payments').select('amount_paid').eq('status','confirmed').gte('payment_date', pFrom).lte('payment_date', pTo),
+        Promise.resolve({data:basis.payments}),
+        Promise.resolve({data:previousBasis.payments}),
         // Invoices
         supabase.from('invoices').select('total_amount,issued_date').not('status', 'in', '("draft","cancelled")').gte('issued_date', from).lte('issued_date', to),
         // Orders
@@ -222,13 +233,13 @@ export default function KPIDashboard() {
         // Staff — staff_public is readable by all authenticated roles
         supabase.from('staff_public').select('id,role,staff_type,is_active'),
         // Expenses
-        bySite(supabase.from('expenses').select('amount,expense_date,status,category:category_id(name,parent_category),vendor').eq('status','approved').gte('expense_date', from).lte('expense_date', to)),
+        Promise.resolve({data:basis.expenses}),
         // Bank accounts
         supabase.from('bank_accounts').select('account_name,current_balance'),
         // Monthly production (last 12 months)
         bySite(supabase.from('production_log').select('date,quantity_produced').gte('date', monthStart(dateParts()[0] - 1, dateParts()[1] - 1))),
         // Monthly revenue (last 12 months)
-        supabase.from('payments').select('amount_paid,payment_date').eq('status','confirmed').gte('payment_date', monthStart(dateParts()[0] - 1, dateParts()[1] - 1)),
+        Promise.resolve({data:trendSource}),
       ])
 
       const g = (r, label = 'Dashboard data') => settledRows(r, label)
@@ -246,6 +257,7 @@ export default function KPIDashboard() {
       const attStaffTypeMap = Object.fromEntries((attStaffRows || []).map(s => [s.id, s.staff_type]))
       const attendanceWithType = attendanceRows.map(a => ({ ...a, _staff_type: attStaffTypeMap[a.staff_id] || null }))
 
+      if (version !== loadVersion.current) return
       setData({
         prodCurr: g(prodCurr), prodPrev: g(prodPrev), dmgLog: g(dmgLog),
         payCurr: g(payCurr), payPrev: g(payPrev), invoices: g(invoices),
@@ -254,10 +266,10 @@ export default function KPIDashboard() {
         attendance: attendanceWithType, staff: g(staff),
         expenses: g(expenses), bankAccts: g(bankAccts),
         monthlyProd: g(monthlyProd), monthlyRev: g(monthlyRev),
-        range, pRange: { from: pFrom, to: pTo },
+        basis, previousBasis, range, pRange: { from: pFrom, to: pTo },
       })
-    } catch (e) { setLoadError(e.message); setData({}) } finally { setLoading(false) }
-  }, [range, siteId])
+    } catch (e) { if (version === loadVersion.current) { setLoadError(e.message); setData({}) } } finally { if (version === loadVersion.current) setLoading(false) }
+  }, [range, siteId, canSeeCosts])
 
   useEffect(() => { load() }, [load])
 
@@ -285,18 +297,14 @@ export default function KPIDashboard() {
     const dmgByType          = {}; dmgLog.forEach(d => { dmgByType[d.block_type] = (dmgByType[d.block_type] || 0) + d.quantity_damaged })
 
     // Revenue
-    const revenue            = payCurr.reduce((s, p) => s + Number(p.amount_paid), 0)
-    const prevRevenue        = payPrev.reduce((s, p) => s + Number(p.amount_paid), 0)
+    const revenue            = data.basis.revenue
+    const prevRevenue        = data.previousBasis.revenue
     const totalInvoiced      = invoices.reduce((s, i) => s + Number(i.total_amount), 0)
-    const collectionRate     = totalInvoiced > 0 ? (revenue / totalInvoiced * 100).toFixed(1) : 0
+    const collectionRate     = data.basis.collectionRate == null ? '—' : (data.basis.collectionRate*100).toFixed(1)
 
     // Customer revenue map
-    const custRevMap = {}; payCurr.forEach(p => {
-      const cid   = p.invoice?.order?.customer?.id
-      const cname = p.invoice?.order?.customer?.name || 'Unknown'
-      if (cid) { custRevMap[cid] = custRevMap[cid] || { name: cname, total: 0 }; custRevMap[cid].total += Number(p.amount_paid) }
-    })
-    const top5Customers = Object.values(custRevMap).sort((a, b) => b.total - a.total).slice(0, 5)
+    const breakdown=financialBreakdown(data.basis.deliveries,expenses);
+    const top5Customers=breakdown.topCustomers.slice(0,5);
 
     const orderCount         = orders.length
     const orderValue         = orders.reduce((s, o) => s + (o.order_items || []).reduce((ss, i) => ss + i.quantity * i.unit_price, 0), 0)
@@ -331,24 +339,18 @@ export default function KPIDashboard() {
     const attendanceRate     = totalDailySlots > 0 ? (attendanceRecords.length / totalDailySlots * 100).toFixed(1) : 0
 
     // Financial
-    const totalExpenses      = expenses.reduce((s, e) => s + Number(e.amount), 0)
+    const totalExpenses      = data.basis.cost
     const cashPosition       = bankAccts.reduce((s, b) => s + Number(b.current_balance || 0), 0)
-    const grossProfit        = revenue - totalExpenses
+    const grossProfit        = data.basis.netProfit
     const grossMargin        = revenue > 0 ? (grossProfit / revenue * 100).toFixed(1) : 0
-    const expByCategory      = {}; expenses.forEach(e => {
-      const cat = e.category?.parent_category || e.category?.name || 'Other'
-      expByCategory[cat] = (expByCategory[cat] || 0) + Number(e.amount)
-    })
-    const expCategories      = Object.entries(expByCategory).sort((a, b) => b[1] - a[1]).slice(0, 6)
+    const expCategories=breakdown.expenseCategories.slice(0,6), expByCategory=Object.fromEntries(expCategories);
 
     // Monthly trends
     const monthBucket = (dateStr) => dateStr?.slice(0, 7)
     const monthlyProdMap = {}; monthlyProd.forEach(p => {
       const m = monthBucket(p.date); if (m) monthlyProdMap[m] = (monthlyProdMap[m] || 0) + p.quantity_produced
     })
-    const monthlyRevMap = {}; monthlyRev.forEach(p => {
-      const m = monthBucket(p.payment_date); if (m) monthlyRevMap[m] = (monthlyRevMap[m] || 0) + Number(p.amount_paid)
-    })
+    const monthlyRevMap=financialBreakdown(monthlyRev).monthly;
     const last12 = Array.from({ length: 12 }, (_, i) => {
       const [y, m] = dateParts()
       return monthStart(y, m - 12 + i).slice(0, 7)
@@ -380,7 +382,7 @@ export default function KPIDashboard() {
     { id: 'delivery',    label: 'Delivery', icon: FileText },
     { id: 'staff',       label: 'Staff', icon: Users },
     { id: 'financial',   label: 'Financial', icon: Wallet },
-  ]
+  ].filter(t => canSeeCosts || t.id !== 'financial')
 
   // ── PDF ─────────────────────────────────────────────────────────
   const downloadPDF = () => {
@@ -392,7 +394,7 @@ export default function KPIDashboard() {
     doc.setFontSize(12); doc.setTextColor(180, 180, 180)
     doc.text('KPI Dashboard Report', W / 2, 22, { align: 'center' })
     doc.setFontSize(9); doc.text(`Period: ${range.from} to ${range.to}`, W / 2, 30, { align: 'center' })
-    doc.text(`Generated: ${now}`, W / 2, 36, { align: 'center' })
+    doc.setFontSize(7); doc.text(ACCOUNTING_EXPLANATION,14,44); doc.text(`Generated: ${now}`, W / 2, 36, { align: 'center' })
     let y = 48
     const section = (title) => {
       doc.setFontSize(11); doc.setFont('helvetica', 'bold'); doc.setTextColor(245, 166, 35)
@@ -414,7 +416,7 @@ export default function KPIDashboard() {
       ['Curing/Yard Damage (Store Officer)', fmt(M.dmgCuring) + ` (${M.totalProduced > 0 ? (M.dmgCuring / M.totalProduced * 100).toFixed(1) : 0}%)`],
     ])
     section('SALES & REVENUE'); kv([
-      ['Revenue Collected', naira(M.revenue)],
+      ['Delivered (revenue)', naira(M.revenue)], ['Cash received',naira(data.basis?.cashReceived)],
       ['Total Invoiced', naira(M.totalInvoiced)],
       ['Collection Rate', M.collectionRate + '%'],
       ['Orders Created', M.orderCount],
@@ -434,13 +436,14 @@ export default function KPIDashboard() {
       ['Active Staff', M.activeStaff?.length],
       ['Attendance Rate', M.attendanceRate + '%'],
     ])
-    section('FINANCIAL'); kv([
+    if (canSeeCosts) { section('FINANCIAL'); kv([
       ['Revenue', naira(M.revenue)],
       ['Total Expenses', naira(M.totalExpenses)],
       ['Gross Profit', naira(M.grossProfit)],
       ['Gross Margin', M.grossMargin + '%'],
       ['Cash Position', naira(M.cashPosition)],
     ])
+    }
     if (M.top5Customers?.length) {
       section('TOP CUSTOMERS')
       autoTable(doc, { startY: y, head: [['Customer', 'Revenue']], body: M.top5Customers.map(c => [c.name, naira(c.total)]), theme: 'grid', styles: { fontSize: 9 }, headStyles: { fillColor: [33, 38, 58], textColor: [245, 166, 35] } })
@@ -455,7 +458,7 @@ export default function KPIDashboard() {
   if (loadError) return <div role="alert" style={{ color: theme.red, overflowWrap: 'anywhere' }}>{loadError}<button style={{ minHeight: 44 }} onClick={load}>Retry</button></div>
 
   return (
-    <div style={s.page}>
+    <div style={s.page}><p>{ACCOUNTING_EXPLANATION}</p>
       {/* Header */}
       <div className="m-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
         <div>
@@ -505,14 +508,14 @@ export default function KPIDashboard() {
                   trend={<TrendBadge current={M.totalProduced} previous={M.prevProduced} />}
                   sub={`${M.prodDays} production days`}
                   target={targets.monthlyProductionTarget} targetVal={M.totalProduced} />
-                <KPICard label="Revenue Collected" value={naira(M.revenue)} accent={theme.green}
+                <KPICard label="Delivered (revenue)" value={naira(M.revenue)} accent={theme.green}
                   trend={<TrendBadge current={M.revenue} previous={M.prevRevenue} />}
-                  sub={`Collection rate: ${M.collectionRate}%`}
+                  sub={`Cash ÷ (opening receivables + delivered): ${M.collectionRate}%`}
                   target={targets.monthlyRevenueTarget} targetVal={M.revenue} />
                 <KPICard label="Total Deliveries" value={fmt(M.totalTrips)} accent={theme.blue}
                   sub={`${fmt(M.totalReceived)} blocks delivered`} />
-                <KPICard label="Gross Profit" value={naira(M.grossProfit)} accent={M.grossProfit >= 0 ? theme.green : theme.red}
-                  sub={`Margin: ${M.grossMargin}%`} />
+                {canSeeCosts && <KPICard label="Profit" value={naira(M.grossProfit)} accent={M.grossProfit >= 0 ? theme.green : theme.red}
+                  sub={`Margin: ${M.grossMargin}%`} />}
               </div>
               <div style={{ ...s.grid(4), marginTop: '14px' }}>
                 <KPICard label="Transit Damage Rate" value={M.damageRate + '%'} accent={Number(M.damageRate) < 1 ? theme.green : Number(M.damageRate) < 2 ? theme.accent : theme.red}
@@ -616,9 +619,11 @@ export default function KPIDashboard() {
                   sub="Registered in period" />
                 <KPICard label="Repeat Customers" value={M.repeatCustCount} accent={theme.blue}
                   sub="Customers with >1 order" />
-                <KPICard label="Outstanding Receivables" value={naira(Math.max(0, M.totalInvoiced - M.revenue))} accent={theme.red}
-                  sub="Invoiced but not yet collected" />
+                <KPICard label="Outstanding Receivables" value={naira(data.basis.position.receivables)} accent={theme.red}
+                  sub="Delivered value less confirmed cash, by customer" />
               </div>
+              <div style={s.grid(3)}><KPICard label="Cash received" value={naira(data.basis.cashReceived)} /><KPICard label="Customer deposits" value={naira(data.basis.position.deposits)} /><KPICard label="Trade receivables" value={naira(data.basis.position.receivables)} /></div>
+              <p>Collection rate = cash received ÷ (opening trade receivables + delivered value).</p>
               <div style={s.section}>Top 5 Customers by Revenue</div>
               {M.top5Customers?.length > 0 ? (
                 <div style={s.card}>
@@ -766,7 +771,7 @@ export default function KPIDashboard() {
           )}
 
           {/* ── FINANCIAL TAB ────────────────────────────────── */}
-          {tab === 'financial' && (
+          {canSeeCosts && tab === 'financial' && (
             <div>
               <div style={s.grid(4)}>
                 <KPICard label="Revenue" value={naira(M.revenue)} accent={theme.green}
@@ -853,3 +858,5 @@ export default function KPIDashboard() {
     </div>
   )
 }
+
+export default function KPIDashboard(props) { return <MobileScope fit><KPIDashboardContent {...props} /></MobileScope> }
