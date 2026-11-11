@@ -51,6 +51,11 @@ it('every payment and client receipt uses its own period date, expenses use expe
   expect(db.mock.calls.find(c => c.table === 'expenses').ops).toContainEqual(['eq','site_id','kado'])
   expect(db.mock.calls.some(c => c.table === 'orders' && c.ops.some(o => o[1] === 'site_id'))).toBe(false)
 })
+it('keeps adjustment identity and reason for checked deletion and statement notes', async () => {
+  await basis.income('2026-09-01', '2026-09-30')
+  const select = db.mock.calls.find(c => c.table === 'financial_adjustments').ops.find(o => o[0] === 'select')[1]
+  expect(select.split(',').map(s => s.trim())).toEqual(expect.arrayContaining(['id','reason']))
+})
 it('paginates source rows instead of silently truncating the first database page', async () => {
   db.resolve = (table, ops) => {
     const offset = ops.filter(o => o[0] === 'range').at(-1)?.[1] || 0

@@ -1,3 +1,4 @@
+import UnpricedDeliveries from './components/UnpricedDeliveries'
 import AccountingSummary from './components/AccountingSummary'
 import { accountingBasisService } from './services/accountingBasis'
 import { startSessionMonitor, CLOCK_WARNING } from './utils/sessionMonitor'
@@ -516,12 +517,12 @@ export const Dashboard = ({ onNavigate, onOpenSite, userProfile }) => {
           needsOrders   ? ordersService.getAll({ from: dateRange.from, to: dateRange.to })   : Promise.resolve([]),
           needsWaybills ? waybillsService.getAll({ from: dateRange.from, to: dateRange.to }) : Promise.resolve([]),
           needsOrders ? accountingBasisService.payments(dateRange.from, dateRange.to).then(rows => accountingBasisService.cashReceived(rows, dateRange)) : Promise.resolve(0),
-          can('md', 'board_member', 'ico', 'accountant') ? accountingBasisService.deliveries(dateRange.from, dateRange.to).then(rows => accountingBasisService.deliveredRevenue(rows, dateRange).revenue) : Promise.resolve(0),
+          can('md', 'board_member', 'ico', 'accountant') ? accountingBasisService.deliveries(dateRange.from, dateRange.to).then(rows => accountingBasisService.deliveredRevenue(rows, dateRange)) : Promise.resolve({revenue:0,deliveredButUnpriced:[]}),
         ]);
         const produced = productions.reduce((s, p) => s + (p.quantity_produced || 0), 0);
         const damages  = waybills.reduce((s, w) => s + (w.quantity_damaged || 0), 0);
         const pending  = orders.filter(isPendingOrder).length;
-        setStats({ staff: staffList.length, produced, orders: orders.length, revenue, delivered, pending, waybills: waybills.length, damages, lpoQueue: 0, scheduleQueue: 0, pendingRegister: 0 });
+        setStats({ staff: staffList.length, produced, orders: orders.length, revenue, delivered:delivered.revenue, deliveredUnpriced:delivered.deliveredButUnpriced, pending, waybills: waybills.length, damages, lpoQueue: 0, scheduleQueue: 0, pendingRegister: 0 });
         setRecent(orders.slice(0, 5));
       } catch (e) {
         setDashboardError('Revenue could not be loaded: ' + (e?.message || e));
@@ -670,6 +671,7 @@ export const Dashboard = ({ onNavigate, onOpenSite, userProfile }) => {
           </button>
         </div>
       )}
+      {!dashboardError && <UnpricedDeliveries rows={stats.deliveredUnpriced} />}
       {/* Phase 7B-1 site cards — loads on its own, independent of the date range. */}
       {hasRole(userProfile, 'md', 'production_manager', 'assistant_production_manager', 'ico') && (
         <SiteDashboardCards userProfile={userProfile} onOpenSite={onOpenSite} />

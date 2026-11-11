@@ -95,7 +95,7 @@ async function expenses(from, to, siteId) {
 
 async function adjustments(statementType) {
   return checked(supabase.from('financial_adjustments').select(
-    'statement_type, account_name, amount, adjustment_date, period_from, period_to'
+    'id, statement_type, account_name, amount, adjustment_date, period_from, period_to, reason'
   ).eq('statement_type', statementType))
 }
 

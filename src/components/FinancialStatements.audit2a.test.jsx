@@ -32,13 +32,13 @@ const exampleIncome = () => ({ ...profitStatement({ deliveries: [{ customer_id: 
   deliveries: [{ customer_id: 'c', customer_name: 'Delivery customer', waybill_date: '2026-09-01', block_type: '9', line_value: 1000 }], payments: [],
   expenses: [{ expense_date: '2026-09-01', status: 'approved', amount: 400, category: { name: 'Labour', parent_category: 'General', cost_center: 'production' } }], adjustments: [] })
 it('Management Accounts renders delivery customers and numeric expense breakdowns', async () => {
-  svc.income.mockResolvedValue(exampleIncome())
+  const sample=exampleIncome(); sample.adjustment=-50; sample.netProfit-=50; svc.income.mockResolvedValue(sample)
   svc.balance.mockResolvedValue(emptyBalance())
   svc.cash.mockResolvedValue({})
   render(<FinancialStatements userProfile={{ role: 'accountant' }} />)
   await userEvent.click(screen.getByRole('button', { name: 'Management Accounts', exact: true }))
   expect(await screen.findByText('Delivery customer')).toBeInTheDocument()
-  expect(screen.getByText('(100.0%)')).toBeInTheDocument()
+  expect(screen.getByText('(100.0%)')).toBeInTheDocument(); expect(screen.getAllByText('₦-50').length).toBeGreaterThan(0)
   expect(document.body.textContent).not.toContain('NaN')
 })
 it('Management Accounts suppresses financial figures when its balance source fails', async () => {

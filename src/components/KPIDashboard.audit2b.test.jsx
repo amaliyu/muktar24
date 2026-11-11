@@ -14,12 +14,12 @@ vi.mock('./SitePicker', () => ({ default: ({ onChange }) => <select aria-label="
 import KPIDashboard from './KPIDashboard'
 afterEach(() => { cleanup(); vi.clearAllMocks() })
 const data = { revenue: 1000, cashReceived: 300, cost: 200, netProfit: 800, collectionRate: 0.3,
-  deliveries: [], payments: [], expenses: [], position: { receivables: 700, deposits: 123 } }
+  deliveredButUnpriced:[{waybill_id:'unpriced',waybill_date:'2026-09-05',block_type:'Unpriced block',quantity_received:99}], deliveries: [], payments: [], expenses: [], position: { receivables: 700, deposits: 123 } }
 it('R9 BDM gets delivered revenue and cash while profit, margins, expenses and Financial are hidden', async () => {
   mock.metrics.mockResolvedValue(data)
   render(<KPIDashboard userProfile={{ role: 'bdm' }} />)
   await screen.findByText('Delivered (revenue)')
-  expect(screen.queryByRole('button', { name: /Financial/ })).toBeNull()
+  expect(screen.queryByRole('button', { name: /Financial/ })).toBeNull(); expect(screen.getByText(/Unpriced block/)).toBeInTheDocument()
   expect(screen.queryByText(/gross profit|total expenses|margin:/i)).toBeNull()
   expect(mock.metrics).toHaveBeenCalledWith(expect.any(String), expect.any(String), '', false)
 })

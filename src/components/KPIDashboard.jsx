@@ -1,3 +1,4 @@
+import UnpricedDeliveries from './UnpricedDeliveries'
 import MobileScope from './MobileScope'
 import { accountingBasisService } from '../services/accountingBasis'
 import { ACCOUNTING_EXPLANATION, financialBreakdown } from '../utils/accountingBasis'
@@ -197,8 +198,8 @@ function KPIDashboardContent({ userProfile }) {
         accountingBasisService.deliveries(monthStart(dateParts()[0]-1,dateParts()[1]-1),to,siteId),
       ]);
       // Site filter (Phase 7A) — only the tables that carry site_id are scoped:
-      // production_log, damage_log, expenses. Sales, cash, deliveries and staff
-      // stay company-wide.
+      // Production, damage and expenses carry production site_id directly.
+      // Revenue and cash use the shared Dutse/client-site source rule.
       const bySite = q => siteId ? q.eq('site_id', siteId) : q
 
       const [
@@ -439,8 +440,8 @@ function KPIDashboardContent({ userProfile }) {
     if (canSeeCosts) { section('FINANCIAL'); kv([
       ['Revenue', naira(M.revenue)],
       ['Total Expenses', naira(M.totalExpenses)],
-      ['Gross Profit', naira(M.grossProfit)],
-      ['Gross Margin', M.grossMargin + '%'],
+      ['Profit', naira(M.grossProfit)],
+      ['Profit margin', M.grossMargin + '%'],
       ['Cash Position', naira(M.cashPosition)],
     ])
     }
@@ -449,6 +450,7 @@ function KPIDashboardContent({ userProfile }) {
       autoTable(doc, { startY: y, head: [['Customer', 'Revenue']], body: M.top5Customers.map(c => [c.name, naira(c.total)]), theme: 'grid', styles: { fontSize: 9 }, headStyles: { fillColor: [33, 38, 58], textColor: [245, 166, 35] } })
       y = doc.lastAutoTable.finalY + 6
     }
+    if (data.basis?.deliveredButUnpriced?.length) { doc.addPage(); doc.text('Delivered but unpriced (excluded)',14,20); autoTable(doc,{startY:28,head:[['Date','Block type','Quantity']],body:data.basis.deliveredButUnpriced.map(r=>[r.waybill_date,r.block_type,r.quantity_received])}); }
     doc.save(`KPI_Report_${range.from}_${range.to}.pdf`)
   }
 
@@ -458,7 +460,7 @@ function KPIDashboardContent({ userProfile }) {
   if (loadError) return <div role="alert" style={{ color: theme.red, overflowWrap: 'anywhere' }}>{loadError}<button style={{ minHeight: 44 }} onClick={load}>Retry</button></div>
 
   return (
-    <div style={s.page}><p>{ACCOUNTING_EXPLANATION}</p>
+    <div style={s.page}><p>{ACCOUNTING_EXPLANATION}</p><UnpricedDeliveries rows={data.basis?.deliveredButUnpriced} />
       {/* Header */}
       <div className="m-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
         <div>
@@ -478,7 +480,7 @@ function KPIDashboardContent({ userProfile }) {
           {PRESETS.map(([p, l]) => (
             <button key={p} data-ico-allow data-board-allow style={s.tab(preset === p)} onClick={() => applyPreset(p)}>{l}</button>
           ))}
-          <div style={{ width: '200px' }} title="Site filter scopes production, damage and expense KPIs; sales, cash, deliveries and staff stay company-wide">
+          <div style={{ width: '200px' }} title="Revenue, cash received and approved costs use the selected production site. Orders and staff remain company-wide.">
             <SitePicker allowAll value={siteId} onChange={setSiteId} style={{ ...s.input, width: '100%' }} />
           </div>
           {preset === 'custom' && (
@@ -777,7 +779,7 @@ function KPIDashboardContent({ userProfile }) {
                 <KPICard label="Revenue" value={naira(M.revenue)} accent={theme.green}
                   trend={<TrendBadge current={M.revenue} previous={M.prevRevenue} />} />
                 <KPICard label="Total Expenses" value={naira(M.totalExpenses)} accent={theme.red} />
-                <KPICard label="Gross Profit" value={naira(M.grossProfit)} accent={M.grossProfit >= 0 ? theme.green : theme.red}
+                <KPICard label="Profit" value={naira(M.grossProfit)} accent={M.grossProfit >= 0 ? theme.green : theme.red}
                   sub={`Margin: ${M.grossMargin}%`} />
                 <KPICard label="Cash Position" value={naira(M.cashPosition)} accent={theme.blue}
                   sub="All bank accounts combined" />

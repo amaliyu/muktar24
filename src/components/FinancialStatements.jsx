@@ -1,3 +1,4 @@
+import UnpricedDeliveries from './UnpricedDeliveries'
 import { incomePresentation, balancePresentation, ACCOUNTING_EXPLANATION } from '../utils/accountingBasis'
 import { monthStart, monthEnd, todayLagos, dateParts } from '../utils/lagosDate'
 import React, { useState, useEffect, useCallback } from 'react'
@@ -492,7 +493,7 @@ const IncomeStatementTab = ({ userProfile }) => {
     const W = doc.internal.pageSize.getWidth(); const ml = 14; const mr = W - 14
 
     const row = (label, val, indent=0, bold=false) => {
-      doc.setFontSize(9); doc.setFont('helvetica', bold?'bold':'normal'); doc.setTextColor(bold?20:40)
+      doc.setFontSize(9); doc.setFont('helvetica', bold?'bold':'normal'); doc.setTextColor(...(label === 'Unreconciled' ? [200,0,0] : [bold?20:40]))
       doc.text(label, ml+indent, y); doc.text(`₦${fmt(val)}`, mr, y, {align:'right'}); y += 5
     }
     const divider = () => { doc.setDrawColor(200); doc.setLineWidth(0.3); doc.line(ml, y, mr, y); y += 3 }
@@ -674,7 +675,7 @@ const CashFlowTab = ({ userProfile }) => {
     let y = await addPdfHeader(doc, 'CASH FLOW STATEMENT', `${from} to ${to}`)
     const W = doc.internal.pageSize.getWidth(); const ml = 14; const mr = W - 14
     const row = (label, val, indent=0, bold=false) => {
-      doc.setFontSize(9); doc.setFont('helvetica', bold?'bold':'normal'); doc.setTextColor(bold?20:40)
+      doc.setFontSize(9); doc.setFont('helvetica', bold?'bold':'normal'); doc.setTextColor(...(label === 'Unreconciled' ? [200,0,0] : [bold?20:40]))
       doc.text(label, ml+indent, y); if (val !== undefined) doc.text(`₦${fmt(val)}`, mr, y, {align:'right'}); y += 5
     }
     const divider = () => { doc.setDrawColor(200); doc.setLineWidth(0.3); doc.line(ml, y, mr, y); y += 3 }
@@ -707,7 +708,7 @@ const CashFlowTab = ({ userProfile }) => {
   const CfRow = ({ label, val, indent=0, color }) => (
     <div style={s.row(indent)}>
       <span>{label}</span>
-      <span style={{ fontWeight: '600', color: color || (Number(val) < 0 ? theme.red : 'inherit') }}>{Number(val) >= 0 ? naira(val) : `(${naira(Math.abs(val))})`}</span>
+      <span style={{ fontWeight: '600', color: color || (Number(val) < 0 ? theme.red : 'inherit') }}>{Number(val) >= 0 ? naira(val) : `(${naira(val)})`}</span>
     </div>
   )
 
@@ -980,8 +981,8 @@ const ManagementAccountsTab = ({ userProfile }) => {
               <div key={label} style={{ ...s.row(), fontWeight: bold ? '700' : '400', borderTop: bold ? `1px solid ${theme.border}` : undefined }}>
                 <span>{label}</span>
                 <div style={{ display: 'flex', gap: '20px', alignItems: 'center' }}>
-                  {prev != null && <span style={{ color: theme.textMuted, fontSize: '12px' }}>{naira(Math.abs(prev))}</span>}
-                  <span style={{ minWidth: '100px', textAlign: 'right', color: bold ? (val >= 0 ? theme.green : theme.red) : 'inherit' }}>{naira(Math.abs(val))}</span>
+                  {prev != null && <span style={{ color: theme.textMuted, fontSize: '12px' }}>{naira(prev)}</span>}
+                  <span style={{ minWidth: '100px', textAlign: 'right', color: bold ? (val >= 0 ? theme.green : theme.red) : 'inherit' }}>{naira(val)}</span>
                 </div>
               </div>
             ))}
@@ -989,6 +990,7 @@ const ManagementAccountsTab = ({ userProfile }) => {
 
           <p>Awaiting approval: {naira(is.awaitingApproval)} (not included)</p>
           <p>{is.adjustmentNote}</p>
+          <UnpricedDeliveries rows={is.deliveredButUnpriced} />
           {/* Expense Breakdown */}
           <div style={s.card}>
             <div style={s.sectionTitle}>Expense Breakdown</div>

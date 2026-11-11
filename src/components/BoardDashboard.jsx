@@ -1,3 +1,4 @@
+import UnpricedDeliveries from './UnpricedDeliveries'
 import MobileScope from './MobileScope'
 import { accountingBasisService } from '../services/accountingBasis'
 import { ACCOUNTING_EXPLANATION, financialBreakdown } from '../utils/accountingBasis'
@@ -339,7 +340,7 @@ function BoardDashboardContent({ userProfile }) {
       const pendingApprovals = get(14).length
 
       if (version !== loadVersion.current) return
-      setD({ netProfit:basis.netProfit, cashReceived:basis.cashReceived, deposits:basis.position.deposits, collectionRate:basis.collectionRate, awaitingApproval:basis.awaitingApproval,
+      setD({ deliveredButUnpriced:basis.deliveredButUnpriced, netProfit:basis.netProfit, cashReceived:basis.cashReceived, deposits:basis.position.deposits, collectionRate:basis.collectionRate, awaitingApproval:basis.awaitingApproval,
         revThisMonth, revLastMonth, incomeThisMonth, expenseThisMonth,
         cashPosition, receivables, blocksThisMonth, activeOrdersValue,
         revTrend, prodTrend, expenseByCategory, top5Customers,
@@ -454,6 +455,7 @@ function BoardDashboardContent({ userProfile }) {
     y += 4
     doc.text(`Generated on ${today()} | Abuja Precast Concrete Limited`, pageW / 2, y, { align: 'center' })
 
+    if (d.deliveredButUnpriced?.length) { doc.addPage(); doc.text('Delivered but unpriced (excluded)',14,20); autoTable(doc,{startY:28,head:[['Date','Block type','Quantity']],body:d.deliveredButUnpriced.map(r=>[r.waybill_date,r.block_type,r.quantity_received])}); }
     doc.save(`Board_Dashboard_${isoToday()}.pdf`)
   }
 
@@ -478,7 +480,7 @@ function BoardDashboardContent({ userProfile }) {
   return (
     <div style={{ padding: '24px 28px', fontFamily: "'DM Sans','Segoe UI',sans-serif", color: theme.text, maxWidth: '1400px', margin: '0 auto' }}>
 
-      <p>{ACCOUNTING_EXPLANATION}</p><SitePicker allowAll value={siteId} onChange={setSiteId} />
+      <p>{ACCOUNTING_EXPLANATION}</p><UnpricedDeliveries rows={d.deliveredButUnpriced} /><SitePicker allowAll value={siteId} onChange={setSiteId} />
       {/* ── Header ─────────────────────────────────────────────── */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '28px', flexWrap: 'wrap', gap: '12px' }}>
         <div>
