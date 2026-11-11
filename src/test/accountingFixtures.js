@@ -1,6 +1,6 @@
 export const emptyBalance = (overrides = {}) => ({
   openingBalances: [], vehicles: [], bankAccounts: [], finishedGoods: [], products: [], inventoryItems: [],
-  receivables: 0, customerDeposits: 0, supplierPayables: 0, ytdProfit: 0, bankTotal: 0, rawMatsValue: 0,
+  cashTotal: 0, cashOnHand: 0, receivables: 0, customerDeposits: 0, supplierPayables: 0, ytdProfit: 0, bankTotal: 0, rawMatsValue: 0,
   adjustments: [], stockValue: { valued: 0, unvalued: [] }, historicalNotes: [], stockNotes: [], warnings: [],
   ...overrides,
 })

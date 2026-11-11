@@ -11,6 +11,8 @@ vi.mock('jspdf', () => ({ default: function () {
 vi.mock('jspdf-autotable', () => ({ default: db.table }))
 import { GENERATORS, supplierStatementRows, renderPDF, monthBounds, weekBounds, fetchCustomers } from './Reports'
 import { op } from '../test/supabaseMock'
+import { emptyBalance } from '../test/accountingFixtures'
+import { profitStatement } from '../utils/accountingBasis'
 
 beforeEach(() => { db.mock.calls.length = 0; db.table.mockClear(); db.resolve = () => ({ data: [], error: null }) })
 it('9: Invoice Report joins payments directly to invoices and renders only confirmed credits', async () => {
@@ -57,4 +59,31 @@ it('14: Customer Statement fetches earlier debits and applies the opening balanc
   expect(data.rows[1].balance).toBe(900)
   expect(db.mock.calls[0].ops).not.toContainEqual(['gte', 'created_at', '2026-09-01'])
   expect(() => renderPDF('customer_statement', data, {}, '')).not.toThrow()
+})
+it('Audit 2B P&L PDF uses delivered revenue, approved costs, all income adjustments and cash memo', () => {
+  const input = { deliveries: [{ waybill_date: '2026-09-01', line_value: 1000, block_type: '9' }],
+    payments: [{ status: 'confirmed', payment_date: '2026-09-02', amount_paid: 600 }],
+    expenses: [{ expense_date: '2026-09-03', status: 'approved', amount: 400 }],
+    adjustments: [{ statement_type: 'income', adjustment_date: '2026-09-04', amount: 50, account_name: 'Correction' }] }
+  renderPDF('pl_report', { ...profitStatement(input), ...input }, {}, 'September 2026')
+  const rows = db.table.mock.calls[0][1].body
+  expect(rows).toContainEqual(['   Goods delivered', '₦1,000.00'])
+  expect(rows).toContainEqual(['Cash received (memo)', '₦600.00'])
+  expect(rows).toContainEqual(['NET PROFIT / (LOSS)', '₦650.00'])
+})
+it('Audit 2B Balance Sheet PDF includes customer deposits and unvalued quantities', () => {
+  renderPDF('balance_sheet', emptyBalance({ customerDeposits: 500, stockValue: { valued: 0, unvalued: [{ block_type: '9', quantity: 20 }] } }), {}, '')
+  const rows = db.table.mock.calls[0][1].body
+  expect(rows).toContainEqual(['Customer deposits', '₦500.00'])
+  expect(rows).toContainEqual(['9: 20 — not valued', ''])
+})
+it('Audit 2B Cash Flow PDF displays the difference and styles Unreconciled red', () => {
+  renderPDF('cash_flow', { netProfit: 100, workingCapitalChange: 10, stockChange: 5, otherAdjustments: 2,
+    netChange: 107, openingCash: 100, closingCash: 200, reconciliation: { reconciled: false, difference: -7 }, historicalNotes: [] }, {}, '')
+  const config = db.table.mock.calls[0][1]
+  expect(config.body).toContainEqual(['Unreconciled', '₦-7.00'])
+  const rowIndex = config.body.findIndex(r => r[0] === 'Unreconciled')
+  const cell = { row: { index: rowIndex }, cell: { styles: {} } }
+  config.didParseCell(cell)
+  expect(cell.cell.styles.fillColor).toEqual([255,160,160])
 })

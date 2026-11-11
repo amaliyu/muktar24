@@ -38,6 +38,7 @@ export default function AccountingSummary({ from, to, refresh = 0, title = 'P&L 
           <dt>{label}</dt><dd style={{ margin: 0 }}>{naira(value)}</dd>
         </div>)}</dl>
         <p>Awaiting approval: {naira(d.awaitingApproval)} (not included)</p>
+        <p>{d.adjustmentNote}</p>
         {d.deliveredButUnpriced.map((r, i) => <p key={i}>Delivered but unpriced: {r.block_type} — {r.quantity_received}</p>)}
         <button type="button" onClick={download} style={{ minHeight: 44, padding: '8px 14px' }}><Download size={16} aria-hidden="true" /> Download PDF</button>
       </>}

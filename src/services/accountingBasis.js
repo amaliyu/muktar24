@@ -43,6 +43,9 @@ async function orderDeliveries(from, to) {
   if (orderById.size !== ids.length) {
     throw new Error('Some delivery orders are unavailable; accounting figures cannot be verified')
   }
+  if (rows.some(row => !row.unvalued && row.line_value != null && !orderById.get(row.order_id)?.customer_id)) {
+    throw new Error('A priced delivery has no customer; accounting positions cannot be verified')
+  }
   return rows.map(row => ({
     ...row, customer_id: orderById.get(row.order_id)?.customer_id,
     customer_name: orderById.get(row.order_id)?.customer?.name,
@@ -58,6 +61,9 @@ async function orderPayments(from, to) {
     'payment_date', from, to
   )
   const rows = await checked(q)
+  if (rows.some(row => !row.invoice?.order?.customer_id)) {
+    throw new Error('A confirmed payment has no customer; accounting positions cannot be verified')
+  }
   return rows.map(row => ({
     ...row,
     customer_id: row.invoice?.order?.customer_id,
@@ -108,7 +114,7 @@ export const accountingBasisService = {
     const [source, expenseRows, adjustmentRows] = await Promise.all([
       sources(from, to, siteId),
       expenses(from, to, siteId),
-      adjustments('income'),
+      siteId ? Promise.resolve([]) : adjustments('income'),
     ])
     const { deliveries: deliveryRows, payments: paymentRows } = source
     const totals = profitStatement(
@@ -121,6 +127,7 @@ export const accountingBasisService = {
       payments: paymentRows,
       expenses: expenseRows,
       adjustments: adjustmentRows,
+      adjustmentNote: 'Manual income adjustments have no site attribution and are included only in the company view.',
     }
   },
 
@@ -149,9 +156,13 @@ export const accountingBasisService = {
       checked(supabase.from('opening_balances').select('*').lte('as_at_date', asAt)),
       checked(supabase.from('vehicles').select('id, vehicle_number, vehicle_name, status')),
     ])
+    const cashOnHand = openingBalances.filter(r => /cash on hand/i.test(r.account_name))
+      .reduce((n, r) => n + Number(r.amount || 0), 0)
     return {
       income, customers, payables, ...stock, ...banks, openingBalances, vehicles,
+      cashOnHand, cashTotal: banks.bankTotal + cashOnHand,
       historicalNotes: [...banks.historicalNotes,
+        ...(cashOnHand ? ['Cash on Hand: current figure — history not available (opening balance register only).'] : []),
         ...openingBalances.filter(r => r.last_edited_at?.slice(0, 10) > asAt).map(r => `${r.account_name}: current figure — history not available`)],
       warnings: [], products: [], receivables: customers.receivables, customerDeposits: customers.deposits,
       supplierPayables: payables.total, ytdProfit: income.netProfit,
@@ -227,8 +238,8 @@ export const accountingBasisService = {
       netProfit: income.netProfit,
       workingCapitalChange: wcChange,
       otherAdjustments,
-      stockChange, netChange, openingCash: opening.bankTotal, closingCash: closing.bankTotal,
-      reconciliation: cashFlowReconciliation({ openingCash: opening.bankTotal, closingCash: closing.bankTotal, netChange }),
+      stockChange, netChange, openingCash: opening.cashTotal, closingCash: closing.cashTotal,
+      reconciliation: cashFlowReconciliation({ openingCash: opening.cashTotal, closingCash: closing.cashTotal, netChange }),
       bankEnd: closing.bankAccounts, bankStart: opening.bankAccounts.map(b => ({ ...b, opening_balance: b.current_balance })),
       warnings: [], openingBalances: closing.openingBalances,
       historicalNotes: [...new Set([...opening.historicalNotes, ...closing.historicalNotes, ...closing.stockNotes])],

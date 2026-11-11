@@ -116,7 +116,8 @@ export function adjustmentTotal(rows = [], statementType, { from, to } = {}) {
 export function profitStatement({ deliveries = [], payments = [], expenses = [], adjustments = [] }, filters = {}) {
   const revenue = deliveredRevenue(deliveries, filters)
   const cost = approvedExpenses(expenses, filters)
-  const adjustment = adjustmentTotal(adjustments, 'income', filters)
+  // Manual adjustments have no site_id in the schema: keep them company-only.
+  const adjustment = filters.siteId ? 0 : adjustmentTotal(adjustments, 'income', filters)
   return {
     ...revenue, ...cost,
     cashReceived: cashReceived(payments, filters),
@@ -220,19 +221,24 @@ export function financialBreakdown(deliveries = [], expenses = []) {
 export function incomePresentation(d) {
   if (!d || d.warnings?.length) return null
   const expenses = d.expenses.filter(e => expenseStatus(e) === 'approved')
-  const expByParent = {}, directMap = {}, opMap = {}
+  const expByParent = {}, directMap = {}, opMap = {}, directGroups = {}, operatingGroups = {}
   for (const e of expenses) {
     const parent = e.category?.parent_category || 'General', cat = e.category?.name || 'Uncategorised'
     expByParent[parent] ||= {}
     expByParent[parent][cat] = (expByParent[parent][cat] || 0) + amount(e.amount)
     const map = e.category?.cost_center === 'production' ? directMap : opMap
     map[cat] = (map[cat] || 0) + amount(e.amount)
+    const groups = e.category?.cost_center === 'production' ? directGroups : operatingGroups
+    groups[parent] ||= {}
+    groups[parent][cat] = (groups[parent][cat] || 0) + amount(e.amount)
   }
   const lines = map => Object.entries(map).map(([label, value]) => ({ label, amount: value }))
   const cogsTotal = Object.values(directMap).reduce((n, v) => n + v, 0)
   const totalOpEx = d.cost - cogsTotal, grossProfit = d.revenue - cogsTotal
   return { ...d, expenses, expByParent, totalRevenue: d.revenue, totalPayments: d.cashReceived,
-    opExpGroups: Object.entries(expByParent).filter(([key]) => !/production|cost of/i.test(key)),
+    directGroups: Object.entries(directGroups), opExpGroups: Object.entries(operatingGroups),
+    parentTotals: Object.fromEntries(Object.entries(expByParent).map(([key, cats]) => [key, Object.values(cats).reduce((n, v) => n + v, 0)])),
+    topCustomers: financialBreakdown(d.deliveries).topCustomers,
     otherIncome: 0, blockRevAdjusted: d.byBlockType, cogsTotal, totalOpEx, grossProfit,
     grossMargin: d.revenue ? (grossProfit / d.revenue * 100).toFixed(1) : 0,
     netMargin: d.revenue ? (d.netProfit / d.revenue * 100).toFixed(1) : 0,
@@ -246,7 +252,17 @@ export function incomePresentation(d) {
 export function balancePresentation(d) {
   if (!d || d.warnings?.length) return null
   const sum = rows => rows.reduce((n, r) => n + amount(r.amount), 0)
-  const obs = d.openingBalances || []
+  const opening = d.openingBalances || []
+  const computedAccounts = new Set(['trade receivables', 'accounts receivable', 'trade payables', 'customer deposits', 'inventory', 'finished goods stock', 'cash at bank'])
+  const adjustmentEntries = (d.adjustments || []).map((adjustment, index) => {
+    const match = opening.find(row => row.account_name === adjustment.account_name)
+    const category = match?.category || 'equity'
+    const subCategory = category === 'asset' && (match?.vehicle_id || match?.sub_category?.startsWith('fixed_asset'))
+      ? 'fixed_asset_other' : match?.sub_category || 'equity'
+    return { id: `adjustment:${index}`, account_name: `${adjustment.account_name} (adjustment)`,
+      category, sub_category: subCategory, amount: adjustment.amount, isAdjustment: true }
+  })
+  const obs = [...opening.filter(row => !computedAccounts.has(row.account_name?.toLowerCase())), ...adjustmentEntries]
   const vehicleEntries = obs.filter(o => o.vehicle_id)
   const otherFixed = obs.filter(o => o.sub_category === 'fixed_asset_other' && !o.vehicle_id)
   const nbv = rows => rows.reduce((n, r) => n + amount(r.amount) - amount(r.depreciation_amount), 0)
@@ -256,19 +272,14 @@ export function balancePresentation(d) {
   const currentLiabs = obs.filter(o => o.sub_category === 'current_liability')
   const ltLiabs = obs.filter(o => o.sub_category === 'long_term_liability')
   const equityObs = obs.filter(o => o.sub_category === 'equity')
-  // The schema has no adjustment category. Exact opening-account matches inherit
-  // that account's category; otherwise expose an explicit equity adjustment.
-  const adj = category => (d.adjustments || []).filter(a =>
-    (obs.find(o => o.account_name === a.account_name)?.category || 'equity') === category)
-    .reduce((n, a) => n + amount(a.amount), 0)
   const fgValue = d.stockValue.valued, rawMatsValue = d.rawMatsValue, bankTotal = d.bankTotal
-  const manualCurrentTotal = sum(manualCurrentAssets) + adj('asset')
+  const manualCurrentTotal = sum(manualCurrentAssets)
   const totalCurrentAssets = fgValue + rawMatsValue + d.receivables + bankTotal + manualCurrentTotal
   const totalAssets = totalFixedAssets + totalCurrentAssets
-  const currentLiabTotal = sum(currentLiabs) + adj('liability')
+  const currentLiabTotal = sum(currentLiabs)
   const totalCurrentLiabilities = d.supplierPayables + d.customerDeposits + currentLiabTotal
   const totalLTLiabilities = sum(ltLiabs), totalLiabilities = totalCurrentLiabilities + totalLTLiabilities
-  const shareCapital = sum(equityObs) + adj('equity'), ytdProfit = d.ytdProfit
+  const shareCapital = sum(equityObs), ytdProfit = d.ytdProfit
   const totalEquity = shareCapital + ytdProfit, totalLiabEquity = totalLiabilities + totalEquity
   return { ...d, vehicleEntries, otherFixed, totalVehiclesNBV, totalOtherFixedNBV, totalFixedAssets,
     manualCurrentAssets, currentLiabs, ltLiabs, equityObs, fgValue, rawMatsValue, bankTotal,

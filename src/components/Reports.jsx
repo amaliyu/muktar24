@@ -501,6 +501,8 @@ function plStatementRows(S) {
   add('NET PROFIT / (LOSS)', naira(S.netProfit), 'netprofit')
   add('', '', 'spacer')
   add('Delivered but unpriced', S.unvaluedCount + ' waybills', 'memo')
+  S.deliveredButUnpriced.forEach(r=>add('Delivered but unpriced: '+r.block_type+' · '+r.quantity_received+' blocks', '', 'warn'))
+  add(S.adjustmentNote || '', '', 'memonote')
   if (S.deposits != null) add('Customer deposits', naira(S.deposits), 'memo')
   return rows
 }
@@ -1018,10 +1020,9 @@ async function saveHistory(reportName, period, generatedBy, userId, format, repo
   const arr = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]')
   arr.unshift({ name: reportName, period, generatedBy, generatedAt: new Date().toISOString(), format: format || 'pdf' })
   localStorage.setItem(HISTORY_KEY, JSON.stringify(arr.slice(0, 50)))
-  // 2. Also persist to DB (non-critical — swallow errors)
-  try {
+  // History failure is reported after generation; it must not look like success.
     const cat = CATALOG.find(r => r.id === reportId)?.category || null
-    await supabase.from('report_history').insert({
+    const { error } = await supabase.from('report_history').insert({
       report_id: reportId || null,
       report_name: reportName,
       report_category: cat,
@@ -1031,7 +1032,7 @@ async function saveHistory(reportName, period, generatedBy, userId, format, repo
       format: format || 'pdf',
       generated_at: new Date().toISOString(),
     })
-  } catch { /* non-critical */ }
+    if (error) throw new Error('Report generated, but history could not be saved: ' + error.message)
 }
 function getHistory() {
   return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]')

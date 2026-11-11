@@ -63,7 +63,7 @@ it('cash flow uses the same profit and working capital changes and reports a rea
   const snapshot = vi.spyOn(basis, 'snapshot').mockImplementation(async date => ({
     customers: { receivables: date === '2026-08-31' ? 100 : 80, deposits: date === '2026-08-31' ? 0 : 10 },
     payables: { total: date === '2026-08-31' ? 50 : 60 }, stockValue: { valued: date === '2026-08-31' ? 100 : 120 }, rawMatsValue: 0,
-    bankTotal: date === '2026-08-31' ? 100 : 160, bankAccounts: [], openingBalances: [], historicalNotes: [], stockNotes: [],
+    bankTotal: date === '2026-08-31' ? 100 : 160, cashTotal: date === '2026-08-31' ? 100 : 160, bankAccounts: [], openingBalances: [], historicalNotes: [], stockNotes: [],
   }))
   try {
     const result = await basis.cashflow('2026-09-01', '2026-09-30')

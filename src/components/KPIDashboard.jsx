@@ -605,7 +605,7 @@ function KPIDashboardContent({ userProfile }) {
           {tab === 'sales' && (
             <div>
               <div style={s.grid(4)}>
-                <KPICard label="Revenue Collected" value={naira(M.revenue)} accent={theme.green}
+                <KPICard label="Delivered (revenue)" value={naira(M.revenue)} accent={theme.green}
                   trend={<TrendBadge current={M.revenue} previous={M.prevRevenue} />}
                   target={targets.monthlyRevenueTarget} targetVal={M.revenue} />
                 <KPICard label="Total Invoiced" value={naira(M.totalInvoiced)} accent={theme.blue}
@@ -827,6 +827,7 @@ function KPIDashboardContent({ userProfile }) {
         </>
       )}
 
+      {canSeeCosts && data.basis && <p>Awaiting approval: {naira(data.basis.awaitingApproval)} (not included)</p>}
       {/* ── TARGETS MODAL ────────────────────────────────────────── */}
       {showTargets && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: Z.modal, padding: '20px' }}>

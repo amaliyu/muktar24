@@ -1,5 +1,4 @@
 import { accountingBasisService } from './accountingBasis'
-import { incomeNetProfit } from '../utils/financialTotals'
 import { supabase } from '../lib/supabase'
 import { deleteById } from '../utils/checkedDelete'
 

@@ -1,5 +1,4 @@
 import { incomePresentation, balancePresentation, ACCOUNTING_EXPLANATION } from '../utils/accountingBasis'
-import { cashBalances, incomeNetProfit, productReceipts } from '../utils/financialTotals'
 import { monthStart, monthEnd, todayLagos, dateParts } from '../utils/lagosDate'
 import React, { useState, useEffect, useCallback } from 'react'
 import jsPDF from 'jspdf'
@@ -62,7 +61,8 @@ async function addPdfHeader(doc, title, subtitle) {
   doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(80)
   doc.text(subtitle, mr, 19, { align: 'right' })
   doc.setDrawColor(180); doc.setLineWidth(0.4); doc.line(ml, 24, mr, 24)
-  return 30
+  doc.setFontSize(7); doc.text(ACCOUNTING_EXPLANATION, ml, 29)
+  return 36
 }
 
 // ── BALANCE SHEET ──────────────────────────────────────────────────
@@ -174,6 +174,8 @@ const BalanceSheetTab = ({ userProfile }) => {
     bs.manualCurrentAssets.forEach(o => lineItem(o.account_name, undefined, undefined, o.amount, 4))
     totalLine('TOTAL CURRENT ASSETS', bs.totalCurrentAssets); divider()
     totalLine('TOTAL ASSETS', bs.totalAssets)
+    for (const r of data.stockValue.unvalued) { doc.setFontSize(8); doc.text(r.block_type+': '+r.quantity+' — not valued',ml,y); y+=5; }
+    for (const note of [...data.historicalNotes,...data.stockNotes]) { doc.setFontSize(7); const lines=doc.splitTextToSize(note,180); doc.text(lines,ml,y); y+=lines.length*4; }
 
     y += 8
     section('CURRENT LIABILITIES')
@@ -204,7 +206,7 @@ const BalanceSheetTab = ({ userProfile }) => {
     doc.save(`Balance_Sheet_${asAt}.pdf`)
   }
 
-  const EditBtn = ({ ob }) => canEdit ? (
+  const EditBtn = ({ ob }) => canEdit && !ob.isAdjustment ? (
     <button style={{ ...s.btn('secondary'), padding: '2px 8px', fontSize: '10px', marginLeft: '8px' }}
       onClick={() => { setEditingId(ob.id); setEditVal({ amount: ob.amount, depreciation_amount: ob.depreciation_amount||0, notes: ob.notes||'' }) }}>Edit</button>
   ) : null
@@ -252,6 +254,8 @@ const BalanceSheetTab = ({ userProfile }) => {
         onConfirm={deleteAdjustment} onCancel={() => setDeleteTarget(null)}
       />}
       <SourceWarnings warnings={[...(data?.warnings || []), ...(compareData?.warnings || []).map(m => `Comparison date: ${m}`)]} />
+      {[...(data?.historicalNotes||[]),...(data?.stockNotes||[])].map((note,i)=><p key={i}>{note}</p>)}
+      {(data?.stockValue?.unvalued||[]).map((r,i)=><p key={i}>{r.block_type}: {r.quantity} — not valued</p>)}
       {loading && <div style={{ color: theme.textMuted, marginBottom: '12px' }}>Loading...</div>}
 
       {bs && !loading && (
@@ -499,7 +503,7 @@ const IncomeStatementTab = ({ userProfile }) => {
     row('TOTAL REVENUE', is.totalRevenue, 0, true); divider()
 
     row('COST OF SALES (Production)', '', 0, true)
-    const cogs = Object.entries(is.expByParent).filter(([k]) => k.includes('Production'))
+    const cogs = is.directGroups
     cogs.forEach(([, cats]) => Object.entries(cats).forEach(([cat, val]) => row(cat, val, 4)))
     row('COST OF GOODS SOLD', is.cogsTotal, 0, true); divider()
     row(`GROSS PROFIT (${is.grossMargin}%)`, is.grossProfit, 0, true); divider()
@@ -558,6 +562,7 @@ const IncomeStatementTab = ({ userProfile }) => {
         <>
           <p>Cash received: {naira(is.cashReceived)}</p>
           <p>Awaiting approval: {naira(is.awaitingApproval)} (not included)</p>
+          <p>{is.adjustmentNote}</p>
           {is.deliveredButUnpriced.map((r, i) => <p key={i}>Delivered but unpriced: {r.block_type} — {r.quantity_received}</p>)}
           {/* KPI Summary */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(100%,180px),1fr))', gap: '12px', marginBottom: '16px' }}>
@@ -591,8 +596,7 @@ const IncomeStatementTab = ({ userProfile }) => {
             <div style={{ height: '14px' }} />
             {/* COGS */}
             <div style={{ fontWeight: '800', fontSize: '13px', color: theme.text, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '10px' }}>Cost of Sales</div>
-            {Object.entries(is.expByParent)
-              .filter(([k]) => k.toLowerCase().includes('production') || k.toLowerCase().includes('cost of'))
+            {is.directGroups
               .map(([parent, cats]) => (
                 <div key={parent}>
                   <div style={{ ...s.row(1), fontWeight: '700', color: theme.textMuted, fontSize: '12px' }}><span>{parent}</span></div>
@@ -651,7 +655,7 @@ const CashFlowTab = ({ userProfile }) => {
     { id: 'stock', account_name: 'Change in stock', amount: -d.stockChange },
     { id: 'other', account_name: 'Other adjustments', amount: d.otherAdjustments }],
     netCashOps: d.netChange, invAdjs: [], netCashInv: 0, finAdjs: [], netCashFin: 0,
-    bankAccounts: d.bankEnd, cashFromBanks: d.closingCash, cashOnHand: 0 } : null
+    bankAccounts: d.bankEnd, cashFromBanks: d.closing.bankTotal, cashOnHand: d.closing.cashOnHand } : null
 
   const cf = calc(data)
 
@@ -823,14 +827,9 @@ const ManagementAccountsTab = ({ userProfile }) => {
 
   const calcIs = incomePresentation
 
-  const is = calcIs(data?.is)
+  const is = data?.warnings?.length ? null : calcIs(data?.is)
   const prevIs = calcIs(data?.prevIs)
-  const bs = data?.bs ? (() => {
-    const obs = data.bs.openingBalances || []
-    const bankTotal = (data.bs.bankAccounts||[]).reduce((s, b) => s + Number(b.current_balance||0), 0)
-    const cashOnHand = obs.find(o => o.account_name?.toLowerCase().includes('cash on hand'))?.amount || 0
-    return { cashPosition: bankTotal + cashOnHand, receivables: data.bs.receivables || 0 }
-  })() : null
+  const bs = data?.bs ? { cashPosition: data.bs.cashTotal, receivables: data.bs.receivables } : null
 
   const pct = (a, b) => b && b !== 0 ? `${((a - b) / Math.abs(b) * 100).toFixed(1)}%` : '—'
   const arrow = (a, b) => a >= b ? '▲' : '▼'
@@ -880,7 +879,10 @@ const ManagementAccountsTab = ({ userProfile }) => {
         ['Cost of Sales', `(₦${fmt(is.cogsTotal)})`],
         ['GROSS PROFIT', `₦${fmt(is.grossProfit)}`],
         ['Operating Expenses', `(₦${fmt(is.totalOpEx)})`],
+        ['Other adjustments', `₦${fmt(is.adjustment)}`],
         ['NET PROFIT / (LOSS)', `₦${fmt(is.netProfit)}`],
+        ['Cash received (memo)', `₦${fmt(is.cashReceived)}`],
+        ['Awaiting approval (not included)', `₦${fmt(is.awaitingApproval)}`],
       ],
       styles: { fontSize: 9, cellPadding: 3 },
       headStyles: { fillColor: [245,166,35], textColor: [20,20,20] },
@@ -891,16 +893,11 @@ const ManagementAccountsTab = ({ userProfile }) => {
     if (y > 220) { doc.addPage(); y = 20 }
     doc.setFontSize(10); doc.setFont('helvetica','bold'); doc.setTextColor(245,166,35)
     doc.text('PAGE 7 — TOP CUSTOMERS', ml, y); y += 6
-    const custMap = {}
-    ;(is.payments||[]).forEach(p => {
-      const name = p.invoice?.order?.customer?.name || 'Unknown'
-      custMap[name] = (custMap[name]||0) + Number(p.amount_paid||0)
-    })
-    const topCusts = Object.entries(custMap).sort((a,b) => b[1]-a[1]).slice(0,10)
+    const topCustomers = is.topCustomers.slice(0,10).map(c=>[c.name,c.total])
     autoTable(doc, {
       startY: y, margin: { left: ml, right: 14 },
       head: [['#', 'Customer', 'Revenue', '% of Total']],
-      body: topCusts.map(([name, rev], i) => [i+1, name, `₦${fmt(rev)}`, is.totalRevenue > 0 ? `${((rev/is.totalRevenue)*100).toFixed(1)}%` : '0%']),
+      body: topCustomers.map(([name, rev], i) => [i+1, name, `₦${fmt(rev)}`, is.totalRevenue > 0 ? `${((rev/is.totalRevenue)*100).toFixed(1)}%` : '0%']),
       styles: { fontSize: 9 },
       headStyles: { fillColor: [245,166,35], textColor: [20,20,20] },
     })
@@ -912,7 +909,7 @@ const ManagementAccountsTab = ({ userProfile }) => {
     autoTable(doc, {
       startY: y, margin: { left: ml, right: 14 },
       head: [['Category', 'Amount', '% of Total Expenses']],
-      body: Object.entries(is.expByParent||{}).sort((a,b) => b[1]-a[1]).map(([cat, val]) => [cat, `₦${fmt(val)}`, is.totalOpEx+is.cogsTotal > 0 ? `${((val/(is.totalOpEx+is.cogsTotal))*100).toFixed(1)}%` : '0%']),
+      body: Object.entries(is.parentTotals||{}).sort((a,b) => b[1]-a[1]).map(([cat, val]) => [cat, `₦${fmt(val)}`, is.totalOpEx+is.cogsTotal > 0 ? `${((val/(is.totalOpEx+is.cogsTotal))*100).toFixed(1)}%` : '0%']),
       styles: { fontSize: 9 },
       headStyles: { fillColor: [245,166,35], textColor: [20,20,20] },
     })
@@ -972,10 +969,12 @@ const ManagementAccountsTab = ({ userProfile }) => {
           <div style={s.card}>
             <div style={s.sectionTitle}>Income Statement Summary — {new Date(month+'-01').toLocaleDateString('en-GB',{month:'long',year:'numeric'})}</div>
             {[
-              { label: 'Total Revenue', val: is.totalRevenue, prev: prevIs?.totalRevenue, bold: false },
+              { label: 'Revenue (delivered)', val: is.totalRevenue, prev: prevIs?.totalRevenue, bold: false },
+              { label: 'Cash received (memo)', val: is.cashReceived, prev: prevIs?.cashReceived, bold: false },
               { label: 'Cost of Sales', val: -is.cogsTotal, prev: prevIs ? -prevIs.cogsTotal : null, bold: false },
               { label: 'Gross Profit', val: is.grossProfit, prev: prevIs?.grossProfit, bold: true },
               { label: 'Operating Expenses', val: -is.totalOpEx, prev: prevIs ? -prevIs.totalOpEx : null, bold: false },
+              { label: 'Other adjustments', val: is.adjustment, prev: prevIs?.adjustment, bold:false },
               { label: 'Net Profit / (Loss)', val: is.netProfit, prev: prevIs?.netProfit, bold: true },
             ].map(({ label, val, prev, bold }) => (
               <div key={label} style={{ ...s.row(), fontWeight: bold ? '700' : '400', borderTop: bold ? `1px solid ${theme.border}` : undefined }}>
@@ -988,10 +987,12 @@ const ManagementAccountsTab = ({ userProfile }) => {
             ))}
           </div>
 
+          <p>Awaiting approval: {naira(is.awaitingApproval)} (not included)</p>
+          <p>{is.adjustmentNote}</p>
           {/* Expense Breakdown */}
           <div style={s.card}>
             <div style={s.sectionTitle}>Expense Breakdown</div>
-            {Object.entries(is.expByParent||{}).sort((a,b) => b[1]-a[1]).map(([cat, val]) => {
+            {Object.entries(is.parentTotals||{}).sort((a,b) => b[1]-a[1]).map(([cat, val]) => {
               const totalExp = (is.cogsTotal||0) + (is.totalOpEx||0)
               const pctVal = totalExp > 0 ? ((val / totalExp) * 100).toFixed(1) : 0
               return (
@@ -1012,12 +1013,7 @@ const ManagementAccountsTab = ({ userProfile }) => {
           <div style={s.card}>
             <div style={s.sectionTitle}>Top Customers by Revenue</div>
             {(() => {
-              const custMap = {}
-              ;(is.payments||[]).forEach(p => {
-                const name = p.invoice?.order?.customer?.name || 'Unknown'
-                custMap[name] = (custMap[name]||0) + Number(p.amount_paid||0)
-              })
-              return Object.entries(custMap).sort((a,b) => b[1]-a[1]).slice(0,10).map(([name, rev], i) => (
+              return is.topCustomers.slice(0,10).map(c=>[c.name,c.total]).map(([name, rev], i) => (
                 <div key={name} style={s.row()}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <span style={{ width: '20px', height: '20px', background: theme.accent+'33', border: `1px solid ${theme.accent}44`, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: '700', color: theme.accent }}>{i+1}</span>

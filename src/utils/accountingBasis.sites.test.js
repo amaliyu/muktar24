@@ -1,6 +1,6 @@
 import { it, expect } from 'vitest'
-import { septemberSources } from '../test/accountingFixtures'
-import { siteAccountingSources, profitStatement, customerPosition, productionUnitCosts, supplierPayables, expenseStatus, adjustmentTotal } from './accountingBasis'
+import { septemberSources, emptyBalance } from '../test/accountingFixtures'
+import { siteAccountingSources, profitStatement, customerPosition, productionUnitCosts, supplierPayables, expenseStatus, adjustmentTotal, balancePresentation } from './accountingBasis'
 const filters = { from: '2026-09-01', to: '2026-09-30' }
 const expenses = [{ site_id: 'dut', expense_date: '2026-09-10', status: 'approved', amount: 300 },
   { site_id: 'kado', expense_date: '2026-09-10', status: 'approved', amount: 400 },
@@ -24,7 +24,11 @@ it('September 2026 mocked before/after reconciles company and all three sites', 
   const siteResults = ['dut', 'kado', 'life'].map(siteId => profitStatement({ ...siteAccountingSources(septemberSources, siteId), expenses }, { ...filters, siteId }))
   for (const key of ['revenue', 'cashReceived', 'cost', 'netProfit']) expect(siteResults.reduce((n, r) => n + r[key], 0)).toBe(after[key])
   // Old cash-based company screens only saw Dutse payments, and included pending expenses.
-  const before = { revenue: 1100, cashReceived: 1100, profit: 1100 - 950, receivables: 200, deposits: 100 }
+  const oldCash = septemberSources.payments.reduce((n, r) => n + r.amount_paid, 0)
+  const oldInvoiceTotal = [800, 500].reduce((n, value) => n + value, 0)
+  const oldCost = expenses.reduce((n, r) => n + r.amount, 0)
+  const before = { revenue: oldCash, cashReceived: oldCash, profit: oldCash - oldCost,
+    receivables: oldInvoiceTotal - oldCash, deposits: Math.max(oldCash - 1000, 0) }
   expect(before).toEqual({ revenue: 1100, cashReceived: 1100, profit: 150, receivables: 200, deposits: 100 })
 })
 it('missing client rates remain delivered but unpriced', () => {
@@ -52,4 +56,20 @@ it('R8 prioritizes adjustment_date over a conflicting period and isolates statem
   const rows = [{ statement_type: 'income', amount: 100, adjustment_date: '2026-10-01', period_from: filters.from, period_to: filters.to },
     { statement_type: 'cashflow', amount: 100, adjustment_date: '2026-09-01' }]
   expect(adjustmentTotal(rows, 'income', filters)).toBe(0)
+})
+it('unallocated manual adjustments stay in company profit, never repeated in every site', () => {
+  const adjustments = [{ statement_type: 'income', adjustment_date: '2026-09-15', amount: 100 }]
+  const company = profitStatement({ ...siteAccountingSources(septemberSources), expenses, adjustments }, filters)
+  const sites = ['dut','kado','life'].map(siteId => profitStatement({ ...siteAccountingSources(septemberSources,siteId), expenses, adjustments }, { ...filters, siteId }))
+  expect(company.netProfit).toBe(sites.reduce((n, r) => n + r.netProfit, 0) + 100)
+  expect(sites.every(r => r.adjustment === 0)).toBe(true)
+})
+it('balance adjustments appear in their matching section totals, with unmatched accounts explicit in equity', () => {
+  const result = balancePresentation(emptyBalance({ openingBalances: [
+    { account_name: 'Plant', category: 'asset', sub_category: 'fixed_asset_other', amount: 1000 },
+    { account_name: 'Loan', category: 'liability', sub_category: 'long_term_liability', amount: 300 },
+    { account_name: 'Trade Receivables', category: 'asset', sub_category: 'current_asset', amount: 9999 },
+  ], adjustments: [{ account_name: 'Plant', amount: 50 }, { account_name: 'Loan', amount: 20 }, { account_name: 'Correction', amount: 10 }] }))
+  expect(result).toMatchObject({ totalFixedAssets: 1050, totalLTLiabilities: 320, totalEquity: 10, totalAssets: 1050 })
+  expect(result.otherFixed[1]).toMatchObject({ account_name: 'Plant (adjustment)', amount: 50, isAdjustment: true })
 })

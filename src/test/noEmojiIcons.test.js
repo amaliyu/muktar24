@@ -12,7 +12,6 @@ const EMOJI = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u
 // Each entry is a file (relative to src/) and a substring of the allowed line.
 const ALLOW = [
   { file: 'components/Reports.jsx', line: '⚠ ${S.unvaluedCount} deliveries excluded — could not be priced' },
-  { file: 'components/Reports.jsx', line: "'Balance Check: ✓ Balanced'" },
   { file: 'components/Reports.jsx', line: "days > 30 ? `⚠ ${days}` : days" },
   { file: 'components/Reports.jsx', line: "Number(i.current_stock)<=Number(i.reorder_level)?'⚠ LOW':'OK'" },
 ]
