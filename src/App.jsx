@@ -88,6 +88,7 @@ import { defaultMachineId, resolveMachine } from './utils/productionMachine'
 import MobileScope, { revealOnPhone } from './components/MobileScope'
 import { ConfirmDialog, fmtDate, fmtDay, fmtDateTime } from './components/site/siteUi'
 import { deleteWhere } from './utils/checkedDelete'
+import { COMPANY_EMAIL, COMPANY_PHONE_OFFICE_INTL } from './constants/company'
 
 const theme = {
   bg: "#0f1117", surface: "#1a1d27", card: "#21263a", border: "#2e3452",
@@ -4431,7 +4432,7 @@ const DailySchedule = () => {
     if (sched.ico_approved_by) doc.text(`Approved by ICO: ${sched.ico_approved_by}`, W / 2, finalY, { align: 'center' });
     doc.text(`Printed: ${new Date().toLocaleDateString('en-GB')}`, W - 14, finalY, { align: 'right' });
     doc.setFontSize(8); doc.setTextColor(140, 140, 160);
-    doc.text('1, Dutse Alhaji, Behind Tipper Garage, Off Bwari Expressway, Abuja  |  +234 905 554 4433', W / 2, doc.internal.pageSize.getHeight() - 8, { align: 'center' });
+    doc.text(`1, Dutse Alhaji, Behind Tipper Garage, Off Bwari Expressway, Abuja  |  ${COMPANY_PHONE_OFFICE_INTL}`, W / 2, doc.internal.pageSize.getHeight() - 8, { align: 'center' });
     doc.save(`Schedule-${sched.schedule_date}.pdf`);
   };
 
@@ -4657,7 +4658,7 @@ const ScheduleApprovals = () => {
     doc.text(`ICO Reviewer: ${approvedBy || sched.ico_approved_by || '—'}`, W / 2, finalY, { align: 'center' });
     doc.text(`Printed: ${new Date().toLocaleDateString('en-GB')}`, W - 14, finalY, { align: 'right' });
     doc.setFontSize(8); doc.setTextColor(140, 140, 160);
-    doc.text('1, Dutse Alhaji, Behind Tipper Garage, Off Bwari Expressway, Abuja  |  +234 905 554 4433', W / 2, doc.internal.pageSize.getHeight() - 8, { align: 'center' });
+    doc.text(`1, Dutse Alhaji, Behind Tipper Garage, Off Bwari Expressway, Abuja  |  ${COMPANY_PHONE_OFFICE_INTL}`, W / 2, doc.internal.pageSize.getHeight() - 8, { align: 'center' });
     doc.save(`Schedule-Approval-${sched.schedule_date}.pdf`);
   };
 
@@ -11784,8 +11785,8 @@ export default function App() {
           <div style={{ fontWeight: "700", color: theme.text, fontSize: "12px", marginBottom: "2px" }}>{userProfile?.full_name || 'User'}</div>
           <div style={{ color: theme.accent, fontSize: "11px", marginBottom: "6px" }}>{APP_ROLES.find(r => r.id === role)?.label || role} {(isBoard || isICO) ? '· View Only' : ''}</div>
           <div style={{ display: "flex", gap: "8px" }}><Ico icon={MapPin} style={{ marginTop: "3px" }} /><span>1, Dutse Alhaji, Behind Tipper Garage, Off Bwari Expressway, Abuja.</span></div>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}><Ico icon={Phone} /><span>+234 905 554 4433</span></div>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px", wordBreak: "break-all" }}><Ico icon={Mail} /><span>abujaprecastconcreteltd@gmail.com</span></div>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}><Ico icon={Phone} /><span>{COMPANY_PHONE_OFFICE_INTL}</span></div>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", wordBreak: "break-all" }}><Ico icon={Mail} /><span>{COMPANY_EMAIL}</span></div>
           <div style={{ display:"flex", gap:"8px", marginTop:"10px" }}>
             <button onClick={() => setShowChangePwd(true)} style={{ flex:1, padding:"6px", minHeight: isMobile ? '44px' : undefined, background:"transparent", border:`1px solid ${theme.border}`, borderRadius:"6px", color:theme.textMuted, fontSize:"11px", cursor:"pointer", fontWeight:"600" }}>Change Password</button>
             <button onClick={handleLogout} style={{ flex:1, padding:"6px", minHeight: isMobile ? '44px' : undefined, background:"transparent", border:`1px solid ${theme.border}`, borderRadius:"6px", color:theme.textMuted, fontSize:"11px", cursor:"pointer", fontWeight:"600" }}>Sign Out</button>

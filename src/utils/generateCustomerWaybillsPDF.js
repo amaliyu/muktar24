@@ -1,3 +1,4 @@
+import { COMPANY_EMAIL, COMPANY_PHONE_OFFICE, COMPANY_PHONE_MOBILE } from '../constants/company'
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -125,7 +126,7 @@ export async function generateCustomerWaybillsPDF(customer, waybills, fromDate, 
   const footY = doc.internal.pageSize.getHeight() - 10;
   doc.setDrawColor(200); doc.setLineWidth(0.3); doc.line(ml, footY - 3, mr, footY - 3);
   doc.setFontSize(7); doc.setFont('helvetica', 'normal'); doc.setTextColor(130);
-  doc.text('ABUJA PRECAST CONCRETE LIMITED  ·  Tel: 09055541433, 07030647949  ·  iabujaprecast@gmail.com', W / 2, footY + 1, { align: 'center' });
+  doc.text(`ABUJA PRECAST CONCRETE LIMITED  ·  Tel: ${COMPANY_PHONE_OFFICE}, ${COMPANY_PHONE_MOBILE}  ·  ${COMPANY_EMAIL}`, W / 2, footY + 1, { align: 'center' });
 
   const fname = `Waybills_${(customer.name || 'customer').replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`;
   doc.save(fname);

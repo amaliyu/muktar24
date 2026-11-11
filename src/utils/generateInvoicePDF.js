@@ -1,4 +1,5 @@
 import { PROFORMA_DISCLAIMER } from './proforma'
+import { COMPANY_EMAIL, COMPANY_PHONE_OFFICE, COMPANY_PHONE_MOBILE } from '../constants/company'
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -198,7 +199,7 @@ export async function generateInvoicePDF(invoiceData, customer) {
   doc.text('THANK YOU FOR YOUR PATRONAGE!', W / 2, footerY + 7, { align: 'center' });
   doc.setFontSize(7.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(90);
   doc.text('1, Dutse Alhaji, Behind Tipper Garage, Beside Istanbul Quarry, Off Bwari Expressway, Bmuko Village, Abuja, Nigeria.', W / 2, footerY + 13, { align: 'center' });
-  doc.text('Tel: 09055541433, 07030647949   |   Email: iabujaprecast@gmail.com', W / 2, footerY + 18, { align: 'center' });
+  doc.text(`Tel: ${COMPANY_PHONE_OFFICE}, ${COMPANY_PHONE_MOBILE}   |   Email: ${COMPANY_EMAIL}`, W / 2, footerY + 18, { align: 'center' });
 
   doc.save(`${isCancelled ? 'CANCELLED_' : ''}${isProforma || cancelledProforma ? 'PROFORMA_' : ''}${invoice_number || 'invoice'}.pdf`);
 }

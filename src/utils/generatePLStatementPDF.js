@@ -1,3 +1,4 @@
+import { COMPANY_EMAIL, COMPANY_PHONE_OFFICE, COMPANY_PHONE_MOBILE } from '../constants/company'
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -137,7 +138,7 @@ export async function generatePLStatementPDF({ fromDate, toDate, payments, incom
   const footY = doc.internal.pageSize.getHeight() - 10;
   doc.setDrawColor(200); doc.setLineWidth(0.3); doc.line(ml, footY - 3, mr, footY - 3);
   doc.setFontSize(7); doc.setFont('helvetica', 'normal'); doc.setTextColor(130);
-  doc.text('ABUJA PRECAST CONCRETE LIMITED  ·  Tel: 09055541433, 07030647949  ·  iabujaprecast@gmail.com', W / 2, footY + 1, { align: 'center' });
+  doc.text(`ABUJA PRECAST CONCRETE LIMITED  ·  Tel: ${COMPANY_PHONE_OFFICE}, ${COMPANY_PHONE_MOBILE}  ·  ${COMPANY_EMAIL}`, W / 2, footY + 1, { align: 'center' });
 
   const d = new Date().toISOString().split('T')[0];
   doc.save(`PL_Statement_${d}.pdf`);

@@ -1,4 +1,5 @@
 import { statementRows } from './customerStatement'
+import { COMPANY_EMAIL, COMPANY_PHONE_OFFICE, COMPANY_PHONE_MOBILE } from '../constants/company'
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -228,7 +229,7 @@ export async function generateStatementPDF(customer, orders, waybills, fromDate,
     W / 2, footerY + 1, { align: 'center' }
   );
   doc.text(
-    'Tel: 09055541433, 07030647949   |   Email: iabujaprecast@gmail.com',
+    `Tel: ${COMPANY_PHONE_OFFICE}, ${COMPANY_PHONE_MOBILE}   |   Email: ${COMPANY_EMAIL}`,
     W / 2, footerY + 6, { align: 'center' }
   );
 

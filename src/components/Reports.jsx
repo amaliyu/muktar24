@@ -13,6 +13,7 @@ import { siteName } from '../services/sites'
 import { Z } from '../lib/zIndex'
 import { CheckCircle2, ChevronDown, ChevronUp, Download, Lock, X } from 'lucide-react'
 import { Ico, IconText, IconButton } from './Ico'
+import { COMPANY_EMAIL, COMPANY_PHONE_OFFICE_INTL } from '../constants/company'
 
 // ── THEME ────────────────────────────────────────────────────
 const theme = {
@@ -38,8 +39,8 @@ const today = todayLagos
 const COMPANY = {
   name: 'Abuja Precast Concrete Limited',
   address: '1, Dutse Alhaji, Behind Tipper Garage, Off Bwari Expressway, Abuja',
-  phone: '+234 905 554 4433',
-  email: 'abujaprecastconcreteltd@gmail.com',
+  phone: COMPANY_PHONE_OFFICE_INTL,
+  email: COMPANY_EMAIL,
 }
 
 // ── CATEGORY COLOURS ─────────────────────────────────────────

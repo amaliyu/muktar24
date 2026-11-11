@@ -1,3 +1,4 @@
+import { COMPANY_EMAIL, COMPANY_PHONE_OFFICE, COMPANY_PHONE_MOBILE } from '../constants/company'
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -136,7 +137,7 @@ export async function generateWaybillPDF(waybill) {
   const footY = doc.internal.pageSize.getHeight() - 10;
   doc.setDrawColor(200); doc.setLineWidth(0.3); doc.line(ml, footY - 4, mr, footY - 4);
   doc.setFontSize(7.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(120);
-  doc.text('ABUJA PRECAST CONCRETE LIMITED · Tel: 09055541433, 07030647949 · iabujaprecast@gmail.com', W / 2, footY - 1, { align: 'center' });
+  doc.text(`ABUJA PRECAST CONCRETE LIMITED · Tel: ${COMPANY_PHONE_OFFICE}, ${COMPANY_PHONE_MOBILE} · ${COMPANY_EMAIL}`, W / 2, footY - 1, { align: 'center' });
 
   doc.save(`${waybill.waybill_number || 'waybill'}.pdf`);
 }
