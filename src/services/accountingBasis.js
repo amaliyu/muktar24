@@ -4,7 +4,7 @@ import {
   deliveredRevenue, cashReceived, customerPosition, approvedExpenses,
   profitStatement, supplierPayables, adjustmentTotal,
   finishedGoodsValuation, cashFlowReconciliation, collectionRate,
-  stockAsAt, productionUnitCosts, materialPriceMap, balancePresentation, expenseStatus,
+  stockAsAt, productionUnitCosts, materialPriceMap, bankBalancesAsAt, balancePresentation, expenseStatus,
   siteAccountingSources,
 } from '../utils/accountingBasis'
 
@@ -177,20 +177,7 @@ export const accountingBasisService = {
       checked(supabase.from('bank_accounts').select('id, account_name, current_balance')),
       checked(supabase.from('bank_transactions').select('id, bank_account_id, transaction_date, created_at, credit, debit, balance').order('transaction_date').order('created_at').order('id')),
     ])
-    const historicalNotes = []
-    const bankAccounts = accounts.map(account => {
-      const tx = transactions.filter(t => t.bank_account_id === account.id)
-      if (!tx.length || tx[0].balance == null) {
-        historicalNotes.push(`${account.account_name}: current figure — history not available`)
-        return account
-      }
-      if (asAt < tx[0].transaction_date) historicalNotes.push(`${account.account_name}: opening balance inferred from first available statement; earlier history not available`)
-      const opening = Number(tx[0].balance) - Number(tx[0].credit || 0) + Number(tx[0].debit || 0)
-      const balance = opening + tx.filter(t => t.transaction_date <= asAt)
-        .reduce((n, t) => n + Number(t.credit || 0) - Number(t.debit || 0), 0)
-      return { ...account, current_balance: balance }
-    })
-    return { bankAccounts, bankTotal: bankAccounts.reduce((n, a) => n + Number(a.current_balance || 0), 0), historicalNotes }
+    return bankBalancesAsAt(accounts, transactions, asAt)
   },
 
   async stock(asAt) {

@@ -7,6 +7,7 @@ vi.mock('../lib/supabase', async () => {
   return db.mock
 })
 import { accountingBasisService as basis } from './accountingBasis'
+import { bankBalancesAsAt } from '../utils/accountingBasis'
 beforeEach(() => {
   db.mock.calls.length = 0
   db.resolve = table => ({ data: table === 'production_sites' ? sites : [], error: null })
@@ -41,6 +42,41 @@ it('historical bank cash is inferred opening balance plus only transactions thro
     { bank_account_id: 'b', transaction_date: '2026-10-01', credit: 300, debit: 0, balance: 800 },
   ], error: null })
   expect((await basis.banks('2026-09-30')).bankTotal).toBe(500)
+})
+it('bank integrity rejects phone-number credits and uses recorded current balance', () => {
+  const result = bankBalancesAsAt([{ id: 'b', account_name: 'Amantelcom', current_balance: 1200 }], [
+    { id: '1', bank_account_id: 'b', transaction_date: '2026-09-01', credit: 8069229567, debit: 0, balance: 100 },
+  ], '2026-09-30')
+  expect(result.bankAccounts[0].current_balance).toBe(1200)
+  expect(result.historicalNotes[0]).toContain('failed the integrity check')
+})
+it('bank integrity rejects a running-balance mismatch', () => {
+  const result = bankBalancesAsAt([{ id: 'b', account_name: 'Mismatch', current_balance: 900 }], [
+    { id: '1', bank_account_id: 'b', transaction_date: '2026-09-01', credit: 100, debit: 0, balance: 500 },
+    { id: '2', bank_account_id: 'b', transaction_date: '2026-09-02', credit: 10, debit: 0, balance: 700 },
+  ], '2026-09-02')
+  expect(result.bankAccounts[0].current_balance).toBe(900)
+  expect(result.historicalNotes[0]).toContain('failed the integrity check')
+})
+it('reliable statements after their last date use the recorded current balance', () => {
+  const result = bankBalancesAsAt([{ id: 'b', account_name: 'Stale', current_balance: 999 }], [
+    { id: '1', bank_account_id: 'b', transaction_date: '2026-09-01', credit: 100, debit: 0, balance: 500 },
+    { id: '2', bank_account_id: 'b', transaction_date: '2026-09-02', credit: 10, debit: 0, balance: 510 },
+  ], '2026-09-30')
+  expect(result.bankAccounts[0].current_balance).toBe(999)
+  expect(result.historicalNotes[0]).toContain('statement data ends 2026-09-02')
+})
+it('reliable statements inside their range rebuild the as-at balance', () => {
+  const result = bankBalancesAsAt([{ id: 'b', account_name: 'Clean', current_balance: 999 }], [
+    { id: '1', bank_account_id: 'b', transaction_date: '2026-09-01', credit: 100, debit: 0, balance: 500 },
+    { id: '2', bank_account_id: 'b', transaction_date: '2026-09-02', credit: 10, debit: 0, balance: 510 },
+  ], '2026-09-01')
+  expect(result.bankAccounts[0].current_balance).toBe(500)
+})
+it('accounts without transactions keep current balance and history note', () => {
+  const result = bankBalancesAsAt([{ id: 'b', account_name: 'Empty', current_balance: 42 }], [], '2026-09-01')
+  expect(result.bankAccounts[0].current_balance).toBe(42)
+  expect(result.historicalNotes[0]).toBe('Empty: current figure — history not available')
 })
 it('every payment and client receipt uses its own period date, expenses use expense_date and site_id', async () => {
   await basis.income('2026-09-01','2026-09-30','kado')

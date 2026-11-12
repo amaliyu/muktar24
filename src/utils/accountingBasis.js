@@ -175,6 +175,52 @@ export function cashFlowReconciliation({ openingCash, closingCash, netChange, to
   }
 }
 
+const bankNumber = value => Number(value || 0)
+
+// Rebuild historical balances only when the imported statement proves internally consistent.
+export function bankBalancesAsAt(accounts = [], transactions = [], asAt) {
+  const historicalNotes = []
+  const bankAccounts = accounts.map(account => {
+    const tx = transactions
+      .filter(row => row.bank_account_id === account.id)
+      .sort((a, b) => String(a.transaction_date || '').localeCompare(String(b.transaction_date || ''))
+        || String(a.created_at || '').localeCompare(String(b.created_at || ''))
+        || String(a.id || '').localeCompare(String(b.id || '')))
+    if (!tx.length) {
+      historicalNotes.push(`${account.account_name}: current figure — history not available`)
+      return account
+    }
+    let running = null, reliable = true
+    for (const row of tx) {
+      if (Math.abs(bankNumber(row.credit)) > 1_000_000_000 || Math.abs(bankNumber(row.debit)) > 1_000_000_000) reliable = false
+      if (running == null) {
+        if (row.balance == null) { reliable = false; break }
+        running = bankNumber(row.balance)
+      } else {
+        running += bankNumber(row.credit) - bankNumber(row.debit)
+        if (row.balance != null && Math.abs(running - bankNumber(row.balance)) > 1) reliable = false
+      }
+      if (!reliable) break
+    }
+    const lastDate = tx.at(-1).transaction_date
+    if (!reliable) {
+      historicalNotes.push(`${account.account_name}: imported statement data failed the integrity check — showing recorded current balance; history not available.`)
+      return account
+    }
+    if (asAt > lastDate) {
+      historicalNotes.push(`${account.account_name}: statement data ends ${lastDate} — showing recorded current balance.`)
+      return account
+    }
+    const first = tx[0]
+    const opening = bankNumber(first.balance) - bankNumber(first.credit) + bankNumber(first.debit)
+    if (asAt < first.transaction_date) historicalNotes.push(`${account.account_name}: opening balance inferred from first available statement; earlier history not available`)
+    const balance = opening + tx.filter(row => row.transaction_date <= asAt)
+      .reduce((total, row) => total + bankNumber(row.credit) - bankNumber(row.debit), 0)
+    return { ...account, current_balance: balance }
+  })
+  return { bankAccounts, bankTotal: bankAccounts.reduce((total, account) => total + bankNumber(account.current_balance), 0), historicalNotes }
+}
+
 export function materialPriceMap(items = []) {
   const names = { cement: 'CEMENT', dust: 'DUST', chippings: 'CHIPPINGS 3/8', diesel: 'DIESEL' }
   return Object.fromEntries(Object.entries(names).map(([key, name]) => {
