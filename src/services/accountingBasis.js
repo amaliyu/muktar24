@@ -4,7 +4,7 @@ import {
   deliveredRevenue, cashReceived, customerPosition, approvedExpenses,
   profitStatement, supplierPayables, adjustmentTotal,
   finishedGoodsValuation, cashFlowReconciliation, collectionRate,
-  stockAsAt, productionUnitCosts, balancePresentation, expenseStatus,
+  stockAsAt, productionUnitCosts, materialPriceMap, balancePresentation, expenseStatus,
   siteAccountingSources,
 } from '../utils/accountingBasis'
 
@@ -206,17 +206,36 @@ export const accountingBasisService = {
     ])
     const inventoryItems = items.map(item => ({ ...item,
       current_stock: stockAsAt(item.current_stock, movements.filter(m => m.item_id === item.id), asAt) }))
+    const materialPrices = materialPriceMap(items)
     const finishedGoods = finished.map(row => ({ ...row,
       quantity_in_yard: stockAsAt(row.quantity_in_yard, [
         ...batches.filter(b => b.block_type === row.block_type).map(b => ({ date: b.date_cured, delta: Number(b.qty_accepted) })),
         ...waybills.filter(b => b.block_type === row.block_type).map(b => ({ date: b.waybill_date, delta: -Number(b.quantity_loaded) })),
         ...damage.filter(b => b.block_type === row.block_type).map(b => ({ date: b.date, delta: -Number(b.quantity_damaged) })),
       ], asAt, { deltaOf: m => m.delta }) }))
-    const stockValue = finishedGoodsValuation(finishedGoods, productionUnitCosts(production, labour, asAt))
+    const unitCosts = productionUnitCosts(production, labour, asAt, materialPrices)
+    const usedMaterials = new Set()
+    production.forEach(row => {
+      if (Number(row.cement_bags || 0) > 0) usedMaterials.add('cement')
+      if (Number(row.granite_dust_kg || 0) > 0) usedMaterials.add('dust')
+      if (Number(row.chippings_kg || 0) > 0) usedMaterials.add('chippings')
+      if (Number(row.diesel_litres || 0) > 0) usedMaterials.add('diesel')
+    })
+    const missingMaterials = Object.entries({ cement: 'CEMENT', dust: 'DUST', chippings: 'CHIPPINGS 3/8', diesel: 'DIESEL' })
+      .filter(([key]) => usedMaterials.has(key) && !(Number.isFinite(Number(materialPrices[key])) && Number(materialPrices[key]) > 0))
+      .map(([, name]) => name)
+    const stockValue = finishedGoodsValuation(finishedGoods, unitCosts)
     return { inventoryItems, finishedGoods, stockValue,
+      materialPrices,
       rawMatsValue: inventoryItems.reduce((n, i) => n + Number(i.current_stock || 0) * Number(i.unit_cost || 0), 0),
       stockNotes: ['Raw material unit costs are current figure — history not available. Finished goods are the Dutse yard; client-site finished stock history is not available. Batch acceptance uses date_cured; edits/deletions before the cutoff have no immutable history.',
-        'Production cost uses the Production Cost Analysis material estimates (cement ₦5,000/bag, dust/chippings ₦50/kg, diesel ₦750/litre), plus approved labour, over the latest three production months per block type.'] }
+        'Production cost uses material prices from the Stock Registry unit costs (current prices — history not available), plus approved labour, over the latest three production months per block type.',
+        ...(missingMaterials.length ? [`Missing material price: ${missingMaterials.join(', ')}; affected finished goods are not valued.`] : [])] }
+  },
+
+  async materialPrices() {
+    const items = await checked(supabase.from('inventory_items').select('name, unit_cost').eq('owner', 'apcl'))
+    return materialPriceMap(items)
   },
 
   async cashflow(from, to, siteId = null) {

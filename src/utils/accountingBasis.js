@@ -22,7 +22,7 @@ export function siteAccountingSources({ sites = [], contracts = [], deliveries =
   const deliveryRows = deliveries.map(r => ({ ...r, site_id: dutse.id }))
   const paymentRows = payments.map(r => ({ ...r, site_id: dutse.id }))
   for (const h of handovers) {
-    if (!['accepted', 'deemed_accepted'].includes(h.status)) continue
+    if (!['accepted', 'deemed_accepted', 'partly_rejected'].includes(h.status)) continue
     const contract = contracts.find(c => c.site_id === h.site_id)
     const rate = contract?.contract_model === 'service_fee' ? contract.fee_per_block
       : /^9(?:\D|$)/.test(h.block_type) ? contract?.opening_rate_9in
@@ -132,7 +132,7 @@ export function finishedGoodsValuation(stock = [], unitCosts = {}) {
     const quantity = amount(row.quantity_in_yard ?? row.quantity)
     const type = row.block_type
     const cost = unitCosts[type]
-    if (cost == null || !Number.isFinite(Number(cost))) {
+    if (cost == null || !Number.isFinite(Number(cost)) || Number(cost) <= 0) {
       unvalued.push({ block_type: type, quantity, label: 'not valued' })
       return total
     }
@@ -175,14 +175,23 @@ export function cashFlowReconciliation({ openingCash, closingCash, netChange, to
   }
 }
 
-// Both Production Cost Analysis and stock valuation use these material rates.
+export function materialPriceMap(items = []) {
+  const names = { cement: 'CEMENT', dust: 'DUST', chippings: 'CHIPPINGS 3/8', diesel: 'DIESEL' }
+  return Object.fromEntries(Object.entries(names).map(([key, name]) => {
+    const item = items.find(row => row.name === name)
+    return [key, item?.unit_cost == null ? null : Number(item.unit_cost)]
+  }))
+}
+
+// Both Production Cost Analysis and stock valuation use Stock Registry prices.
 // Labour is allocated by blocks produced in each production month.
-export function productionUnitCosts(production = [], labour = [], asAt) {
+export function productionUnitCosts(production = [], labour = [], asAt, materialPrices = {}) {
   const eligible = production.filter(r => through(r.date, asAt) && amount(r.quantity_produced) > 0)
   const months = [...new Set(eligible.map(r => r.date.slice(0, 7)))].sort().reverse()
   const typeMonths = Object.fromEntries([...new Set(eligible.map(r => r.block_type))].map(type =>
     [type, months.filter(m => eligible.some(r => r.block_type === type && r.date.startsWith(m))).slice(0, 3)]))
-  const quantities = {}, costs = {}
+  const quantities = {}, costs = {}, invalidTypes = new Set()
+  const price = key => Number.isFinite(Number(materialPrices[key])) && Number(materialPrices[key]) > 0
   for (const month of months) {
     const rows = eligible.filter(r => r.date.startsWith(month))
     const totalQty = rows.reduce((n, r) => n + amount(r.quantity_produced), 0)
@@ -193,12 +202,19 @@ export function productionUnitCosts(production = [], labour = [], asAt) {
       const type = r.block_type, qty = amount(r.quantity_produced)
       if (!typeMonths[type].includes(month)) continue
       quantities[type] = (quantities[type] || 0) + qty
-      costs[type] = (costs[type] || 0) + amount(r.cement_bags) * 5000
-        + amount(r.granite_dust_kg) * 50 + amount(r.chippings_kg) * 50
-        + amount(r.diesel_litres) * 750 + monthLabour * qty / totalQty
+      if ((amount(r.cement_bags) > 0 && !price('cement'))
+        || (amount(r.granite_dust_kg) > 0 && !price('dust'))
+        || (amount(r.chippings_kg) > 0 && !price('chippings'))
+        || (amount(r.diesel_litres) > 0 && !price('diesel'))) invalidTypes.add(type)
+      costs[type] = (costs[type] || 0) + amount(r.cement_bags) * (price('cement') ? Number(materialPrices.cement) : 0)
+        + amount(r.granite_dust_kg) * (price('dust') ? Number(materialPrices.dust) : 0)
+        + amount(r.chippings_kg) * (price('chippings') ? Number(materialPrices.chippings) : 0)
+        + amount(r.diesel_litres) * (price('diesel') ? Number(materialPrices.diesel) : 0) + monthLabour * qty / totalQty
     }
   }
-  return Object.fromEntries(Object.entries(quantities).filter(([type]) => costs[type] > 0).map(([type, qty]) => [type, costs[type] / qty]))
+  return Object.fromEntries(Object.entries(quantities)
+    .filter(([type]) => costs[type] > 0 && !invalidTypes.has(type))
+    .map(([type, qty]) => [type, costs[type] / qty]))
 }
 
 export function financialBreakdown(deliveries = [], expenses = []) {

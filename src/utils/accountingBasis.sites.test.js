@@ -1,6 +1,6 @@
 import { it, expect } from 'vitest'
 import { septemberSources, emptyBalance } from '../test/accountingFixtures'
-import { siteAccountingSources, profitStatement, customerPosition, productionUnitCosts, supplierPayables, expenseStatus, adjustmentTotal, balancePresentation } from './accountingBasis'
+import { siteAccountingSources, profitStatement, customerPosition, productionUnitCosts, finishedGoodsValuation, materialPriceMap, supplierPayables, expenseStatus, adjustmentTotal, balancePresentation } from './accountingBasis'
 const filters = { from: '2026-09-01', to: '2026-09-30' }
 const expenses = [{ site_id: 'dut', expense_date: '2026-09-10', status: 'approved', amount: 300 },
   { site_id: 'kado', expense_date: '2026-09-10', status: 'approved', amount: 400 },
@@ -35,11 +35,36 @@ it('missing client rates remain delivered but unpriced', () => {
   const source = siteAccountingSources({ ...septemberSources, contracts: [] }, 'kado')
   expect(profitStatement(source, filters)).toMatchObject({ revenue: 0, deliveredButUnpriced: [{ quantity_received: 2 }] })
 })
+it('partly rejected handovers count accepted quantity only', () => {
+  const source = siteAccountingSources({
+    sites: [{ id: 'dut', code: 'DUTSE' }, { id: 'kado', code: 'KADO' }],
+    contracts: [{ site_id: 'kado', contract_model: 'full_supply', opening_rate_9in: 10 }],
+    deliveries: [], payments: [], receipts: [], handovers: [
+      { id: 'partial', site_id: 'kado', handover_date: '2026-09-10', block_type: '9in', qty_handed_over: 3000, qty_accepted: 2800, status: 'partly_rejected' },
+      { id: 'pending', site_id: 'kado', handover_date: '2026-09-10', block_type: '9in', qty_handed_over: 1000, qty_accepted: 1000, status: 'pending' },
+      { id: 'rejected', site_id: 'kado', handover_date: '2026-09-10', block_type: '9in', qty_handed_over: 1000, qty_accepted: 1000, status: 'rejected' },
+    ],
+  }, 'kado')
+  expect(source.deliveries).toHaveLength(1)
+  expect(source.deliveries[0]).toMatchObject({ quantity_received: 2800, line_value: 28000 })
+})
 it('R4 uses the latest three production months for each type and allocates approved labour', () => {
   const production = ['2026-01-01','2026-03-01','2026-05-01','2026-09-01'].map(date => ({ date, block_type: '9', quantity_produced: 100, cement_bags: 1 }))
   production.push({ date: '2025-09-01', block_type: '6', quantity_produced: 100, cement_bags: 2 })
-  const costs = productionUnitCosts(production, [{ expense_date: '2026-09-01', status: 'approved', amount: 300, category: { name: 'Labour' } }], '2026-09-30')
-  expect(costs).toEqual({ 9: 51, 6: 100 })
+  const costs = productionUnitCosts(production, [{ expense_date: '2026-09-01', status: 'approved', amount: 300, category: { name: 'Labour' } }], '2026-09-30', { cement: 1000, dust: 50, chippings: 50, diesel: 750 })
+  expect(costs).toEqual({ 9: 11, 6: 20 })
+})
+it('Stock Registry material prices drive production cost and missing prices leave stock not valued', () => {
+  expect(materialPriceMap([
+    { name: 'CEMENT', unit_cost: 11550 }, { name: 'DUST', unit_cost: 13.5 },
+    { name: 'CHIPPINGS 3/8', unit_cost: 13.5 }, { name: 'DIESEL', unit_cost: 1680 },
+    { name: 'CEMENT - KADO (SEQUOIA)', unit_cost: 1 },
+  ])).toEqual({ cement: 11550, dust: 13.5, chippings: 13.5, diesel: 1680 })
+  const production = [{ date: '2026-09-01', block_type: '9', quantity_produced: 100, cement_bags: 1, diesel_litres: 1 }]
+  expect(productionUnitCosts(production, [], '2026-09-30', { cement: 11550, dust: 13.5, chippings: 13.5, diesel: 1680 })).toEqual({ 9: 132.3 })
+  const missing = productionUnitCosts(production, [], '2026-09-30', { cement: 11550, dust: 13.5, chippings: 13.5 })
+  expect(missing).toEqual({})
+  expect(finishedGoodsValuation([{ block_type: '9', quantity_in_yard: 100 }], missing).unvalued).toEqual([{ block_type: '9', quantity: 100, label: 'not valued' }])
 })
 it('R5 applies supplier returns and historical cutoffs through supplierBalance', () => {
   expect(supplierPayables([

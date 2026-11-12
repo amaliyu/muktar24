@@ -332,9 +332,9 @@ export const GENERATORS = {
   monthly_production: async (params) => fetchProductionRange(params.from, params.to, params.site_id),
   // 4. Production Cost
   production_cost: async p => {
-    const [rows,costs]=await Promise.all([fetchProductionRange(null,p.to,p.site_id),accountingBasisService.expenses(null,p.to,p.site_id)]);
+    const [rows,costs,materialPrices]=await Promise.all([fetchProductionRange(null,p.to,p.site_id),accountingBasisService.expenses(null,p.to,p.site_id),accountingBasisService.materialPrices()]);
     const selected=rows.filter(r=>(!p.from||r.date>=p.from)&&(!p.to||r.date<=p.to));
-    selected.unitCosts=productionUnitCosts(rows,costs,p.to);return selected;
+    selected.unitCosts=productionUnitCosts(rows,costs,p.to,materialPrices);return selected;
   },
   // 5. Damage & Waste
   damage_waste: async (params) => fetchDamageRange(params.from, params.to, params.site_id),

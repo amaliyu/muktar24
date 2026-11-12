@@ -65,3 +65,10 @@ Findings about valuation/history notes, cash-on-hand consistency, company-only a
 - [ ] Financial Statements → Balance Sheet: Customer deposits line appears; stock is valued at cost (or “not valued”).
 - [ ] Cash Flow: opening + change = closing, or a red “Unreconciled” line.
 - [ ] KPI Dashboard with Kado selected: cash and costs are Kado’s only.
+
+## PR #134 review fixes (12 November 2026)
+
+- Production costing now uses exact APCL Stock Registry unit costs (`CEMENT`, `DUST`, `CHIPPINGS 3/8`, `DIESEL`) in both balance-sheet finished-goods valuation and the Production Cost Analysis report. Kado/Sequoia inventory items are never matched. Missing or zero prices leave affected block types not valued and name the missing material in the stock note; no estimate fallback remains.
+- Partly rejected handovers now count `qty_accepted`; pending and rejected handovers remain excluded.
+- New mocked tests cover the live material prices, missing-price not-valued behavior, exact item matching, and 3,000 handed over / 2,800 accepted partly-rejected behavior.
+- Validation after these fixes: 379 tests pass (377 existing plus 2 new review-fix tests); the production build passes.
