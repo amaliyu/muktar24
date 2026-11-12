@@ -6,6 +6,7 @@ vi.mock('./lib/supabase', async () => {
   const { createSupabaseMock } = await import('./test/supabaseMock')
   return createSupabaseMock(() => ({ data: [], error: null }))
 })
+vi.mock('./services/accountingBasis', () => ({ accountingBasisService: { payments: () => svc.cash(), deliveries: async () => [], deliveredRevenue: () => ({revenue:0}), cashReceived: () => 0, income: async () => ({revenue:0,cost:0,netProfit:0,adjustment:0,cashReceived:0,awaitingApproval:0,deliveredButUnpriced:[]}) } }))
 vi.mock('pdfjs-dist', () => ({ GlobalWorkerOptions: {} }))
 vi.mock('./services/orders', () => ({
   ordersService: { getAll: svc.orders, getCashReceived: svc.cash },

@@ -1,6 +1,11 @@
+import UnpricedDeliveries from './UnpricedDeliveries'
+import MobileScope from './MobileScope'
+import { accountingBasisService } from '../services/accountingBasis'
+import { ACCOUNTING_EXPLANATION, financialBreakdown } from '../utils/accountingBasis'
+import SitePicker from './SitePicker'
 import { settledRows } from '../utils/moneyQueries'
 import { todayLagos, monthStart, monthEnd, dateParts, shiftDate } from '../utils/lagosDate'
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
@@ -172,7 +177,9 @@ const SectionHeader = ({ title }) => (
 )
 
 // ── Main Component ────────────────────────────────────────────────────
-export default function BoardDashboard({ userProfile }) {
+function BoardDashboardContent({ userProfile }) {
+  const loadVersion = useRef(0)
+  const [siteId,setSiteId] = useState('')
   const [loadError, setLoadError] = useState('')
   const [loading, setLoading] = useState(true)
   const [d, setD] = useState({
@@ -195,6 +202,7 @@ export default function BoardDashboard({ userProfile }) {
   })
 
   const load = useCallback(async () => {
+    const version = ++loadVersion.current
     setLoading(true); setLoadError('')
     try {
       const thisMonthStart = firstOfMonth()
@@ -207,15 +215,20 @@ export default function BoardDashboard({ userProfile }) {
       const sixtyDaysAgo  = shiftDate(todayLagos(), -60)
       const threeMonthsAgo = shiftDate(todayLagos(), -90)
 
+      const [basis, previousBasis, trend] = await Promise.all([
+        accountingBasisService.metrics(thisMonthStart,todayISO,siteId),
+        accountingBasisService.metrics(lastMonthStart,lastMonthEnd,siteId),
+        accountingBasisService.deliveries(twelveMonthsAgo,todayISO,siteId),
+      ]);
       const results = await Promise.allSettled([
         // 0: Current month confirmed payments
-        supabase.from('payments').select('amount_paid').eq('status', 'confirmed').gte('payment_date', thisMonthStart),
+        Promise.resolve({data:[]}),
         // 1: Previous month confirmed payments
-        supabase.from('payments').select('amount_paid').eq('status', 'confirmed').gte('payment_date', lastMonthStart).lte('payment_date', lastMonthEnd),
+        Promise.resolve({data:[]}),
         // 2: Current month income records
-        supabase.from('income_records').select('amount').gte('record_date', thisMonthStart),
+        Promise.resolve({data:[]}),
         // 3: Current month approved expenses
-        supabase.from('expenses').select('amount').eq('status', 'approved').gte('expense_date', thisMonthStart),
+        Promise.resolve({data:[]}),
         // 4: All bank accounts
         supabase.from('bank_accounts').select('current_balance'),
         // 5: Invoices for receivables
@@ -225,13 +238,13 @@ export default function BoardDashboard({ userProfile }) {
         // 7: Active orders with items
         supabase.from('orders').select('id, order_items(subtotal)').not('status', 'in', '("delivered","cancelled")'),
         // 8: Revenue last 12 months
-        supabase.from('payments').select('amount_paid, payment_date').eq('status', 'confirmed').gte('payment_date', twelveMonthsAgo),
+        Promise.resolve({data:[]}),
         // 9: Production last 12 months
         supabase.from('production_log').select('quantity_produced, date').gte('date', twelveMonthsAgo),
         // 10: Expenses by category last 3 months
-        supabase.from('expenses').select('amount, category:category_id(name, parent_category)').neq('status', 'rejected').gte('expense_date', threeMonthsAgo),
+        Promise.resolve({data:basis.expenses.filter(e=>accountingBasisService.expenseStatus(e)==='approved')}),
         // 11: Payments for top 5 customers (last 12 months)
-        supabase.from('payments').select('amount_paid, invoice:invoice_id(order:order_id(customer:customer_id(id, name)))').eq('status', 'confirmed').gte('payment_date', twelveMonthsAgo),
+        Promise.resolve({data:[]}),
         // 12: Vehicles for expiring docs
         supabase.from('vehicles').select('id, vehicle_number, vehicle_name, insurance_expiry_date, road_worthiness_expiry_date').eq('status', 'active'),
         // 13: Low stock items
@@ -245,25 +258,19 @@ export default function BoardDashboard({ userProfile }) {
       const get = i => rows[i]
 
       // Current month revenue
-      const revThisMonth = get(0).reduce((s, p) => s + Number(p.amount_paid || 0), 0)
-      const revLastMonth = get(1).reduce((s, p) => s + Number(p.amount_paid || 0), 0)
+      const revThisMonth = basis.revenue
+      const revLastMonth = previousBasis.revenue
 
       // Income and expenses
-      const incomeThisMonth  = get(2).reduce((s, r) => s + Number(r.amount || 0), 0) + revThisMonth
-      const expenseThisMonth = get(3).reduce((s, e) => s + Number(e.amount || 0), 0)
+      const incomeThisMonth  = basis.revenue
+      const expenseThisMonth = basis.cost
 
       // Cash position
       const cashPosition = get(4).reduce((s, b) => s + Number(b.current_balance || 0), 0)
 
       // Receivables
       const allInvoices = get(5)
-      const receivables = allInvoices.reduce((total, inv) => {
-        const confirmed = (inv.payments || [])
-          .filter(p => p.status === 'confirmed')
-          .reduce((s, p) => s + Number(p.amount_paid || 0), 0)
-        const outstanding = Math.max(0, Number(inv.total_amount || 0) - confirmed)
-        return total + outstanding
-      }, 0)
+      const receivables = basis.position.receivables
 
       // Overdue receivables (> 60 days with outstanding balance)
       const overdueReceivables = allInvoices.reduce((arr, inv) => {
@@ -279,7 +286,7 @@ export default function BoardDashboard({ userProfile }) {
           })
         }
         return arr
-      }, []).sort((a, b) => b.amount - a.amount).slice(0, 8)
+      }, [siteId]).sort((a, b) => b.amount - a.amount).slice(0, 8)
 
       // Production this month
       const blocksThisMonth = get(6).reduce((s, r) => s + Number(r.quantity_produced || 0), 0)
@@ -291,15 +298,8 @@ export default function BoardDashboard({ userProfile }) {
       }, 0)
 
       // Revenue trend last 12 months
-      const revByMonth = {}
-      months12.forEach(m => { revByMonth[m] = 0 })
-      get(8).forEach(p => {
-        if (p.payment_date) {
-          const key = p.payment_date.substring(0, 7)
-          if (revByMonth[key] !== undefined) revByMonth[key] += Number(p.amount_paid || 0)
-        }
-      })
-      const revTrend = months12.map(m => ({ label: monthLabel(m + '-01'), value: revByMonth[m] || 0 }))
+      const breakdown=financialBreakdown(trend,basis.expenses);
+      const revTrend=months12.map(m=>({label:monthLabel(m+'-01'),value:breakdown.monthly[m]||0}));
 
       // Production trend last 12 months
       const prodByMonth = {}
@@ -313,29 +313,8 @@ export default function BoardDashboard({ userProfile }) {
       const prodTrend = months12.map(m => ({ label: monthLabel(m + '-01'), value: prodByMonth[m] || 0 }))
 
       // Expense by category
-      const catMap = {}
-      get(10).forEach(e => {
-        const cat = e.category?.parent_category || e.category?.name || 'Other'
-        catMap[cat] = (catMap[cat] || 0) + Number(e.amount || 0)
-      })
-      const expenseByCategory = Object.entries(catMap)
-        .map(([label, value], i) => ({ label, value, color: CHART_COLORS[i % CHART_COLORS.length] }))
-        .sort((a, b) => b.value - a.value)
-
-      // Top 5 customers
-      const custMap = {}
-      get(11).forEach(p => {
-        const cust = p.invoice?.order?.customer
-        if (cust) {
-          if (!custMap[cust.id]) custMap[cust.id] = { name: cust.name, total: 0 }
-          custMap[cust.id].total += Number(p.amount_paid || 0)
-        }
-      })
-      const totalRev = Object.values(custMap).reduce((s, c) => s + c.total, 0)
-      const top5Customers = Object.values(custMap)
-        .sort((a, b) => b.total - a.total)
-        .slice(0, 5)
-        .map((c, i) => ({ ...c, rank: i + 1, pct: totalRev > 0 ? ((c.total / totalRev) * 100).toFixed(1) : 0 }))
+      const expenseByCategory=breakdown.expenseCategories.map(([label,value],i)=>({label,value,color:CHART_COLORS[i%CHART_COLORS.length]}));
+      const top5Customers=breakdown.topCustomers.slice(0,5).map((c,i)=>({...c,rank:i+1,pct:basis.revenue ? (c.total/basis.revenue*100).toFixed(1) : 0}));
 
       // Expiring vehicle docs within 30 days
       const expiringDocs = []
@@ -360,20 +339,21 @@ export default function BoardDashboard({ userProfile }) {
       // Pending approvals
       const pendingApprovals = get(14).length
 
-      setD({
+      if (version !== loadVersion.current) return
+      setD({ deliveredButUnpriced:basis.deliveredButUnpriced, netProfit:basis.netProfit, cashReceived:basis.cashReceived, deposits:basis.position.deposits, collectionRate:basis.collectionRate, awaitingApproval:basis.awaitingApproval,
         revThisMonth, revLastMonth, incomeThisMonth, expenseThisMonth,
         cashPosition, receivables, blocksThisMonth, activeOrdersValue,
         revTrend, prodTrend, expenseByCategory, top5Customers,
         overdueReceivables, expiringDocs, lowStock, pendingApprovals,
       })
     } catch (err) {
-      setLoadError(err.message)
+      if (version === loadVersion.current) setLoadError(err.message)
     } finally {
-      setLoading(false)
+      if (version === loadVersion.current) setLoading(false)
     }
   }, [])
 
-  useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load() }, [load]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── PDF Download ─────────────────────────────────────────────────
   const downloadPDF = () => {
@@ -407,7 +387,7 @@ export default function BoardDashboard({ userProfile }) {
     doc.text('Key Performance Indicators', 14, y)
     y += 6
 
-    const netProfit = d.incomeThisMonth - d.expenseThisMonth
+    const netProfit = d.netProfit
     const revChange = d.revLastMonth > 0 ? ((d.revThisMonth - d.revLastMonth) / d.revLastMonth * 100).toFixed(1) : 0
 
     autoTable(doc, {
@@ -417,7 +397,7 @@ export default function BoardDashboard({ userProfile }) {
         ['Revenue This Month', naira(d.revThisMonth), `${revChange > 0 ? '▲' : '▼'} ${Math.abs(revChange)}% vs last month`],
         ['Net Profit This Month', naira(netProfit), netProfit >= 0 ? 'Profitable' : 'Loss'],
         ['Cash Position', naira(d.cashPosition), 'Total bank balances'],
-        ['Outstanding Receivables', naira(d.receivables), 'Unpaid invoice balances'],
+        ['Outstanding Receivables', naira(d.receivables), 'Delivered value less confirmed payments'],
         ['Blocks Produced This Month', fmt(d.blocksThisMonth) + ' units', ''],
         ['Active Orders Value', naira(d.activeOrdersValue), 'Orders not yet delivered/cancelled'],
       ],
@@ -475,11 +455,12 @@ export default function BoardDashboard({ userProfile }) {
     y += 4
     doc.text(`Generated on ${today()} | Abuja Precast Concrete Limited`, pageW / 2, y, { align: 'center' })
 
+    if (d.deliveredButUnpriced?.length) { doc.addPage(); doc.text('Delivered but unpriced (excluded)',14,20); autoTable(doc,{startY:28,head:[['Date','Block type','Quantity']],body:d.deliveredButUnpriced.map(r=>[r.waybill_date,r.block_type,r.quantity_received])}); }
     doc.save(`Board_Dashboard_${isoToday()}.pdf`)
   }
 
   // ── Derived values ────────────────────────────────────────────────
-  const netProfitThisMonth = d.incomeThisMonth - d.expenseThisMonth
+  const netProfitThisMonth = d.netProfit
   const revChangePct = d.revLastMonth > 0
     ? ((d.revThisMonth - d.revLastMonth) / d.revLastMonth) * 100
     : 0
@@ -499,6 +480,7 @@ export default function BoardDashboard({ userProfile }) {
   return (
     <div style={{ padding: '24px 28px', fontFamily: "'DM Sans','Segoe UI',sans-serif", color: theme.text, maxWidth: '1400px', margin: '0 auto' }}>
 
+      <p>{ACCOUNTING_EXPLANATION}</p><UnpricedDeliveries rows={d.deliveredButUnpriced} /><SitePicker allowAll value={siteId} onChange={setSiteId} />
       {/* ── Header ─────────────────────────────────────────────── */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '28px', flexWrap: 'wrap', gap: '12px' }}>
         <div>
@@ -564,7 +546,9 @@ export default function BoardDashboard({ userProfile }) {
       <SectionHeader title="Analytics" />
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '16px', marginBottom: '28px' }}>
 
-        {/* Revenue Trend */}
+        <div style={{display:'flex',gap:12,flexWrap:'wrap'}}><StatCard label="Cash received" value={naira(d.cashReceived)} /><StatCard label="Customer deposits" value={naira(d.deposits)} /><StatCard label="Collection rate" value={d.collectionRate == null ? '—' : (d.collectionRate*100).toFixed(1)+'%'} sub="Cash received ÷ (opening trade receivables + delivered value)" /></div>
+      <p>Awaiting approval: {naira(d.awaitingApproval)} (not included)</p>
+      {/* Revenue Trend */}
         <ChartCard title="Revenue Trend — Last 12 Months">
           <BarChart data={d.revTrend} color={theme.green} height={160} />
           <div style={{ fontSize: '10px', color: theme.textMuted, marginTop: '6px' }}>Confirmed payments by month (₦)</div>
@@ -671,3 +655,5 @@ export default function BoardDashboard({ userProfile }) {
     </div>
   )
 }
+
+export default function BoardDashboard(props) { return <MobileScope fit><BoardDashboardContent {...props} /></MobileScope> }

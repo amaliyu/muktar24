@@ -1,3 +1,4 @@
+import { sites } from '../test/accountingFixtures'
 import { beforeEach, it, expect, vi } from 'vitest'
 
 const db = vi.hoisted(() => ({ resolve: null, mock: null }))
@@ -34,7 +35,7 @@ it('AR aging rejects the exact database error instead of returning an empty repo
 })
 
 it('AR aging still excludes draft/cancelled and permits a genuinely empty report', async () => {
-  db.resolve = () => ({ data: [], error: null })
-  expect(await GENERATORS.ar_aging({ date: '2026-10-25' })).toEqual([])
+  db.resolve = t => ({ data: t === 'production_sites' ? sites : [], error: null })
+  const rows=await GENERATORS.ar_aging({ date: '2026-10-25' }); expect(rows).toHaveLength(0); expect(rows.position).toMatchObject({receivables:0,deposits:0})
   expect(db.mock.calls[0].ops).toContainEqual(['not', 'status', 'in', '("draft","cancelled")'])
 })

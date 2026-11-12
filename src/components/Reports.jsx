@@ -1,3 +1,5 @@
+import { accountingBasisService } from '../services/accountingBasis'
+import { incomePresentation, balancePresentation, ACCOUNTING_EXPLANATION, expenseStatus, productionUnitCosts } from '../utils/accountingBasis'
 import { statementRows, invoiceAging } from '../utils/customerStatement'
 import { supplierTotals } from '../utils/supplierBalance'
 import { todayLagos, monthStart, monthEnd, shiftDate } from '../utils/lagosDate'
@@ -59,7 +61,7 @@ const CATALOG = [
   { id: 'damage_waste',        name: 'Damage & Waste Report',         category: 'production', description: 'Damages by stage, by block type, by vehicle and total value of damaged blocks', formats: ['pdf','excel'], roles: ['md','production_manager','assistant_production_manager','logistics_manager','ico'], periodType: 'range', siteFilter: true },
   // SALES
   { id: 'sales_report',        name: 'Sales Report',                  category: 'sales', description: 'All orders, sales by block type, by area and by marketer with collection rate',    formats: ['pdf','excel'], roles: ['md','accountant','bdm','ico'], periodType: 'range' },
-  { id: 'revenue_report',      name: 'Revenue Report',                category: 'sales', description: 'Confirmed payments, daily revenue chart and outstanding balances summary',          formats: ['pdf','excel'], roles: ['md','accountant','ico'], periodType: 'range' },
+  { id: 'revenue_report',      name: 'Cash received and delivered value',                category: 'sales', description: 'Confirmed payments, daily revenue chart and outstanding balances summary',          formats: ['pdf','excel'], roles: ['md','accountant','ico'], periodType: 'range' },
   { id: 'invoice_report',      name: 'Invoice Report',                category: 'sales', description: 'All invoices raised with status, days outstanding and oldest unpaid',               formats: ['pdf','excel'], roles: ['md','accountant','ico'], periodType: 'range' },
   { id: 'marketer_performance',name: 'Marketer Performance Report',   category: 'sales', description: 'Orders generated, value and collection rate per marketer',                          formats: ['pdf','excel'], roles: ['md','bdm','ico'], periodType: 'range' },
   // CUSTOMER
@@ -160,6 +162,7 @@ function excelExport(filename, title, period, headers, rows, totalsRow = null) {
     [COMPANY.name],
     [title],
     [period],
+    [ACCOUNTING_EXPLANATION],
     [],
     headers,
     ...rows,
@@ -328,13 +331,22 @@ export const GENERATORS = {
   weekly_production: async (params) => fetchProductionRange(params.from, params.to, params.site_id),
   monthly_production: async (params) => fetchProductionRange(params.from, params.to, params.site_id),
   // 4. Production Cost
-  production_cost: async (params) => fetchProductionRange(params.from, params.to, params.site_id),
+  production_cost: async p => {
+    const [rows,costs,materialPrices]=await Promise.all([fetchProductionRange(null,p.to,p.site_id),accountingBasisService.expenses(null,p.to,p.site_id),accountingBasisService.materialPrices()]);
+    const selected=rows.filter(r=>(!p.from||r.date>=p.from)&&(!p.to||r.date<=p.to));
+    selected.unitCosts=productionUnitCosts(rows,costs,p.to,materialPrices);return selected;
+  },
   // 5. Damage & Waste
   damage_waste: async (params) => fetchDamageRange(params.from, params.to, params.site_id),
   // 6. Sales
   sales_report: async (params) => salesOrders(await fetchOrdersRange(params.from, params.to)),
   // 7. Revenue
-  revenue_report: async (params) => fetchPaymentsRange(params.from, params.to),
+  revenue_report: async p => {
+    const rows=await accountingBasisService.payments(p.from,p.to,p.site_id);
+    const [deliveries,payments]=await Promise.all([accountingBasisService.deliveries(p.from,p.to),accountingBasisService.payments(p.from,p.to)]);
+    rows.accounting = { ...accountingBasisService.deliveredRevenue(deliveries), cashReceived:accountingBasisService.cashReceived(payments) };
+    return rows;
+  },
   // 8. Invoice
   invoice_report: async (params) => {
     // Drafts are quotations and cancelled invoices are void — neither is a
@@ -366,7 +378,10 @@ export const GENERATORS = {
     // Receivables aging must exclude drafts (quotations) and cancelled invoices.
     const { data: invoices, error } = await supabase.from('invoices').select('*, order:order_id(customer:customer_id(name)), payments(amount_paid,status,payment_date)').not('status', 'in', '("draft","cancelled")').lte('issued_date', params.date || today())
     if (error) throw error
-    return (invoices || []).map(inv => ({ ...inv, asAt: params.date || today(), ...invoiceAging(inv, params.date || today()) }))
+    const rows=(invoices || []).map(inv => ({ ...inv, asAt: params.date || today(), ...invoiceAging(inv, params.date || today()) }));
+    rows.position=await accountingBasisService.customerBalances(params.date || today());
+    rows.agingTotal=rows.reduce((n,r)=>n+Math.max(0,r.balance),0);
+    return rows;
   },
   // 12. Customer History
   customer_history: async (params) => ({ orders: await fetchOrdersRange(params.from, params.to) }),
@@ -427,58 +442,17 @@ export const GENERATORS = {
   // 27. Fuel Consumption
   fuel_consumption: async (params) => fetchFuelRange(params.from, params.to),
   // 28. Expense
-  expense_report: async (params) => fetchExpensesRange(params.from, params.to, params.site_id),
+  expense_report: async p => {
+    const all=await fetchExpensesRange(p.from,p.to,p.site_id);
+    const rows=all.filter(e=>expenseStatus(e)==='approved');
+    rows.awaitingApproval=accountingBasisService.approvedExpenses(all).awaitingApproval;
+    return rows;
+  },
   // 29. P&L — accrual income statement (delivered revenue, cost centres, memo)
-  pl_report: async (params) => {
-    const { from, to } = params
-    const unwrap = r => { if (r.error) throw r.error; return r.data || [] }
-    // Monthly-salary accrual: payroll_lines whose run falls in the period.
-    // Two-step (run ids → lines) avoids fragile embedded-column filtering.
-    const runs = unwrap(await supabase.from('payroll_runs').select('id').gte('run_date', from).lte('run_date', to))
-    const runIds = runs.map(r => r.id)
-    const [deliveries, expenses, weeklyLabour, loadingUnpaid, payrollLines, payments] = await Promise.all([
-      supabase.from('v_delivered_revenue').select('waybill_id, waybill_date, block_type, quantity_received, unit_price, line_value, unvalued').gte('waybill_date', from).lte('waybill_date', to).then(unwrap),
-      supabase.from('expenses').select('amount, category:category_id(name, cost_center)').gte('expense_date', from).lte('expense_date', to).then(unwrap),
-      supabase.from('weekly_labour_payroll').select('total_amount').gte('week_ending', from).lte('week_ending', to).then(unwrap),
-      // Unlinked loading only — rows WITH a payroll_id are already inside
-      // weekly_labour_payroll.total_amount; including them would double-count.
-      supabase.from('truck_loading_log').select('total_amount').is('payroll_id', null).gte('date', from).lte('date', to).then(unwrap),
-      runIds.length ? supabase.from('payroll_lines').select('amount_due').in('payroll_run_id', runIds).then(unwrap) : Promise.resolve([]),
-      supabase.from('payments').select('amount_paid').eq('status', 'confirmed').gte('payment_date', from).lte('payment_date', to).then(unwrap),
-    ])
-    return { deliveries, expenses, weeklyLabour, loadingUnpaid, payrollLines, payments }
-  },
-  // 30. Balance Sheet — live working-capital positions + static opening balances
-  balance_sheet: async () => {
-    const unwrap = r => { if (r.error) throw r.error; return r.data || [] }
-    const [openingBalances, banks, invoices, paymentsConfirmed, inventory, payablesExp] = await Promise.all([
-      supabase.from('opening_balances').select('category, account_name, amount, as_at_date').then(unwrap),
-      supabase.from('bank_accounts').select('current_balance').eq('is_active', true).then(unwrap),
-      // Trade receivables = invoice totals less confirmed payments. Drafts
-      // (quotations) and cancelled invoices are not receivables — exclude them.
-      supabase.from('invoices').select('total_amount').not('status', 'in', '("draft","cancelled")').then(unwrap),
-      supabase.from('payments').select('amount_paid').eq('status', 'confirmed').then(unwrap),
-      supabase.from('inventory_items').select('current_stock, unit_cost').eq('owner', 'apcl').then(unwrap),
-      // Trade Payables = approved but not-yet-disbursed expenses (no payment_request,
-      // not ingested from a bank statement) — i.e. owed-but-unpaid. See PR note.
-      supabase.from('expenses').select('amount').eq('status', 'approved').is('payment_request_id', null).is('ingestion_source', null).then(unwrap),
-    ])
-    return { openingBalances, banks, invoices, paymentsConfirmed, inventory, payablesExp }
-  },
-  // 31. Cash Flow — true cash basis (money that actually moved)
-  cash_flow: async (params) => {
-    const { from, to } = params
-    const unwrap = r => { if (r.error) throw r.error; return r.data || [] }
-    const [payments, expenses] = await Promise.all([
-      supabase.from('payments').select('amount_paid').eq('status', 'confirmed').gte('payment_date', from).lte('payment_date', to).then(unwrap),
-      // Confirmed cash out only: disbursed via payment_request, or approved
-      // manual expenses. Excludes pending (never paid).
-      supabase.from('expenses').select('amount')
-        .or('ingestion_source.eq.payment_request,and(ingestion_source.is.null,status.eq.approved)')
-        .gte('expense_date', from).lte('expense_date', to).then(unwrap),
-    ])
-    return { payments, expenses }
-  },
+  pl_report: async p => ({ ...await accountingBasisService.income(p.from,p.to,p.site_id),
+    deposits: (await accountingBasisService.customerBalances(p.to,p.site_id)).deposits }),
+  balance_sheet: async p => accountingBasisService.snapshot(p.date || today()),
+  cash_flow: async p => accountingBasisService.cashflow(p.from,p.to),
   // 32. Bank Recon
   bank_recon: async (params) => {
     let q = supabase.from('bank_reconciliations').select('*, account:bank_account_id(account_name,bank_name)').order('created_at', { ascending: false })
@@ -502,60 +476,12 @@ export const GENERATORS = {
 // memo below net profit and never enter the profit calculation (no double
 // count — see the pl_report notes).
 const capWord = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : s
-function buildPLStatement(data) {
-  const { deliveries = [], expenses = [], weeklyLabour = [], loadingUnpaid = [], payrollLines = [], payments = [] } = data || {}
-  const num = v => Number(v) || 0
-
-  // REVENUE — delivered goods that could be priced
-  const revenue = deliveries.filter(d => d.unvalued === false).reduce((s, d) => s + num(d.line_value), 0)
-  const unvaluedCount = deliveries.filter(d => d.unvalued === true).length
-
-  // DIRECT COSTS — expenses in the 'production' cost centre, one line per category
-  const directMap = {}
-  for (const e of expenses) {
-    if (e.category?.cost_center === 'production') {
-      const k = e.category?.name || 'Uncategorised'
-      directMap[k] = (directMap[k] || 0) + num(e.amount)
-    }
-  }
-  const directLines = Object.entries(directMap).map(([label, amount]) => ({ label, amount })).sort((a, b) => b.amount - a.amount)
-  const directTotal = directLines.reduce((s, l) => s + l.amount, 0)
-  const grossProfit = revenue - directTotal
-
-  // OPERATING EXPENSES — every non-production expense, grouped by cost centre
-  // (null grouped as Uncategorised, never dropped)
-  const opMap = {}
-  for (const e of expenses) {
-    const cc = e.category?.cost_center
-    if (cc === 'production') continue
-    const key = cc || '__null__'
-    opMap[key] = (opMap[key] || 0) + num(e.amount)
-  }
-  const opLines = Object.entries(opMap)
-    .map(([key, amount]) => ({ label: key === '__null__' ? 'Uncategorised' : capWord(key), amount }))
-    .sort((a, b) => b.amount - a.amount)
-  const operatingTotal = opLines.reduce((s, l) => s + l.amount, 0)
-  const netProfit = grossProfit - operatingTotal
-
-  // NOT YET INCLUDED (memo only — from payroll tables, never in net profit)
-  const dailyLabour = weeklyLabour.reduce((s, r) => s + num(r.total_amount), 0)
-  const loadingUnpaidSum = loadingUnpaid.reduce((s, r) => s + num(r.total_amount), 0)
-  const loadingUnpaidCount = loadingUnpaid.length
-  const monthlySalaries = payrollLines.reduce((s, r) => s + num(r.amount_due), 0)
-
-  // MEMO — deposits held = confirmed cash in − delivered revenue, only if positive
-  const paymentsTotal = payments.reduce((s, r) => s + num(r.amount_paid), 0)
-  const depositsRaw = paymentsTotal - revenue
-  const deposits = depositsRaw > 0 ? depositsRaw : null
-
-  return { revenue, unvaluedCount, directLines, directTotal, grossProfit, opLines, operatingTotal,
-           netProfit, dailyLabour, loadingUnpaidSum, loadingUnpaidCount, monthlySalaries, deposits }
-}
+function buildPLStatement(data) { return incomePresentation(data) }
 // Rows shared by both renderers: { label, amount(string), kind } — kind drives PDF styling.
 function plStatementRows(S) {
   const rows = []
   const add = (label, amount, kind) => rows.push({ label, amount, kind })
-  add('REVENUE', '', 'header')
+  add(ACCOUNTING_EXPLANATION, '', 'memonote'); add('REVENUE (DELIVERED)', '', 'header')
   add('   Goods delivered', naira(S.revenue), 'line')
   if (S.unvaluedCount > 0) add(`   ⚠ ${S.unvaluedCount} deliveries excluded — could not be priced`, '', 'warn')
   add('', '', 'spacer')
@@ -571,22 +497,13 @@ function plStatementRows(S) {
   S.opLines.forEach(l => add('   ' + l.label, naira(l.amount), 'line'))
   add('   Total operating expenses', '(' + naira(S.operatingTotal) + ')', 'total')
   add('', '', 'spacer')
-  add('NET PROFIT / (LOSS) — before items below', naira(S.netProfit), 'netprofit')
+  add('Other adjustments', naira(S.adjustment), 'line'); add('Cash received (memo)', naira(S.cashReceived), 'memo'); add('Awaiting approval (not included)', naira(S.awaitingApproval), 'memo');
+  add('NET PROFIT / (LOSS)', naira(S.netProfit), 'netprofit')
   add('', '', 'spacer')
-  add('── NOT YET INCLUDED IN THIS STATEMENT ──', '', 'memohead')
-  add('   Daily-paid labour (weekly payroll)', naira(S.dailyLabour), 'memo')
-  add('   Loading & offloading — unpaid', naira(S.loadingUnpaidSum), 'memo')
-  add(`      ${S.loadingUnpaidCount} records not yet attached to a payroll`, '', 'memonote')
-  add('   Monthly staff salaries (accrued)', naira(S.monthlySalaries), 'memo')
-  add('   Materials consumed in production', '—', 'memo')
-  add('      (costing layer pending)', '', 'memonote')
-  add('   Unvalued deliveries', `${S.unvaluedCount} waybills`, 'memo')
-  if (S.deposits !== null) {
-    add('', '', 'spacer')
-    add('── MEMO ──', '', 'memohead')
-    add('   Customer deposits held', naira(S.deposits), 'memo')
-    add('      money received for goods not yet delivered — a liability, not revenue', '', 'memonote')
-  }
+  add('Delivered but unpriced', S.unvaluedCount + ' waybills', 'memo')
+  S.deliveredButUnpriced.forEach(r=>add('Delivered but unpriced: '+r.block_type+' · '+r.quantity_received+' blocks', '', 'warn'))
+  add(S.adjustmentNote || '', '', 'memonote')
+  if (S.deposits != null) add('Customer deposits', naira(S.deposits), 'memo')
   return rows
 }
 
@@ -628,69 +545,30 @@ export function supplierStatementRows(data) {
 
 // ── CASH FLOW (cash basis) ──────────────────────────────────
 function buildCashFlowRows(data) {
-  const num = v => Number(v) || 0
-  const received = (data.payments || []).reduce((s, p) => s + num(p.amount_paid), 0)
-  const paid = (data.expenses || []).reduce((s, e) => s + num(e.amount), 0)
-  const net = received - paid
-  const rows = []
-  const add = (l, a, k) => rows.push({ label: l, amount: a, kind: k })
-  add('OPERATING ACTIVITIES', '', 'header')
-  add('   Cash received from customers', naira(received), 'line')
-  add('   Cash paid for expenses', '(' + naira(paid) + ')', 'line')
-  add('   Net Operating Cash Flow', naira(net), 'subtotal')
-  add('', '', 'spacer')
-  add('INVESTING ACTIVITIES', '', 'header')
-  add('   Not currently tracked in this system', '—', 'memonote')
-  add('', '', 'spacer')
-  add('FINANCING ACTIVITIES', '', 'header')
-  add('   Not currently tracked in this system', '—', 'memonote')
-  add('', '', 'spacer')
-  add('NET CHANGE IN CASH', naira(net), 'net')
-  return { rows, net }
+  const rows = [['Net profit',data.netProfit], ['Change in receivables, deposits and payables',data.workingCapitalChange],
+    ['Change in stock',-data.stockChange], ['Other adjustments',data.otherAdjustments], ['Net change in cash',data.netChange],
+    ['Opening cash',data.openingCash], ['Closing cash',data.closingCash]]
+    .map(([label,value])=>({label,amount:naira(value),kind:'line'}));
+  if (!data.reconciliation.reconciled) rows.push({label:'Unreconciled', amount:naira(data.reconciliation.difference),kind:'unreconciled'});
+  data.historicalNotes.forEach(label=>rows.push({label,amount:'',kind:'warn'}));
+  return {rows,net:data.netChange};
 }
 
 // ── BALANCE SHEET (live positions + static opening balances) ─
 function buildBalanceSheet(data) {
-  const num = v => Number(v) || 0
-  const ob = data.openingBalances || []
-  const cashAtBank = (data.banks || []).reduce((s, b) => s + num(b.current_balance), 0)
-  const receivables = (data.invoices || []).reduce((s, i) => s + num(i.total_amount), 0)
-    - (data.paymentsConfirmed || []).reduce((s, p) => s + num(p.amount_paid), 0)
-  const inventory = (data.inventory || []).reduce((s, i) => s + num(i.current_stock) * num(i.unit_cost), 0)
-  const payables = (data.payablesExp || []).reduce((s, e) => s + num(e.amount), 0)
-
-  // Static rows, excluding the four items now computed live (avoid double count)
-  const COMPUTED = new Set(['Cash on Hand', 'Trade Receivables', 'Inventory', 'Trade Payables'])
-  const pick = cat => ob.filter(o => o.category === cat && !COMPUTED.has(o.account_name))
-  const staticAssets = pick('asset'), staticLiab = pick('liability'), staticEquity = pick('equity')
-  const sum = arr => arr.reduce((s, o) => s + num(o.amount), 0)
-
-  const totalAssets = cashAtBank + receivables + inventory + sum(staticAssets)
-  const totalLE = payables + sum(staticLiab) + sum(staticEquity)
-  const balanceCheck = totalAssets - totalLE
-
-  const rows = []
-  const add = (l, a, k) => rows.push({ label: l, amount: a, kind: k })
-  const staticRow = o => add(`   ${o.account_name} · per opening balances (as at ${fmtDate(o.as_at_date)})`, naira(num(o.amount)), 'static')
-  add('ASSETS', '', 'header')
-  add('   Cash at Bank (live)', naira(cashAtBank), 'line')
-  add('   Trade Receivables (live)', naira(receivables), 'line')
-  add('   Inventory (live)', naira(inventory), 'line')
-  staticAssets.forEach(staticRow)
-  add('   Total Assets', naira(totalAssets), 'total')
-  add('', '', 'spacer')
-  add('LIABILITIES & EQUITY', '', 'header')
-  add('   Trade Payables (live)', naira(payables), 'line')
-  staticLiab.forEach(staticRow)
-  staticEquity.forEach(staticRow)
-  add('   Total Liabilities & Equity', naira(totalLE), 'total')
-  add('', '', 'spacer')
-  add(balanceCheck === 0 ? 'Balance Check: ✓ Balanced' : 'Balance Check (Assets − Liabilities & Equity)',
-      balanceCheck === 0 ? '' : naira(balanceCheck), 'balancecheck')
-  return { rows, balanceCheck }
+  const b=balancePresentation(data);
+  const rows=[['Cash at bank',b.bankTotal],['Trade receivables',b.receivables],['Finished goods at production cost',b.fgValue],
+    ['Raw materials',b.rawMatsValue],['Total assets',b.totalAssets],['Trade payables',b.supplierPayables],
+    ['Customer deposits',b.customerDeposits],['Current year profit',b.ytdProfit],['Total liabilities and equity',b.totalLiabEquity]]
+    .map(([label,value])=>({label,amount:naira(value),kind:'line'}));
+  b.openingBalances.forEach(r=>rows.push({label:r.account_name,amount:naira(Number(r.amount)-Number(r.depreciation_amount||0)),kind:'static'}));
+  b.adjustments.forEach(r=>rows.push({label:r.account_name+' (included in totals)',amount:naira(r.amount),kind:'line'}));
+  b.stockValue.unvalued.forEach(r=>rows.push({label:r.block_type+': '+r.quantity+' — not valued',amount:'',kind:'warn'}));
+  [...b.historicalNotes,...b.stockNotes].forEach(label=>rows.push({label,amount:'',kind:'warn'}));
+  rows.push({label:'Balance check',amount:naira(b.difference),kind:'balancecheck'});
+  return {rows,balanceCheck:b.difference};
 }
 
-// Shared statement-style autoTable used by cash flow & balance sheet.
 function statementTable(doc, startY, rows, colorFor) {
   autoTable(doc, {
     startY,
@@ -712,11 +590,10 @@ function statementTable(doc, startY, rows, colorFor) {
   })
 }
 
-// ── PDF RENDERERS ────────────────────────────────────────────
 export function renderPDF(reportId, data, params, period) {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
   const report = CATALOG.find(r => r.id === reportId)
-  const startY = pdfHeader(doc, report.name, period)
+  let startY = pdfHeader(doc, report.name, period)
 
   switch (reportId) {
     case 'daily_production': {
@@ -754,8 +631,8 @@ export function renderPDF(reportId, data, params, period) {
         const cement = tr.reduce((s,r)=>s+Number(r.cement_bags||0),0)
         const granite = tr.reduce((s,r)=>s+Number(r.granite_dust_kg||0),0)
         const diesel = tr.reduce((s,r)=>s+Number(r.diesel_litres||0),0)
-        const estCost = qty > 0 ? ((cement * 5000 + granite * 50 + diesel * 750) / qty) : 0
-        return [t, qty, cement.toFixed(1), granite.toFixed(1), diesel.toFixed(1), naira(estCost)]
+        const estCost = data.unitCosts[t]
+        return [t, qty, cement.toFixed(1), granite.toFixed(1), diesel.toFixed(1), estCost == null ? 'not valued' : naira(estCost)]
       })
       pdfTable(doc, startY, head, body)
       break
@@ -779,6 +656,8 @@ export function renderPDF(reportId, data, params, period) {
       break
     }
     case 'revenue_report': {
+      doc.setFontSize(9); doc.text('Cash received: '+naira(data.accounting.cashReceived)+' | Delivered (revenue): '+naira(data.accounting.revenue),14,startY);
+      startY+=10;
       const head = ['Date', 'Customer', 'Invoice No', 'Amount Paid (₦)', 'Method']
       const body = data.map(p => [fmtDate(p.payment_date), p.invoice?.order?.customer?.name||'—', p.invoice?.invoice_number||'—', naira(p.amount_paid), p.payment_method||'—'])
       const total = data.reduce((s,p)=>s+Number(p.amount_paid),0)
@@ -823,6 +702,9 @@ export function renderPDF(reportId, data, params, period) {
       break
     }
     case 'ar_aging': {
+      doc.setFontSize(9); doc.text('Trade receivables: '+naira(data.position.receivables)+' | Customer deposits: '+naira(data.position.deposits),14,startY);
+      const diff=data.position.receivables-data.agingTotal;
+      doc.text((diff>=0?'Delivered but not yet invoiced: ':'Invoiced but not yet delivered: ')+naira(Math.abs(diff)),14,startY+5); startY+=15;
       const head = ['Customer', 'Invoice No', 'Issued', 'Amount (₦)', 'Paid (₦)', 'Balance (₦)', 'Days Outstanding', 'Aging Bucket']
       const body = data.map(inv => {
         const { paid, balance: bal, days } = invoiceAging(inv, inv.asAt || params.date || today())
@@ -956,6 +838,7 @@ export function renderPDF(reportId, data, params, period) {
       break
     }
     case 'expense_report': {
+      doc.setFontSize(9); doc.text('Awaiting approval: '+naira(data.awaitingApproval)+' (not included)',14,startY); startY+=10;
       const head = ['Date', 'Category', 'Cost Center', 'Description', 'Paid To', 'Amount (₦)']
       const body = data.map(e => [fmtDate(e.expense_date), e.category?.name||'—', e.category?.cost_center||'—', e.description||'—', e.paid_to||'—', naira(e.amount)])
       const total = data.reduce((s,e)=>s+Number(e.amount||0),0)
@@ -990,7 +873,7 @@ export function renderPDF(reportId, data, params, period) {
     }
     case 'cash_flow': {
       const { rows, net } = buildCashFlowRows(data)
-      statementTable(doc, startY, rows, k => k === 'net' ? (net >= 0 ? [200,240,210] : [255,200,200]) : null)
+      statementTable(doc, startY, rows, k => k === 'unreconciled' ? [255,160,160] : null)
       break
     }
     case 'bank_recon': {
@@ -1016,6 +899,7 @@ export function renderPDF(reportId, data, params, period) {
       doc.text('No data available for this report.', 14, startY + 10)
     }
   }
+  doc.setFontSize(7); doc.text(ACCOUNTING_EXPLANATION,14,doc.internal.pageSize.getHeight()-15);
   pdfFooter(doc)
   return doc
 }
@@ -1047,15 +931,25 @@ function renderExcel(reportId, data, params, period) {
         ['TOTAL','','','',data.reduce((s,o)=>s+o.salesTotal,0),''])
       break
     case 'revenue_report':
-      excelExport(filename, report.name, period, ['Date','Customer','Invoice No','Amount Paid (₦)'],
-        data.map(p=>[fmtDate(p.payment_date),p.invoice?.order?.customer?.name||'—',p.invoice?.invoice_number||'—',Number(p.amount_paid)]),
-        ['TOTAL','','',data.reduce((s,p)=>s+Number(p.amount_paid),0)])
+      excelExport(filename, report.name, period, ['Date','Customer','Invoice No','Cash received (₦)'],
+        [...data.map(p=>[fmtDate(p.payment_date),p.invoice?.order?.customer?.name||p.customer_id||'—',p.invoice?.invoice_number||'—',Number(p.amount_paid)]),['Cash received','','',data.accounting.cashReceived],['Delivered (revenue)','','',data.accounting.revenue]],
+        [])
       break
     case 'expense_report':
       excelExport(filename, report.name, period, ['Date','Category','Cost Center','Description','Paid To','Amount (₦)'],
-        data.map(e=>[fmtDate(e.expense_date),e.category?.name||'—',e.category?.cost_center||'—',e.description||'—',e.paid_to||'—',Number(e.amount||0)]),
-        ['TOTAL','','','','',data.reduce((s,e)=>s+Number(e.amount||0),0)])
+        [...data.map(e=>[fmtDate(e.expense_date),e.category?.name||'—',e.category?.cost_center||'—',e.description||'—',e.paid_to||'—',Number(e.amount||0)]),['Awaiting approval (not included)','','','','',data.awaitingApproval]],
+        ['TOTAL approved','','','','',data.reduce((s,e)=>s+Number(e.amount||0),0)])
       break
+    case 'ar_aging': {
+      const diff=data.position.receivables-data.agingTotal;
+      excelExport(filename,report.name,period,['Customer','Invoice','Aged balance'],[
+        ...data.map(r=>[r.order?.customer?.name||'—',r.invoice_number,r.balance]),
+        ['Trade receivables','',data.position.receivables],['Customer deposits','',data.position.deposits],
+        [diff>=0?'Delivered but not yet invoiced':'Invoiced but not yet delivered','',Math.abs(diff)],
+      ]);break;
+    }
+    case 'production_cost':
+      excelExport(filename,report.name,period,['Block type','Production cost/block'],Object.entries(data.unitCosts).map(([type,cost])=>[type,cost]));break;
     case 'staff_directory':
       excelExport(filename, report.name, period, ['Name','Role','Type','Phone','Date Hired'],
         data.map(s=>[s.full_name,s.role,s.staff_type,s.phone||'—',fmtDate(s.date_hired)]))
@@ -1126,10 +1020,9 @@ async function saveHistory(reportName, period, generatedBy, userId, format, repo
   const arr = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]')
   arr.unshift({ name: reportName, period, generatedBy, generatedAt: new Date().toISOString(), format: format || 'pdf' })
   localStorage.setItem(HISTORY_KEY, JSON.stringify(arr.slice(0, 50)))
-  // 2. Also persist to DB (non-critical — swallow errors)
-  try {
+  // History failure is reported after generation; it must not look like success.
     const cat = CATALOG.find(r => r.id === reportId)?.category || null
-    await supabase.from('report_history').insert({
+    const { error } = await supabase.from('report_history').insert({
       report_id: reportId || null,
       report_name: reportName,
       report_category: cat,
@@ -1139,7 +1032,7 @@ async function saveHistory(reportName, period, generatedBy, userId, format, repo
       format: format || 'pdf',
       generated_at: new Date().toISOString(),
     })
-  } catch { /* non-critical */ }
+    if (error) throw new Error('Report generated, but history could not be saved: ' + error.message)
 }
 function getHistory() {
   return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]')

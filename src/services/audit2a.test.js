@@ -1,3 +1,4 @@
+import { sites } from '../test/accountingFixtures'
 import { beforeEach, it, expect, vi } from 'vitest'
 const db = vi.hoisted(() => ({ resolve: null, mock: null }))
 vi.mock('../lib/supabase', async () => {
@@ -13,7 +14,7 @@ import { op } from '../test/supabaseMock'
 
 beforeEach(() => {
   db.mock.calls.length = 0
-  db.resolve = () => ({ data: [], error: null })
+  db.resolve = t => ({ data: t === 'production_sites' ? sites : [], error: null })
 })
 const items = [{ block_type: 'Block', quantity: 100, unit_price: 1000 }]
 
@@ -61,9 +62,9 @@ it('5: cash received filters payment_date and never the order date', async () =>
   expect(JSON.stringify(c.ops)).not.toContain('created_at')
 })
 it('7: balance sheet returns YTD profit from the Income Statement sources to the as-at date', async () => {
-  db.resolve = t => ({ data: t === 'payments' ? [{ amount_paid: 1000 }] : t === 'income_records' ? [{ amount: 100 }] : t === 'expenses' ? [{ amount: 400 }] : [], error: null })
+  db.resolve=t=>({data: t==='production_sites'? sites : t==='v_delivered_revenue'?[{order_id:'o',waybill_date:'2026-09-01',line_value:1000}] : t==='orders'?[{id:'o',customer_id:'c'}] : t==='expenses'?[{expense_date:'2026-09-01',status:'approved',amount:400}]: [],error:null});
   const d = await balanceSheetService.getData('2026-09-30')
-  expect(d.ytdProfit).toBe(700)
+  expect(d.ytdProfit).toBe(600)
   const paymentQuery = db.mock.calls.find(c => c.table === 'payments')
   expect(paymentQuery.ops).toContainEqual(['gte', 'payment_date', '2026-01-01'])
   expect(paymentQuery.ops).toContainEqual(['lte', 'payment_date', '2026-09-30'])
@@ -72,10 +73,11 @@ it('7: a failed revenue source cannot become zero YTD profit', async () => {
   db.resolve = t => t === 'payments' ? { error: { message: 'revenue denied' } } : { data: [], error: null }
   await expect(balanceSheetService.getData('2026-09-30')).rejects.toThrow('revenue denied')
 })
-it('8: payroll queries use total_payroll, the verified live column', async () => {
-  await incomeStatementService.getData('2026-09-01', '2026-09-30')
-  expect(op(db.mock.calls.find(c => c.table === 'payroll_runs'), 'select')[1]).toBe('total_payroll, period_from, period_to')
-})
+it('8: profit uses approved expense records once instead of adding payroll again', async () => {
+  await incomeStatementService.getData('2026-09-01','2026-09-30');
+  expect(db.mock.calls.some(c=>c.table==='payroll_runs')).toBe(false);
+  expect(op(db.mock.calls.find(c=>c.table==='expenses'),'select')[1]).toContain('approval_status');
+});
 it('11: supplier service subtracts returns through the shared rule', async () => {
   db.resolve = () => ({ data: [{ transaction_type: 'purchase', amount: 100 }, { transaction_type: 'payment', amount: 20 }, { transaction_type: 'return', amount: 30 }], error: null })
   expect(await supplierTransactionsService.getBalance('s')).toBe(50)

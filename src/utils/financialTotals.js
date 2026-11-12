@@ -1,10 +1,7 @@
 export function incomeNetProfit(data) {
   if (data.warnings?.length) throw new Error(data.warnings.join('; '))
-  const sum = (rows, key) => (rows || []).reduce((n, r) => n + Number(r[key] || 0), 0)
-  // Keep the Income Statement tab's cash basis and tax adjustment treatment.
-  return sum(data.payments, 'amount_paid') + sum(data.incomeRecords, 'amount')
-    - sum(data.expenses, 'amount')
-    - sum((data.adjustments || []).filter(a => a.account_name?.toLowerCase().includes('tax')), 'amount')
+  if (!Number.isFinite(data.netProfit)) throw new Error('Shared accounting profit is unavailable')
+  return data.netProfit
 }
 export function cashBalances(data) {
   return {
