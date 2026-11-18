@@ -1,3 +1,4 @@
+import { withAssignedSite } from '../AssignedSite'
 import { LateReasonField, useLateReason } from '../LateReasonField'
 import { withPhase7Touch } from './siteUi'
 import { useEffect, useMemo, useState } from 'react'
@@ -39,9 +40,10 @@ const itemFields = (item) => ({
 })
 const emptyForm = () => ({ ...itemFields(), receivedOn: lagosToday(), delivered: '', accepted: '', reason: '', supplier: '', ref: '', notes: '', photo: null })
 
-export function ReceivingForm({ onSaved }) {
+export const ReceivingForm = withAssignedSite(MaterialReceiptForm)
+function MaterialReceiptForm({ onSaved, assignedSiteId }) {
   const { sites } = useSites()
-  const [siteId, setSiteId] = useState(DUTSE_SITE_ID)
+  const [siteId, setSiteId] = useState(assignedSiteId || DUTSE_SITE_ID)
   const [items, setItems] = useState([])
   const [itemsErr, setItemsErr] = useState(null)
   const [form, setForm] = useState(emptyForm)

@@ -1,3 +1,4 @@
+import { AssignedSiteStatus, useAssignedSite } from './AssignedSite'
 import React, { useState, useEffect } from 'react'
 import { sitesService, DUTSE_SITE_ID } from '../services/sites'
 
@@ -42,8 +43,22 @@ export function useSites() {
 // Site select. Form mode (default): value is a site id and an empty value is
 // shown as Dutse — a load failure keeps Dutse selected and shows the error.
 // Filter mode (allowAll): '' means "All sites".
+export function FixedSite({ id, siteId, sites, style }) {
+  const site = sites.find(s => s.id === siteId)
+  return <div id={id} style={{ ...style, height: 'auto', minHeight: 44, display: 'flex', alignItems: 'center', boxSizing: 'border-box', overflowWrap: 'anywhere', padding: '8px 12px' }}>
+    {site?.name || (siteId === DUTSE_SITE_ID ? 'Dutse Factory' : 'Assigned site')}
+  </div>
+}
+
 export default function SitePicker({ id, value, onChange, allowAll = false, allLabel = 'All sites', disabled = false, style }) {
   const { sites, error } = useSites()
+  const assignment = useAssignedSite()
+  // All-sites controls filter history. The assignment only fixes entry sites.
+  if (!allowAll && (assignment.loading || assignment.error)) return <AssignedSiteStatus {...assignment} />
+  if (!allowAll && assignment.siteId) return <>
+    <FixedSite id={id} siteId={assignment.siteId} sites={sites} style={style} />
+    {error && <AssignedSiteStatus error={error} />}
+  </>
   const current = allowAll ? (value || '') : (value || DUTSE_SITE_ID)
 
   // Keep the selected id visible even if it isn't in the active list (inactive

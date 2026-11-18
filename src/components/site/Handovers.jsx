@@ -1,7 +1,8 @@
+import { withAssignedSite } from '../AssignedSite'
 import { LateReasonField, useLateReason } from '../LateReasonField'
 import { withPhase7Touch } from './siteUi'
 import { useEffect, useMemo, useState } from 'react'
-import { useSites } from '../SitePicker'
+import { FixedSite, useSites } from '../SitePicker'
 import { siteName } from '../../services/sites'
 import { productsService } from '../../services/products'
 import { siteContractsService, lagosToday } from '../../services/siteContracts'
@@ -19,7 +20,7 @@ export const HANDOVER_WRITE_ROLES = ['md', 'production_manager', 'assistant_prod
 
 const emptyForm = (siteId = '') => ({ siteId, date: lagosToday(), blockType: '', qty: '', clientRep: '', notes: '', photo: null })
 
-function Handovers({ userProfile }) {
+function Handovers({ userProfile, assignedSiteId }) {
   const canWrite = hasRole(userProfile, ...HANDOVER_WRITE_ROLES)
   const isMD = userProfile?.role === 'md'
   const today = lagosToday()
@@ -31,7 +32,7 @@ function Handovers({ userProfile }) {
   const [products, setProducts] = useState([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState(null)
-  const [form, setForm] = useState(emptyForm())
+  const [form, setForm] = useState(() => emptyForm(assignedSiteId || ''))
   const lateEntry = useLateReason(form.date)
   const [busy, setBusy] = useState(false)
   const [formErr, setFormErr] = useState(null)
@@ -180,10 +181,10 @@ function Handovers({ userProfile }) {
           <div style={ui.formGrid}>
             <div style={ui.field}>
               <label style={ui.label} htmlFor="ho-site">Site *</label>
-              <select id="ho-site" style={ui.input} value={form.siteId} onChange={set('siteId')}>
+              {assignedSiteId ? <FixedSite id="ho-site" siteId={assignedSiteId} sites={sites} style={ui.input} /> : <select id="ho-site" style={ui.input} value={form.siteId} onChange={set('siteId')}>
                 {clientSites.length === 0 && <option value="">No client sites</option>}
                 {clientSites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
+              </select>}
             </div>
             <div style={ui.field}>
               <label style={ui.label} htmlFor="ho-date">Handover date *</label>
@@ -355,4 +356,4 @@ function Handovers({ userProfile }) {
   )
 }
 
-export default withPhase7Touch(Handovers)
+export default withPhase7Touch(withAssignedSite(Handovers))
