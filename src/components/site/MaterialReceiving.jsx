@@ -31,7 +31,12 @@ export function receiptFormProblem(form, item) {
   return null
 }
 
-const emptyForm = () => ({ itemId: '', receivedOn: lagosToday(), delivered: '', accepted: '', unit: 'kg', reason: '', supplier: '', ref: '', notes: '', photo: null })
+const isDustOrChippings = (item) => item?.material === 'dust' || item?.material === 'chippings'
+const itemFields = (item) => ({
+  itemId: item?.id ?? '',
+  unit: item?.unit === 'kg' && isDustOrChippings(item) ? 'tonnes' : 'kg',
+})
+const emptyForm = () => ({ ...itemFields(), receivedOn: lagosToday(), delivered: '', accepted: '', reason: '', supplier: '', ref: '', notes: '', photo: null })
 
 export function ReceivingForm({ onSaved }) {
   const { sites } = useSites()
@@ -40,13 +45,14 @@ export function ReceivingForm({ onSaved }) {
   const [itemsErr, setItemsErr] = useState(null)
   const [form, setForm] = useState(emptyForm)
   const [busy, setBusy] = useState(false)
+  const [confirmWeight, setConfirmWeight] = useState(false)
   const [err, setErr] = useState(null)
   const [ok, setOk] = useState('')
 
   useEffect(() => {
     let alive = true
     setItems([]); setItemsErr(null)
-    setForm(f => ({ ...f, itemId: '' }))
+    setForm(f => ({ ...f, ...itemFields() }))
     siteContractsService.listSiteItems(siteId)
       .then(r => { if (alive) setItems(r) })
       .catch(e => { if (alive) setItemsErr(e) })
@@ -55,15 +61,26 @@ export function ReceivingForm({ onSaved }) {
 
   const item = items.find(i => i.id === form.itemId)
   const isKg = item?.unit === 'kg'
+  const bulkMaterial = isKg && isDustOrChippings(item)
+  const deliveredKg = Number(form.delivered)
   const factor = isKg && form.unit === 'tonnes' ? 1000 : 1
   const accRaw = form.accepted === '' ? form.delivered : form.accepted
   const rejected = (toNum(form.delivered) || 0) - (toNum(accRaw) || 0)
   const problem = receiptFormProblem(form, item)
   const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }))
 
-  const submit = async (e) => {
+  const submit = (e) => {
     e.preventDefault()
-    if (problem || busy) return
+    if (problem || busy || confirmWeight) return
+    if (bulkMaterial && form.unit === 'kg' && deliveredKg < 100) {
+      setConfirmWeight(true)
+      return
+    }
+    saveReceipt()
+  }
+
+  const saveReceipt = async () => {
+    setConfirmWeight(false)
     setBusy(true); setErr(null); setOk('')
     let photoPath = null
     let photoWarn = ''
@@ -101,10 +118,12 @@ export function ReceivingForm({ onSaved }) {
   }
 
   return (
+    <>
     <form style={ui.panel} onSubmit={submit} aria-label="Record a delivery">
       <div style={ui.section}>Record a delivery</div>
       <ErrorBox error={err} />
       {ok && <div style={ui.ok}>{ok}</div>}
+      <fieldset disabled={confirmWeight} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
       <div style={ui.formGrid}>
         <div style={ui.field}>
           <label style={ui.label}>Site</label>
@@ -112,7 +131,10 @@ export function ReceivingForm({ onSaved }) {
         </div>
         <div style={ui.field}>
           <label style={ui.label} htmlFor="rcv-item">Item *</label>
-          <select id="rcv-item" style={ui.input} value={form.itemId} onChange={e => setForm(f => ({ ...f, itemId: e.target.value, unit: 'kg' }))}>
+          <select id="rcv-item" style={ui.input} value={form.itemId} onChange={e => {
+            const nextItem = items.find(i => i.id === e.target.value)
+            setForm(f => ({ ...f, ...itemFields(nextItem) }))
+          }}>
             <option value="">— Select item —</option>
             {items.map(i => <option key={i.id} value={i.id}>{i.name} ({i.unit}){i.owner === 'client' ? ' · Client-owned' : ''}</option>)}
           </select>
@@ -127,7 +149,7 @@ export function ReceivingForm({ onSaved }) {
         <div style={ui.field}>
           <label style={ui.label} htmlFor="rcv-del">Delivered *</label>
           <div style={{ display: 'flex', gap: '8px' }}>
-            <input id="rcv-del" type="number" inputMode="decimal" min="0" step="any" style={{ ...ui.input, flex: 1 }} value={form.delivered} onChange={set('delivered')} />
+            <input id="rcv-del" type="number" inputMode="decimal" min="0" step="any" style={{ ...ui.input, flex: 1, minWidth: 0 }} value={form.delivered} onChange={set('delivered')} />
             {isKg ? (
               <select aria-label="Unit" style={{ ...ui.input, width: '104px' }} value={form.unit} onChange={set('unit')}>
                 <option value="kg">kg</option>
@@ -136,6 +158,7 @@ export function ReceivingForm({ onSaved }) {
             ) : <span style={{ ...ui.input, width: '104px', display: 'flex', alignItems: 'center', color: theme.textMuted, background: 'transparent' }}>{item?.unit || '—'}</span>}
           </div>
           {isKg && form.unit === 'tonnes' && form.delivered !== '' && <div style={ui.hint}>= {fmtDec(Number(form.delivered) * 1000)} kg will be stored</div>}
+          {bulkMaterial && form.unit === 'kg' && form.delivered !== '' && <div style={ui.hint}>= {deliveredKg / 1000} t</div>}
         </div>
         <div style={ui.field}>
           <label style={ui.label} htmlFor="rcv-acc">Accepted *</label>
@@ -170,7 +193,19 @@ export function ReceivingForm({ onSaved }) {
       <button type="submit" style={{ ...ui.btn('primary', !!problem || busy), width: '100%', minHeight: '52px' }} disabled={!!problem || busy}>
         {busy ? 'Saving…' : 'Record delivery'}
       </button>
+      </fieldset>
     </form>
+    {confirmWeight && (
+      <ConfirmDialog
+        title="Confirm delivered weight"
+        body={`You entered ${deliveredKg} kg (${deliveredKg / 1000} t). Dust and chippings usually arrive by the tonne. Is ${deliveredKg} kg correct?`}
+        confirmLabel={`Yes, ${deliveredKg} kg`}
+        cancelLabel="Change it"
+        onCancel={() => setConfirmWeight(false)}
+        onConfirm={saveReceipt}
+      />
+    )}
+    </>
   )
 }
 

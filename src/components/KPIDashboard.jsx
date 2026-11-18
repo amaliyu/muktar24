@@ -1,3 +1,4 @@
+import { formatDust } from '../utils/productionDust'
 import UnpricedDeliveries from './UnpricedDeliveries'
 import MobileScope from './MobileScope'
 import { accountingBasisService } from '../services/accountingBasis'
@@ -412,7 +413,7 @@ function KPIDashboardContent({ userProfile }) {
       ['Production Days', M.prodDays],
       ['Cement Used (bags)', fmt(M.cementUsed)],
       ['Diesel Used (litres)', fmt(M.dieselUsed)],
-      ['Granite Used (kg)', fmt(M.graniteUsed)],
+      ['Granite Used', formatDust(M.graniteUsed)],
       ['Production Damage', fmt(M.dmgProduction) + ` (${M.totalProduced > 0 ? (M.dmgProduction / M.totalProduced * 100).toFixed(1) : 0}%)`],
       ['Curing/Yard Damage (Store Officer)', fmt(M.dmgCuring) + ` (${M.totalProduced > 0 ? (M.dmgCuring / M.totalProduced * 100).toFixed(1) : 0}%)`],
     ])
@@ -573,7 +574,7 @@ function KPIDashboardContent({ userProfile }) {
                   sub={M.totalProduced > 0 ? `${(M.cementUsed / M.totalProduced * 1000).toFixed(1)} bags per 1,000 blocks` : ''} />
                 <KPICard label="Diesel (Production)" value={`${fmt(M.dieselUsed)} L`} accent={theme.blue}
                   sub={M.totalProduced > 0 ? `${(M.dieselUsed / M.totalProduced * 1000).toFixed(1)} litres per 1,000 blocks` : ''} />
-                <KPICard label="Granite Dust" value={`${fmt(M.graniteUsed)} kg`} accent={theme.textMuted}
+                <KPICard label="Granite Dust" value={formatDust(M.graniteUsed)} accent={theme.textMuted}
                   sub={M.totalProduced > 0 ? `${(M.graniteUsed / M.totalProduced * 1000).toFixed(1)} kg per 1,000 blocks` : ''} />
               </div>
               <div style={s.section}>Damage Analysis</div>

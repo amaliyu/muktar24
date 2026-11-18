@@ -1,3 +1,5 @@
+import { formatDust } from '../utils/productionDust'
+import { buildProductionExcelRows } from '../utils/productionExcelRows'
 import { accountingBasisService } from '../services/accountingBasis'
 import { incomePresentation, balancePresentation, ACCOUNTING_EXPLANATION, expenseStatus, productionUnitCosts } from '../utils/accountingBasis'
 import { statementRows, invoiceAging } from '../utils/customerStatement'
@@ -598,9 +600,9 @@ export function renderPDF(reportId, data, params, period) {
   switch (reportId) {
     case 'daily_production': {
       const { rows, damages } = data
-      const head = ['Date', 'Block Type', 'Qty Produced', 'Cement Bags', 'Granite kg', 'Diesel L', 'Recorded By']
-      const body = rows.map(r => [r.date, r.block_type, r.quantity_produced, r.cement_bags || 0, r.granite_dust_kg || 0, r.diesel_litres || 0, r.recorder?.full_name || '—'])
-      const totals = ['TOTAL', '', rows.reduce((s,r)=>s+r.quantity_produced,0), rows.reduce((s,r)=>s+Number(r.cement_bags||0),0).toFixed(1), rows.reduce((s,r)=>s+Number(r.granite_dust_kg||0),0).toFixed(1), rows.reduce((s,r)=>s+Number(r.diesel_litres||0),0).toFixed(1), '']
+      const head = ['Date', 'Block Type', 'Qty Produced', 'Cement Bags', 'Granite dust (kg)', 'Diesel L', 'Recorded By']
+      const body = rows.map(r => [r.date, r.block_type, r.quantity_produced, r.cement_bags || 0, formatDust(r.granite_dust_kg), r.diesel_litres || 0, r.recorder?.full_name || '—'])
+      const totals = ['TOTAL', '', rows.reduce((s,r)=>s+r.quantity_produced,0), rows.reduce((s,r)=>s+Number(r.cement_bags||0),0).toFixed(1), formatDust(rows.reduce((s,r)=>s+Number(r.granite_dust_kg||0),0)), rows.reduce((s,r)=>s+Number(r.diesel_litres||0),0).toFixed(1), '']
       pdfTable(doc, startY, head, body, totals)
       if (damages.length) {
         const dmgY = doc.lastAutoTable.finalY + 8
@@ -615,16 +617,16 @@ export function renderPDF(reportId, data, params, period) {
     case 'weekly_production':
     case 'monthly_production': {
       const rows = data
-      const head = ['Date', 'Block Type', 'Qty Produced', 'Cement Bags', 'Granite kg', 'Diesel L']
-      const body = rows.map(r => [r.date, r.block_type, r.quantity_produced, r.cement_bags || 0, r.granite_dust_kg || 0, r.diesel_litres || 0])
-      const totals = ['TOTAL', '', rows.reduce((s,r)=>s+r.quantity_produced,0), rows.reduce((s,r)=>s+Number(r.cement_bags||0),0).toFixed(1), rows.reduce((s,r)=>s+Number(r.granite_dust_kg||0),0).toFixed(1), rows.reduce((s,r)=>s+Number(r.diesel_litres||0),0).toFixed(1)]
+      const head = ['Date', 'Block Type', 'Qty Produced', 'Cement Bags', 'Granite dust (kg)', 'Diesel L']
+      const body = rows.map(r => [r.date, r.block_type, r.quantity_produced, r.cement_bags || 0, formatDust(r.granite_dust_kg), r.diesel_litres || 0])
+      const totals = ['TOTAL', '', rows.reduce((s,r)=>s+r.quantity_produced,0), rows.reduce((s,r)=>s+Number(r.cement_bags||0),0).toFixed(1), formatDust(rows.reduce((s,r)=>s+Number(r.granite_dust_kg||0),0)), rows.reduce((s,r)=>s+Number(r.diesel_litres||0),0).toFixed(1)]
       pdfTable(doc, startY, head, body, totals)
       break
     }
     case 'production_cost': {
       const rows = data
       const types = [...new Set(rows.map(r => r.block_type))]
-      const head = ['Block Type', 'Total Produced', 'Cement Bags', 'Granite kg', 'Diesel L', 'Est. Cost/Block']
+      const head = ['Block Type', 'Total Produced', 'Cement Bags', 'Granite dust (kg)', 'Diesel L', 'Est. Cost/Block']
       const body = types.map(t => {
         const tr = rows.filter(r => r.block_type === t)
         const qty = tr.reduce((s,r)=>s+r.quantity_produced,0)
@@ -632,7 +634,7 @@ export function renderPDF(reportId, data, params, period) {
         const granite = tr.reduce((s,r)=>s+Number(r.granite_dust_kg||0),0)
         const diesel = tr.reduce((s,r)=>s+Number(r.diesel_litres||0),0)
         const estCost = data.unitCosts[t]
-        return [t, qty, cement.toFixed(1), granite.toFixed(1), diesel.toFixed(1), estCost == null ? 'not valued' : naira(estCost)]
+        return [t, qty, cement.toFixed(1), formatDust(granite), diesel.toFixed(1), estCost == null ? 'not valued' : naira(estCost)]
       })
       pdfTable(doc, startY, head, body)
       break
@@ -905,6 +907,8 @@ export function renderPDF(reportId, data, params, period) {
 }
 
 // ── EXCEL RENDERERS ──────────────────────────────────────────
+// Keep Excel quantities numeric; formatted kg/tonnes text is only for PDF/UI.
+
 function renderExcel(reportId, data, params, period) {
   const report = CATALOG.find(r => r.id === reportId)
   const filename = `${report.name.replace(/\s+/g,'-')}-${today()}.xlsx`
@@ -915,8 +919,8 @@ function renderExcel(reportId, data, params, period) {
     case 'monthly_production': {
       const rows = Array.isArray(data) ? data : data.rows || []
       excelExport(filename, report.name, period,
-        ['Date','Block Type','Qty Produced','Cement Bags','Granite kg','Diesel L','Recorded By'],
-        rows.map(r=>[r.date, r.block_type, r.quantity_produced, r.cement_bags||0, r.granite_dust_kg||0, r.diesel_litres||0, r.recorder?.full_name||'—']),
+        ['Date','Block Type','Qty Produced','Cement Bags','Granite dust (kg)','Diesel L','Recorded By'],
+        buildProductionExcelRows(rows),
         ['TOTAL','',rows.reduce((s,r)=>s+r.quantity_produced,0),rows.reduce((s,r)=>s+Number(r.cement_bags||0),0).toFixed(1),'','',''])
       break
     }

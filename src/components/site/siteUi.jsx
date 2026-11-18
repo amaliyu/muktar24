@@ -181,14 +181,14 @@ export function useIsMobile() {
   return m
 }
 
-export const ConfirmDialog = ({ title, body, confirmLabel = 'Confirm', danger = false, children, onConfirm, onCancel, busy = false, confirmDisabled = false }) => (
+export const ConfirmDialog = ({ title, body, confirmLabel = 'Confirm', cancelLabel = 'Cancel', danger = false, children, onConfirm, onCancel, busy = false, confirmDisabled = false }) => (
   <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: Z.modal, padding: '16px' }}>
     <div style={{ background: theme.card, border: `1px solid ${theme.border}`, borderRadius: '8px', padding: '20px', width: '100%', maxWidth: '440px', boxShadow: '0 8px 24px rgba(0,0,0,.4)' }}>
       <div style={{ fontSize: '16px', fontWeight: '700', color: theme.text, marginBottom: '8px' }}>{title}</div>
       {body && <div style={{ fontSize: '13px', color: theme.textMuted, marginBottom: '12px', lineHeight: 1.45 }}>{body}</div>}
       {children}
       <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', marginTop: '12px', flexWrap: 'wrap' }}>
-        <button type="button" style={ui.btn('secondary')} onClick={onCancel} disabled={busy}>Cancel</button>
+        <button type="button" style={ui.btn('secondary')} onClick={onCancel} disabled={busy}>{cancelLabel}</button>
         <button type="button" style={ui.btn(danger ? 'danger' : 'primary', busy || confirmDisabled)} onClick={onConfirm} disabled={busy || confirmDisabled}>
           {busy ? 'Working…' : confirmLabel}
         </button>

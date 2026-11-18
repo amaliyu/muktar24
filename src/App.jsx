@@ -20,6 +20,9 @@ import BoardDashboard from './components/BoardDashboard';
 import FinancialStatements from './components/FinancialStatements';
 import OpeningBalances from './components/OpeningBalances';
 import { productionService } from './services/production';
+import { productionMaterialsInDb, loadDustStandards, postProductionMaterials } from './services/productionMaterials';
+import { dustStandard, calculatedDustKg, formatDust } from './utils/productionDust';
+import DustStandardsSettings from './components/DustStandardsSettings';
 import { staffService } from './services/staff';
 import Staff, { PayrollTab } from './components/StaffHR';
 import { ordersService, customersService, customerSitesService } from './services/orders';
@@ -847,6 +850,18 @@ const Production = ({ userProfile }) => {
   // Site the loaded `machines` list belongs to (null while loading).
   const [machinesSite, setMachinesSite] = useState(null);
   const [stockWarning, setStockWarning] = useState(null);
+  const [dustStandards, setDustStandards] = useState([]);
+  const [standardsError, setStandardsError] = useState(null);
+  const standard = dustStandard(dustStandards, form.siteId || DUTSE_SITE_ID, form.blockType);
+  const previewDust = standard ? calculatedDustKg(form.produced, standard.dust_kg_per_block) : null;
+  useEffect(() => {
+    if (!showForm) return;
+    let alive = true;
+    setStandardsError(null);
+    loadDustStandards().then(rows => { if (alive) setDustStandards(rows); })
+      .catch(e => { if (alive) setStandardsError(e.message); });
+    return () => { alive = false; };
+  }, [showForm]);
 
   // Machines at the form's site. Auto-pick when the site has exactly one;
   // with several, the user must choose (resolveMachine blocks the save).
@@ -868,15 +883,12 @@ const Production = ({ userProfile }) => {
     return () => { alive = false; };
   }, [showForm, form.siteId]);
 
-  // Production is the only deduction path; write errors stop the save flow.
-  const deductStock = async (entryData, reference) => {
-    const { missing } = await inventoryService.autoDeductProduction({
-      siteId: entryData.site_id, cementBags: entryData.cement_bags,
-      graniteDustKg: entryData.granite_dust_kg, chippingsKg: entryData.chippings_kg,
-      dieselLitres: entryData.diesel_litres, date: entryData.date, reference,
+  const postMaterials = async (entryData, reference, isEdit, dbPosting) => {
+    await postProductionMaterials({ dbPosting, entry: entryData, reference, isEdit,
+      warn: missing => setStockWarning(missing.length
+        ? missing.map(m => `No ${m} stock item set up for ${siteName(entryData.site_id, sites)} — not deducted`)
+        : null),
     });
-    setStockWarning(missing.length ? missing.map(m => `No ${m} stock item set up for ${siteName(entryData.site_id, sites)} — not deducted`) : null);
-    await inventoryService.getAllItems();
   };
 
   const load = async () => {
@@ -946,6 +958,7 @@ const Production = ({ userProfile }) => {
 
   const handleSave = async (skipDupCheck = false) => {
     if (!form.date || !form.produced) return setAlert({ type: "error", msg: "Date and quantity produced are required." });
+    if (standardsError) return setAlert({ type: "error", msg: "Could not load dust standards: " + standardsError });
     if (machinesSite !== (form.siteId || DUTSE_SITE_ID)) return setAlert({ type: "error", msg: "The machines for this site are still loading. Try again in a moment." });
     const machine = resolveMachine({ machines, selectedId: form.assetId, originalId: editTarget?.asset_id || null });
     if (machine.error) return setAlert({ type: "error", msg: machine.error });
@@ -962,6 +975,10 @@ const Production = ({ userProfile }) => {
     setAlert(null);
     setStockWarning(null);
     try {
+      const dbPosting = await productionMaterialsInDb();
+      // This read occurs before either create or update. RPC errors block the write.
+      const latestStandards = await loadDustStandards();
+      const saveStandard = dustStandard(latestStandards, form.siteId || DUTSE_SITE_ID, form.blockType);
       const dmgProd = parseInt(form.dmgProd) || 0;
       const dmgStack = parseInt(form.dmgStack) || 0;
       const siteId = form.siteId || DUTSE_SITE_ID;
@@ -972,7 +989,7 @@ const Production = ({ userProfile }) => {
         asset_id: machine.assetId,
         quantity_produced: parseInt(form.produced) || 0,
         cement_bags: parseFloat(form.cement) || 0,
-        granite_dust_kg: parseFloat(form.granite) || 0,
+        granite_dust_kg: saveStandard ? calculatedDustKg(form.produced, saveStandard.dust_kg_per_block) : (parseFloat(form.granite) || 0),
         chippings_kg: parseFloat(form.chippings) || 0,
         diesel_litres: parseFloat(form.diesel) || 0,
       };
@@ -982,11 +999,9 @@ const Production = ({ userProfile }) => {
         await productionService.clearDamages(editTarget.id);
         if (dmgProd > 0) await productionService.logDamage({ date: form.date, block_type: form.blockType, stage: "production", quantity_damaged: dmgProd, production_log_id: editTarget.id, site_id: siteId });
         if (dmgStack > 0) await productionService.logDamage({ date: form.date, block_type: form.blockType, stage: "stacking", quantity_damaged: dmgStack, production_log_id: editTarget.id, site_id: siteId });
-        // Reverse-then-apply (Rule 10.7): undo the old movements by reference,
-        // then deduct the new quantities at the (possibly changed) site.
+        // The DB owns ALL material movements when the flag is ON.
         const ref = `PROD-${editTarget.id.slice(0, 8)}`;
-        await inventoryService.reverseProductionMovements(ref);
-        await deductStock(entryData, ref);
+        await postMaterials(entryData, ref, true, dbPosting);
         await load();
         setAlert({ type: "success", msg: "Production entry updated and movement log adjusted." });
       } else {
@@ -994,7 +1009,7 @@ const Production = ({ userProfile }) => {
         savedProduction = entry;
         if (dmgProd > 0) await productionService.logDamage({ date: form.date, block_type: form.blockType, stage: "production", quantity_damaged: dmgProd, production_log_id: entry.id, site_id: siteId });
         if (dmgStack > 0) await productionService.logDamage({ date: form.date, block_type: form.blockType, stage: "stacking", quantity_damaged: dmgStack, production_log_id: entry.id, site_id: siteId });
-        await deductStock(entryData, `PROD-${entry.id.slice(0, 8)}`);
+        await postMaterials(entryData, `PROD-${entry.id.slice(0, 8)}`, false, dbPosting);
         setRecords(prev => [{ ...entry, damaged: { production: dmgProd, stacking: dmgStack } }, ...prev]);
         setAlert({ type: "success", msg: `Production entry saved at ${siteName(siteId, sites)}.` });
       }
@@ -1159,7 +1174,6 @@ const Production = ({ userProfile }) => {
             {[
               { label: "Quantity Produced", key: "produced", placeholder: "e.g. 850" },
               { label: "Cement Bags Used", key: "cement", placeholder: "bags" },
-              { label: "Granite Dust (kg)", key: "granite", placeholder: "kg" },
               { label: "Chippings (kg)", key: "chippings", placeholder: "kg" },
               { label: "Diesel Used (litres)", key: "diesel", placeholder: "litres" },
               { label: "Damaged During Production", key: "dmgProd", placeholder: "0" },
@@ -1170,6 +1184,20 @@ const Production = ({ userProfile }) => {
                 <input style={styles.input} type="number" inputMode={["produced", "dmgProd", "dmgStack"].includes(f.key) ? "numeric" : "decimal"} placeholder={f.placeholder} value={form[f.key]} onChange={e => setForm({ ...form, [f.key]: e.target.value })} />
               </div>
             ))}
+            <div style={{ ...styles.formGroup, minWidth: 0 }}>
+              {standard ? (
+                <div style={{ fontSize: 13, overflowWrap: 'anywhere' }} aria-live="polite">
+                  <strong>Dust (calculated):</strong> {formatDust(previewDust)} = {fmt(Number(form.produced) || 0)} blocks × {standard.dust_kg_per_block} kg
+                </div>
+              ) : (
+                <>
+                  <label style={styles.label} htmlFor="production-granite">Granite dust (kg)</label>
+                  <input id="production-granite" style={styles.input} type="number" min="0" inputMode="decimal" placeholder="kg" value={form.granite} onChange={e => setForm({ ...form, granite: e.target.value })} />
+                  <div style={{ fontSize: 12, color: theme.textMuted, marginTop: 4 }}>Enter kilograms, not tonnes (1 tonne = 1,000 kg)</div>
+                </>
+              )}
+            </div>
+            {standardsError && <div role="alert" style={{ color: theme.red }}>Could not load dust standards: {standardsError}</div>}
           </div>
           <div className="m-buttons" style={styles.row}>
             <button style={styles.btn("primary")} onClick={() => handleSave()} disabled={saving}>{saving ? "Saving…" : editTarget ? "Update Entry" : "Save Entry"}</button>
@@ -1195,7 +1223,7 @@ const Production = ({ userProfile }) => {
         ) : (
           <table style={styles.table}>
             <thead>
-              <tr>{["Date", "Site", "Block Type", "Produced", "Cement (bags)", "Granite (kg)", "Chippings (kg)", "Diesel (L)", "Dmg Production", "Dmg Stacking", "Net Output", ""].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
+              <tr>{["Date", "Site", "Block Type", "Produced", "Cement (bags)", "Granite dust (kg)", "Chippings (kg)", "Diesel (L)", "Dmg Production", "Dmg Stacking", "Net Output", ""].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr>
             </thead>
             <tbody>
               {shown.map((p) => {
@@ -1218,7 +1246,7 @@ const Production = ({ userProfile }) => {
                     <td className="m-hide" style={styles.td}><span style={styles.badge(theme.blue)}>{p.block_type}</span></td>
                     <td className="m-key" style={styles.td}>{fmt(p.quantity_produced)}</td>
                     <td style={styles.td}>{p.cement_bags}</td>
-                    <td style={styles.td}>{fmt(p.granite_dust_kg)}</td>
+                    <td style={styles.td}>{formatDust(p.granite_dust_kg)}</td>
                     <td style={styles.td}>{fmt(p.chippings_kg)}</td>
                     <td style={styles.td}>{p.diesel_litres}</td>
                     <td style={styles.td}><span style={styles.badge(p.damaged?.production > 0 ? theme.red : theme.green)}>{p.damaged?.production || 0}</span></td>
@@ -5149,7 +5177,7 @@ export const Batches = ({ userProfile }) => {
 };
 
 // ── PRODUCTS ──────────────────────────────────────────────────
-const Products = () => {
+const Products = ({ userProfile }) => {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -5213,6 +5241,7 @@ const Products = () => {
 
   return (
     <div>
+      <DustStandardsSettings userProfile={userProfile} />
       <div className="m-header" style={styles.header}>
         <div>
           <div style={styles.pageTitle}>Product Catalogue</div>
@@ -11454,7 +11483,7 @@ export default function App() {
     reports: <MobileScope fit><Reports userProfile={userProfile} /></MobileScope>,
     kpi_dashboard: <MobileScope fit><KPIDashboard userProfile={userProfile} /></MobileScope>,
     trading_margin: <MobileScope fit><TradingMarginReport /></MobileScope>,
-    products: <MobileScope fit><Products /></MobileScope>,
+    products: <MobileScope fit><Products userProfile={userProfile} /></MobileScope>,
     suppliers: <MobileScope fit><SupplierRegistry /></MobileScope>,
     accounting: <MobileScope fit><Accounting userProfile={userProfile} /></MobileScope>,
     data_import: <MobileScope fit><DataImport /></MobileScope>,
