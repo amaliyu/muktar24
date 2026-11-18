@@ -1,4 +1,5 @@
 import { formatDust } from '../utils/productionDust'
+import { buildProductionExcelRows } from '../utils/productionExcelRows'
 import { accountingBasisService } from '../services/accountingBasis'
 import { incomePresentation, balancePresentation, ACCOUNTING_EXPLANATION, expenseStatus, productionUnitCosts } from '../utils/accountingBasis'
 import { statementRows, invoiceAging } from '../utils/customerStatement'
@@ -906,6 +907,8 @@ export function renderPDF(reportId, data, params, period) {
 }
 
 // ── EXCEL RENDERERS ──────────────────────────────────────────
+// Keep Excel quantities numeric; formatted kg/tonnes text is only for PDF/UI.
+
 function renderExcel(reportId, data, params, period) {
   const report = CATALOG.find(r => r.id === reportId)
   const filename = `${report.name.replace(/\s+/g,'-')}-${today()}.xlsx`
@@ -917,7 +920,7 @@ function renderExcel(reportId, data, params, period) {
       const rows = Array.isArray(data) ? data : data.rows || []
       excelExport(filename, report.name, period,
         ['Date','Block Type','Qty Produced','Cement Bags','Granite dust (kg)','Diesel L','Recorded By'],
-        rows.map(r=>[r.date, r.block_type, r.quantity_produced, r.cement_bags||0, formatDust(r.granite_dust_kg), r.diesel_litres||0, r.recorder?.full_name||'—']),
+        buildProductionExcelRows(rows),
         ['TOTAL','',rows.reduce((s,r)=>s+r.quantity_produced,0),rows.reduce((s,r)=>s+Number(r.cement_bags||0),0).toFixed(1),'','',''])
       break
     }
