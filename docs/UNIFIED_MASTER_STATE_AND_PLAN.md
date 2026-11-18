@@ -1344,3 +1344,69 @@ Also from audit 2 work: invoices — issued/paid now MD/Accountant-only to chang
 | A6-6 | Medium | invoice/order updates broader than the UI | DONE 2026-10-27 (invoice status/delete controls; order lines via replace_order_items) |
 Found while checking A6-2: the app loads a marketer's orders/customers by their login id, but orders.marketer_id and customers.added_by hold the STAFF id — a marketer would see an empty list. LATER (no marketer login active); fix in the next Orders PR: use userProfile.staff_id.
 Tests 2026-10-29 (rolled back): MD and BDM still see all 102 invoices / 55 payments / 126 customers; board sees 0 staff documents, ICO 2.
+
+---
+
+## 13. SITE RECORDING PLAN — Kado & Life Camp (MD approved 2026-11-18)
+
+**Context (live check 2026-11-18).** Production has started at both client sites; Dutse production is on hold. Site managers: **Umar Mohammed Idris — Kado** (assistant_production_manager, can already record) and **Abubakar Suleman Aliyu — Life Camp** (logistics_manager, cannot record production/batches/handovers/roster). Recording is near zero: Kado's app entries stop at 12 Nov (WhatsApp reports exist for 16–17 Nov); Life Camp has nothing in the app. Both contract cycles still show "awaiting payment, not started". No material receipts at either site (Kado items negative: cement −48 bags, diesel −60 L). Site managers currently report by WhatsApp each evening.
+
+**Contract models (already modelled in the app):**
+- **Kado — Sequoia, full supply (materials + labour).** ₦1,000 per 9", ₦969 per 6" (app holds ₦960 — to correct). Phase 1 = 125,000 9" + 25,000 6". Sequoia has paid ₦12m against phase 1 (MD, 2026-11-18). APCL funds all materials, so production value must be tracked against money received.
+- **Life Camp — Bilaad, labour only.** ₦241 per *accepted* block; Bilaad funds materials through its own procurement. Award BR/PMO/BALI GROVE/APCL/2026/001 + NEC4 ECSC, signed.
+
+### Bilaad contract rules the app must follow
+- **Cement yield is contractual:** planning yields 40 9" and 43 6" blocks per 50 kg bag, 1% production damage allowance (Award 3a). Material ratios cannot change without Bilaad's written approval, and unexplained material variance holds back certification (Clause 7). First Life Camp WhatsApp report shows **26 blocks/bag** — investigate immediately.
+- **Production only against an approved written requisition** (3c). Mobilisation advance ₦10,542,665.50 covers the initial target 30,162 9" + 13,583 6" = 43,745; all of it must be accepted before the next payment is certified (6a, 6c).
+- **Batch-level records** of materials received and consumed, gross production, rejected blocks, wastage and material balances (3c); receipts, consumption, gross production, rejected and accepted reconciled separately (3a).
+- **Acceptance:** inspected and verified by Bilaad's Site Inventory Officer (and technical rep where required) and satisfied by Bilaad QMU. **No deemed acceptance** — app correctly leaves Bilaad handovers pending until signed.
+- **After acceptance** blocks are in Bilaad's inventory; release to Trifekta Projects only on the Project Manager's instruction with issue notes and signed delivery acknowledgements (3e). APCL is not liable after handover.
+- **Certificates:** cumulative accepted × ₦241 − all previous gross payments (incl. mobilisation); withholding tax deducted from each; needs invoice + verified production and material records (6d).
+- **Completion:** 63 days from starting date (starting date = 7 days after mobilisation received). No delay damages stated. Programme of Work must be approved before commencement and kept updated.
+- **Idle period (Clause 9):** other customers only if production is blocked by Bilaad dependencies for more than 3 weeks, with prior written notice **and** Bilaad's approval, using no Bilaad materials.
+- **Plant:** the award names the QTJ4-26B for Bali Grove; the app shows the QTJ4-40 there and the QTJ4-26B at Kado — regularise in writing.
+
+### Who does what
+| Person | Responsible for |
+|---|---|
+| Site manager | Everything at their site, recorded the same day |
+| Client rep (Sequoia / Bilaad Site Inventory Officer) | Signing every handover |
+| ICO | Monday check: paper book vs app vs Friday count; differences to MD within a day |
+| MD / Accountant | Client payments (gross and WHT) and site expenses |
+
+### Daily routine — one entry, two outputs
+- One daily form per site, shaped by the contract: date; blocks by type (9" and 6" separately); breakage; cement bags; dust (**tonnes**); diesel (litres); names of workers present. Kado also records material purchases with prices; Life Camp records Bilaad's deliveries as quantities only.
+- The app calculates cost per block (Kado), blocks per bag against the contract yield (Life Camp 40/43), output against plan, days of materials left. Managers never type prices; Kado prices come from purchase receipts.
+- **"Send to WhatsApp" button** produces the evening report in today's format from the app entry — no app entry, no WhatsApp report.
+- Materials received: quantity delivered/accepted/rejected + photo of delivery note. Machine downtime and stacking breakage when they happen. Friday yard + materials count, signed, photographed — the yard count separates APCL's unaccepted blocks from blocks already accepted into the client's inventory.
+
+### Deliveries
+- **Blocks do not leave client plots by truck** (MD, 2026-11-18): the app refuses waybills at client sites; the handover is the delivery. If the idle clause is ever used for other customers, add site sales then.
+- Each day's production becomes a batch automatically, ready after curing (14 days for 9"/6"). The handover screen shows cured blocks available and warns above that.
+- Handover recorded the same day: quantity by type, client rep's name, photo of signed note; accept/reject with reason.
+- Accepted blocks drive billing. Life Camp: certificate value per the rule above, WHT recorded. Kado: warn before produced value exceeds money received / paid milestone.
+- Friday check: produced − breakage − handed over = blocks in the yard.
+
+### Rules
+- Same day; anything entered >24 h late needs a reason, reviewed by the ICO.
+- No block leaves without a handover record.
+- Corrections go through the ICO and MD; nobody edits past days.
+- Production at Life Camp only against an approved Bilaad requisition.
+
+### Catch-up (this week)
+- Start cycle 1 at both sites: start date, mix (Life Camp 30,162 / 13,583; Sequoia per its schedule), payments received (Sequoia ₦12m; Bilaad mobilisation if received). Correct Kado 6" price to ₦969; confirm Kado milestone size (app 25,000; agreed 50,000 combined).
+- Kado: all material deliveries; production from 13 Nov onward from the book and WhatsApp reports.
+- Life Camp: everything since production started — Bilaad's materials, production, roster, requisition.
+- ICO checks the catch-up against the books before sign-off.
+
+### App build order
+| Step | What | Who |
+|---|---|---|
+| A | Site Manager role locked to one site: site fills itself and cannot be changed; nothing defaults to Dutse; waybills refused at client sites; can raise site payment requests | Planning chat (database) |
+| B | Site Manager home screen: one daily form per contract, WhatsApp share, handover with cured-stock check, site figures | Codex, reviewed by planning chat |
+| C | Install to home screen and stay signed in (mobile stage 1) | Codex, reviewed by planning chat |
+Interim until A–C: Umar records Kado now; Abubakar gets a temporary assistant_production_manager grant.
+
+### Dutse while production is on hold
+- Any block leaving the yard needs a same-day waybill; owner to be named now Abubakar has moved.
+- Weekly yard count continues; best window to close the ICO stock reconciliation (unexplained ~77,000 blocks, ₦37–48m at cost, pending ICO checks due 20 Nov).
