@@ -1,3 +1,5 @@
+import { LateReasonField, useLateReason } from './LateReasonField'
+import { lagosToday } from '../utils/lateEntry'
 import { todayLagos } from '../utils/lagosDate'
 import { weeklyPayrollService } from '../services/weeklyPayroll'
 import { rosterService, rateChangeService } from '../services/labour'
@@ -577,9 +579,10 @@ function DailyRosterTab({ pool, roles, userProfile }) {
   )
 }
 
-function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCancel }) {
+export function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCancel }) {
   const isEdit = !!editRoster
-  const [date, setDate] = useState(editRoster?.roster_date || todayStr())
+  const [date, setDate] = useState(editRoster?.roster_date || lagosToday())
+  const lateEntry = useLateReason(date, editRoster?.roster_date)
   // This form only opens for a roster that passes the edit lock (canEdit in
   // the list), so the site is changeable whenever the form is reachable.
   const [siteId, setSiteId] = useState(editRoster?.site_id || DUTSE_SITE_ID)
@@ -713,6 +716,7 @@ function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCanc
   const toBePaidThisWeek = grandTotal - deferred
 
   const handleSave = async (submit = false) => {
+    if (lateEntry.invalid) return
     if (!entriesLoaded) return setErr('Load the roster workers successfully before saving.')
     if (!date) return setErr('Date is required.')
     if (entries.length === 0) return setErr('Add at least one worker.')
@@ -752,6 +756,7 @@ function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCanc
     }))
 
     const header = {
+      ...lateEntry.payload,
       roster_date: date, site_id: siteId, target_met: targetMet, total_daily_cost: grandTotal,
       payment_week_ending: weekEnding, worker_count: entries.length,
       ico_status: submit ? 'submitted' : isEdit && editRoster.ico_status === 'submitted' ? 'draft' : (editRoster?.ico_status || 'draft'),
@@ -762,7 +767,9 @@ function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCanc
       if (isEdit) await rosterService.saveEntriesFirst(editRoster.id, header, entryRows(editRoster.id))
       else await rosterService.create({ ...header, md_status: 'pending', payment_status: 'unpaid' }, entryRows(null))
       onSave()
-    } catch (e) { setErr(rosterError(e) || friendlyEntryError(e)) }
+    } catch (e) {
+      if (!lateEntry.handleError(e)) setErr(e.code === "22007" ? e.message : rosterError(e) || friendlyEntryError(e))
+    }
     finally { setSaving(false) }
   }
 
@@ -781,7 +788,7 @@ function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCanc
         <div style={styles.formGroup}>
           <label style={styles.label}>Roster Date</label>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <input type="date" style={styles.input} value={date} onChange={e => setDate(e.target.value)} />
+            <input type="date" max={lagosToday()} style={styles.input} value={date} onChange={e => { lateEntry.reset(); setDate(e.target.value) }} />
             {date < todayStr() && (
               <span style={{ fontSize: '12px', padding: '1px 6px', borderRadius: '4px', background: '#f59e0b22', color: '#f59e0b', border: '1px solid #f59e0b44', fontWeight: '700', whiteSpace: 'nowrap' }}>Historical</span>
             )}
@@ -891,11 +898,12 @@ function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCanc
         </div>
       )}
 
+      <LateReasonField entry={lateEntry} />
       <div style={{ ...styles.row, marginTop: '14px', justifyContent: 'space-between' }}>
         <button style={{ ...styles.btn('ghost'), border: `1px dashed ${theme.border}` }} onClick={addRow}>+ Add Worker Row</button>
         <div style={styles.row}>
-          <button style={styles.btn('ghost')} onClick={() => handleSave(false)} disabled={saving}>{isEdit ? 'Save Changes (Draft)' : 'Save as Draft'}</button>
-          <button style={styles.btn('primary')} onClick={() => handleSave(true)} disabled={saving}>{saving ? 'Saving…' : isEdit ? 'Save & Re-submit' : 'Submit for ICO Review'}</button>
+          <button style={styles.btn('ghost')} onClick={() => handleSave(false)} disabled={saving || lateEntry.invalid}>{isEdit ? 'Save Changes (Draft)' : 'Save as Draft'}</button>
+          <button style={styles.btn('primary')} onClick={() => handleSave(true)} disabled={saving || lateEntry.invalid}>{saving ? 'Saving…' : isEdit ? 'Save & Re-submit' : 'Submit for ICO Review'}</button>
         </div>
       </div>
     </div>

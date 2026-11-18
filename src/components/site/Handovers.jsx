@@ -1,3 +1,4 @@
+import { LateReasonField, useLateReason } from '../LateReasonField'
 import { withPhase7Touch } from './siteUi'
 import { useEffect, useMemo, useState } from 'react'
 import { useSites } from '../SitePicker'
@@ -31,6 +32,7 @@ function Handovers({ userProfile }) {
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState(null)
   const [form, setForm] = useState(emptyForm())
+  const lateEntry = useLateReason(form.date)
   const [busy, setBusy] = useState(false)
   const [formErr, setFormErr] = useState(null)
   const [ok, setOk] = useState('')
@@ -74,7 +76,7 @@ function Handovers({ userProfile }) {
 
   const submit = (e) => {
     e.preventDefault()
-    if (formProblem || busy) return
+    if (formProblem || lateEntry.invalid || busy) return
     // Compare with the yard balance first; a missing yard row means 0 in the
     // yard. If the yard did not load, there is nothing to compare against.
     const warning = handoverYardWarning({
@@ -88,6 +90,7 @@ function Handovers({ userProfile }) {
   }
 
   const save = async () => {
+    if (lateEntry.invalid) return
     setBusy(true); setFormErr(null); setOk('')
     let photoPath = null
     let photoWarn = ''
@@ -101,15 +104,17 @@ function Handovers({ userProfile }) {
         }
       }
       await siteContractsService.createHandover({
+        ...lateEntry.payload,
         site_id: form.siteId, handover_date: form.date, block_type: form.blockType,
         qty_handed_over: Math.round(Number(form.qty)), client_rep: form.clientRep.trim() || null,
         photo_path: photoPath, notes: form.notes.trim() || null,
       })
       setOk(`Handover recorded: ${fmtQty(form.qty)} ${form.blockType}.${photoWarn}`)
+      lateEntry.reset()
       setForm(f => ({ ...emptyForm(f.siteId), date: f.date }))
       await load()
     } catch (e2) {
-      setFormErr(e2)
+      if (!lateEntry.handleError(e2)) setFormErr(e2)
     } finally {
       setBusy(false)
     }
@@ -182,7 +187,7 @@ function Handovers({ userProfile }) {
             </div>
             <div style={ui.field}>
               <label style={ui.label} htmlFor="ho-date">Handover date *</label>
-              <input id="ho-date" type="date" style={ui.input} value={form.date} onChange={set('date')} />
+              <input id="ho-date" type="date" max={lagosToday()} style={ui.input} value={form.date} onChange={e => { lateEntry.reset(); set('date')(e) }} />
             </div>
             <div style={ui.field}>
               <label style={ui.label} htmlFor="ho-type">Block type *</label>
@@ -210,7 +215,8 @@ function Handovers({ userProfile }) {
             <label style={ui.label} htmlFor="ho-notes">Notes</label>
             <textarea id="ho-notes" style={ui.textarea} value={form.notes} onChange={set('notes')} />
           </div>
-          <button type="submit" style={{ ...ui.btn('primary', !!formProblem || busy), width: '100%', minHeight: '52px' }} disabled={!!formProblem || busy}>
+          <LateReasonField entry={lateEntry} />
+          <button type="submit" style={{ ...ui.btn('primary', !!formProblem || lateEntry.invalid || busy), width: '100%', minHeight: '52px' }} disabled={!!formProblem || lateEntry.invalid || busy}>
             {busy ? 'Saving…' : 'Record handover'}
           </button>
         </form>

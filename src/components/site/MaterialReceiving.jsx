@@ -1,3 +1,4 @@
+import { LateReasonField, useLateReason } from '../LateReasonField'
 import { withPhase7Touch } from './siteUi'
 import { useEffect, useMemo, useState } from 'react'
 import SitePicker, { useSites } from '../SitePicker'
@@ -44,6 +45,7 @@ export function ReceivingForm({ onSaved }) {
   const [items, setItems] = useState([])
   const [itemsErr, setItemsErr] = useState(null)
   const [form, setForm] = useState(emptyForm)
+  const lateEntry = useLateReason(form.receivedOn)
   const [busy, setBusy] = useState(false)
   const [confirmWeight, setConfirmWeight] = useState(false)
   const [err, setErr] = useState(null)
@@ -71,7 +73,7 @@ export function ReceivingForm({ onSaved }) {
 
   const submit = (e) => {
     e.preventDefault()
-    if (problem || busy || confirmWeight) return
+    if (problem || lateEntry.invalid || busy || confirmWeight) return
     if (bulkMaterial && form.unit === 'kg' && deliveredKg < 100) {
       setConfirmWeight(true)
       return
@@ -80,6 +82,7 @@ export function ReceivingForm({ onSaved }) {
   }
 
   const saveReceipt = async () => {
+    if (lateEntry.invalid) return
     setConfirmWeight(false)
     setBusy(true); setErr(null); setOk('')
     let photoPath = null
@@ -95,6 +98,7 @@ export function ReceivingForm({ onSaved }) {
         }
       }
       await siteContractsService.recordReceipt({
+        ...lateEntry.payload,
         itemId: form.itemId,
         receivedOn: form.receivedOn,
         qtyDelivered: Number(form.delivered) * factor,
@@ -106,12 +110,13 @@ export function ReceivingForm({ onSaved }) {
         notes: form.notes.trim(),
       })
       setOk(`Delivery recorded. ${fmtDec(Number(accRaw) * factor)} ${item.unit} added to ${item.name} stock.${photoWarn}`)
+      lateEntry.reset()
       setForm(f => ({ ...emptyForm(), receivedOn: f.receivedOn }))
       const fresh = await siteContractsService.listSiteItems(siteId).catch(() => null)
       if (fresh) setItems(fresh)
       onSaved?.()
     } catch (e2) {
-      setErr(e2)
+      if (!lateEntry.handleError(e2)) setErr(e2)
     } finally {
       setBusy(false)
     }
@@ -144,7 +149,7 @@ export function ReceivingForm({ onSaved }) {
         </div>
         <div style={ui.field}>
           <label style={ui.label} htmlFor="rcv-date">Date received *</label>
-          <input id="rcv-date" type="date" style={ui.input} value={form.receivedOn} onChange={set('receivedOn')} />
+          <input id="rcv-date" type="date" max={lagosToday()} style={ui.input} value={form.receivedOn} onChange={e => { lateEntry.reset(); set('receivedOn')(e) }} />
         </div>
         <div style={ui.field}>
           <label style={ui.label} htmlFor="rcv-del">Delivered *</label>
@@ -190,7 +195,8 @@ export function ReceivingForm({ onSaved }) {
         <textarea id="rcv-notes" style={ui.textarea} value={form.notes} onChange={set('notes')} />
       </div>
       {problem && form.delivered !== '' && <div style={{ ...ui.hint, marginBottom: '8px' }}>{problem}</div>}
-      <button type="submit" style={{ ...ui.btn('primary', !!problem || busy), width: '100%', minHeight: '52px' }} disabled={!!problem || busy}>
+      <LateReasonField entry={lateEntry} />
+      <button type="submit" style={{ ...ui.btn('primary', !!problem || lateEntry.invalid || busy), width: '100%', minHeight: '52px' }} disabled={!!problem || lateEntry.invalid || busy}>
         {busy ? 'Saving…' : 'Record delivery'}
       </button>
       </fieldset>
