@@ -1,3 +1,4 @@
+import { withAssignedSite } from './AssignedSite'
 import { LateReasonField, useLateReason } from './LateReasonField'
 import { lagosToday } from '../utils/lateEntry'
 import { todayLagos } from '../utils/lagosDate'
@@ -388,7 +389,8 @@ function WorkerForm({ worker, roles, userProfile, onSave, onCancel }) {
 }
 
 // ── DAILY ROSTER TAB ─────────────────────────────────────────────────────────
-function DailyRosterTab({ pool, roles, userProfile }) {
+const DailyRosterTab = withAssignedSite(DailyRosters)
+function DailyRosters({ pool, roles, userProfile, assignedSiteId }) {
   const [rosters, setRosters] = useState([])
   const [loading, setLoading] = useState(true)
   const [selectedRoster, setSelectedRoster] = useState(null)
@@ -534,7 +536,7 @@ function DailyRosterTab({ pool, roles, userProfile }) {
                 const payrollStatus = r.payroll?.status
                 const payrollEditable = !r.payroll_id || !payrollStatus || payrollStatus === 'draft'
                 const canWriteRole = hasRole(userProfile, ...ROSTER_WRITE_ROLES)
-                const canEdit = !isPaid && payrollEditable && canWriteRole
+                const canEdit = (!assignedSiteId || r.site_id === assignedSiteId) && !isPaid && payrollEditable && canWriteRole
                 // daily_roster_delete permits MD via get_user_role() with no
                 // status condition; everyone else needs the roster's OWN
                 // ico_status to be draft/submitted (NOT the linked payroll's
@@ -579,13 +581,14 @@ function DailyRosterTab({ pool, roles, userProfile }) {
   )
 }
 
-export function RosterCreateForm({ pool, roles, userProfile, editRoster, onSave, onCancel }) {
+export const RosterCreateForm = withAssignedSite(RosterForm)
+function RosterForm({ pool, roles, userProfile, editRoster, onSave, onCancel, assignedSiteId }) {
   const isEdit = !!editRoster
   const [date, setDate] = useState(editRoster?.roster_date || lagosToday())
   const lateEntry = useLateReason(date, editRoster?.roster_date)
   // This form only opens for a roster that passes the edit lock (canEdit in
   // the list), so the site is changeable whenever the form is reachable.
-  const [siteId, setSiteId] = useState(editRoster?.site_id || DUTSE_SITE_ID)
+  const [siteId, setSiteId] = useState(assignedSiteId || editRoster?.site_id || DUTSE_SITE_ID)
   const { sites } = useSites()
   // Workers already on ANOTHER roster this date (any site) → labour_id: site
   // name. UI hint only; the DB trigger is the real guard, so a failed lookup

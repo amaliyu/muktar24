@@ -1,3 +1,5 @@
+import { withAssignedSite } from './AssignedSite'
+import { FixedSite, useSites } from './SitePicker'
 import { LateReasonField, useLateReason } from './LateReasonField'
 import { lagosToday } from '../utils/lateEntry'
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
@@ -209,7 +211,7 @@ function ChecklistTab({ assets, templates, staffById, activeStaff, userProfile, 
     setAlert(null)
     if (!templateId) { setAlert({ type: 'error', msg: 'Select a checklist first.' }); return }
     if (items.length === 0) { setAlert({ type: 'error', msg: 'This checklist has no items configured — nothing to record.' }); return }
-    if (!assetId) { setAlert({ type: 'error', msg: 'Select the asset this checklist is for.' }); return }
+    if (!availableAssets.some(asset => asset.id === assetId)) { setAlert({ type: 'error', msg: 'Select the asset this checklist is for.' }); return }
     if (!staffId) { setAlert({ type: 'error', msg: 'Select the staff member this checklist is for.' }); return }
     // Block silent incomplete data: nothing ticked and no issue explained.
     if (noneChecked && !notes.trim()) {
@@ -413,7 +415,10 @@ function ChecklistTab({ assets, templates, staffById, activeStaff, userProfile, 
 }
 
 // ── DOWNTIME TAB ─────────────────────────────────────────────────
-export function DowntimeTab({ assets, activeStaff, staffById, userProfile, canWrite }) {
+export const DowntimeTab = withAssignedSite(DowntimeForm)
+function DowntimeForm({ assets, activeStaff, staffById, userProfile, canWrite, assignedSiteId }) {
+  const { sites } = useSites()
+  const availableAssets = assignedSiteId ? assets.filter(asset => asset.site_id === assignedSiteId) : assets
   const [assetId, setAssetId] = useState('')
   const [startTime, setStartTime] = useState(nowLagosInput)
   const lateEntry = useLateReason(startTime.slice(0, 10))
@@ -480,7 +485,7 @@ export function DowntimeTab({ assets, activeStaff, staffById, userProfile, canWr
         asset_id: assetId,
         // The asset's own site (Phase 7A). Null for site-less assets (vehicles);
         // the DB trigger then falls back to Dutse.
-        site_id: assetById[assetId]?.site_id || null,
+        site_id: assignedSiteId || assetById[assetId]?.site_id || null,
         start_time: new Date(startTime + '+01:00').toISOString(),
         reason_category: reason,
         reason_detail: detail.trim() || null,
@@ -534,12 +539,16 @@ export function DowntimeTab({ assets, activeStaff, staffById, userProfile, canWr
       {canWrite && (
         <div style={styles.card}>
           <div style={{ fontWeight: '700', fontSize: '15px', marginBottom: '16px' }}>Log downtime</div>
+          {assignedSiteId && <div style={styles.formGroup}>
+            <div style={styles.label}>Site</div>
+            <FixedSite siteId={assignedSiteId} sites={sites} style={styles.input} />
+          </div>}
           <div style={styles.grid2}>
             <div style={styles.formGroup}>
               <label style={styles.label}>Asset</label>
               <select style={styles.input} value={assetId} onChange={e => { setAssetId(e.target.value); setStaffId('') }}>
                 <option value="">Select an asset…</option>
-                {assets.map(a => (
+                {availableAssets.map(a => (
                   <option key={a.id} value={a.id}>{assetLabel(a)}{a.site?.name ? ` · ${a.site.name}` : ''} — {a.status}</option>
                 ))}
               </select>

@@ -1,3 +1,4 @@
+import { AssignedSiteProvider, withAssignedSite } from './components/AssignedSite'
 import { LateReasonField, useLateReason } from './components/LateReasonField'
 import { lagosToday } from './utils/lateEntry'
 import LateEntries, { LateEntriesCard } from './components/LateEntries'
@@ -61,7 +62,7 @@ import SupplierRegistry from './components/SupplierRegistry'
 import { suppliersService, supplierTransactionsService } from './services/suppliers'
 import Labour, { getLastSaturday, shiftWeek, shiftDays } from './components/Labour'
 import Maintenance from './components/Maintenance'
-import SitePicker, { useSites } from './components/SitePicker'
+import SitePicker, { FixedSite, useSites } from './components/SitePicker'
 import { sitesService, DUTSE_SITE_ID, isFactorySite, siteName } from './services/sites'
 import Messages from './components/Messages'
 import { messagesService } from './services/messages'
@@ -833,7 +834,7 @@ const fmtRelativeTime = (iso) => {
   return `${Math.floor(months / 12)}y ago`;
 };
 
-export const Production = ({ userProfile }) => {
+export const Production = withAssignedSite(function Production({ userProfile, assignedSiteId }) {
   const [showForm, setShowForm] = useState(false);
   const [dupWarning, setDupWarning] = useState(null);
   const [records, setRecords] = useState([]);
@@ -846,7 +847,7 @@ export const Production = ({ userProfile }) => {
   const [targets, setTargets] = useState([]);
   const [targetForm, setTargetForm] = useState({ date: new Date().toISOString().split('T')[0], blockType: "9 Inch 3 Hole Block", quantity: "" });
   const [savingTarget, setSavingTarget] = useState(false);
-  const emptyForm = { date: "", siteId: DUTSE_SITE_ID, assetId: "", blockType: "9 Inch 3 Hole Block", produced: "", cement: "", granite: "", chippings: "", diesel: "", dmgProd: "0", dmgStack: "0" };
+  const emptyForm = { date: "", siteId: assignedSiteId || DUTSE_SITE_ID, assetId: "", blockType: "9 Inch 3 Hole Block", produced: "", cement: "", granite: "", chippings: "", diesel: "", dmgProd: "0", dmgStack: "0" };
   const [form, setForm] = useState(emptyForm);
   const lateEntry = useLateReason(form.date, editTarget?.date);
   const { sites } = useSites();
@@ -857,6 +858,7 @@ export const Production = ({ userProfile }) => {
   const [machinesSite, setMachinesSite] = useState(null);
   const [stockWarning, setStockWarning] = useState(null);
   const [dustStandards, setDustStandards] = useState([]);
+  const [standardsLoaded, setStandardsLoaded] = useState(false);
   const [standardsError, setStandardsError] = useState(null);
   const standard = dustStandard(dustStandards, form.siteId || DUTSE_SITE_ID, form.blockType);
   const previewDust = standard ? calculatedDustKg(form.produced, standard.dust_kg_per_block) : null;
@@ -864,7 +866,7 @@ export const Production = ({ userProfile }) => {
     if (!showForm) return;
     let alive = true;
     setStandardsError(null);
-    loadDustStandards().then(rows => { if (alive) setDustStandards(rows); })
+    loadDustStandards().then(rows => { if (alive) { setDustStandards(rows); setStandardsLoaded(true); } })
       .catch(e => { if (alive) setStandardsError(e.message); });
     return () => { alive = false; };
   }, [showForm]);
@@ -947,11 +949,12 @@ export const Production = ({ userProfile }) => {
   useEffect(() => { load(); loadTargets(); }, []);
 
   const startEdit = (record) => {
+    if (assignedSiteId && record.site_id !== assignedSiteId) return;
     lateEntry.reset();
     setEditTarget(record);
     setForm({
       date: record.date, blockType: record.block_type,
-      siteId: record.site_id || DUTSE_SITE_ID, assetId: record.asset_id || "",
+      siteId: assignedSiteId || record.site_id || DUTSE_SITE_ID, assetId: record.asset_id || "",
       produced: String(record.quantity_produced || ""),
       cement: String(record.cement_bags || ""),
       granite: String(record.granite_dust_kg || ""),
@@ -1183,11 +1186,12 @@ export const Production = ({ userProfile }) => {
               <ProductSelect value={form.blockType} onChange={(name) => setForm({ ...form, blockType: name })} style={styles.input} />
             </div>
             {[
-              { label: "Quantity Produced", key: "produced", placeholder: "e.g. 850" },
+              { label: assignedSiteId ? "Total blocks produced (including broken)" : "Quantity Produced", key: "produced", placeholder: "e.g. 850" },
+              ...(assignedSiteId ? [{ label: "Damaged During Production", key: "dmgProd", placeholder: "0" }] : []),
               { label: "Cement Bags Used", key: "cement", placeholder: "bags" },
               { label: "Chippings (kg)", key: "chippings", placeholder: "kg" },
               { label: "Diesel Used (litres)", key: "diesel", placeholder: "litres" },
-              { label: "Damaged During Production", key: "dmgProd", placeholder: "0" },
+              ...(!assignedSiteId ? [{ label: "Damaged During Production", key: "dmgProd", placeholder: "0" }] : []),
               { label: "Damaged During Stacking", key: "dmgStack", placeholder: "0" },
             ].map(f => (
               <div key={f.key} style={styles.formGroup}>
@@ -1196,9 +1200,12 @@ export const Production = ({ userProfile }) => {
               </div>
             ))}
             <div style={{ ...styles.formGroup, minWidth: 0 }}>
-              {standard ? (
+              {assignedSiteId && !standardsLoaded ? (
+                standardsError ? null : <div role="status">Loading dust standard…</div>
+              ) : standard ? (
                 <div style={{ fontSize: 13, overflowWrap: 'anywhere' }} aria-live="polite">
                   <strong>Dust (calculated):</strong> {formatDust(previewDust)} = {fmt(Number(form.produced) || 0)} blocks × {standard.dust_kg_per_block} kg
+                  {assignedSiteId && <div>Dust is calculated automatically — do not convert anything.</div>}
                 </div>
               ) : (
                 <>
@@ -1212,7 +1219,7 @@ export const Production = ({ userProfile }) => {
           </div>
           <LateReasonField entry={lateEntry} />
           <div className="m-buttons" style={styles.row}>
-            <button style={styles.btn("primary")} onClick={() => handleSave()} disabled={saving || lateEntry.invalid}>{saving ? "Saving…" : editTarget ? "Update Entry" : "Save Entry"}</button>
+            <button style={styles.btn("primary")} onClick={() => handleSave()} disabled={saving || lateEntry.invalid || !!(assignedSiteId && !standardsLoaded)}>{saving ? "Saving…" : editTarget ? "Update Entry" : "Save Entry"}</button>
             <button style={styles.btn("secondary")} onClick={() => { setShowForm(false); setForm(emptyForm); lateEntry.reset(); setEditTarget(null); }}>Cancel</button>
           </div>
         </div>
@@ -1266,7 +1273,7 @@ export const Production = ({ userProfile }) => {
                     <td style={styles.td}><strong style={{ color: theme.green }}>{fmt(net)}</strong></td>
                     <td className="m-actions" style={styles.td}>
                       <div style={{ display: "flex", gap: "8px" }}>
-                        <button style={{ ...styles.btn("secondary"), padding: "4px 10px", fontSize: "12px" }} onClick={() => startEdit(p)}>Edit</button>
+                        {(!assignedSiteId || p.site_id === assignedSiteId) && <button style={{ ...styles.btn("secondary"), padding: "4px 10px", fontSize: "12px" }} onClick={() => startEdit(p)}>Edit</button>}
                         <button style={{ ...styles.btn("danger"), padding: "4px 10px", fontSize: "12px" }} onClick={() => setConfirmDelete(p)}>Delete</button>
                       </div>
                     </td>
@@ -1279,7 +1286,7 @@ export const Production = ({ userProfile }) => {
       </div>
     </div>
   );
-};
+});
 
 // ── ORDERS ────────────────────────────────────────────────────
 const emptyItem = () => ({ blockType: "9 Inch 3 Hole Block", quantity: "", unitPrice: "", unit: "pieces", sourceType: "manufactured", costBasis: "" });
@@ -3344,7 +3351,8 @@ const Reports = ({ userProfile }) => <ReportsEngine userProfile={userProfile} />
 const UNITS = ["bags", "kg", "litres", "units", "tonnes", "metres", "packs"];
 export const ISSUED_TO = ["Maintenance", "Logistics", "Administration", "Other"];
 
-export const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
+export const Inventory = withAssignedSite(InventoryPage);
+function InventoryPage({ onLowStockChange, userProfile, onNavigate, assignedSiteId }) {
   // Whoever is logged in is recorded as the person who entered the movement —
   // no free text, no override (deliberate accountability requirement).
   const recordedBy = userProfile?.full_name || userProfile?.email || null;
@@ -3372,7 +3380,7 @@ export const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
   const [movConfirmDelete, setMovConfirmDelete] = useState(null);
 
   const today = new Date().toISOString().split("T")[0];
-  const emptyItem = { name: "", unit: "bags", current_stock: "", reorder_level: "", unit_cost: "", supplier: "", date_added: today, site_id: DUTSE_SITE_ID, owner: "apcl", material: "" };
+  const emptyItem = { name: "", unit: "bags", current_stock: "", reorder_level: "", unit_cost: "", supplier: "", date_added: today, site_id: assignedSiteId || DUTSE_SITE_ID, owner: "apcl", material: "" };
   const emptyIn  = { itemId: "", quantity: "", unit: "kg", unitCost: "", supplierId: "", supplier: "", date: today, notes: "" };
   const emptyOut = { itemId: "", quantity: "", unit: "kg", issuedTo: "Maintenance", reference: "", date: today, notes: "" };
 
@@ -3418,6 +3426,7 @@ export const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
 
   const [itemHistory, setItemHistory] = useState(null);
   const startEditItem = async (item) => {
+    if (assignedSiteId && item.site_id !== assignedSiteId) return;
     setItemHistory(null);
     setItemForm({ name: item.name, unit: item.unit, current_stock: String(item.current_stock), reorder_level: String(item.reorder_level), unit_cost: String(item.unit_cost || ""), supplier: item.supplier || "", date_added: item.date_added || item.created_at?.split("T")[0] || today, site_id: item.site_id || DUTSE_SITE_ID, owner: item.owner || "apcl", material: item.material || "" });
     setEditItem(item);
@@ -3748,7 +3757,7 @@ export const Inventory = ({ onLowStockChange, userProfile, onNavigate }) => {
                         <td style={styles.td}>{fmtDate(item.updated_at?.split("T")[0])}</td>
                         <td className="m-actions" style={styles.td}>
                           <div style={{ display: "flex", gap: "8px" }}>
-                            <button style={{ ...styles.btn("secondary"), padding: "4px 10px", fontSize: "12px" }} onClick={() => startEditItem(item)}>Edit</button>
+                            {(!assignedSiteId || item.site_id === assignedSiteId) && <button style={{ ...styles.btn("secondary"), padding: "4px 10px", fontSize: "12px" }} onClick={() => startEditItem(item)}>Edit</button>}
                             <button style={{ ...styles.btn("danger"), padding: "4px 10px", fontSize: "12px" }} onClick={() => setConfirmDelete(item)}>Delete</button>
                           </div>
                         </td>
@@ -4780,7 +4789,8 @@ const ScheduleApprovals = () => {
 };
 
 // ── BATCHES ────────────────────────────────────────────────────
-export const Batches = ({ userProfile }) => {
+export const Batches = withAssignedSite(BatchesPage);
+function BatchesPage({ userProfile, assignedSiteId }) {
   const [batches, setBatches] = useState([]);
   const [productions, setProductions] = useState([]);
   const [siteYard, setSiteYard] = useState([]);
@@ -4809,7 +4819,7 @@ export const Batches = ({ userProfile }) => {
   const BATCH_DELETE_ROLES = ['md'];
   const canWriteBatch = hasRole(userProfile, ...BATCH_WRITE_ROLES);
   const canDeleteBatch = BATCH_DELETE_ROLES.includes(userProfile?.role);
-  const emptyForm = { siteId: DUTSE_SITE_ID, productId: "", blockType: "", dateCured: today, qtyAccepted: "", createdBy: "", notes: "", linkedProds: [] };
+  const emptyForm = { siteId: assignedSiteId || DUTSE_SITE_ID, productId: "", blockType: "", dateCured: today, qtyAccepted: "", createdBy: "", notes: "", linkedProds: [] };
   const [form, setForm] = useState(emptyForm);
   const { sites } = useSites();
   const [siteFilter, setSiteFilter] = useState("");
@@ -4871,6 +4881,7 @@ export const Batches = ({ userProfile }) => {
   };
 
   const startEdit = (b) => {
+    if (assignedSiteId && b.site_id !== assignedSiteId) return;
     setEditTarget(b);
     setEditForm({ siteId: b.site_id || DUTSE_SITE_ID, blockType: b.block_type, dateCured: b.date_cured, qtyAccepted: String(b.qty_accepted), createdBy: b.created_by || "", notes: b.notes || "" });
     setExpandedId(null);
@@ -4908,6 +4919,7 @@ export const Batches = ({ userProfile }) => {
   };
 
   const openDmgModal = (b) => {
+    if (assignedSiteId && b.site_id !== assignedSiteId) return;
     setDmgTarget(b);
     damageLateEntry.reset();
     setDmgForm({ qty: '', date: lagosToday(), notes: '' });
@@ -4927,7 +4939,7 @@ export const Batches = ({ userProfile }) => {
         stage: "curing",
         quantity_damaged: qty,
         batch_id: dmgTarget.id,
-        site_id: dmgTarget.site_id || DUTSE_SITE_ID,
+        site_id: assignedSiteId || dmgTarget.site_id || DUTSE_SITE_ID,
         notes: dmgForm.notes || null,
         recorded_by: userProfile?.id || null,
       });
@@ -5045,6 +5057,10 @@ export const Batches = ({ userProfile }) => {
                 )}
               </div>
             </div>
+            {assignedSiteId && <div style={styles.formGroup}>
+              <div style={styles.label}>Site</div>
+              <FixedSite siteId={assignedSiteId} sites={sites} style={styles.input} />
+            </div>}
             <LateReasonField entry={damageLateEntry} />
             <div style={styles.formGroup}>
               <label style={styles.label}>Notes (optional)</label>
@@ -5165,10 +5181,10 @@ export const Batches = ({ userProfile }) => {
                     {canWriteBatch && ci && ci.state === "curing" && ci.ready && (
                       <button style={{ ...styles.btn("primary"), padding: "5px 12px", fontSize: "12px", background: theme.green, color: "#000" }} onClick={() => handleMarkCured(b)} disabled={curingId === b.id}>{curingId === b.id ? "…" : "Mark Cured"}</button>
                     )}
-                    {canWriteBatch && b.status === "active" && (
+                    {canWriteBatch && (!assignedSiteId || b.site_id === assignedSiteId) && b.status === "active" && (
                       <button style={{ ...styles.btn("danger"), padding: "5px 12px", fontSize: "12px" }} onClick={() => openDmgModal(b)}>Log Damage</button>
                     )}
-                    {canWriteBatch && <button style={{ ...styles.btn("secondary"), padding: "5px 12px", fontSize: "12px" }} onClick={() => startEdit(b)}>Edit</button>}
+                    {canWriteBatch && (!assignedSiteId || b.site_id === assignedSiteId) && <button style={{ ...styles.btn("secondary"), padding: "5px 12px", fontSize: "12px" }} onClick={() => startEdit(b)}>Edit</button>}
                     {canDeleteBatch && <button style={{ ...styles.btn("danger"), padding: "5px 12px", fontSize: "12px" }} onClick={() => setConfirmDel(b)} disabled={deleting === b.id}>{deleting === b.id ? "…" : "Delete"}</button>}
                   </div>
                 </div>
@@ -7956,7 +7972,8 @@ const PaymentRequestAttachmentRow = ({ att }) => {
 };
 
 // ── PAYMENT REQUESTS ──────────────────────────────────────────
-const PaymentRequestsPage = ({ userProfile }) => {
+const PaymentRequestsPage = withAssignedSite(PaymentRequests);
+function PaymentRequests({ userProfile, assignedSiteId }) {
   const role = userProfile?.role;
   const userId = userProfile?.id;
   const isInitiator = ['production_manager', 'logistics_manager', 'bdm', 'hr_officer'].includes(role);
@@ -8073,7 +8090,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
     return acc;
   }, {});
 
-  const emptyForm = { site_id: DUTSE_SITE_ID, amount: '', purpose: '', expense_category_id: '', disbursement_method: 'bank_transfer', order_item_id: '', _order_id: '', category_other_note: '', payeeMode: 'existing', supplier_id: '', payee_name: '', payee_bank_name: '', payee_account_number: '', payee_account_name: '', saveAsVendor: false };
+  const emptyForm = { site_id: assignedSiteId || DUTSE_SITE_ID, amount: '', purpose: '', expense_category_id: '', disbursement_method: 'bank_transfer', order_item_id: '', _order_id: '', category_other_note: '', payeeMode: 'existing', supplier_id: '', payee_name: '', payee_bank_name: '', payee_account_number: '', payee_account_name: '', saveAsVendor: false };
 
   const openEdit = async (req) => {
     const payeeMode = req.supplier_id ? 'existing' : 'new';
@@ -8151,7 +8168,7 @@ const PaymentRequestsPage = ({ userProfile }) => {
       } else {
         // Site is set on create only. Edits leave it untouched so this change
         // never interacts with the payment-request guard/state machine.
-        const createFields = { ...fields, site_id: form.site_id || DUTSE_SITE_ID };
+        const createFields = { ...fields, site_id: assignedSiteId || form.site_id || DUTSE_SITE_ID };
         let req;
         try {
           req = await paymentRequestsService.create(createFields);
@@ -11647,7 +11664,7 @@ export default function App() {
             <Ico icon={Lock} style={{ marginRight: '8px' }} />Read-Only Mode — Internal Control Officer. Approvals available in Schedule Approvals and Labour modules.
           </div>
         )}
-        {pages[safePage]}
+        <AssignedSiteProvider key={userProfile.id}>{pages[safePage]}</AssignedSiteProvider>
       </main>
     </div>
     </>

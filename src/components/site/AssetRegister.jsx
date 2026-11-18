@@ -1,6 +1,7 @@
+import { withAssignedSite } from '../AssignedSite'
 import { withPhase7Touch } from './siteUi'
 import { useEffect, useMemo, useState } from 'react'
-import { useSites } from '../SitePicker'
+import { FixedSite, useSites } from '../SitePicker'
 import { siteName } from '../../services/sites'
 import { lagosToday } from '../../services/siteContracts'
 import { assetsService, assetTypeFor, ASSET_CATEGORIES, ASSET_CONDITIONS, ASSET_STATUSES } from '../../services/assets'
@@ -28,7 +29,7 @@ const CONDITION_COLOR = { good: theme.green, fair: theme.accent, needs_repair: t
 const STATUS_COLOR = { active: theme.green, down: theme.red, maintenance: theme.accent, retired: theme.textMuted }
 const label = (s) => (s ? String(s).replace(/_/g, ' ').replace(/^./, c => c.toUpperCase()) : '—')
 
-function AssetRegister({ userProfile }) {
+function AssetRegister({ userProfile, assignedSiteId }) {
   const canRead = hasRole(userProfile, ...ASSET_READ_ROLES)
   const canWrite = hasRole(userProfile, ...ASSET_WRITE_ROLES)
   const seeMoney = hasRole(userProfile, ...MONEY_ROLES)
@@ -109,7 +110,7 @@ function AssetRegister({ userProfile }) {
           <div style={ui.title}>Asset Register</div>
           <div style={ui.subtitle}>Machines, generators, moulds, pallets and other plant, by site. Every move is logged.</div>
         </div>
-        {canWrite && <button type="button" style={ui.btn('primary')} onClick={() => setForm(blankForm())}>Add asset</button>}
+        {canWrite && <button type="button" style={ui.btn('primary')} onClick={() => setForm({ ...blankForm(), site_id: assignedSiteId || '' })}>Add asset</button>}
       </div>
 
       <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
@@ -134,23 +135,23 @@ function AssetRegister({ userProfile }) {
       {loading ? <SkeletonRows rows={5} /> : !err && shownGroups.length === 0 ? (
         <div style={{ ...ui.panel, color: theme.textMuted, fontSize: '13px' }}>
           No assets{catFilter ? ` in ${label(catFilter)}` : ''}{siteFilter ? ` at ${siteFilter}` : ''}.
-          {canWrite && <button type="button" style={{ ...ui.small(theme.accent), marginLeft: '12px' }} onClick={() => setForm(blankForm())}>Add asset</button>}
+          {canWrite && <button type="button" style={{ ...ui.small(theme.accent), marginLeft: '12px' }} onClick={() => setForm({ ...blankForm(), site_id: assignedSiteId || '' })}>Add asset</button>}
         </div>
       ) : !err && shownGroups.map(g => (
         <SiteGroup key={g.name} group={g} seeMoney={seeMoney} canWrite={canWrite} isMobile={isMobile} investorOf={investorOf}
           onExport={g.siteType === 'client_site' ? () => exportPlant(g) : null}
           onDetail={(r) => setDetailId(r.asset_id)}
-          onEdit={(r) => setForm(formFrom(r))}
-          onMove={(r) => setMove({ asset: r, toSiteId: '', quantity: String(r.quantity), date: lagosToday(), reason: '' })} />
+          onEdit={(!assignedSiteId || g.siteId === assignedSiteId) ? r => setForm(formFrom(r)) : null}
+          onMove={(!assignedSiteId || g.siteId !== assignedSiteId) ? r => setMove({ asset: r, toSiteId: assignedSiteId || '', quantity: String(r.quantity), date: lagosToday(), reason: '' }) : null} />
       ))}
 
       {form && (
-        <AssetForm form={form} setForm={setForm} sites={sites} canCost={canCost} canInvestor={canInvestor} investors={investors}
+        <AssetForm assignedSiteId={assignedSiteId} form={form} setForm={setForm} sites={sites} canCost={canCost} canInvestor={canInvestor} investors={investors}
           onClose={() => setForm(null)}
           onSaved={async (msg) => { setForm(null); setNotice(msg); await load() }} />
       )}
       {move && (
-        <MoveDialog move={move} setMove={setMove} sites={sites}
+        <MoveDialog assignedSiteId={assignedSiteId} move={move} setMove={setMove} sites={sites}
           onClose={() => setMove(null)}
           onMoved={async (msg) => { setMove(null); setNotice(msg); await load() }} />
       )}
@@ -224,8 +225,8 @@ function SiteGroup({ group: g, seeMoney, canWrite, isMobile, investorOf, onExpor
             <td style={ui.td}>
               <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: isMobile ? 'flex-end' : 'flex-start' }}>
                 <button type="button" data-board-allow data-ico-allow style={ui.small()} onClick={() => onDetail(r)}>Details</button>
-                {canWrite && <button type="button" style={ui.small()} onClick={() => onEdit(r)}>Edit</button>}
-                {canWrite && r.status !== 'retired' && <button type="button" style={ui.small(theme.accent)} onClick={() => onMove(r)}>Move</button>}
+                {canWrite && onEdit && <button type="button" style={ui.small()} onClick={() => onEdit(r)}>Edit</button>}
+                {canWrite && onMove && r.status !== 'retired' && <button type="button" style={ui.small(theme.accent)} onClick={() => onMove(r)}>Move</button>}
               </div>
             </td>
           </tr>
@@ -257,7 +258,7 @@ const formFrom = (r) => ({
   condition: r.condition || 'good', status: r.status || 'active', notes: r.notes || '',
 })
 
-function AssetForm({ form, setForm, sites, canCost, canInvestor, investors = [], onClose, onSaved }) {
+function AssetForm({ assignedSiteId, form, setForm, sites, canCost, canInvestor, investors = [], onClose, onSaved }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
   const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }))
@@ -348,10 +349,10 @@ function AssetForm({ form, setForm, sites, canCost, canInvestor, investors = [],
         </Field>
         {form.mode === 'add' ? (
           <Field id="af-site" label="Site">
-            <select id="af-site" style={ui.input} value={form.site_id} onChange={set('site_id')}>
+            {assignedSiteId ? <FixedSite id="af-site" siteId={assignedSiteId} sites={sites} style={ui.input} /> : <select id="af-site" style={ui.input} value={form.site_id} onChange={set('site_id')}>
               <option value="">No fixed site</option>
               {sites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
+            </select>}
           </Field>
         ) : (
           <Field id="af-site-ro" label="Site">
@@ -375,7 +376,7 @@ const Field = ({ id, label: l, children }) => (
 )
 
 // ── move ─────────────────────────────────────────────────────
-function MoveDialog({ move, setMove, sites, onClose, onMoved }) {
+function MoveDialog({ assignedSiteId, move, setMove, sites, onClose, onMoved }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
   const a = move.asset
@@ -408,10 +409,10 @@ function MoveDialog({ move, setMove, sites, onClose, onMoved }) {
     <ConfirmDialog title={`Move ${a.name}`} body={`Now at ${a.site_name}. Quantity on this record: ${fmtQty(total)}.`}
       confirmLabel="Move asset" busy={busy} confirmDisabled={!!problem} onCancel={onClose} onConfirm={run}>
       <Field id="mv-to" label="Destination *">
-        <select id="mv-to" style={ui.input} value={move.toSiteId} onChange={set('toSiteId')}>
+        {assignedSiteId ? <FixedSite id="mv-to" siteId={assignedSiteId} sites={sites} style={ui.input} /> : <select id="mv-to" style={ui.input} value={move.toSiteId} onChange={set('toSiteId')}>
           <option value="">Choose…</option>
           {dests.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-        </select>
+        </select>}
       </Field>
       <Field id="mv-qty" label="Quantity *">
         <input id="mv-qty" type="number" inputMode="numeric" min="1" max={total} step="1" style={ui.input} value={move.quantity} onChange={set('quantity')} />
@@ -508,4 +509,4 @@ function DetailDrawer({ asset: a, rows, sites, seeMoney, isMobile, investorOf, o
   )
 }
 
-export default withPhase7Touch(AssetRegister)
+export default withPhase7Touch(withAssignedSite(AssetRegister))
