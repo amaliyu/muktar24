@@ -1,3 +1,6 @@
+import { LateReasonField, useLateReason } from './components/LateReasonField'
+import { lagosToday } from './utils/lateEntry'
+import LateEntries, { LateEntriesCard } from './components/LateEntries'
 import UnpricedDeliveries from './components/UnpricedDeliveries'
 import AccountingSummary from './components/AccountingSummary'
 import { accountingBasisService } from './services/accountingBasis'
@@ -200,7 +203,7 @@ const ROLE_PAGES = {
 // (accounting, reports, kpi_dashboard, daily_schedule) are NOT listed here —
 // those buttons carry per-element data-ico-allow / data-board-allow instead,
 // so write actions stay hidden.
-const ICO_EXEMPT_PAGES   = ['dashboard', 'payroll_approvals', 'labour', 'truck_loading', 'schedule_approvals', 'advances', 'leave', 'my_hr', 'payment_requests', 'maintenance'];
+const ICO_EXEMPT_PAGES   = ['late_entries', 'dashboard', 'payroll_approvals', 'labour', 'truck_loading', 'schedule_approvals', 'advances', 'leave', 'my_hr', 'payment_requests', 'maintenance'];
 const BOARD_EXEMPT_PAGES = ['dashboard', 'my_profile', 'my_hr', 'maintenance'];
 
 // ── UI HELPERS ───────────────────────────────────────────────
@@ -409,6 +412,7 @@ const NAV_ICONS = {
   orders: Receipt,
   lpo_approvals: ClipboardCheck,
   schedule_approvals: CalendarCheck,
+  late_entries: CalendarClock,
   reports: BarChart3,
   kpi_dashboard: Gauge,
   trading_margin: TrendingUp,
@@ -675,6 +679,7 @@ export const Dashboard = ({ onNavigate, onOpenSite, userProfile }) => {
         </div>
       )}
       {!dashboardError && <UnpricedDeliveries rows={stats.deliveredUnpriced} />}
+      <LateEntriesCard userProfile={userProfile} onOpen={() => onNavigate('late_entries')} />
       {/* Phase 7B-1 site cards — loads on its own, independent of the date range. */}
       {hasRole(userProfile, 'md', 'production_manager', 'assistant_production_manager', 'ico') && (
         <SiteDashboardCards userProfile={userProfile} onOpenSite={onOpenSite} />
@@ -828,7 +833,7 @@ const fmtRelativeTime = (iso) => {
   return `${Math.floor(months / 12)}y ago`;
 };
 
-const Production = ({ userProfile }) => {
+export const Production = ({ userProfile }) => {
   const [showForm, setShowForm] = useState(false);
   const [dupWarning, setDupWarning] = useState(null);
   const [records, setRecords] = useState([]);
@@ -843,6 +848,7 @@ const Production = ({ userProfile }) => {
   const [savingTarget, setSavingTarget] = useState(false);
   const emptyForm = { date: "", siteId: DUTSE_SITE_ID, assetId: "", blockType: "9 Inch 3 Hole Block", produced: "", cement: "", granite: "", chippings: "", diesel: "", dmgProd: "0", dmgStack: "0" };
   const [form, setForm] = useState(emptyForm);
+  const lateEntry = useLateReason(form.date, editTarget?.date);
   const { sites } = useSites();
   const [siteFilter, setSiteFilter] = useState("");
   const [machines, setMachines] = useState([]);
@@ -941,6 +947,7 @@ const Production = ({ userProfile }) => {
   useEffect(() => { load(); loadTargets(); }, []);
 
   const startEdit = (record) => {
+    lateEntry.reset();
     setEditTarget(record);
     setForm({
       date: record.date, blockType: record.block_type,
@@ -957,6 +964,7 @@ const Production = ({ userProfile }) => {
   };
 
   const handleSave = async (skipDupCheck = false) => {
+    if (lateEntry.invalid) return;
     if (!form.date || !form.produced) return setAlert({ type: "error", msg: "Date and quantity produced are required." });
     if (standardsError) return setAlert({ type: "error", msg: "Could not load dust standards: " + standardsError });
     if (machinesSite !== (form.siteId || DUTSE_SITE_ID)) return setAlert({ type: "error", msg: "The machines for this site are still loading. Try again in a moment." });
@@ -983,6 +991,7 @@ const Production = ({ userProfile }) => {
       const dmgStack = parseInt(form.dmgStack) || 0;
       const siteId = form.siteId || DUTSE_SITE_ID;
       const entryData = {
+        ...lateEntry.payload,
         date: form.date, block_type: form.blockType,
         site_id: siteId,
         // null only when the site has no active machine (resolveMachine)
@@ -1013,12 +1022,14 @@ const Production = ({ userProfile }) => {
         setRecords(prev => [{ ...entry, damaged: { production: dmgProd, stacking: dmgStack } }, ...prev]);
         setAlert({ type: "success", msg: `Production entry saved at ${siteName(siteId, sites)}.` });
       }
+      lateEntry.reset();
       setForm(emptyForm);
       setShowForm(false);
       setEditTarget(null);
     } catch (e) {
+      if (!savedProduction && lateEntry.handleError(e)) return;
       if (savedProduction) { setShowForm(false); setEditTarget(null); await load(); }
-      setAlert({ type: "error", msg: (savedProduction ? "Production saved, but a follow-up step failed. " : "Failed to save. ") + e.message });
+      setAlert({ type: "error", msg: e.code === "22007" ? e.message : (savedProduction ? "Production saved, but a follow-up step failed. " : "Failed to save. ") + e.message });
     } finally {
       setSaving(false);
     }
@@ -1164,7 +1175,7 @@ const Production = ({ userProfile }) => {
             ].map(f => (
               <div key={f.key} style={styles.formGroup}>
                 <label style={styles.label}>{f.label}</label>
-                <input style={styles.input} type={f.type} value={form[f.key]} onChange={e => setForm({ ...form, [f.key]: e.target.value })} />
+                <input style={styles.input} type={f.type} max={lagosToday()} value={form[f.key]} onChange={e => { lateEntry.reset(); setForm({ ...form, [f.key]: e.target.value }); }} />
               </div>
             ))}
             <div style={styles.formGroup}>
@@ -1199,9 +1210,10 @@ const Production = ({ userProfile }) => {
             </div>
             {standardsError && <div role="alert" style={{ color: theme.red }}>Could not load dust standards: {standardsError}</div>}
           </div>
+          <LateReasonField entry={lateEntry} />
           <div className="m-buttons" style={styles.row}>
-            <button style={styles.btn("primary")} onClick={() => handleSave()} disabled={saving}>{saving ? "Saving…" : editTarget ? "Update Entry" : "Save Entry"}</button>
-            <button style={styles.btn("secondary")} onClick={() => { setShowForm(false); setForm(emptyForm); setEditTarget(null); }}>Cancel</button>
+            <button style={styles.btn("primary")} onClick={() => handleSave()} disabled={saving || lateEntry.invalid}>{saving ? "Saving…" : editTarget ? "Update Entry" : "Save Entry"}</button>
+            <button style={styles.btn("secondary")} onClick={() => { setShowForm(false); setForm(emptyForm); lateEntry.reset(); setEditTarget(null); }}>Cancel</button>
           </div>
         </div>
       )}
@@ -2259,6 +2271,7 @@ export const Waybills = ({ userProfile }) => {
   const [selectedOrderId, setSelectedOrderId] = useState("");
   const emptyForm = { waybillDate: "", vehicleId: "", driverId: "", truckNumber: "", physicalWaybillNumber: "", blockType: "9 Inch 3 Hole Block", quantityLoaded: "", quantityReceived: "", quantityDamaged: "0", batchId: "", scheduleItemId: "", dieselLitres: "", storeOfficerId: "", signedByName: "", notes: "" };
   const [form, setForm] = useState(emptyForm);
+  const lateEntry = useLateReason(form.waybillDate, editTarget?.waybill_date);
   const [loaderAssignments, setLoaderAssignments] = useState([]);
   const [wbPool, setWbPool] = useState([]);
   const [waybillLoaders, setWaybillLoaders] = useState(null);
@@ -2324,6 +2337,7 @@ export const Waybills = ({ userProfile }) => {
   const selectedOrder = activeOrders.find(o => o.id === selectedOrderId) || null;
 
   const startEditWaybill = (w) => {
+    lateEntry.reset();
     setEditTarget(w);
     setForm({
       waybillDate: w.waybill_date, vehicleId: w.vehicle_id || "", driverId: w.driver_id || "",
@@ -2346,6 +2360,7 @@ export const Waybills = ({ userProfile }) => {
   };
 
   const handleSave = async () => {
+    if (lateEntry.invalid) return;
     if (!editTarget && !selectedOrderId) return setAlert({ type: "error", msg: "Select a customer with an active invoice before recording a waybill." });
     if (!form.waybillDate || !form.quantityLoaded) return setAlert({ type: "error", msg: "Date and quantity loaded are required." });
     // batch is optional — blocks dispatched from yard stock without a specific batch
@@ -2357,6 +2372,7 @@ export const Waybills = ({ userProfile }) => {
       const dieselLitres = parseFloat(form.dieselLitres) || 0;
       const soName = staff.find(s => s.id === form.storeOfficerId)?.full_name || '';
       const waybillData = {
+        ...lateEntry.payload,
         vehicle_id: form.vehicleId || null,
         driver_id: form.driverId || null,
         truck_number: form.truckNumber || null,
@@ -2410,6 +2426,7 @@ export const Waybills = ({ userProfile }) => {
       }
       await load(true);
       setAlert({ type: "success", msg: `Waybill ${saved.waybill_number} saved.` });
+      lateEntry.reset();
       setForm(emptyForm);
       setSelectedOrderId("");
       setShowForm(false);
@@ -2417,13 +2434,14 @@ export const Waybills = ({ userProfile }) => {
       setWaybillLoaders(null);
       setLoaderSearch('');
     } catch (e) {
+      if (!savedWaybill && lateEntry.handleError(e)) return;
       if (savedWaybill) {
         // Close the create form: the stock-affecting record already exists.
         setShowForm(false);
         setEditTarget(null);
         await load();
       }
-      setAlert({ type: "error", msg: savedWaybill ? `Waybill ${savedWaybill.waybill_number} saved, but a follow-up step failed: ${e.message}` : "Failed to save waybill. " + e.message });
+      setAlert({ type: "error", msg: e.code === "22007" ? e.message : savedWaybill ? `Waybill ${savedWaybill.waybill_number} saved, but a follow-up step failed: ${e.message}` : "Failed to save waybill. " + e.message });
     } finally {
       setSaving(false);
     }
@@ -2502,7 +2520,8 @@ export const Waybills = ({ userProfile }) => {
           <div className="m-form" style={styles.grid(3)}>
             <div style={styles.formGroup}>
               <label style={styles.label}>Date *</label>
-              <input style={styles.input} type="date" value={form.waybillDate} onChange={e => setForm({ ...form, waybillDate: e.target.value })} />
+              <input style={styles.input} type="date" value={form.waybillDate} onChange={e => { lateEntry.reset(); setForm({ ...form, waybillDate: e.target.value }); }} />
+              <LateReasonField entry={lateEntry} />
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Vehicle</label>
@@ -2683,8 +2702,8 @@ export const Waybills = ({ userProfile }) => {
             </div>
           )}
           <div className="m-buttons" style={styles.row}>
-            <button style={styles.btn("primary")} onClick={handleSave} disabled={saving}>{saving ? "Saving…" : editTarget ? "Update Waybill" : "Record Waybill"}</button>
-            <button style={styles.btn("secondary")} onClick={() => { setShowForm(false); setForm(emptyForm); setSelectedOrderId(""); setEditTarget(null); setWaybillLoaders(null); setLoaderSearch(''); }}>Cancel</button>
+            <button style={styles.btn("primary")} onClick={handleSave} disabled={saving || lateEntry.invalid}>{saving ? "Saving…" : editTarget ? "Update Waybill" : "Record Waybill"}</button>
+            <button style={styles.btn("secondary")} onClick={() => { setShowForm(false); setForm(emptyForm); lateEntry.reset(); setSelectedOrderId(""); setEditTarget(null); setWaybillLoaders(null); setLoaderSearch(''); }}>Cancel</button>
           </div>
         </div>
       )}
@@ -4776,6 +4795,7 @@ export const Batches = ({ userProfile }) => {
   const [confirmDel, setConfirmDel] = useState(null);
   const [dmgTarget, setDmgTarget] = useState(null);
   const [dmgForm, setDmgForm] = useState({ qty: '', date: '', notes: '' });
+  const damageLateEntry = useLateReason(dmgForm.date);
   const [dmgSaving, setDmgSaving] = useState(false);
   const [products, setProducts] = useState([]);
   const [productsLoadFailed, setProductsLoadFailed] = useState(false);
@@ -4889,16 +4909,19 @@ export const Batches = ({ userProfile }) => {
 
   const openDmgModal = (b) => {
     setDmgTarget(b);
-    setDmgForm({ qty: '', date: today, notes: '' });
+    damageLateEntry.reset();
+    setDmgForm({ qty: '', date: lagosToday(), notes: '' });
   };
 
   const handleLogDamage = async () => {
+    if (damageLateEntry.invalid) return;
     const qty = parseInt(dmgForm.qty);
     if (!qty || qty <= 0) return setAlert({ type: "error", msg: "Quantity damaged must be a positive number." });
     if (!dmgForm.date) return setAlert({ type: "error", msg: "Date is required." });
     setDmgSaving(true);
     try {
       await productionService.logDamage({
+        ...damageLateEntry.payload,
         date: dmgForm.date,
         block_type: dmgTarget.block_type,
         stage: "curing",
@@ -4911,7 +4934,9 @@ export const Batches = ({ userProfile }) => {
       setDmgTarget(null);
       await load(true);
       setAlert({ type: "success", msg: `${qty} damaged block(s) logged against ${dmgTarget.batch_number}.` });
-    } catch (e) { setAlert({ type: "error", msg: "Failed to log damage: " + e.message }); }
+    } catch (e) {
+      if (!damageLateEntry.handleError(e)) setAlert({ type: "error", msg: e.code === "22007" ? e.message : "Failed to log damage: " + e.message });
+    }
     finally { setDmgSaving(false); }
   };
 
@@ -5014,18 +5039,19 @@ export const Batches = ({ userProfile }) => {
             <div style={styles.formGroup}>
               <label style={styles.label}>Date *</label>
               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <input style={styles.input} type="date" value={dmgForm.date} onChange={e => setDmgForm(f => ({ ...f, date: e.target.value }))} />
-                {dmgForm.date && dmgForm.date < today && (
+                <input style={styles.input} type="date" max={lagosToday()} value={dmgForm.date} onChange={e => { damageLateEntry.reset(); setDmgForm(f => ({ ...f, date: e.target.value })); }} />
+                {dmgForm.date && dmgForm.date < lagosToday() && (
                   <span style={{ fontSize: "12px", padding: "1px 6px", borderRadius: "4px", background: "#f59e0b22", color: "#f59e0b", border: "1px solid #f59e0b44", fontWeight: "700", whiteSpace: "nowrap" }}>Historical</span>
                 )}
               </div>
             </div>
+            <LateReasonField entry={damageLateEntry} />
             <div style={styles.formGroup}>
               <label style={styles.label}>Notes (optional)</label>
               <input style={styles.input} placeholder="e.g. cracks found during picking" value={dmgForm.notes} onChange={e => setDmgForm(f => ({ ...f, notes: e.target.value }))} />
             </div>
             <div className="m-buttons" style={styles.row}>
-              <button style={styles.btn("danger")} onClick={handleLogDamage} disabled={dmgSaving}>{dmgSaving ? "Logging…" : "Log Damage"}</button>
+              <button style={styles.btn("danger")} onClick={handleLogDamage} disabled={dmgSaving || damageLateEntry.invalid}>{dmgSaving ? "Logging…" : "Log Damage"}</button>
               <button style={styles.btn("secondary")} onClick={() => setDmgTarget(null)}>Cancel</button>
             </div>
           </div>
@@ -10782,6 +10808,7 @@ const navItems = [
   { section: "Approvals", items: [
     { id: "lpo_approvals", label: "LPO Approvals", icon: "lpo_approvals" },
     { id: "schedule_approvals", label: "Schedule Approvals", icon: "schedule_approvals" },
+    { id: "late_entries", label: "Late entries", icon: "late_entries" },
   ]},
   { section: "Analytics", items: [
     { id: "reports", label: "Reports", icon: "reports" },
@@ -11441,6 +11468,7 @@ export default function App() {
   const grantedRoles = effRoles.filter(r => r !== role);
   const grantedPages = new Set(grantedRoles.flatMap(r => (ROLE_PAGES[r] && ROLE_PAGES[r] !== 'all') ? ROLE_PAGES[r] : []));
   const canSee = (pageId) => {
+    if (pageId === 'late_entries') return hasRole(userProfile, 'md', 'ico');
     if (pageId === 'my_profile') return true;
     if (pageId === 'my_hr') return !!userProfile?.staff_id;
     // The investor portal is only for a login with the investor role (md's
@@ -11454,7 +11482,7 @@ export default function App() {
   const safePage = canSee(active) ? active : (visibleNav[0]?.items[0]?.id || 'dashboard');
   // The read-only mask still applies to a primary board/ICO viewer, but is
   // relaxed on any page a granted role unlocks (so a granted write role works).
-  const boardMasked = isBoard && !BOARD_EXEMPT_PAGES.includes(safePage) && !grantedPages.has(safePage);
+  const boardMasked = isBoard && safePage !== 'late_entries' && !BOARD_EXEMPT_PAGES.includes(safePage) && !grantedPages.has(safePage);
   const icoMasked   = isICO   && !ICO_EXEMPT_PAGES.includes(safePage)   && !grantedPages.has(safePage);
 
   const openSiteContracts = (siteId, opts = {}) => { setContractsSite(siteId || ''); setContractsReport(!!opts.report); setActive('site_contracts'); };
@@ -11463,6 +11491,7 @@ export default function App() {
     dashboard: isBoard
       ? <><SiteDashboardCards userProfile={userProfile} onOpenSite={openSiteContracts} /><BoardDashboard userProfile={userProfile} /></>
       : <MobileScope><Dashboard onNavigate={setActive} onOpenSite={openSiteContracts} userProfile={userProfile} /></MobileScope>,
+    late_entries: <MobileScope fit><LateEntries /></MobileScope>,
     production: <MobileScope><Production userProfile={userProfile} /></MobileScope>,
     inventory: <MobileScope><Inventory onLowStockChange={setLowStockCount} userProfile={userProfile} onNavigate={setActive} /></MobileScope>,
     site_contracts: <SiteContracts userProfile={userProfile} initialSiteId={contractsSite} initialReport={contractsReport} />,

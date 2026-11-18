@@ -42,7 +42,7 @@ export function useSites() {
 // Site select. Form mode (default): value is a site id and an empty value is
 // shown as Dutse — a load failure keeps Dutse selected and shows the error.
 // Filter mode (allowAll): '' means "All sites".
-export default function SitePicker({ value, onChange, allowAll = false, allLabel = 'All sites', disabled = false, style }) {
+export default function SitePicker({ id, value, onChange, allowAll = false, allLabel = 'All sites', disabled = false, style }) {
   const { sites, error } = useSites()
   const current = allowAll ? (value || '') : (value || DUTSE_SITE_ID)
 
@@ -56,6 +56,7 @@ export default function SitePicker({ value, onChange, allowAll = false, allLabel
   return (
     <div>
       <select
+        id={id}
         // A site filter is read-only, so it stays usable on view-only (board) pages.
         data-board-allow={allowAll ? true : undefined}
         style={{ ...baseInput, ...style }}

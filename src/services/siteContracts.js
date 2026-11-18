@@ -30,7 +30,7 @@ const pick = (obj, keys) => Object.fromEntries(keys.filter(k => k in obj).map(k 
 
 // Today's date in Lagos as YYYY-MM-DD (the DB's current_date is UTC, which is
 // the same calendar day except 00:00–01:00 WAT).
-export const lagosToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Lagos' }).format(new Date())
+export { lagosToday } from '../utils/lateEntry'
 
 // A cycle may start only when fully paid and, for full supply, the schedule is
 // received. Mirrors fn_contract_cycle_guard so the UI can offer "Start early";
@@ -124,7 +124,7 @@ export const siteContractsService = {
     return must(await q)
   },
 
-  async recordReceipt({ itemId, receivedOn, qtyDelivered, qtyAccepted, rejectionReason, supplier, ref, photoPath, notes }) {
+  async recordReceipt({ itemId, receivedOn, qtyDelivered, qtyAccepted, rejectionReason, supplier, ref, photoPath, notes, late_reason }) {
     return must(await supabase.rpc('record_material_receipt', {
       p_item_id: itemId,
       p_received_on: receivedOn,
@@ -135,6 +135,7 @@ export const siteContractsService = {
       p_ref: ref || null,
       p_photo_path: photoPath || null,
       p_notes: notes || null,
+      ...(late_reason !== undefined ? { p_late_reason: late_reason } : {}),
     }))
   },
 
@@ -151,7 +152,7 @@ export const siteContractsService = {
   },
 
   async createHandover(row) {
-    const payload = pick(row, ['site_id', 'handover_date', 'block_type', 'qty_handed_over', 'client_rep', 'photo_path', 'notes'])
+    const payload = pick(row, ['site_id', 'handover_date', 'block_type', 'qty_handed_over', 'client_rep', 'photo_path', 'notes', 'late_reason'])
     return must(await supabase.from('block_handovers').insert(payload).select().single())
   },
 

@@ -1,3 +1,5 @@
+import { LateReasonField, useLateReason } from './LateReasonField'
+import { lagosToday } from '../utils/lateEntry'
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { maintenanceService } from '../services/maintenance'
 import { getSignedDocUrl } from '../services/storage'
@@ -35,12 +37,10 @@ const STATUS_COLOR = { active: '#2dd4a0', down: '#f06b6b', maintenance: '#f5a623
 
 const todayStr = () => new Date().toISOString().split('T')[0]
 
-// datetime-local wants "YYYY-MM-DDTHH:mm" in LOCAL time.
-const nowLocalInput = () => {
-  const d = new Date()
-  const off = d.getTimezoneOffset() * 60000
-  return new Date(d.getTime() - off).toISOString().slice(0, 16)
-}
+const lagosClock = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Africa/Lagos', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+})
+const nowLagosInput = (now = new Date()) => lagosToday(now) + 'T' + lagosClock.format(now)
 
 // "3h 20m" / "45m" / "just now" between two Date-ish values.
 const humanDuration = (fromIso, toIso) => {
@@ -413,9 +413,10 @@ function ChecklistTab({ assets, templates, staffById, activeStaff, userProfile, 
 }
 
 // ── DOWNTIME TAB ─────────────────────────────────────────────────
-function DowntimeTab({ assets, activeStaff, staffById, userProfile, canWrite }) {
+export function DowntimeTab({ assets, activeStaff, staffById, userProfile, canWrite }) {
   const [assetId, setAssetId] = useState('')
-  const [startTime, setStartTime] = useState(nowLocalInput())
+  const [startTime, setStartTime] = useState(nowLagosInput)
+  const lateEntry = useLateReason(startTime.slice(0, 10))
   const [reason, setReason] = useState('')
   const [detail, setDetail] = useState('')
   const [staffId, setStaffId] = useState('')
@@ -452,10 +453,12 @@ function DowntimeTab({ assets, activeStaff, staffById, userProfile, canWrite }) 
   }, [])
 
   const resetForm = () => {
-    setAssetId(''); setStartTime(nowLocalInput()); setReason(''); setDetail(''); setStaffId(''); setPhotoFile(null)
+    lateEntry.reset()
+    setAssetId(''); setStartTime(nowLagosInput()); setReason(''); setDetail(''); setStaffId(''); setPhotoFile(null)
   }
 
   const submit = async () => {
+    if (lateEntry.invalid) return
     setAlert(null)
     if (!assetId) { setAlert({ type: 'error', msg: 'Select the asset that stopped.' }); return }
     if (!startTime) { setAlert({ type: 'error', msg: 'Set the start time.' }); return }
@@ -473,11 +476,12 @@ function DowntimeTab({ assets, activeStaff, staffById, userProfile, canWrite }) 
       }
 
       await maintenanceService.insertDowntime({
+        ...lateEntry.payload,
         asset_id: assetId,
         // The asset's own site (Phase 7A). Null for site-less assets (vehicles);
         // the DB trigger then falls back to Dutse.
         site_id: assetById[assetId]?.site_id || null,
-        start_time: new Date(startTime).toISOString(),
+        start_time: new Date(startTime + '+01:00').toISOString(),
         reason_category: reason,
         reason_detail: detail.trim() || null,
         staff_id: staffId || null,
@@ -493,7 +497,7 @@ function DowntimeTab({ assets, activeStaff, staffById, userProfile, canWrite }) 
       resetForm()
       load()
     } catch (e) {
-      setAlert({ type: 'error', msg: e?.message || 'Could not log downtime.' })
+      if (!lateEntry.handleError(e)) setAlert({ type: 'error', msg: e?.message || 'Could not log downtime.' })
     } finally {
       setSubmitting(false)
     }
@@ -541,8 +545,8 @@ function DowntimeTab({ assets, activeStaff, staffById, userProfile, canWrite }) 
               </select>
             </div>
             <div style={styles.formGroup}>
-              <label style={styles.label}>Start time</label>
-              <input type="datetime-local" style={styles.input} value={startTime} onChange={e => setStartTime(e.target.value)} />
+              <label style={styles.label} htmlFor="downtime-start">Start time (Lagos)</label>
+              <input id="downtime-start" type="datetime-local" max={lagosToday() + "T23:59"} style={styles.input} value={startTime} onChange={e => { lateEntry.reset(); setStartTime(e.target.value) }} />
             </div>
           </div>
           <div style={styles.grid2}>
@@ -569,7 +573,8 @@ function DowntimeTab({ assets, activeStaff, staffById, userProfile, canWrite }) 
             <label style={styles.label}>Photo (optional)</label>
             <input type="file" accept="image/*" onChange={e => setPhotoFile(e.target.files?.[0] || null)} style={{ fontSize: '13px', color: theme.text }} />
           </div>
-          <button style={styles.btn('primary')} onClick={submit} disabled={submitting}>
+          <LateReasonField entry={lateEntry} />
+          <button style={styles.btn('primary')} onClick={submit} disabled={submitting || lateEntry.invalid}>
             {submitting ? 'Saving…' : 'Log downtime'}
           </button>
         </div>
