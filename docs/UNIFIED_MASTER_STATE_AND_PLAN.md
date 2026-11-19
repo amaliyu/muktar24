@@ -1448,6 +1448,18 @@ Interim until A–C: Umar records Kado now; Abubakar gets a temporary assistant_
 - **Weekly review:** Kado and Life Camp diesel/cement standards reviewed 26 Nov (scheduled).
 - **Umar's Kado explanations (19 Nov):** MD asked questions back on 11 Nov (2.49% breakage) and 16–17 Nov (material box shifted three times — cause, fix, maintenance record; cement +10.5% on 17 Nov). 10 and 12 Nov await close.
 
+### Deliveries linked to payment requests + two fixes (MD 2026-11-19)
+- **Database — DONE** (`20261119190922_delivery_payment_request_link_and_small_fixes`):
+  - `material_receipts.payment_request_id`; `record_material_receipt(..., p_unit_cost, p_payment_request_id uuid default null)` (13 args; old 12-arg version dropped). Optional link, APCL items only, same site, request status `md_approved` / `funded` / `disbursed`, category with `closure_mechanism = 'stock_movements'`; Production Fuel ⇔ diesel, Raw Materials ⇔ not diesel. The 'in' stock movement carries the same `payment_request_id`.
+  - A `disbursed` request is **closed by the delivery** (audit row "Closed by delivery RCPT-…"). A request linked while still approved/funded closes the moment it is marked disbursed (`trg_zz_pr_close_when_delivered`, runs after the expense trigger so the expense is still created).
+  - One delivery closes a paid request, so a request covering several trucks closes on the first linked truck — the later trucks are recorded without a link. Revisit if this bites.
+  - Staff set to `terminated` or `suspended` have their attendance PIN switched off (`trg_zz_staff_pin_off_when_inactive`).
+  - `advance_salary_advance`: reject / cancel now set `outstanding_balance = 0` (existing rejected rows left as they are, per MD).
+- **Tested (rolled back):** paid request closes with audit; approved request closes on payment and still gets its expense; wrong material, wrong category, other site, pending/closed request and client item all refused; unlinked deliveries unchanged; suspend switches PIN off; rejected advance balance 0.
+- **Picker lookup** (`20261119191152_site_open_material_requests`): site staff can only read payment requests they raised, so `site_open_material_requests(site)` returns the site's approved/funded/paid Production Fuel and Raw Materials requests (whoever raised them) for the picker. Same roles as recording deliveries plus md/ico/accountant; site access via `can_see_site`.
+- **Note (19 Nov):** Kado has only one payment request ever (a draft diesel request by Umar), so Kado materials are currently bought outside payment requests. The link only helps once purchases go through payment requests.
+- **Frontend:** b9 — "Paid by payment request" picker on Material Receiving; linked deliveries shown on the payment request.
+
 ### Dutse while production is on hold
 - Any block leaving the yard needs a same-day waybill; owner to be named now Abubakar has moved.
 - Weekly yard count continues; best window to close the ICO stock reconciliation (unexplained ~77,000 blocks, ₦37–48m at cost, pending ICO checks due 20 Nov).
