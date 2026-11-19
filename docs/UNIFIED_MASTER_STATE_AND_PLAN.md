@@ -1460,6 +1460,18 @@ Interim until A–C: Umar records Kado now; Abubakar gets a temporary assistant_
 - **Note (19 Nov):** Kado has only one payment request ever (a draft diesel request by Umar), so Kado materials are currently bought outside payment requests. The link only helps once purchases go through payment requests.
 - **Frontend:** b9 — "Paid by payment request" picker on Material Receiving; linked deliveries shown on the payment request.
 
+### Payment request clean-up and staff tasks (MD 2026-11-19)
+- **Data, 19 Nov:** MD confirmed every approved request was paid. 52 `md_approved` requests (₦8,301,800, raised 9 Jul–7 Aug by Auwalu 23, Emmanuel 7, Abubakar 22) set to `disbursed`, `transaction_date` = approval date, so their auto-created expenses fall in July (7, ₦2.49m) and August (45, ₦5.81m); audit note "Historical clean-up: MD confirmed on 19 Nov 2026…"; no notifications sent. APC-PR-00051 and APC-PR-00088 have no category. Bank statements in the app end 18 May, so payment could not be checked against the bank; APC-PR-00064 (₦3.42m, 300 bags cement) matches 300 bags received 25 Jul.
+- **Gap:** no payment request has been raised since early September — Sept–Nov spending (beyond payroll and roster) is not in the app. MD: Kayode backfills it.
+- **Database — DONE** (`20261119200301_staff_tasks_and_payment_role_grants`, `20261119200418_backfill_payment_request_with_site`):
+  - `advance_payment_request` and `backfill_payment_request` now honour granted roles (`has_any_role`, i.e. `user_role_grants`) instead of only `user_profiles.role`. Kayode (ico) holds accountant (to 31 Dec 2026) and hr_officer (to 11 Feb 2027) grants, so he can fund, disburse, close and override-close. MD accepted that he closes entries he backfills.
+  - Backfill allowed for ico and accountant too. `backfill_payment_request_at_site(p_site_id, …same args…)` puts backfilled spending (and its expense) on the right site; plain backfill still defaults to Dutse.
+  - `staff_tasks` + `staff_task_events` (read: assignee or MD; writes only through functions). Kinds: `manual` (checklist; assignee ticks; all ticked → `submitted`; MD confirms or returns) and `pr_closure` (list of payment requests; finishes itself when all are closed — trigger `trg_zz_staff_task_pr_closed`).
+  - Functions: `create_staff_task` (MD), `list_staff_tasks(p_include_closed)`, `tick_staff_task_item`, `submit_staff_task`, `review_staff_task(confirm|return|cancel)`, `comment_staff_task`.
+  - `run_staff_task_reminders()` via pg_cron `staff-task-reminders-daily` at 07:00 UTC (08:00 Lagos): one notification per open task per day to the assignee with progress; overdue → daily copy to MD; submitted → MD reminded to confirm.
+- **Kayode's tasks (created 19 Nov, due 4 Dec):** "Receipts for 95 paid payment requests (₦11,869,800)" (pr_closure) and "Backfill September–November 2026 spending" (checklist Sep / Oct / Nov).
+- **Frontend:** b10 — My Tasks on the profile, banner on every page, MD task page, payment request screens honouring granted roles, site on backfill.
+
 ### Dutse while production is on hold
 - Any block leaving the yard needs a same-day waybill; owner to be named now Abubakar has moved.
 - Weekly yard count continues; best window to close the ICO stock reconciliation (unexplained ~77,000 blocks, ₦37–48m at cost, pending ICO checks due 20 Nov).
