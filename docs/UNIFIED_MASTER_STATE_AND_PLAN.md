@@ -1441,6 +1441,13 @@ Interim until A–C: Umar records Kado now; Abubakar gets a temporary assistant_
 - **One warning per site per day (MD, `20261119083947_production_warnings_one_per_site_day`):** lines stay per parameter; one notification per site-day listing every line out; explain / ask / close act on the whole day; a line added later the same day sends one more note. Screens to group by day next (Codex b7).
 - **Duplicate-deduction check 19 Nov:** clean — one movement per material per entry since the switch; dust = blocks × standard.
 
+### Site scorecard — step B (MD 2026-11-19)
+- **Database — DONE** (`20261119165008_site_delivery_prices_and_material_costing`, `20261119165101_site_daily_scorecard`): price per unit on deliveries (`material_receipts.unit_cost`, `record_material_receipt(..., p_unit_cost)`); `inventory_items.unit_cost` is a running weighted average (replaced by the new price when stock is zero or negative); production consumption is costed at it; Bilaad (client) materials never priced; flag `site_delivery_price_required` (Kado price compulsory) OFF until the price field ships. Kado opening prices from Umar's 18 Nov report (MD): cement ₦11,600/bag, dust ₦17,000/t, diesel ₦1,970/L; Kado consumption 10–18 Nov costed at ₦2,863,452 = ~₦736 per block vs ₦791.29 budget (`production_sites.material_cost_budget_per_block`). `site_daily_scorecard(site, date)` returns quantities, yields and costs vs budget, labour from the roster, and the day's warning lines.
+- **Data fix 19 Nov:** all six Kado production entries had the day's dust tonnes typed into "Chippings (kg)" (e.g. 21.9 on 18 Nov). Cleared (no stock effect — Kado has no 3/8 item); Umar is still working dust out by hand. The 3/8 box comes off the form for sites with standards.
+- **Gaps for the scorecard:** no Kado roster has ever been recorded, so labour is blank until Umar records the daily roster; only one Kado delivery is recorded, so Kado stock is negative.
+- **Weekly review:** Kado and Life Camp diesel/cement standards reviewed 26 Nov (scheduled).
+- **Umar's Kado explanations (19 Nov):** MD asked questions back on 11 Nov (2.49% breakage) and 16–17 Nov (material box shifted three times — cause, fix, maintenance record; cement +10.5% on 17 Nov). 10 and 12 Nov await close.
+
 ### Dutse while production is on hold
 - Any block leaving the yard needs a same-day waybill; owner to be named now Abubakar has moved.
 - Weekly yard count continues; best window to close the ICO stock reconciliation (unexplained ~77,000 blocks, ₦37–48m at cost, pending ICO checks due 20 Nov).
