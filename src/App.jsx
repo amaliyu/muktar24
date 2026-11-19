@@ -8016,6 +8016,7 @@ function PaymentRequests({ userProfile, assignedSiteId, initialRequest }) {
   const INITIATOR_ROLES = ['production_manager', 'logistics_manager', 'bdm', 'hr_officer'];
   const isSiteRequester = Boolean(assignedSiteId);
   const isInitiator = hasRole(userProfile, ...INITIATOR_ROLES) || isSiteRequester;
+  const initiatorView = isInitiator && !canProcess;
   const canReadSuppliers = hasRole(userProfile, 'md', 'accountant', 'board_member', 'ico', ...INITIATOR_ROLES);
   const canRecall = hasRole(userProfile, 'ico', 'md', ...INITIATOR_ROLES);
   const defaultPayeeMode = canReadSuppliers ? 'existing' : 'new';
@@ -8102,7 +8103,7 @@ function PaymentRequests({ userProfile, assignedSiteId, initialRequest }) {
     setLoading(true);
     try {
       const [reqs, cats] = await Promise.all([
-        isInitiator && !canProcess ? paymentRequestsService.listMine(userId) : paymentRequestsService.list(),
+        initiatorView ? paymentRequestsService.listMine(userId) : paymentRequestsService.list(),
         expenseCategoriesService.getActive(),
       ]);
       setRequests(reqs);
@@ -8414,11 +8415,11 @@ function PaymentRequests({ userProfile, assignedSiteId, initialRequest }) {
         <div>
           <div style={styles.pageTitle}>Payment Requests</div>
           <div style={styles.pageSubtitle}>
-            {isInitiator ? 'Submit and track your payment requests' : 'Review and process payment requests'}
+            {initiatorView ? 'Submit and track your payment requests' : 'Review and process payment requests'}
           </div>
         </div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-          {(!isInitiator || canProcess) && (
+          {!initiatorView && (
             <div className="m-wrap" style={{ display: 'flex', gap: '4px' }}>
               {[['Action Queue', 'queue'], ['All Requests', 'all'], ...((canQuery || isMD) ? [['Queried', 'queried']] : [])].map(([label, val]) => {
                 const active = val === 'queried' ? showQueried : (!showQueried && showHistory === (val === 'all'));
@@ -8458,11 +8459,11 @@ function PaymentRequests({ userProfile, assignedSiteId, initialRequest }) {
             <div style={{ ...styles.statValue, color: theme.green }}>{naira(outstandingTotal)}</div>
             <div style={styles.statSub}>
               {fundedRequests.length} request{fundedRequests.length !== 1 ? 's' : ''} funded but not yet disbursed
-              {isInitiator && ' (your requests)'}
+              {initiatorView && ' (your requests)'}
             </div>
           </div>
           <div style={{ fontSize: '12px', color: theme.textMuted, maxWidth: '320px' }}>
-            Funding has been set aside for {isInitiator ? 'these requests' : 'these requests across all initiators'} — pending final disbursement by the accountant.
+            Funding has been set aside for {initiatorView ? 'these requests' : 'these requests across all initiators'} — pending final disbursement by the accountant.
           </div>
         </div>
       )}
@@ -8902,7 +8903,7 @@ function PaymentRequests({ userProfile, assignedSiteId, initialRequest }) {
                   <div style={{ fontSize: '13px', color: theme.textMuted }}>No payee details recorded.</div>
                 )}
               </div>
-              {!isInitiator && req.requester?.full_name && (
+              {!initiatorView && req.requester?.full_name && (
                 <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: '16px', marginTop: '4px' }}>
                   <DL label="Requested by" value={req.requester.full_name} />
                   <DL label="Date" value={req.created_at ? fmtDay(req.created_at) : null} />
@@ -9002,7 +9003,7 @@ function PaymentRequests({ userProfile, assignedSiteId, initialRequest }) {
       <div style={styles.card}>
         {loading ? <Spinner /> : queue.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '30px', color: theme.textMuted }}>
-            {prSiteFilter && statusQueue.length > 0 ? `No requests for ${siteName(prSiteFilter, prSites)} in this view.` : statusFilter !== 'all' ? `No ${statusFilter.replace(/_/g, ' ')} requests.` : isInitiator ? 'No payment requests yet.' : showHistory ? 'No payment requests found.' : 'No requests pending in this queue.'}
+            {prSiteFilter && statusQueue.length > 0 ? `No requests for ${siteName(prSiteFilter, prSites)} in this view.` : statusFilter !== 'all' ? `No ${statusFilter.replace(/_/g, ' ')} requests.` : initiatorView ? 'No payment requests yet.' : showHistory ? 'No payment requests found.' : 'No requests pending in this queue.'}
           </div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
@@ -9010,7 +9011,7 @@ function PaymentRequests({ userProfile, assignedSiteId, initialRequest }) {
               <thead>
                 <tr>
                   {['Reference', 'Site', 'Amount', 'Purpose', 'Category', 'Method', 'Payee',
-                    ...(!isInitiator ? ['Requested By'] : []),
+                    ...(!initiatorView ? ['Requested By'] : []),
                     'Status', 'Date', 'Actions'].map(h => (
                     <th key={h} style={styles.th}>{h}</th>
                   ))}
@@ -9028,7 +9029,7 @@ function PaymentRequests({ userProfile, assignedSiteId, initialRequest }) {
                       <td style={styles.td}>{req.expense_category_id ? (catMap[req.expense_category_id] || '—') : <span style={{ color: theme.textMuted }}>—</span>}</td>
                       <td style={styles.td}>{req.disbursement_method === 'bank_transfer' ? 'Bank Transfer' : 'Cash'}</td>
                       <td style={styles.td}>{req.supplier?.company_name || req.payee_name || <span style={{ color: theme.textMuted }}>—</span>}</td>
-                      {!isInitiator && <td style={styles.td}>{req.requester?.full_name || '—'}</td>}
+                      {!initiatorView && <td style={styles.td}>{req.requester?.full_name || '—'}</td>}
                       <td style={styles.td}>
                         <span style={styles.badge(statusColor(req.status))}>{req.status}</span>
                         {req.transaction_date && <span style={{ ...styles.badge('#f59e0b'), marginLeft: '4px', fontSize: '10px', color: '#000' }}>Historical</span>}
@@ -9037,7 +9038,7 @@ function PaymentRequests({ userProfile, assignedSiteId, initialRequest }) {
                       <td style={styles.td}>
                         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                           <button style={{ ...styles.btn('secondary'), ...sm }} onClick={() => setDetailReq(req)}>View</button>
-                          {isInitiator && req.status === 'draft' && (
+                          {req.status === 'draft' && req.requested_by === userId && (
                             <button style={{ ...styles.btn('secondary'), ...sm }} onClick={() => openEdit(req)}><IconText icon={Pencil}>Edit</IconText></button>
                           )}
                           {actions}
@@ -11569,7 +11570,7 @@ export default function App() {
   const visibleNav = navItems
     .map(s => ({ ...s, items: s.items.filter(it => canSee(it.id)) }))
     .filter(s => s.items.length > 0);
-  const safePage = (canSee(active) || (active === 'payment_requests' && initialPayment?.id)) ? active : (visibleNav[0]?.items[0]?.id || 'dashboard');
+  const safePage = canSee(active) ? active : (visibleNav[0]?.items[0]?.id || 'dashboard');
   // The read-only mask still applies to a primary board/ICO viewer, but is
   // relaxed on any page a granted role unlocks (so a granted write role works).
   const boardMasked = isBoard && safePage !== 'late_entries' && !BOARD_EXEMPT_PAGES.includes(safePage) && !grantedPages.has(safePage);
@@ -11589,7 +11590,10 @@ export default function App() {
   const scorecardDashboard = canSee("site_scorecard")
     ? <ScorecardDashboard userProfile={userProfile} onOpen={openScorecard} /> : null;
   const budgetCards = <BudgetWarningDashboardCards userProfile={userProfile} onOpen={openBudgetWarnings} />;
-  const openPaymentRequest = id => { setInitialPayment(id ? { id } : null); setActive('payment_requests'); };
+  const openPaymentRequest = id => {
+    setInitialPayment(id && canSee('payment_requests') ? { id } : null);
+    setActive('payment_requests');
+  };
   const pages = {
     dashboard: isBoard
       ? <>{budgetCards}{scorecardDashboard}<SiteDashboardCards userProfile={userProfile} onOpenSite={openSiteContracts} /><RequisitionsDashboardBanner userProfile={userProfile} onOpen={openRequisitions} /><BoardDashboard userProfile={userProfile} /></>
