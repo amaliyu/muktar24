@@ -1456,6 +1456,8 @@ Interim until A–C: Umar records Kado now; Abubakar gets a temporary assistant_
   - Staff set to `terminated` or `suspended` have their attendance PIN switched off (`trg_zz_staff_pin_off_when_inactive`).
   - `advance_salary_advance`: reject / cancel now set `outstanding_balance = 0` (existing rejected rows left as they are, per MD).
 - **Tested (rolled back):** paid request closes with audit; approved request closes on payment and still gets its expense; wrong material, wrong category, other site, pending/closed request and client item all refused; unlinked deliveries unchanged; suspend switches PIN off; rejected advance balance 0.
+- **Picker lookup** (`20261119191152_site_open_material_requests`): site staff can only read payment requests they raised, so `site_open_material_requests(site)` returns the site's approved/funded/paid Production Fuel and Raw Materials requests (whoever raised them) for the picker. Same roles as recording deliveries plus md/ico/accountant; site access via `can_see_site`.
+- **Note (19 Nov):** Kado has only one payment request ever (a draft diesel request by Umar), so Kado materials are currently bought outside payment requests. The link only helps once purchases go through payment requests.
 - **Frontend:** b9 — "Paid by payment request" picker on Material Receiving; linked deliveries shown on the payment request.
 
 ### Dutse while production is on hold
