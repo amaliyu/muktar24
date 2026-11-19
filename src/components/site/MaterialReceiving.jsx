@@ -1,3 +1,5 @@
+import { requisitionsService } from '../../services/requisitions'
+import { RECEIPT_STATUSES, number } from '../../utils/requisitionText'
 import { withAssignedSite } from '../AssignedSite'
 import { LateReasonField, useLateReason } from '../LateReasonField'
 import { withPhase7Touch } from './siteUi'
@@ -64,6 +66,19 @@ function MaterialReceiptForm({ onSaved, assignedSiteId }) {
   }, [siteId])
 
   const item = items.find(i => i.id === form.itemId)
+  const clientItem = item?.owner === 'client' && sites.some(site => site.id === siteId && site.site_type === 'client_site')
+  const [requisitionOptions, setRequisitionOptions] = useState([])
+  const [requisitionError, setRequisitionError] = useState(null)
+  const [requisitionChoice, setRequisitionChoice] = useState(null)
+  useEffect(() => {
+    let active = true
+    setRequisitionOptions([]); setRequisitionChoice(null); setRequisitionError(null)
+    if (clientItem) requisitionsService.list(siteId, RECEIPT_STATUSES).then(rows => {
+      if (active) setRequisitionOptions(rows || [])
+    }, error => { if (active) setRequisitionError(error) })
+    return () => { active = false }
+  }, [siteId, clientItem])
+  const requisitionId = clientItem ? (requisitionChoice ?? requisitionOptions.find(row => row.site_id === siteId && row.status === 'client_approved')?.id ?? '') : ''
   const isKg = item?.unit === 'kg'
   const bulkMaterial = isKg && isDustOrChippings(item)
   const deliveredKg = Number(form.delivered)
@@ -101,6 +116,7 @@ function MaterialReceiptForm({ onSaved, assignedSiteId }) {
       }
       await siteContractsService.recordReceipt({
         ...lateEntry.payload,
+        ...(requisitionOptions.some(row => row.site_id === siteId && row.id === requisitionId) ? { requisitionId } : {}),
         itemId: form.itemId,
         receivedOn: form.receivedOn,
         qtyDelivered: Number(form.delivered) * factor,
@@ -149,6 +165,14 @@ function MaterialReceiptForm({ onSaved, assignedSiteId }) {
           {!itemsErr && items.length === 0 && <div style={ui.hint}>No stock items at this site yet.</div>}
           {item?.owner === 'client' && <div style={{ marginTop: '6px' }}><Pill label="Client-owned" color={theme.blue} /> <span style={ui.hint}>Not APCL stock or cost.</span></div>}
         </div>
+        {clientItem && <div style={ui.field}>
+          <label style={ui.label} htmlFor="rcv-requisition">Against requisition</label>
+          <select id="rcv-requisition" style={ui.input} value={requisitionId} onChange={e => setRequisitionChoice(e.target.value)}>
+            <option value="">None</option>
+            {requisitionOptions.filter(row => row.site_id === siteId).map(row => <option key={row.id} value={row.id}>{row.reference} — {number(row.qty_total)} blocks</option>)}
+          </select>
+          <ErrorBox error={requisitionError} />
+        </div>}
         <div style={ui.field}>
           <label style={ui.label} htmlFor="rcv-date">Date received *</label>
           <input id="rcv-date" type="date" max={lagosToday()} style={ui.input} value={form.receivedOn} onChange={e => { lateEntry.reset(); set('receivedOn')(e) }} />

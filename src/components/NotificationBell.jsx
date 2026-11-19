@@ -27,6 +27,7 @@ const TABLE_PAGE = {
   contract_cycles:      'site_contracts',
   block_handovers:      'handovers',
   material_receipts:    'material_receiving',
+  client_requisitions:  'requisitions',
   inventory_items:      'material_receiving',   // "materials running low" → record the next delivery
 }
 
