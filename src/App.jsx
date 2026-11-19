@@ -1,3 +1,5 @@
+import { SiteDayDashboard, SiteDayForm, SiteDayStrip, SITE_DAY_WRITE_ROLES, SITE_DAY_READ_ROLES, useSiteDayOverview } from './components/site/SiteDays'
+import { siteDays } from './services/siteDays'
 import MyTasks, { StaffTasks, TaskReminder, useTaskReminders } from './components/tasks/MyTasks'
 import SiteScorecard, { ScorecardDashboard } from './components/site/SiteScorecard'
 import BudgetWarnings, { BudgetWarningDashboardCards, SavedBudgetWarnings, useSavedBudgetWarnings } from './components/site/BudgetWarnings'
@@ -845,7 +847,7 @@ const fmtRelativeTime = (iso) => {
   return `${Math.floor(months / 12)}y ago`;
 };
 
-export const Production = withAssignedSite(function Production({ userProfile, assignedSiteId, onOpenBudgetWarnings }) {
+export const Production = withAssignedSite(function Production({ userProfile, assignedSiteId, onOpenBudgetWarnings, initialSiteId, onLabour }) {
   const savedWarnings = useSavedBudgetWarnings();
   const [showForm, setShowForm] = useState(false);
   const [dupWarning, setDupWarning] = useState(null);
@@ -859,11 +861,33 @@ export const Production = withAssignedSite(function Production({ userProfile, as
   const [targets, setTargets] = useState([]);
   const [targetForm, setTargetForm] = useState({ date: new Date().toISOString().split('T')[0], blockType: "9 Inch 3 Hole Block", quantity: "" });
   const [savingTarget, setSavingTarget] = useState(false);
-  const emptyForm = { date: "", siteId: assignedSiteId || DUTSE_SITE_ID, assetId: "", blockType: "9 Inch 3 Hole Block", produced: "", cement: "", granite: "", chippings: "", diesel: "", dmgProd: "0", dmgStack: "0" };
+  const [siteFilter, setSiteFilter] = useState(initialSiteId || "");
+  const emptyForm = { date: "", siteId: assignedSiteId || siteFilter || DUTSE_SITE_ID, assetId: "", blockType: "9 Inch 3 Hole Block", produced: "", cement: "", granite: "", chippings: "", diesel: "", dmgProd: "0", dmgStack: "0" };
   const [form, setForm] = useState(emptyForm);
   const lateEntry = useLateReason(form.date, editTarget?.date);
   const { sites } = useSites();
-  const [siteFilter, setSiteFilter] = useState("");
+  const daySite = assignedSiteId || (showForm && form.siteId) || siteFilter || DUTSE_SITE_ID;
+  const canWriteDay = hasRole(userProfile, ...SITE_DAY_WRITE_ROLES);
+  const canWriteProduction = canWriteDay || hasRole(userProfile, "operations");
+  const [dayRevision, setDayRevision] = useState(0);
+  const refreshDays = () => setDayRevision(revision => revision + 1);
+  const { overview: dayOverview, error: dayError } = useSiteDayOverview(
+    hasRole(userProfile, ...SITE_DAY_READ_ROLES) ? daySite : null, dayRevision);
+  const [dayEditor, setDayEditor] = useState(null);
+  const [markedDay, setMarkedDay] = useState(null);
+  const [removingDay, setRemovingDay] = useState(false);
+  const openDay = date => setDayEditor({ siteId: daySite, date });
+  const removeMarkedDay = async () => {
+    if (removingDay) return;
+    setRemovingDay(true);
+    try {
+      await siteDays.clear(markedDay.siteId, markedDay.date);
+      refreshDays();
+      setMarkedDay(null);
+      setAlert(null);
+    } catch (error) { setMarkedDay(previous => previous === markedDay ? { ...previous, error: error.message } : previous); }
+    finally { setRemovingDay(false); }
+  };
   const [machines, setMachines] = useState([]);
   const [machinesError, setMachinesError] = useState(null);
   // Site the loaded `machines` list belongs to (null while loading).
@@ -984,7 +1008,7 @@ export const Production = withAssignedSite(function Production({ userProfile, as
   };
 
   const handleSave = async (skipDupCheck = false) => {
-    if (lateEntry.invalid) return;
+    if (lateEntry.invalid || removingDay) return;
     if (!form.date || !form.produced) return setAlert({ type: "error", msg: "Date and quantity produced are required." });
     if (standardsError) return setAlert({ type: "error", msg: "Could not load dust standards: " + standardsError });
     if (machinesSite !== (form.siteId || DUTSE_SITE_ID)) return setAlert({ type: "error", msg: "The machines for this site are still loading. Try again in a moment." });
@@ -1001,6 +1025,7 @@ export const Production = withAssignedSite(function Production({ userProfile, as
     let savedProduction = null;
     setSaving(true);
     setAlert(null);
+    setMarkedDay(null);
     setStockWarning(null);
     try {
       const dbPosting = await productionMaterialsInDb();
@@ -1058,11 +1083,18 @@ export const Production = withAssignedSite(function Production({ userProfile, as
       setShowForm(false);
       setEditTarget(null);
     } catch (e) {
+      if (!savedProduction && e.message?.startsWith('DAY_MARKED:')) {
+        setMarkedDay({ siteId: form.siteId || DUTSE_SITE_ID, date: form.date, message: e.message });
+        return;
+      }
       if (!savedProduction && lateEntry.handleError(e)) return;
       if (savedProduction) { setShowForm(false); setEditTarget(null); await load(); }
       setAlert({ type: "error", msg: e.code === "22007" ? e.message : (savedProduction ? "Production saved, but a follow-up step failed. " : "Failed to save. ") + e.message });
     } finally {
-      if (savedProduction) await savedWarnings.refresh(form.siteId || DUTSE_SITE_ID, form.date);
+      if (savedProduction) {
+        refreshDays();
+        await savedWarnings.refresh(form.siteId || DUTSE_SITE_ID, form.date);
+      }
       setSaving(false);
     }
   };
@@ -1071,6 +1103,7 @@ export const Production = withAssignedSite(function Production({ userProfile, as
     try {
       // The database reverses material movements in the parent delete transaction.
       await productionService.deleteEntry(record.id);
+      refreshDays();
       await inventoryService.getAllItems();
       await load();
       setRecords(prev => prev.filter(r => r.id !== record.id));
@@ -1127,12 +1160,30 @@ export const Production = withAssignedSite(function Production({ userProfile, as
           <div style={styles.pageSubtitle}>Daily block production, material usage, and damage tracking</div>
         </div>
         <div style={{ display: "flex", gap: "8px" }}>
-          <button style={styles.btn("secondary")} onClick={() => setShowTargetForm(!showTargetForm)}>Set Daily Target</button>
-          <button style={styles.btn("primary")} onClick={() => setShowForm(!showForm)}>+ Log Today's Production</button>
+          {canWriteProduction && <button style={styles.btn("secondary")} onClick={() => setShowTargetForm(!showTargetForm)}>Set Daily Target</button>}
+          {canWriteProduction && <button style={styles.btn("primary")} onClick={() => {
+            if (!showForm && !editTarget) setForm(previous => ({ ...previous,
+              siteId: assignedSiteId || siteFilter || previous.siteId, assetId: "" }));
+            setShowForm(!showForm);
+          }}>+ Log Today's Production</button>}
+          {dayOverview?.day_status_from && canWriteDay && <button data-ico-allow data-board-allow type="button"
+            style={{ ...styles.btn("secondary"), minHeight: 44 }} onClick={() => openDay(lagosToday())}>No production on a day</button>}
         </div>
       </div>
 
       {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
+      {markedDay && <div style={{ ...styles.alert("error"), display: "block", overflowWrap: "anywhere" }}>
+        <div role="alert">{markedDay.message}</div>
+        {markedDay.error && <div role="alert">{markedDay.error}</div>}
+        {canWriteDay && <button data-ico-allow data-board-allow type="button" style={{ ...styles.btn("secondary"), marginTop: 8, minHeight: 44 }}
+          disabled={removingDay} onClick={removeMarkedDay}>Remove day status for {fmtDate(markedDay.date)}</button>}
+      </div>}
+      {dayError && <div role="alert" style={{ marginBottom: 12, color: theme.red }}>Could not load site days: {dayError.message}</div>}
+      <SiteDayStrip overview={dayOverview} canWrite={canWriteDay} onOpen={openDay} onLabour={onLabour} />
+      {dayEditor?.siteId === daySite && dayOverview?.day_status_from && canWriteDay && <SiteDayForm
+        key={dayEditor.siteId + ':' + dayEditor.date} siteId={daySite} siteName={dayOverview.site_name}
+        initialDate={dayEditor.date} overview={dayOverview} onCancel={() => setDayEditor(null)}
+        onSaved={() => { setDayEditor(null); refreshDays(); }} />}
       {stockWarning && (
         <div style={{ padding: "10px 14px", borderRadius: "8px", marginBottom: "16px", background: theme.accent + "18", border: `1px solid ${theme.accent}55`, color: theme.accent, fontSize: "13px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px" }}>
           <div>
@@ -1189,7 +1240,7 @@ export const Production = withAssignedSite(function Production({ userProfile, as
           <div className="m-form" style={styles.grid(3)}>
             <div style={styles.formGroup}>
               <label style={styles.label}>Site</label>
-              <SitePicker value={form.siteId} onChange={v => setForm({ ...form, siteId: v, assetId: "" })} style={styles.input} />
+              <SitePicker value={form.siteId} onChange={v => { setDayEditor(null); setMarkedDay(null); setForm({ ...form, siteId: v, assetId: "" }); }} style={styles.input} />
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Machine</label>
@@ -1208,7 +1259,7 @@ export const Production = withAssignedSite(function Production({ userProfile, as
             ].map(f => (
               <div key={f.key} style={styles.formGroup}>
                 <label style={styles.label}>{f.label}</label>
-                <input style={styles.input} type={f.type} max={lagosToday()} value={form[f.key]} onChange={e => { lateEntry.reset(); setForm({ ...form, [f.key]: e.target.value }); }} />
+                <input style={styles.input} type={f.type} max={lagosToday()} value={form[f.key]} onChange={e => { lateEntry.reset(); setMarkedDay(null); setForm({ ...form, [f.key]: e.target.value }); }} />
               </div>
             ))}
             <div style={styles.formGroup}>
@@ -1264,7 +1315,7 @@ export const Production = withAssignedSite(function Production({ userProfile, as
       <div style={styles.card}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap", marginBottom: "14px" }}>
           <div style={{ ...styles.sectionTitle, marginBottom: 0 }}>Production Records</div>
-          <div className="m-full" style={{ width: "220px" }}><SitePicker allowAll value={siteFilter} onChange={setSiteFilter} style={styles.input} /></div>
+          <div className="m-full" style={{ width: "220px" }}><SitePicker allowAll value={siteFilter} onChange={siteId => { setDayEditor(null); setSiteFilter(siteId); }} style={styles.input} /></div>
         </div>
         {loading ? <Spinner /> : shown.length === 0 ? (
           <div style={{ textAlign: "center", padding: "40px", color: theme.textMuted, fontSize: "13px" }}>{records.length === 0 ? "No records yet. Log today's production to get started." : `No production records for ${scopeLabel}.`}</div>
@@ -1302,8 +1353,8 @@ export const Production = withAssignedSite(function Production({ userProfile, as
                     <td style={styles.td}><strong style={{ color: theme.green }}>{fmt(net)}</strong></td>
                     <td className="m-actions" style={styles.td}>
                       <div style={{ display: "flex", gap: "8px" }}>
-                        {(!assignedSiteId || p.site_id === assignedSiteId) && <button style={{ ...styles.btn("secondary"), padding: "4px 10px", fontSize: "12px" }} onClick={() => startEdit(p)}>Edit</button>}
-                        <button style={{ ...styles.btn("danger"), padding: "4px 10px", fontSize: "12px" }} onClick={() => setConfirmDelete(p)}>Delete</button>
+                        {canWriteProduction && (!assignedSiteId || p.site_id === assignedSiteId) && <button style={{ ...styles.btn("secondary"), padding: "4px 10px", fontSize: "12px" }} onClick={() => startEdit(p)}>Edit</button>}
+                        {canWriteProduction && <button style={{ ...styles.btn("danger"), padding: "4px 10px", fontSize: "12px" }} onClick={() => setConfirmDelete(p)}>Delete</button>}
                       </div>
                     </td>
                   </tr>
@@ -11367,6 +11418,7 @@ export default function App() {
   const [contractsSite, setContractsSite] = useState('');
   const [requisitionSite, setRequisitionSite] = useState('');
   const [initialScorecard, setInitialScorecard] = useState(null);
+  const [initialProduction, setInitialProduction] = useState(null);
   const [initialWarning, setInitialWarning] = useState(null);
   const [contractsReport, setContractsReport] = useState(false);
   const [lowStockCount, setLowStockCount] = useState(0);
@@ -11558,6 +11610,7 @@ export default function App() {
   const grantedRoles = effRoles.filter(r => r !== role);
   const grantedPages = new Set(grantedRoles.flatMap(r => (ROLE_PAGES[r] && ROLE_PAGES[r] !== 'all') ? ROLE_PAGES[r] : []));
   const canSee = (pageId) => {
+    if (pageId === 'production') return allowedPages === 'all' || allowedPages.includes(pageId) || hasRole(userProfile, ...SITE_DAY_READ_ROLES);
     if (pageId === 'staff_tasks') return hasRole(userProfile, 'md');
     if (pageId === 'late_entries') return hasRole(userProfile, 'md', 'ico');
     if (pageId === 'my_profile') return true;
@@ -11589,6 +11642,8 @@ export default function App() {
   };
   const scorecardDashboard = canSee("site_scorecard")
     ? <ScorecardDashboard userProfile={userProfile} onOpen={openScorecard} /> : null;
+  const openProduction = siteId => { setInitialProduction(previous => ({ siteId, key: (previous?.key || 0) + 1 })); setActive("production"); };
+  const dayCards = <SiteDayDashboard userProfile={userProfile} onProduction={openProduction} />;
   const budgetCards = <BudgetWarningDashboardCards userProfile={userProfile} onOpen={openBudgetWarnings} />;
   const openPaymentRequest = id => {
     setInitialPayment(id && canSee('payment_requests') ? { id } : null);
@@ -11596,15 +11651,16 @@ export default function App() {
   };
   const pages = {
     dashboard: isBoard
-      ? <>{budgetCards}{scorecardDashboard}<SiteDashboardCards userProfile={userProfile} onOpenSite={openSiteContracts} /><RequisitionsDashboardBanner userProfile={userProfile} onOpen={openRequisitions} /><BoardDashboard userProfile={userProfile} /></>
-      : <MobileScope>{budgetCards}{scorecardDashboard}<Dashboard onOpenRequisitions={openRequisitions} onNavigate={setActive} onOpenSite={openSiteContracts} userProfile={userProfile} /></MobileScope>,
+      ? <>{dayCards}{budgetCards}{scorecardDashboard}<SiteDashboardCards userProfile={userProfile} onOpenSite={openSiteContracts} /><RequisitionsDashboardBanner userProfile={userProfile} onOpen={openRequisitions} /><BoardDashboard userProfile={userProfile} /></>
+      : <MobileScope>{dayCards}{budgetCards}{scorecardDashboard}<Dashboard onOpenRequisitions={openRequisitions} onNavigate={setActive} onOpenSite={openSiteContracts} userProfile={userProfile} /></MobileScope>,
     late_entries: <MobileScope fit><LateEntries /></MobileScope>,
-    production: <MobileScope><Production userProfile={userProfile} onOpenBudgetWarnings={openBudgetWarnings} /></MobileScope>,
+    production: <MobileScope><Production key={initialProduction?.key || 'default'} userProfile={userProfile}
+      initialSiteId={initialProduction?.siteId} onLabour={() => setActive("labour")} onOpenBudgetWarnings={openBudgetWarnings} /></MobileScope>,
     inventory: <MobileScope><Inventory onLowStockChange={setLowStockCount} userProfile={userProfile} onNavigate={setActive} /></MobileScope>,
     site_contracts: <SiteContracts userProfile={userProfile} initialSiteId={contractsSite} initialReport={contractsReport} />,
     asset_register: <AssetRegister userProfile={userProfile} />,
     material_receiving: <MaterialReceiving userProfile={userProfile} />,
-    site_scorecard: <SiteScorecard userProfile={userProfile} initial={initialScorecard} onOpenBudgetWarnings={openBudgetWarnings} />,
+    site_scorecard: <SiteScorecard userProfile={userProfile} initial={initialScorecard} onProduction={openProduction} onOpenBudgetWarnings={openBudgetWarnings} />,
     production_exceptions: <BudgetWarnings key={initialWarning?.navigationKey || 'default'} userProfile={userProfile} initial={initialWarning} />,
     requisitions: <Requisitions userProfile={userProfile} initialSiteId={requisitionSite} />,
     handovers: <Handovers userProfile={userProfile} />,
@@ -11685,7 +11741,7 @@ export default function App() {
               {section.items.map(item => {
                 const badge = getBadge(item.id);
                 return (
-                  <div key={item.id} style={{ ...styles.navItem(active === item.id), ...(isMobile ? { minHeight: '44px' } : {}) }} onClick={() => { if (item.id === 'payment_requests') setInitialPayment(null); if (item.id === 'staff_tasks' || item.id === 'my_profile') setInitialTask(null); if (item.id === 'production_exceptions') setInitialWarning(null); if (item.id === 'site_scorecard') setInitialScorecard(null); setActive(item.id); setContractsReport(false); if (isMobile) setSidebarOpen(false); }}>
+                  <div key={item.id} style={{ ...styles.navItem(active === item.id), ...(isMobile ? { minHeight: '44px' } : {}) }} onClick={() => { if (item.id === 'payment_requests') setInitialPayment(null); if (item.id === 'staff_tasks' || item.id === 'my_profile') setInitialTask(null); if (item.id === 'production_exceptions') setInitialWarning(null); if (item.id === 'site_scorecard') setInitialScorecard(null); if (item.id === 'production') setInitialProduction(null); setActive(item.id); setContractsReport(false); if (isMobile) setSidebarOpen(false); }}>
                     <Icon name={item.icon} size={20} />
                     <span style={{ flex: 1 }}>{item.label}</span>
                     {badge > 0 && (
@@ -11719,6 +11775,7 @@ export default function App() {
         userProfile={userProfile}
         onNavigate={(page, relatedId) => {
           if (page === "production_exceptions") openBudgetWarnings(relatedId ? { id: relatedId } : null);
+          else if (page === "production" && relatedId) openProduction(relatedId);
           else if (page === "payment_requests") openPaymentRequest(relatedId);
           else {
             if (page === "staff_tasks" || page === "my_profile") setInitialTask(relatedId || null);

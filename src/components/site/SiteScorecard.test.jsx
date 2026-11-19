@@ -7,6 +7,7 @@ import { lagosToday } from '../../utils/lateEntry'
 
 const f = vi.hoisted(() => ({
   date: '2026-11-18',
+  idle: false,
   sites: [
     { id: 'kado', code: 'KADO-SEQ', name: 'Kado Site (Sequoia)', site_type: 'client_site' },
     { id: 'life', code: 'LIFECAMP-BIL', name: 'Life Camp Site (Bilaad)', site_type: 'client_site' },
@@ -34,7 +35,8 @@ vi.mock('../../lib/supabase', async () => {
   const mock = createSupabaseMock((table, args = {}) => {
     const data = {
       'rpc:my_assigned_site': f.assignment,
-      'rpc:site_daily_scorecard': args.p_date === f.date ? (args.p_site_id === 'kado' ? kado : life) : null,
+      'rpc:site_daily_scorecard': args.p_date === f.date ? (f.idle ? { ...kado, blocks_total: 0, day_status: { reason: 'rain', note: 'Wet yard', staff_worked: true, work_done: ['stacking', 'maintenance'] }, idle_labour: 45000 } : args.p_site_id === 'kado' ? kado : life) : null,
+      'rpc:site_day_overview': f.idle ? { totals: { blocks: 500, production_days: 1, no_production_days: 1, idle_labour_cost: 45000, cost_per_block: 210, cost_per_block_excl_idle: 120, missing_records: 1, missing_rosters: 0 } } : null,
       production_sites: f.sites,
       production_log: { date: f.date },
       production_exceptions: [{ id: 'open-line' }],
@@ -44,7 +46,7 @@ vi.mock('../../lib/supabase', async () => {
   f.calls = mock.calls
   return { supabase: mock.supabase }
 })
-beforeEach(() => { f.assignment = null; f.calls.length = 0 })
+beforeEach(() => { f.assignment = null; f.idle = false; f.calls.length = 0 })
 afterEach(cleanup)
 const shareText = () => new URL(screen.getByRole('link', { name: 'Send to WhatsApp' }).href).searchParams.get('text')
 
@@ -107,4 +109,18 @@ it('summarizes both client sites for the MD and opens the selected production da
   expect(screen.queryByText(/Dutse Factory/)).not.toBeInTheDocument()
   fireEvent.click(screen.getAllByRole('button', { name: 'View scorecard' })[0])
   expect(onOpen).toHaveBeenCalledWith('kado', f.date)
+})
+
+it('shows idle labour and both period cost-per-block measures on a no-production day', async () => {
+  f.idle = true
+  const onProduction = vi.fn()
+  render(<Scorecard initial={{ date: f.date }} onProduction={onProduction} />)
+  expect(await screen.findByText('No production — Rain')).toBeInTheDocument()
+  expect(screen.getByText('Staff worked: stacking, maintenance')).toBeInTheDocument()
+  expect(screen.getByText('Idle labour ₦45,000')).toBeInTheDocument()
+  const period = within(screen.getByRole('region', { name: 'Period totals' }))
+  expect(period.getByText('Cost per block (all days)').nextSibling).toHaveTextContent('₦210')
+  expect(period.getByText('Cost per block (production days only)').nextSibling).toHaveTextContent('₦120')
+  fireEvent.click(period.getByRole('button', { name: 'Missing records: 1' }))
+  expect(onProduction).toHaveBeenCalledWith('kado')
 })
