@@ -173,7 +173,7 @@ const APP_ROLES = [
 ];
 
 // Pages each role is allowed to access. 'all' = unrestricted.
-const ROLE_PAGES = {
+export const ROLE_PAGES = {
   md:                 'all',
   ico:                ['dashboard','payroll_approvals','investor_register','capital','terms','monthly_close','spv_ledger','reserve_budget','production','inventory','batches','maintenance','asset_register','site_contracts','material_receiving','handovers','waybills','vehicles','labour','truck_loading','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','advances','leave','payment_requests','messages'],
   accountant:         ['dashboard','payroll_approvals','investor_register','capital','terms','monthly_close','spv_ledger','reserve_budget','asset_register','site_contracts','material_receiving','handovers','customers','orders','reports','kpi_dashboard','accounting','suppliers','products','my_profile','data_import','labour','waybills','advances','leave','payment_requests','truck_loading','trading_margin','messages'],
@@ -186,7 +186,7 @@ const ROLE_PAGES = {
   hr_officer:         ['dashboard','site_contracts','staff','reports','labour','my_profile','advances','leave','disciplinary','attendance_kiosk','attendance_flags','payment_requests','messages'],
   kiosk_device:       ['attendance_kiosk'],
   production_manager:           ['dashboard','production','inventory','batches','maintenance','asset_register','site_contracts','material_receiving','handovers','reports','products','labour','truck_loading','my_profile','attendance_flags','payment_requests','messages'],
-  assistant_production_manager: ['dashboard','production','inventory','batches','maintenance','asset_register','site_contracts','material_receiving','handovers','reports','products','labour','truck_loading','my_profile','attendance_flags','messages'],
+  assistant_production_manager: ['dashboard','production','inventory','batches','maintenance','asset_register','site_contracts','material_receiving','handovers','reports','products','labour','truck_loading','my_profile','attendance_flags','payment_requests','messages'],
   // legacy roles — kept for any existing users
   operations:         ['dashboard','production','inventory','batches','waybills','vehicles','pending_register','daily_schedule','lpo_approvals','my_profile'],
   sales:              ['dashboard','customers','orders','my_profile'],
@@ -7972,11 +7972,16 @@ const PaymentRequestAttachmentRow = ({ att }) => {
 };
 
 // ── PAYMENT REQUESTS ──────────────────────────────────────────
-const PaymentRequestsPage = withAssignedSite(PaymentRequests);
+export const PaymentRequestsPage = withAssignedSite(PaymentRequests);
 function PaymentRequests({ userProfile, assignedSiteId }) {
   const role = userProfile?.role;
   const userId = userProfile?.id;
-  const isInitiator = ['production_manager', 'logistics_manager', 'bdm', 'hr_officer'].includes(role);
+  const INITIATOR_ROLES = ['production_manager', 'logistics_manager', 'bdm', 'hr_officer'];
+  const isSiteRequester = Boolean(assignedSiteId);
+  const isInitiator = INITIATOR_ROLES.includes(role) || isSiteRequester;
+  const canReadSuppliers = hasRole(userProfile, 'md', 'accountant', 'board_member', 'ico', ...INITIATOR_ROLES);
+  const canRecall = hasRole(userProfile, 'ico', 'md', ...INITIATOR_ROLES);
+  const defaultPayeeMode = canReadSuppliers ? 'existing' : 'new';
   const canReviewVendors = ['md', 'ico', 'accountant'].includes(role);
 
   const [requests, setRequests] = useState([]);
@@ -7987,7 +7992,7 @@ function PaymentRequests({ userProfile, assignedSiteId }) {
 
   const [showForm, setShowForm] = useState(false);
   const [editTarget, setEditTarget] = useState(null);
-  const [form, setForm] = useState({ amount: '', purpose: '', expense_category_id: '', disbursement_method: 'bank_transfer', order_item_id: '', _order_id: '', category_other_note: '', payeeMode: 'existing', supplier_id: '', payee_name: '', payee_bank_name: '', payee_account_number: '', payee_account_name: '', saveAsVendor: false });
+  const [form, setForm] = useState({ amount: '', purpose: '', expense_category_id: '', disbursement_method: 'bank_transfer', order_item_id: '', _order_id: '', category_other_note: '', payeeMode: defaultPayeeMode, supplier_id: '', payee_name: '', payee_bank_name: '', payee_account_number: '', payee_account_name: '', saveAsVendor: false });
   const [saving, setSaving] = useState(false);
   const [activeSuppliers, setActiveSuppliers] = useState([]);
   const [pendingVendors, setPendingVendors] = useState([]);
@@ -8024,7 +8029,7 @@ function PaymentRequests({ userProfile, assignedSiteId }) {
   const [prSiteFilter, setPrSiteFilter] = useState('');
   const { sites: prSites } = useSites();
 
-  const canBackfill = isInitiator || role === 'md';
+  const canBackfill = INITIATOR_ROLES.includes(role) || role === 'md';
   const canQuery = ['ico', 'accountant'].includes(role);
 
   const [resaleItems, setResaleItems] = useState([]);
@@ -8065,7 +8070,7 @@ function PaymentRequests({ userProfile, assignedSiteId }) {
       ]);
       setRequests(reqs);
       setCategories(cats);
-      if (isInitiator || role === 'md') paymentRequestsService.getActiveSuppliers().then(setActiveSuppliers).catch(e => setAlert({ type: 'error', msg: 'Could not load the vendor list: ' + (e?.message || e) }));
+      if (canReadSuppliers && (isInitiator || role === 'md')) paymentRequestsService.getActiveSuppliers().then(setActiveSuppliers).catch(e => setAlert({ type: 'error', msg: 'Could not load the vendor list: ' + (e?.message || e) }));
       if (canReviewVendors) paymentRequestsService.getPendingVendors().then(setPendingVendors).catch(e => setAlert({ type: 'error', msg: 'Could not load vendors awaiting review: ' + (e?.message || e) }));
     } catch (e) { setAlert({ type: 'error', msg: e.message }); }
     finally { setLoading(false); }
@@ -8090,10 +8095,10 @@ function PaymentRequests({ userProfile, assignedSiteId }) {
     return acc;
   }, {});
 
-  const emptyForm = { site_id: assignedSiteId || DUTSE_SITE_ID, amount: '', purpose: '', expense_category_id: '', disbursement_method: 'bank_transfer', order_item_id: '', _order_id: '', category_other_note: '', payeeMode: 'existing', supplier_id: '', payee_name: '', payee_bank_name: '', payee_account_number: '', payee_account_name: '', saveAsVendor: false };
+  const emptyForm = { site_id: assignedSiteId || DUTSE_SITE_ID, amount: '', purpose: '', expense_category_id: '', disbursement_method: 'bank_transfer', order_item_id: '', _order_id: '', category_other_note: '', payeeMode: defaultPayeeMode, supplier_id: '', payee_name: '', payee_bank_name: '', payee_account_number: '', payee_account_name: '', saveAsVendor: false };
 
   const openEdit = async (req) => {
-    const payeeMode = req.supplier_id ? 'existing' : 'new';
+    const payeeMode = canReadSuppliers && req.supplier_id ? 'existing' : 'new';
     let _order_id = '';
     if (req.order_item_id && req.expense_category_id === tradingPurchasesId) {
       const { data, error } = await supabase.from('order_items').select('order_id').eq('id', req.order_item_id).single();
@@ -8134,7 +8139,7 @@ function PaymentRequests({ userProfile, assignedSiteId }) {
     setSaving(true); setAlert(null);
     try {
       let supplierId = form.payeeMode === 'existing' ? form.supplier_id : null;
-      if (form.payeeMode === 'new' && form.saveAsVendor) {
+      if (canReadSuppliers && form.payeeMode === 'new' && form.saveAsVendor) {
         const result = await paymentRequestsService.createSupplierFromPaymentRequest({
           company_name: form.payee_name.trim(),
           bank_name: form.payee_bank_name.trim() || null,
@@ -8299,14 +8304,14 @@ function PaymentRequests({ userProfile, assignedSiteId }) {
     const btns = [];
     if (role === 'ico' && status === 'draft') {
       btns.push(<button key="approve" style={{ ...styles.btn('primary'), ...sm }} onClick={() => handleAction(id, 'ico_approve')} disabled={actionSaving}><IconText icon={Check}>Approve</IconText></button>);
-      btns.push(<button key="recall" style={{ ...styles.btn('danger'), ...sm }} onClick={() => setRecallTarget({ id })}><IconText icon={Undo2}>Recall</IconText></button>);
+      if (canRecall) btns.push(<button key="recall" style={{ ...styles.btn('danger'), ...sm }} onClick={() => setRecallTarget({ id })}><IconText icon={Undo2}>Recall</IconText></button>);
     } else if (role === 'md') {
       if (status === 'ico_approved') {
         btns.push(<button key="approve" style={{ ...styles.btn('primary'), ...sm }} onClick={() => handleAction(id, 'md_approve')} disabled={actionSaving}><IconText icon={Check}>Approve</IconText></button>);
-        btns.push(<button key="recall" style={{ ...styles.btn('danger'), ...sm }} onClick={() => setRecallTarget({ id })}><IconText icon={Undo2}>Recall</IconText></button>);
+        if (canRecall) btns.push(<button key="recall" style={{ ...styles.btn('danger'), ...sm }} onClick={() => setRecallTarget({ id })}><IconText icon={Undo2}>Recall</IconText></button>);
       }
       if (status === 'funded') {
-        btns.push(<button key="recall" style={{ ...styles.btn('danger'), ...sm }} onClick={() => setRecallTarget({ id })}><IconText icon={Undo2}>Recall</IconText></button>);
+        if (canRecall) btns.push(<button key="recall" style={{ ...styles.btn('danger'), ...sm }} onClick={() => setRecallTarget({ id })}><IconText icon={Undo2}>Recall</IconText></button>);
       }
     } else if (role === 'accountant') {
       if (status === 'md_approved') {
@@ -8425,7 +8430,9 @@ function PaymentRequests({ userProfile, assignedSiteId }) {
           <div style={styles.grid(2)}>
             <div style={styles.formGroup}>
               <label style={styles.label}>Site *</label>
-              {editTarget
+              {assignedSiteId
+                ? <FixedSite siteId={assignedSiteId} sites={prSites} style={styles.input} />
+                : editTarget
                 ? <div style={{ ...styles.input, color: theme.textMuted }}>{siteName(editTarget.site_id, prSites)}</div>
                 : <SitePicker value={form.site_id} onChange={v => setForm(f => ({ ...f, site_id: v }))} style={styles.input} />}
             </div>
@@ -8458,6 +8465,7 @@ function PaymentRequests({ userProfile, assignedSiteId }) {
                 <option value="">— None —</option>
                 {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
+              {isSiteRequester && <div style={{ fontSize: 12, color: theme.textMuted, marginTop: 4 }}>Diesel → Production Fuel. Cement or dust → Raw Materials.</div>}
             </div>
           </div>
           {othersCategoryId && form.expense_category_id === othersCategoryId && (
@@ -8513,7 +8521,7 @@ function PaymentRequests({ userProfile, assignedSiteId }) {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
               <div style={{ fontSize: '12px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Payee *</div>
               <div style={{ display: 'flex', gap: '4px' }}>
-                {['existing', 'new'].map(m => (
+                {(canReadSuppliers ? ['existing', 'new'] : ['new']).map(m => (
                   <button key={m} type="button"
                     style={{ ...styles.btn(form.payeeMode === m ? 'primary' : 'secondary'), padding: '5px 12px', fontSize: '12px' }}
                     onClick={() => setForm(f => ({ ...f, payeeMode: m, supplier_id: '', payee_name: '', payee_bank_name: '', payee_account_number: '', payee_account_name: '', saveAsVendor: false }))}>
@@ -8558,12 +8566,12 @@ function PaymentRequests({ userProfile, assignedSiteId }) {
                       value={form.payee_account_name} onChange={e => setForm(f => ({ ...f, payee_account_name: e.target.value }))} />
                   </div>
                 </div>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', marginTop: '4px', color: theme.text }}>
+                {canReadSuppliers && <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', marginTop: '4px', color: theme.text }}>
                   <input type="checkbox" checked={form.saveAsVendor}
                     onChange={e => setForm(f => ({ ...f, saveAsVendor: e.target.checked }))} />
                   Save as vendor for next time
                   {form.saveAsVendor && <span style={{ fontSize: '11px', color: theme.textMuted }}>(will appear in Pending Vendors for verification)</span>}
-                </label>
+                </label>}
               </div>
             )}
           </div>
@@ -8697,7 +8705,7 @@ function PaymentRequests({ userProfile, assignedSiteId }) {
         </div>
       )}
 
-      {recallTarget && (
+      {canRecall && recallTarget && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: Z.modal }}>
           <div style={{ ...styles.card, width: '420px' }}>
             <div style={{ ...styles.sectionTitle, marginBottom: '12px' }}>Recall Request — Reason Required</div>
