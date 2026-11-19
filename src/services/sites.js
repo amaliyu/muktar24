@@ -23,7 +23,7 @@ export const sitesService = {
   async getActive() {
     const { data, error } = await supabase
       .from('production_sites')
-      .select('id, code, name, site_type, contract_model, client_name, is_active, variance_tolerance_pct, breakage_budget_pct')
+      .select('id, code, name, site_type, contract_model, client_name, is_active, variance_tolerance_pct, breakage_budget_pct, material_cost_budget_per_block')
       .eq('is_active', true)
       .order('name')
     if (error) throw error

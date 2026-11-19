@@ -10,7 +10,7 @@ import { siteContractsService, lagosToday } from '../../services/siteContracts'
 import { hasRole } from '../../lib/roles'
 import { compressImage } from '../../utils/compressImage'
 import { buildRejectionNoticeText } from '../../utils/siteNotices'
-import { theme, ui, Pill, fmtDec, fmtDate, ErrorBox, SkeletonRows, PhotoLink, CopyButton, ConfirmDialog, StackTable } from './siteUi'
+import { theme, ui, Pill, fmtDec, fmtNaira, fmtDate, ErrorBox, SkeletonRows, PhotoLink, CopyButton, ConfirmDialog, StackTable } from './siteUi'
 
 // Phase 7B-1 — every material delivery checked on arrival. Writes go through
 // the record_material_receipt RPC, which adds ONLY the accepted quantity to
@@ -38,13 +38,14 @@ export function receiptFormProblem(form, item) {
 const isDustOrChippings = (item) => item?.material === 'dust' || item?.material === 'chippings'
 const itemFields = (item) => ({
   itemId: item?.id ?? '',
+  price: '',
   unit: item?.unit === 'kg' && isDustOrChippings(item) ? 'tonnes' : 'kg',
 })
 const emptyForm = () => ({ ...itemFields(), receivedOn: lagosToday(), delivered: '', accepted: '', reason: '', supplier: '', ref: '', notes: '', photo: null })
 
 export const ReceivingForm = withAssignedSite(MaterialReceiptForm)
 function MaterialReceiptForm({ onSaved, assignedSiteId }) {
-  const { sites } = useSites()
+  const { sites, error: sitesError } = useSites()
   const [siteId, setSiteId] = useState(assignedSiteId || DUTSE_SITE_ID)
   const [items, setItems] = useState([])
   const [itemsErr, setItemsErr] = useState(null)
@@ -66,7 +67,8 @@ function MaterialReceiptForm({ onSaved, assignedSiteId }) {
   }, [siteId])
 
   const item = items.find(i => i.id === form.itemId)
-  const clientItem = item?.owner === 'client' && sites.some(site => site.id === siteId && site.site_type === 'client_site')
+  const site = sites.find(row => row.id === siteId)
+  const clientItem = item?.owner === 'client' && site?.site_type === 'client_site'
   const [requisitionOptions, setRequisitionOptions] = useState([])
   const [requisitionError, setRequisitionError] = useState(null)
   const [requisitionChoice, setRequisitionChoice] = useState(null)
@@ -85,7 +87,16 @@ function MaterialReceiptForm({ onSaved, assignedSiteId }) {
   const factor = isKg && form.unit === 'tonnes' ? 1000 : 1
   const accRaw = form.accepted === '' ? form.delivered : form.accepted
   const rejected = (toNum(form.delivered) || 0) - (toNum(accRaw) || 0)
-  const problem = receiptFormProblem(form, item)
+  const apclItem = item?.owner === 'apcl'
+  const priceRequired = apclItem && site?.site_type === 'client_site'
+  const priceUnit = ({ bags: 'bag', litres: 'litre', kg: 'tonne' })[item?.unit] || item?.unit
+  const price = toNum(form.price)
+  const unitCost = isKg ? Number((price / 1000).toFixed(4)) : price
+  const validPrice = Number.isFinite(unitCost) && unitCost > 0
+  const priceProblem = apclItem && !site ? (sitesError?.message || 'Waiting for site details.')
+    : apclItem && (priceRequired || form.price !== '') && !validPrice
+      ? `Enter the price per ${priceUnit} for this delivery.` : null
+  const problem = receiptFormProblem(form, item) || priceProblem
   const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }))
 
   const submit = (e) => {
@@ -99,7 +110,7 @@ function MaterialReceiptForm({ onSaved, assignedSiteId }) {
   }
 
   const saveReceipt = async () => {
-    if (lateEntry.invalid) return
+    if (problem || lateEntry.invalid) return
     setConfirmWeight(false)
     setBusy(true); setErr(null); setOk('')
     let photoPath = null
@@ -116,6 +127,7 @@ function MaterialReceiptForm({ onSaved, assignedSiteId }) {
       }
       await siteContractsService.recordReceipt({
         ...lateEntry.payload,
+        ...(apclItem && validPrice ? { unitCost } : {}),
         ...(requisitionOptions.some(row => row.site_id === siteId && row.id === requisitionId) ? { requisitionId } : {}),
         itemId: form.itemId,
         receivedOn: form.receivedOn,
@@ -198,6 +210,14 @@ function MaterialReceiptForm({ onSaved, assignedSiteId }) {
             Rejected: {fmtDec(Math.max(rejected, 0))} {isKg ? form.unit : (item?.unit || '')}
           </div>
         </div>
+        {apclItem && <div style={ui.field}>
+          <label style={ui.label} htmlFor="rcv-price">Price per {priceUnit} (₦)</label>
+          <input id="rcv-price" style={ui.input} type="number" inputMode="decimal" min="0" step="any"
+            value={form.price} onChange={set('price')} required={priceRequired} />
+          {validPrice && Number.isFinite(toNum(accRaw)) && <div style={ui.hint}>
+            Accepted quantity total: {fmtNaira(Number(accRaw) * factor * unitCost)}
+          </div>}
+        </div>}
         <div style={ui.field}>
           <label style={ui.label} htmlFor="rcv-reason">Rejection reason {rejected > 0 ? '*' : ''}</label>
           <input id="rcv-reason" style={{ ...ui.input, borderColor: rejected > 0 && !form.reason.trim() ? theme.red : theme.border }} value={form.reason} onChange={set('reason')} disabled={!(rejected > 0)} placeholder={rejected > 0 ? 'e.g. caked bags, wet dust' : 'Only when some is rejected'} />

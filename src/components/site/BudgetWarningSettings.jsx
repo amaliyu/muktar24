@@ -7,12 +7,14 @@ import { useSiteRead } from './useSiteRead'
 
 const varianceLabel = 'Allowed variance before a warning (%)'
 const breakageLabel = 'Breakage allowed (% of blocks made)'
+const materialsLabel = 'Materials budget per block (₦)'
 const input = { ...ui.input, width: '100%', minWidth: 0, maxWidth: 120, minHeight: 44 }
 const button = { ...ui.btn('primary'), minHeight: 44 }
 
 function SiteSettings({ site }) {
   const [variance, setVariance] = useState(String(site.variance_tolerance_pct ?? 5))
   const [breakage, setBreakage] = useState(String(site.breakage_budget_pct ?? 1))
+  const [materials, setMaterials] = useState(String(site.material_cost_budget_per_block ?? ''))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
   const [saved, setSaved] = useState(false)
@@ -21,12 +23,13 @@ function SiteSettings({ site }) {
     ? 'Allowed variance must be greater than 0 and at most 50%.'
     : !breakage.trim() || !Number.isFinite(b) || b < 0 || b > 20
       ? 'Breakage allowed must be between 0 and 20%.'
-      : null
+      : materials !== '' && (!Number.isFinite(Number(materials)) || Number(materials) <= 0)
+        ? 'Materials budget per block must be greater than 0.' : null
   const save = async () => {
     if (validation || busy) return
     setError(null); setSaved(false); setBusy(true)
     try {
-      await api.saveSettings(site.id, { variance_tolerance_pct: v, breakage_budget_pct: b })
+      await api.saveSettings(site.id, { variance_tolerance_pct: v, breakage_budget_pct: b, material_cost_budget_per_block: materials === '' ? null : Number(materials) })
       setSaved(true)
     } catch (e) { setError(e) }
     finally { setBusy(false) }
@@ -37,6 +40,8 @@ function SiteSettings({ site }) {
       value={variance} disabled={busy} onChange={e => { setVariance(e.target.value); setSaved(false) }} /></td>
     <td style={ui.td}><input aria-label={breakageLabel + ' — ' + site.name} style={input} type="number" step="any" min={0} max={20}
       value={breakage} disabled={busy} onChange={e => { setBreakage(e.target.value); setSaved(false) }} /></td>
+    <td style={ui.td}><input aria-label={materialsLabel + ' — ' + site.name} style={input} type="number" step="any"
+      value={materials} disabled={busy} onChange={e => { setMaterials(e.target.value); setSaved(false) }} /></td>
     <td style={ui.td}>
       <ErrorBox error={error} />
       {validation && <div style={{ color: theme.red }}>{validation}</div>}
@@ -54,7 +59,7 @@ function BudgetWarningSettings({ userProfile }) {
     <h3>Budget warning settings</h3>
     <ErrorBox error={result.error} />
     {result.loading && <p role="status">Loading sites…</p>}
-    {result.data?.length > 0 && <StackTable headers={['Site', varianceLabel, breakageLabel, '']}>
+    {result.data?.length > 0 && <StackTable headers={['Site', varianceLabel, breakageLabel, materialsLabel, '']}>
       {result.data.map(site => <SiteSettings key={site.id} site={site} />)}
     </StackTable>}
   </section>

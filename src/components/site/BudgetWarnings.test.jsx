@@ -152,7 +152,7 @@ it('validates both settings and accepts inclusive maximum and zero breakage', as
   fireEvent.click(save)
   await screen.findByText('Settings saved.')
   expect(f.calls.flatMap(call => call.ops || []).find(op => op[0] === 'update')[1])
-    .toEqual({ variance_tolerance_pct: 50, breakage_budget_pct: 0 })
+    .toEqual({ variance_tolerance_pct: 50, breakage_budget_pct: 0, material_cost_budget_per_block: null })
 })
 
 it.each([
@@ -185,4 +185,19 @@ it('filters tabs by grouped day status', async () => {
   expect(screen.getByRole('article')).toHaveTextContent('Kado')
   await click('All')
   expect(screen.getAllByRole('article')).toHaveLength(3)
+})
+
+it('saves a positive materials budget and blocks zero and negative values', async () => {
+  render(<BudgetWarningSettings userProfile={{ role: 'md' }} />)
+  const budget = await screen.findByLabelText(/Materials budget per block/)
+  const save = screen.getByRole('button', { name: 'Save Life Camp' })
+  for (const invalid of ['0', '-1']) {
+    change(budget, invalid)
+    expect(save).toBeDisabled()
+  }
+  change(budget, '791.29')
+  fireEvent.click(save)
+  await screen.findByText('Settings saved.')
+  expect(f.calls.flatMap(call => call.ops || []).find(op => op[0] === 'update')[1])
+    .toMatchObject({ material_cost_budget_per_block: 791.29 })
 })
