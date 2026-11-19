@@ -1,3 +1,4 @@
+import SiteScorecard, { ScorecardDashboard } from './components/site/SiteScorecard'
 import BudgetWarnings, { BudgetWarningDashboardCards, SavedBudgetWarnings, useSavedBudgetWarnings } from './components/site/BudgetWarnings'
 import BudgetWarningSettings from './components/site/BudgetWarningSettings'
 import Requisitions, { RequisitionsDashboardBanner } from './components/site/Requisitions'
@@ -178,18 +179,18 @@ const APP_ROLES = [
 // Pages each role is allowed to access. 'all' = unrestricted.
 export const ROLE_PAGES = {
   md:                 'all',
-  ico:                ['dashboard','payroll_approvals','investor_register','capital','terms','monthly_close','spv_ledger','reserve_budget','production','inventory','batches','maintenance','asset_register','site_contracts','material_receiving','handovers','waybills','vehicles','labour','truck_loading','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','advances','leave','payment_requests','requisitions','production_exceptions','messages'],
-  accountant:         ['dashboard','payroll_approvals','investor_register','capital','terms','monthly_close','spv_ledger','reserve_budget','asset_register','site_contracts','material_receiving','handovers','customers','orders','reports','kpi_dashboard','accounting','suppliers','products','my_profile','data_import','labour','waybills','advances','leave','payment_requests','truck_loading','trading_margin','requisitions','production_exceptions','messages'],
-  board_member:       ['dashboard','investor_register','capital','terms','monthly_close','spv_ledger','reserve_budget','production','inventory','batches','maintenance','asset_register','site_contracts','handovers','waybills','vehicles','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','trading_margin','requisitions','production_exceptions','messages'],
+  ico:                ['dashboard','payroll_approvals','investor_register','capital','terms','monthly_close','spv_ledger','reserve_budget','production','inventory','batches','maintenance','asset_register','site_contracts','material_receiving','handovers','waybills','vehicles','labour','truck_loading','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','advances','leave','payment_requests','requisitions','production_exceptions','site_scorecard','messages'],
+  accountant:         ['dashboard','payroll_approvals','investor_register','capital','terms','monthly_close','spv_ledger','reserve_budget','asset_register','site_contracts','material_receiving','handovers','customers','orders','reports','kpi_dashboard','accounting','suppliers','products','my_profile','data_import','labour','waybills','advances','leave','payment_requests','truck_loading','trading_margin','requisitions','production_exceptions','site_scorecard','messages'],
+  board_member:       ['dashboard','investor_register','capital','terms','monthly_close','spv_ledger','reserve_budget','production','inventory','batches','maintenance','asset_register','site_contracts','handovers','waybills','vehicles','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','trading_margin','requisitions','production_exceptions','site_scorecard','messages'],
   bdm:                ['dashboard','customers','orders','pending_register','daily_schedule','lpo_approvals','reports','kpi_dashboard','my_profile','payment_requests','trading_margin','messages'],
   store_officer:      ['dashboard','inventory','batches','maintenance','asset_register','site_contracts','material_receiving','handovers','waybills','pending_register','daily_schedule','products','reports','my_profile','messages'],
-  logistics_manager:  ['dashboard','asset_register','site_contracts','handovers','waybills','vehicles','labour','truck_loading','maintenance','pending_register','daily_schedule','customers','my_profile','payment_requests','requisitions','production_exceptions','messages'],
+  logistics_manager:  ['dashboard','asset_register','site_contracts','handovers','waybills','vehicles','labour','truck_loading','maintenance','pending_register','daily_schedule','customers','my_profile','payment_requests','requisitions','production_exceptions','site_scorecard','messages'],
   marketer:           ['dashboard','customers','orders','products','my_profile','messages'],
   driver:             ['dashboard','waybills','my_profile','messages'],
   hr_officer:         ['dashboard','site_contracts','staff','reports','labour','my_profile','advances','leave','disciplinary','attendance_kiosk','attendance_flags','payment_requests','messages'],
   kiosk_device:       ['attendance_kiosk'],
-  production_manager:           ['dashboard','production','inventory','batches','maintenance','asset_register','site_contracts','material_receiving','handovers','reports','products','labour','truck_loading','my_profile','attendance_flags','payment_requests','requisitions','production_exceptions','messages'],
-  assistant_production_manager: ['dashboard','production','inventory','batches','maintenance','asset_register','site_contracts','material_receiving','handovers','reports','products','labour','truck_loading','my_profile','attendance_flags','payment_requests','requisitions','production_exceptions','messages'],
+  production_manager:           ['dashboard','production','inventory','batches','maintenance','asset_register','site_contracts','material_receiving','handovers','reports','products','labour','truck_loading','my_profile','attendance_flags','payment_requests','requisitions','production_exceptions','site_scorecard','messages'],
+  assistant_production_manager: ['dashboard','production','inventory','batches','maintenance','asset_register','site_contracts','material_receiving','handovers','reports','products','labour','truck_loading','my_profile','attendance_flags','payment_requests','requisitions','production_exceptions','site_scorecard','messages'],
   // legacy roles — kept for any existing users
   operations:         ['dashboard','production','inventory','batches','waybills','vehicles','pending_register','daily_schedule','lpo_approvals','my_profile'],
   sales:              ['dashboard','customers','orders','my_profile'],
@@ -207,8 +208,8 @@ export const ROLE_PAGES = {
 // (accounting, reports, kpi_dashboard, daily_schedule) are NOT listed here —
 // those buttons carry per-element data-ico-allow / data-board-allow instead,
 // so write actions stay hidden.
-const ICO_EXEMPT_PAGES   = ['production_exceptions', 'requisitions', 'late_entries', 'dashboard', 'payroll_approvals', 'labour', 'truck_loading', 'schedule_approvals', 'advances', 'leave', 'my_hr', 'payment_requests', 'maintenance'];
-const BOARD_EXEMPT_PAGES = ['production_exceptions', 'requisitions', 'dashboard', 'my_profile', 'my_hr', 'maintenance'];
+const ICO_EXEMPT_PAGES   = ['site_scorecard', 'production_exceptions', 'requisitions', 'late_entries', 'dashboard', 'payroll_approvals', 'labour', 'truck_loading', 'schedule_approvals', 'advances', 'leave', 'my_hr', 'payment_requests', 'maintenance'];
+const BOARD_EXEMPT_PAGES = ['site_scorecard', 'production_exceptions', 'requisitions', 'dashboard', 'my_profile', 'my_hr', 'maintenance'];
 
 // ── UI HELPERS ───────────────────────────────────────────────
 const Spinner = () => (
@@ -394,6 +395,7 @@ const NAV_ICONS = {
   dashboard: LayoutDashboard,
   production: Factory,
   production_exceptions: AlertTriangle,
+  site_scorecard: Gauge,
   inventory: Package,
   batches: Layers,
   maintenance: Wrench,
@@ -867,12 +869,17 @@ export const Production = withAssignedSite(function Production({ userProfile, as
   const [dustStandards, setDustStandards] = useState([]);
   const [standardsLoaded, setStandardsLoaded] = useState(false);
   const [standardsError, setStandardsError] = useState(null);
-  const standard = dustStandard(dustStandards, form.siteId || DUTSE_SITE_ID, form.blockType);
-  const previewDust = standard ? calculatedDustKg(form.produced, standard.dust_kg_per_block) : null;
+  const siteStandards = dustStandards.filter(row => row.site_id === form.siteId);
+  const automaticAggregate = siteStandards.length > 0;
+  const aggregateRates = [...siteStandards].reverse().map(row => {
+    const size = row.block_type.match(/^(\d+) Inch/i)?.[1];
+    return `${row.dust_kg_per_block} kg per ${size ? `${size}-inch block` : row.block_type}`;
+  });
   useEffect(() => {
     if (!showForm) return;
     let alive = true;
     setStandardsError(null);
+    setStandardsLoaded(false);
     loadDustStandards().then(rows => { if (alive) { setDustStandards(rows); setStandardsLoaded(true); } })
       .catch(e => { if (alive) setStandardsError(e.message); });
     return () => { alive = false; };
@@ -997,6 +1004,11 @@ export const Production = withAssignedSite(function Production({ userProfile, as
       // This read occurs before either create or update. RPC errors block the write.
       const latestStandards = await loadDustStandards();
       const saveStandard = dustStandard(latestStandards, form.siteId || DUTSE_SITE_ID, form.blockType);
+      const siteHasStandards = latestStandards.some(row => row.site_id === form.siteId);
+      const manualAggregate = {
+        granite_dust_kg: parseFloat(form.granite) || 0,
+        chippings_kg: parseFloat(form.chippings) || 0,
+      };
       const dmgProd = parseInt(form.dmgProd) || 0;
       const dmgStack = parseInt(form.dmgStack) || 0;
       const siteId = form.siteId || DUTSE_SITE_ID;
@@ -1008,10 +1020,16 @@ export const Production = withAssignedSite(function Production({ userProfile, as
         asset_id: machine.assetId,
         quantity_produced: parseInt(form.produced) || 0,
         cement_bags: parseFloat(form.cement) || 0,
-        granite_dust_kg: saveStandard ? calculatedDustKg(form.produced, saveStandard.dust_kg_per_block) : (parseFloat(form.granite) || 0),
-        chippings_kg: parseFloat(form.chippings) || 0,
+        ...(!siteHasStandards ? manualAggregate : {}),
         diesel_litres: parseFloat(form.diesel) || 0,
       };
+      // Legacy inventory posting still needs the quantities when the database posting flag is off.
+      const chippingsRate = Number(saveStandard?.chippings_kg_per_block || 0);
+      const postingData = siteHasStandards ? {
+        ...entryData,
+        granite_dust_kg: calculatedDustKg(form.produced, Number(saveStandard?.dust_kg_per_block || 0) - chippingsRate),
+        chippings_kg: calculatedDustKg(form.produced, chippingsRate),
+      } : entryData;
       if (editTarget) {
         await productionService.update(editTarget.id, entryData, userProfile?.id);
         savedProduction = editTarget;
@@ -1020,7 +1038,7 @@ export const Production = withAssignedSite(function Production({ userProfile, as
         if (dmgStack > 0) await productionService.logDamage({ date: form.date, block_type: form.blockType, stage: "stacking", quantity_damaged: dmgStack, production_log_id: editTarget.id, site_id: siteId });
         // The DB owns ALL material movements when the flag is ON.
         const ref = `PROD-${editTarget.id.slice(0, 8)}`;
-        await postMaterials(entryData, ref, true, dbPosting);
+        await postMaterials(postingData, ref, true, dbPosting);
         await load();
         setAlert({ type: "success", msg: "Production entry updated and movement log adjusted." });
       } else {
@@ -1028,7 +1046,7 @@ export const Production = withAssignedSite(function Production({ userProfile, as
         savedProduction = entry;
         if (dmgProd > 0) await productionService.logDamage({ date: form.date, block_type: form.blockType, stage: "production", quantity_damaged: dmgProd, production_log_id: entry.id, site_id: siteId });
         if (dmgStack > 0) await productionService.logDamage({ date: form.date, block_type: form.blockType, stage: "stacking", quantity_damaged: dmgStack, production_log_id: entry.id, site_id: siteId });
-        await postMaterials(entryData, `PROD-${entry.id.slice(0, 8)}`, false, dbPosting);
+        await postMaterials(postingData, `PROD-${entry.id.slice(0, 8)}`, false, dbPosting);
         setRecords(prev => [{ ...entry, damaged: { production: dmgProd, stacking: dmgStack } }, ...prev]);
         setAlert({ type: "success", msg: `Production entry saved at ${siteName(siteId, sites)}.` });
       }
@@ -1198,7 +1216,7 @@ export const Production = withAssignedSite(function Production({ userProfile, as
               { label: assignedSiteId ? "Total blocks produced (including broken)" : "Quantity Produced", key: "produced", placeholder: "e.g. 850" },
               ...(assignedSiteId ? [{ label: "Damaged During Production", key: "dmgProd", placeholder: "0" }] : []),
               { label: "Cement Bags Used", key: "cement", placeholder: "bags" },
-              { label: "Chippings (kg)", key: "chippings", placeholder: "kg" },
+              ...(standardsLoaded && !automaticAggregate ? [{ label: "Chippings (kg)", key: "chippings", placeholder: "kg" }] : []),
               { label: "Diesel Used (litres)", key: "diesel", placeholder: "litres" },
               ...(!assignedSiteId ? [{ label: "Damaged During Production", key: "dmgProd", placeholder: "0" }] : []),
               { label: "Damaged During Stacking", key: "dmgStack", placeholder: "0" },
@@ -1209,12 +1227,11 @@ export const Production = withAssignedSite(function Production({ userProfile, as
               </div>
             ))}
             <div style={{ ...styles.formGroup, minWidth: 0 }}>
-              {assignedSiteId && !standardsLoaded ? (
-                standardsError ? null : <div role="status">Loading dust standard…</div>
-              ) : standard ? (
-                <div style={{ fontSize: 13, overflowWrap: 'anywhere' }} aria-live="polite">
-                  <strong>Dust (calculated):</strong> {formatDust(previewDust)} = {fmt(Number(form.produced) || 0)} blocks × {standard.dust_kg_per_block} kg
-                  {assignedSiteId && <div>Dust is calculated automatically — do not convert anything.</div>}
+              {!standardsLoaded ? (
+                standardsError ? null : <div role="status">Loading dust standards…</div>
+              ) : automaticAggregate ? (
+                <div style={{ fontSize: 13, overflowWrap: 'anywhere' }}>
+                  Dust and 3/8 are calculated by the app ({aggregateRates.join(', ')})
                 </div>
               ) : (
                 <>
@@ -1228,7 +1245,7 @@ export const Production = withAssignedSite(function Production({ userProfile, as
           </div>
           <LateReasonField entry={lateEntry} />
           <div className="m-buttons" style={styles.row}>
-            <button style={styles.btn("primary")} onClick={() => handleSave()} disabled={saving || lateEntry.invalid || !!(assignedSiteId && !standardsLoaded)}>{saving ? "Saving…" : editTarget ? "Update Entry" : "Save Entry"}</button>
+            <button style={styles.btn("primary")} onClick={() => handleSave()} disabled={saving || lateEntry.invalid || !standardsLoaded}>{saving ? "Saving…" : editTarget ? "Update Entry" : "Save Entry"}</button>
             <button style={styles.btn("secondary")} onClick={() => { setShowForm(false); setForm(emptyForm); lateEntry.reset(); setEditTarget(null); }}>Cancel</button>
           </div>
         </div>
@@ -10824,6 +10841,7 @@ const navItems = [
     { id: "site_contracts", label: "Site Contracts", icon: "site_contracts" },
     { id: "material_receiving", label: "Material Receiving", icon: "material_receiving" },
     { id: "requisitions", label: "Material Requisitions", icon: "requisitions" },
+    { id: "site_scorecard", label: "Daily Scorecard", icon: "site_scorecard" },
     { id: "production_exceptions", label: "Budget Warnings", icon: "production_exceptions" },
     { id: "handovers", label: "Handovers", icon: "handovers" },
   ]},
@@ -11319,6 +11337,7 @@ export default function App() {
   // Site preselected when the Dashboard opens Site Contracts from a site card.
   const [contractsSite, setContractsSite] = useState('');
   const [requisitionSite, setRequisitionSite] = useState('');
+  const [initialScorecard, setInitialScorecard] = useState(null);
   const [initialWarning, setInitialWarning] = useState(null);
   const [contractsReport, setContractsReport] = useState(false);
   const [lowStockCount, setLowStockCount] = useState(0);
@@ -11534,17 +11553,24 @@ export default function App() {
     setInitialWarning(previous => initial && { ...initial, navigationKey: (previous?.navigationKey || 0) + 1 });
     setActive("production_exceptions");
   };
+  const openScorecard = (siteId, date) => {
+    setInitialScorecard({ siteId, date });
+    setActive("site_scorecard");
+  };
+  const scorecardDashboard = canSee("site_scorecard")
+    ? <ScorecardDashboard userProfile={userProfile} onOpen={openScorecard} /> : null;
   const budgetCards = <BudgetWarningDashboardCards userProfile={userProfile} onOpen={openBudgetWarnings} />;
   const pages = {
     dashboard: isBoard
-      ? <>{budgetCards}<SiteDashboardCards userProfile={userProfile} onOpenSite={openSiteContracts} /><RequisitionsDashboardBanner userProfile={userProfile} onOpen={openRequisitions} /><BoardDashboard userProfile={userProfile} /></>
-      : <MobileScope>{budgetCards}<Dashboard onOpenRequisitions={openRequisitions} onNavigate={setActive} onOpenSite={openSiteContracts} userProfile={userProfile} /></MobileScope>,
+      ? <>{budgetCards}{scorecardDashboard}<SiteDashboardCards userProfile={userProfile} onOpenSite={openSiteContracts} /><RequisitionsDashboardBanner userProfile={userProfile} onOpen={openRequisitions} /><BoardDashboard userProfile={userProfile} /></>
+      : <MobileScope>{budgetCards}{scorecardDashboard}<Dashboard onOpenRequisitions={openRequisitions} onNavigate={setActive} onOpenSite={openSiteContracts} userProfile={userProfile} /></MobileScope>,
     late_entries: <MobileScope fit><LateEntries /></MobileScope>,
     production: <MobileScope><Production userProfile={userProfile} onOpenBudgetWarnings={openBudgetWarnings} /></MobileScope>,
     inventory: <MobileScope><Inventory onLowStockChange={setLowStockCount} userProfile={userProfile} onNavigate={setActive} /></MobileScope>,
     site_contracts: <SiteContracts userProfile={userProfile} initialSiteId={contractsSite} initialReport={contractsReport} />,
     asset_register: <AssetRegister userProfile={userProfile} />,
     material_receiving: <MaterialReceiving userProfile={userProfile} />,
+    site_scorecard: <SiteScorecard userProfile={userProfile} initial={initialScorecard} onOpenBudgetWarnings={openBudgetWarnings} />,
     production_exceptions: <BudgetWarnings key={initialWarning?.navigationKey || 'default'} userProfile={userProfile} initial={initialWarning} />,
     requisitions: <Requisitions userProfile={userProfile} initialSiteId={requisitionSite} />,
     handovers: <Handovers userProfile={userProfile} />,
@@ -11624,7 +11650,7 @@ export default function App() {
               {section.items.map(item => {
                 const badge = getBadge(item.id);
                 return (
-                  <div key={item.id} style={{ ...styles.navItem(active === item.id), ...(isMobile ? { minHeight: '44px' } : {}) }} onClick={() => { if (item.id === 'production_exceptions') setInitialWarning(null); setActive(item.id); setContractsReport(false); if (isMobile) setSidebarOpen(false); }}>
+                  <div key={item.id} style={{ ...styles.navItem(active === item.id), ...(isMobile ? { minHeight: '44px' } : {}) }} onClick={() => { if (item.id === 'production_exceptions') setInitialWarning(null); if (item.id === 'site_scorecard') setInitialScorecard(null); setActive(item.id); setContractsReport(false); if (isMobile) setSidebarOpen(false); }}>
                     <Icon name={item.icon} size={20} />
                     <span style={{ flex: 1 }}>{item.label}</span>
                     {badge > 0 && (

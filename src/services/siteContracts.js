@@ -124,7 +124,7 @@ export const siteContractsService = {
     return must(await q)
   },
 
-  async recordReceipt({ itemId, receivedOn, qtyDelivered, qtyAccepted, rejectionReason, supplier, ref, photoPath, notes, late_reason, requisitionId }) {
+  async recordReceipt({ itemId, receivedOn, qtyDelivered, qtyAccepted, rejectionReason, supplier, ref, photoPath, notes, late_reason, requisitionId, unitCost }) {
     return must(await supabase.rpc('record_material_receipt', {
       p_item_id: itemId,
       p_received_on: receivedOn,
@@ -137,6 +137,7 @@ export const siteContractsService = {
       p_notes: notes || null,
       ...(late_reason !== undefined ? { p_late_reason: late_reason } : {}),
       ...(requisitionId ? { p_requisition_id: requisitionId } : {}),
+      ...(unitCost !== undefined ? { p_unit_cost: unitCost } : {}),
     }))
   },
 

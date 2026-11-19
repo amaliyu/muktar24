@@ -10,6 +10,7 @@ import { lagosToday } from './utils/lateEntry'
 const fixture = vi.hoisted(() => ({
   site: '00000000-0000-4000-8000-000000000003',
   siteName: 'Life Camp Site (Bilaad)',
+  kado: '00000000-0000-4000-8000-000000000002',
   blockType: '9 Inch 3 Hole Block',
   calls: [],
   assignment: null,
@@ -28,14 +29,22 @@ vi.mock('./lib/supabase', async () => {
     const rows = {
       production_sites: [
         { id: '00000000-0000-4000-8000-000000000001', name: 'Dutse Factory', site_type: 'factory' },
+        { id: fixture.kado, name: 'Kado Site (Sequoia)', site_type: 'client_site' },
         { id: fixture.site, name: fixture.siteName, site_type: 'client_site' },
       ],
-      site_block_standards: [{ site_id: fixture.site, block_type: fixture.blockType, dust_kg_per_block: 18 }],
+      site_block_standards: [
+        { site_id: fixture.site, block_type: fixture.blockType, dust_kg_per_block: 18 },
+        { site_id: fixture.kado, block_type: fixture.blockType, dust_kg_per_block: 23 },
+      ],
       assets: [{ id: 'life-camp-machine', site_id: fixture.site, name: 'Bilaad machine', code: 'LC-1' }],
       products: [{ id: 'product', name: fixture.blockType, category: 'Blocks' }],
       production_log: fixture.production,
       production_exceptions: fixture.warnings,
-      inventory_items: [{ id: 'bilaad-cement', name: 'Bilaad cement', site_id: fixture.site, unit: 'bags' }],
+      inventory_items: [
+        { id: 'bilaad-cement', name: 'Bilaad cement', site_id: fixture.site, unit: 'bags', owner: 'client' },
+        { id: 'kado-dust', name: 'Kado dust', site_id: fixture.kado, unit: 'kg', owner: 'apcl', material: 'dust' },
+        { id: 'dutse-cement', name: 'Dutse cement', site_id: '00000000-0000-4000-8000-000000000001', unit: 'bags', owner: 'apcl' },
+      ],
       v_site_yard: [{ site_id: fixture.site, site_name: fixture.siteName, block_type: fixture.blockType, in_yard: 100 }],
     }[table] || []
     const filters = ops.filter(op => op[0] === 'eq' && op[1] === 'site_id')
@@ -80,16 +89,18 @@ it('waits for assignment, then opens Production on the assigned site with its ma
   expect(await within(form).findByText(fixture.siteName)).toBeInTheDocument()
   expect(within(form).queryByRole('option', { name: 'Dutse Factory' })).not.toBeInTheDocument()
   expect(await within(form).findByRole('option', { name: /Bilaad machine/ })).toBeInTheDocument()
-  expect(await within(form).findByText('Dust (calculated):')).toBeInTheDocument()
-  expect(within(form).getByText('Dust is calculated automatically — do not convert anything.')).toBeInTheDocument()
+  expect(await within(form).findByText(/Dust and 3\/8 are calculated by the app/)).toBeInTheDocument()
+  expect(within(form).queryByText('Chippings (kg)')).not.toBeInTheDocument()
   expect(within(form).getByText('Total blocks produced (including broken)')).toBeInTheDocument()
   expect(container.querySelector('#production-granite')).toBeNull()
   change(form.querySelector('input[type=date]'), lagosToday())
   change(within(form).getByPlaceholderText('e.g. 850'), '20')
   fireEvent.click(within(form).getByRole('button', { name: 'Save Entry' }))
-  await waitFor(() => expect(fixture.calls.find(call => call.table === 'production_log'
-    && call.ops.some(op => op[0] === 'insert'))?.ops.find(op => op[0] === 'insert')[1])
-    .toMatchObject({ site_id: fixture.site, asset_id: 'life-camp-machine', granite_dust_kg: 360 }))
+  const productionInsert = () => fixture.calls.find(call => call.table === 'production_log'
+    && call.ops.some(op => op[0] === 'insert'))?.ops.find(op => op[0] === 'insert')[1]
+  await waitFor(() => expect(productionInsert()).toMatchObject({ site_id: fixture.site, asset_id: 'life-camp-machine' }))
+  expect(productionInsert()).not.toHaveProperty('granite_dust_kg')
+  expect(productionInsert()).not.toHaveProperty('chippings_kg')
   expect(await screen.findByText(/Budget warning for .*: Cement \+40% · Diesel \+87\.5%/)).toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: 'Explain now' }))
   expect(onOpen).toHaveBeenCalledWith({ id: 'cement-warning', siteId: fixture.site, action: 'explain' })
@@ -109,7 +120,7 @@ it('keeps the assigned site locked when editing an existing production entry', a
   const form = screen.getByText('Edit Production Entry').parentElement
   expect(await within(form).findByText(fixture.siteName)).toBeInTheDocument()
   expect(within(form).queryByRole('option', { name: 'Dutse Factory' })).not.toBeInTheDocument()
-  expect(await within(form).findByText('Dust (calculated):')).toBeInTheDocument()
+  expect(await within(form).findByText(/Dust and 3\/8 are calculated by the app/)).toBeInTheDocument()
 })
 
 it('keeps the Dutse default and the Production site control for an unassigned user', async () => {
@@ -120,7 +131,8 @@ it('keeps the Dutse default and the Production site control for an unassigned us
   const site = await within(form).findByRole('option', { name: 'Dutse Factory' })
   expect(site.parentElement).toHaveValue(DUTSE_SITE_ID)
   expect(within(form).getByText('Quantity Produced')).toBeInTheDocument()
-  expect(within(form).getByLabelText('Granite dust (kg)')).toBeInTheDocument()
+  expect(await within(form).findByLabelText('Granite dust (kg)')).toBeInTheDocument()
+  expect(within(form).getByText('Chippings (kg)')).toBeInTheDocument()
 })
 
 it('shows the assignment RPC error and blocks the Production form and its reads', async () => {
@@ -138,6 +150,7 @@ it('uses one assignment request across Receiving and Handovers and locks both en
   expect(within(receipt).queryByRole('option', { name: 'Dutse Factory' })).not.toBeInTheDocument()
   const cement = await within(receipt).findByRole('option', { name: /Bilaad cement/ })
   change(cement.parentElement, cement.value)
+  expect(within(receipt).queryByLabelText(/Price per/)).not.toBeInTheDocument()
   change(within(receipt).getByLabelText(/^Delivered/), '10')
   fireEvent.click(within(receipt).getByRole('button', { name: 'Record delivery' }))
   await waitFor(() => expect(fixture.calls.find(call => call.rpc === 'record_material_receipt')?.args)
@@ -157,4 +170,46 @@ it('uses one assignment request across Receiving and Handovers and locks both en
     && call.ops.some(op => op[0] === 'insert'))?.ops.find(op => op[0] === 'insert')[1])
     .toMatchObject({ site_id: fixture.site }))
   expect(fixture.calls.filter(call => call.rpc === 'my_assigned_site')).toHaveLength(1)
+})
+
+it('shows Kado’s automatic aggregate rate and hides both manual fields', async () => {
+  fixture.assignment = () => ({ data: fixture.kado, error: null })
+  render(session(<Production userProfile={profile} />))
+  await showProduction()
+  const form = screen.getByText('New Production Entry').parentElement
+  expect(await within(form).findByText('Dust and 3/8 are calculated by the app (23 kg per 9-inch block)')).toBeInTheDocument()
+  expect(within(form).queryByText('Chippings (kg)')).not.toBeInTheDocument()
+  expect(within(form).queryByLabelText('Granite dust (kg)')).not.toBeInTheDocument()
+})
+
+it('requires Kado dust pricing and uses the accepted tonnes to show the total', async () => {
+  fixture.assignment = () => ({ data: fixture.kado, error: null })
+  render(session(<ReceivingForm />))
+  const dust = await screen.findByRole('option', { name: /Kado dust/ })
+  change(dust.parentElement, dust.value)
+  change(screen.getByLabelText(/^Delivered/), '3')
+  change(screen.getByLabelText(/^Accepted/), '2.5')
+  change(screen.getByLabelText(/^Rejection reason/), 'Wet portion')
+  const price = screen.getByLabelText('Price per tonne (₦)')
+  const save = screen.getByRole('button', { name: 'Record delivery' })
+  expect(price).toBeRequired()
+  expect(save).toBeDisabled()
+  expect(screen.getByText('Enter the price per tonne for this delivery.')).toBeInTheDocument()
+  change(price, '17000')
+  expect(screen.getByText('Accepted quantity total: ₦42,500')).toBeInTheDocument()
+  fireEvent.click(save)
+  await waitFor(() => expect(fixture.calls.find(call => call.rpc === 'record_material_receipt')?.args)
+    .toMatchObject({ p_qty_accepted: 2500, p_unit_cost: 17 }))
+})
+
+it('omits an empty delivery price at Dutse', async () => {
+  fixture.assignment = () => ({ data: null, error: null })
+  render(session(<ReceivingForm />))
+  const cement = await screen.findByRole('option', { name: /Dutse cement/ })
+  change(cement.parentElement, cement.value)
+  change(screen.getByLabelText(/^Delivered/), '10')
+  expect(screen.getByLabelText('Price per bag (₦)')).not.toBeRequired()
+  fireEvent.click(screen.getByRole('button', { name: 'Record delivery' }))
+  await waitFor(() => expect(fixture.calls.find(call => call.rpc === 'record_material_receipt')?.args).toBeDefined())
+  expect(fixture.calls.find(call => call.rpc === 'record_material_receipt').args).not.toHaveProperty('p_unit_cost')
 })
