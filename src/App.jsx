@@ -11530,7 +11530,10 @@ export default function App() {
   const openSiteContracts = (siteId, opts = {}) => { setContractsSite(siteId || ''); setContractsReport(!!opts.report); setActive('site_contracts'); };
 
   const openRequisitions = siteId => { setRequisitionSite(siteId); setActive("requisitions"); };
-  const openBudgetWarnings = initial => { setInitialWarning(initial); setActive("production_exceptions"); };
+  const openBudgetWarnings = initial => {
+    setInitialWarning(previous => initial && { ...initial, navigationKey: (previous?.navigationKey || 0) + 1 });
+    setActive("production_exceptions");
+  };
   const budgetCards = <BudgetWarningDashboardCards userProfile={userProfile} onOpen={openBudgetWarnings} />;
   const pages = {
     dashboard: isBoard
@@ -11542,7 +11545,7 @@ export default function App() {
     site_contracts: <SiteContracts userProfile={userProfile} initialSiteId={contractsSite} initialReport={contractsReport} />,
     asset_register: <AssetRegister userProfile={userProfile} />,
     material_receiving: <MaterialReceiving userProfile={userProfile} />,
-    production_exceptions: <BudgetWarnings key={initialWarning?.id || initialWarning?.status || 'default'} userProfile={userProfile} initial={initialWarning} />,
+    production_exceptions: <BudgetWarnings key={initialWarning?.navigationKey || 'default'} userProfile={userProfile} initial={initialWarning} />,
     requisitions: <Requisitions userProfile={userProfile} initialSiteId={requisitionSite} />,
     handovers: <Handovers userProfile={userProfile} />,
     batches: <MobileScope><Batches userProfile={userProfile} onOpenBudgetWarnings={openBudgetWarnings} /></MobileScope>,
@@ -11653,7 +11656,11 @@ export default function App() {
       />}
       {!investorOnly && <NotificationBell
         userProfile={userProfile}
-        onNavigate={(page) => { setActive(page); if (isMobile) setSidebarOpen(false); }}
+        onNavigate={(page, relatedId) => {
+          if (page === "production_exceptions") openBudgetWarnings(relatedId ? { id: relatedId } : null);
+          else setActive(page);
+          if (isMobile) setSidebarOpen(false);
+        }}
         isMobile={isMobile}
       />}
       <main style={{ ...styles.main, ...(isMobile ? { marginLeft: 0, minWidth: 0, padding: '16px 14px', paddingTop: '68px' } : {}) }} {...(boardMasked ? { 'data-board-view': 'true' } : {})} {...(icoMasked ? { 'data-ico-view': 'true' } : {})}>

@@ -3,7 +3,7 @@ import { AlertTriangle } from 'lucide-react'
 import { hasRole } from '../../lib/roles'
 import { productionExceptionsService as api } from '../../services/productionExceptions'
 import { siteName } from '../../services/sites'
-import { isAdverse, parameterName, varianceLabel, warningAge, warningSentence } from '../../utils/productionExceptions'
+import { groupWarningDays, isAdverse, parameterName, varianceLabel, warningSentence, warningWindowStart } from '../../utils/productionExceptions'
 import { useAssignedSite, withAssignedSite } from '../AssignedSite'
 import { FixedSite, useSites } from '../SitePicker'
 import { ErrorBox, fmtDate, fmtDateTime, Pill, theme, ui, withPhase7Touch } from './siteUi'
@@ -23,33 +23,44 @@ const input = { ...ui.input, width: '100%', minWidth: 0, minHeight: 44, boxSizin
 const button = kind => ({ ...ui.btn(kind), minHeight: 44, whiteSpace: 'normal' })
 const name = row => parameterName[row.parameter] || row.parameter
 
-function WarningFacts({ warning, sites }) {
-  const age = warningAge(warning)
+function WarningFacts({ day, sites }) {
   return <>
-    <strong>{name(warning)} · {siteName(warning.site_id, sites)} · {fmtDate(warning.date)}</strong>
-    <p>{warningSentence(warning)}</p>
+    <strong>{siteName(day.site_id, sites)} · {fmtDate(day.date)}</strong>
     <div style={rowStyle}>
-      <Pill color={isAdverse(warning) ? theme.red : theme.accent} label={varianceLabel(warning.variance_pct)} />
-      <Pill status={warning.status} label={warning.status} />
-      {['open', 'explained'].includes(warning.status) && <span>{warning.status} {age} {age === 1 ? 'day' : 'days'}</span>}
+      <Pill status={day.status} label={day.status} />
+      {day.age !== null && <span>open {day.age} {day.age === 1 ? 'day' : 'days'}</span>}
     </div>
+    {day.lines.map(line => {
+      const fixed = line.status === 'resolved'
+      return <div key={line.id} style={{ padding: '8px 0', color: fixed ? theme.textMuted : theme.text }}>
+        <strong>{name(line)}</strong>
+        <div>{warningSentence(line)}</div>
+        <Pill color={fixed ? theme.textMuted : isAdverse(line) ? theme.red : theme.accent} label={varianceLabel(line.variance_pct)} />
+        {fixed && <span> fixed by a correction</span>}
+      </div>
+    })}
   </>
 }
 
 function WarningDetail({ id, initialAction, assignedSiteId, userProfile, sites, onBack }) {
   const [action, setAction] = useState(initialAction)
   const [message, setMessage] = useState('')
-  const [updated, setUpdated] = useState(null)
   const [revision, setRevision] = useState(0)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
-  const record = useSiteRead(() => api.get(id), [id])
-  const thread = useSiteRead(() => api.comments(id), [id, revision])
-  const warning = updated || record.data
-  const siteManager = warning && assignedSiteId === warning.site_id
+  const record = useSiteRead(async () => {
+    const anchor = await api.get(id)
+    if (!anchor || (assignedSiteId && assignedSiteId !== anchor.site_id)) return null
+    const lines = await api.list({ siteId: anchor.site_id, date: anchor.date })
+    return groupWarningDays(lines)[0] || null
+  }, [id, assignedSiteId, revision])
+  const day = record.data
+  const ids = day?.lines.map(line => line.id).join(',')
+  const thread = useSiteRead(() => ids ? api.comments(ids.split(',')) : [], [ids, revision])
+  const siteManager = day && assignedSiteId === day.site_id
   const md = hasRole(userProfile, 'md')
   const review = hasRole(userProfile, 'md', 'ico')
-  const active = ['open', 'explained'].includes(warning?.status)
+  const active = ['open', 'explained'].includes(day?.status)
   const options = active ? [
     ...(md || siteManager ? ['explain'] : []),
     ...(review || siteManager ? ['comment'] : []),
@@ -61,7 +72,7 @@ function WarningDetail({ id, initialAction, assignedSiteId, userProfile, sites, 
     if (!selected || busy || message.trim().length < actions[selected][1]) return
     setError(null); setBusy(true)
     try {
-      setUpdated(await api.respond(id, selected, message.trim() || null))
+      await api.respond(day.actionLine.id, selected, message.trim() || null)
       setMessage(''); setAction(''); setRevision(n => n + 1)
     } catch (e) { setError(e) }
     finally { setBusy(false) }
@@ -72,9 +83,9 @@ function WarningDetail({ id, initialAction, assignedSiteId, userProfile, sites, 
     <ErrorBox error={thread.error} />
     <ErrorBox error={error} />
     {record.loading && <p role="status">Loading warning…</p>}
-    {!record.loading && !record.error && !warning && <p>Warning unavailable.</p>}
-    {warning && <>
-      <h3>Budget warning</h3><WarningFacts warning={warning} sites={sites} />
+    {!record.loading && !record.error && !day && <p>Warning unavailable.</p>}
+    {day && <>
+      <h3>Budget warning</h3><WarningFacts day={day} sites={sites} />
       <h4>Thread</h4>
       {thread.loading && <p role="status">Loading thread…</p>}
       {!thread.loading && !thread.error && thread.data?.length === 0 && <p>No responses yet.</p>}
@@ -100,10 +111,16 @@ function WarningDetail({ id, initialAction, assignedSiteId, userProfile, sites, 
 function BudgetWarnings({ assignedSiteId, userProfile, initial }) {
   const { sites, error } = useSites()
   const [filter, setFilter] = useState(initial?.status || 'open')
-  const [choice, setChoice] = useState(initial?.siteId || '')
+  const [choice, setChoice] = useState(initial?.siteId ?? null)
   const [id, setId] = useState(initial?.id || '')
-  const siteId = assignedSiteId || choice
-  const list = useSiteRead(() => id ? [] : api.list({ siteId, statuses: tabs.find(tab => tab[0] === filter)?.[2] }), [siteId, filter, id])
+  const allSites = hasRole(userProfile, 'md', 'ico')
+  const siteId = assignedSiteId || (choice ?? (allSites ? '' : sites[0]?.id))
+  const list = useSiteRead(async () => {
+    if (id || (!allSites && !siteId)) return []
+    return groupWarningDays(await api.list({ siteId, since: warningWindowStart() }))
+  }, [siteId, allSites, id])
+  const statuses = tabs.find(tab => tab[0] === filter)?.[2]
+  const days = list.data?.filter(day => (!siteId || day.site_id === siteId) && (!statuses || statuses.includes(day.status)))
   return <div style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
     <h2><AlertTriangle size={20} aria-hidden="true" /> Budget Warnings</h2>
     <ErrorBox error={error} />
@@ -111,8 +128,8 @@ function BudgetWarnings({ assignedSiteId, userProfile, initial }) {
       sites={sites} userProfile={userProfile} onBack={() => setId('')} /> :
       <>
         {assignedSiteId ? <FixedSite siteId={assignedSiteId} sites={sites} style={input} /> :
-          <label>Site<select style={{ ...input, display: 'block' }} value={choice} onChange={e => setChoice(e.target.value)}>
-            <option value="">All sites</option>{sites.map(site => <option key={site.id} value={site.id}>{site.name}</option>)}
+          <label>Site<select style={{ ...input, display: 'block' }} value={siteId || ''} onChange={e => setChoice(e.target.value)}>
+            {allSites && <option value="">All sites</option>}{sites.map(site => <option key={site.id} value={site.id}>{site.name}</option>)}
           </select></label>}
         <div style={{ ...rowStyle, margin: '12px 0' }} aria-label="Warning status">
           {tabs.map(([value, label]) => <button key={value} aria-pressed={filter === value}
@@ -120,10 +137,10 @@ function BudgetWarnings({ assignedSiteId, userProfile, initial }) {
         </div>
         <ErrorBox error={list.error} />
         {list.loading && <p role="status">Loading budget warnings…</p>}
-        {list.data?.length === 0 && <p>No warnings in this view.</p>}
-        {list.data?.filter(warning => !siteId || warning.site_id === siteId).map(warning => <article style={panel} key={warning.id}>
-          <WarningFacts warning={warning} sites={sites} />
-          <button style={{ ...button(), marginTop: 8 }} onClick={() => setId(warning.id)}>View {name(warning)} warning</button>
+        {days?.length === 0 && <p>No warnings in this view.</p>}
+        {days?.map(day => <article style={panel} key={day.key}>
+          <WarningFacts day={day} sites={sites} />
+          <button style={{ ...button(), marginTop: 8 }} onClick={() => setId((day.actionLine || day.lines[0]).id)}>View warning for {fmtDate(day.date)}</button>
         </article>)}
       </>}
   </div>
@@ -132,23 +149,24 @@ function BudgetWarnings({ assignedSiteId, userProfile, initial }) {
 export function BudgetWarningDashboardCards({ userProfile, onOpen }) {
   const { siteId } = useAssignedSite()
   const review = hasRole(userProfile, 'md', 'ico')
+  const { sites } = useSites()
   const own = useSiteRead(async () => {
-    if (!siteId) return null
-    const [count, rows] = await Promise.all([api.count('open', siteId), api.list({ siteId, statuses: ['open'], oldest: true, limit: 3 })])
-    return { count, rows }
+    if (!siteId) return []
+    return groupWarningDays(await api.list({ siteId })).filter(day => day.status === 'open')
+      .sort((a, b) => a.date.localeCompare(b.date))
   }, [siteId])
   const oversight = useSiteRead(async () => {
     if (!review) return null
-    const [explained, open] = await Promise.all([api.count('explained'), api.count('open')])
-    return { explained, open }
+    const days = groupWarningDays(await api.list())
+    return { explained: days.filter(day => day.status === 'explained').length, open: days.filter(day => day.status === 'open').length }
   }, [review])
   return <>
     {siteId && <ErrorBox error={own.error} />}
-    {siteId && own.data?.count > 0 && <section aria-label="Budget warnings to explain" style={panel}>
-      <strong>Budget warnings to explain: {own.data.count}</strong>
-      {own.data.rows.map(warning => <div key={warning.id} style={rowStyle}>
-        <span>{name(warning)} · {fmtDate(warning.date)}</span>
-        <button style={button()} onClick={() => onOpen({ id: warning.id, siteId, action: 'explain' })}>Explain</button>
+    {siteId && own.data?.length > 0 && <section aria-label="Budget warnings to explain" style={panel}>
+      <strong>Budget warnings to explain: {own.data.length}</strong>
+      {own.data.slice(0, 3).map(day => <div key={day.key} style={{ marginTop: 8 }}>
+        <WarningFacts day={day} sites={sites} />
+        <button style={button()} onClick={() => onOpen({ id: day.actionLine.id, siteId, action: 'explain' })}>Explain</button>
       </div>)}
     </section>}
     {review && <ErrorBox error={oversight.error} />}
@@ -173,15 +191,14 @@ export function useSavedBudgetWarnings() {
 }
 
 export function SavedBudgetWarnings({ result, onOpen, userProfile, assignedSiteId }) {
+  const day = groupWarningDays(result.rows.filter(line => line.status === 'open'))[0]
+  const explain = day && (hasRole(userProfile, 'md') || assignedSiteId === day.site_id)
   return <>
     <ErrorBox error={result.error} />
-    {result.rows.map(warning => {
-      const explain = hasRole(userProfile, 'md') || assignedSiteId === warning.site_id
-      return <div style={panel} key={warning.id}>
-        <strong>{name(warning)} {varianceLabel(warning.variance_pct).replace(/^[+−]/, '')} {warning.direction} budget for {fmtDate(warning.date)}</strong>
-        {onOpen && <button style={{ ...button(), marginLeft: 8 }} onClick={() => onOpen({ id: warning.id, siteId: warning.site_id, action: explain ? 'explain' : '' })}>{explain ? 'Explain now' : 'View warning'}</button>}
-      </div>
-    })}
+    {day && <div style={panel}>
+      <strong>Budget warning for {fmtDate(day.date)}: {day.lines.map(line => name(line) + ' ' + varianceLabel(line.variance_pct)).join(' · ')}</strong>
+      {onOpen && <button style={{ ...button(), marginLeft: 8 }} onClick={() => onOpen({ id: day.actionLine.id, siteId: day.site_id, action: explain ? 'explain' : '' })}>{explain ? 'Explain now' : 'View warning'}</button>}
+    </div>}
   </>
 }
 
