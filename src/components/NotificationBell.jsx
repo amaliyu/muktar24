@@ -1,3 +1,4 @@
+import { hasRole } from '../lib/roles'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { notificationsService } from '../services/notifications'
 import { Z } from '../lib/zIndex'
@@ -55,6 +56,9 @@ function BellIcon({ hasUnread }) {
 }
 
 export default function NotificationBell({ userProfile, onNavigate, isMobile }) {
+  const targetPage = table => table === 'staff_tasks'
+    ? (hasRole(userProfile, 'md') ? 'staff_tasks' : 'my_profile')
+    : TABLE_PAGE[table];
   const [open, setOpen] = useState(false)
   const [notifications, setNotifications] = useState([])
   const [unreadCount, setUnreadCount] = useState(0)
@@ -134,7 +138,7 @@ export default function NotificationBell({ userProfile, onNavigate, isMobile }) 
       }
     }
     // Navigate if we know the page
-    const page = n.related_table ? TABLE_PAGE[n.related_table] : null
+    const page = n.related_table ? targetPage(n.related_table) : null
     if (page && onNavigate) {
       onNavigate(page, n.related_id)
       setOpen(false)
@@ -253,7 +257,7 @@ export default function NotificationBell({ userProfile, onNavigate, isMobile }) 
               notifications.map(n => {
                 const meta = TYPE_META[n.type] || TYPE_META.info
                 const isUnread = !n.read_at
-                const hasNav = n.related_table && TABLE_PAGE[n.related_table]
+                const hasNav = n.related_table && targetPage(n.related_table)
                 return (
                   <div
                     key={n.id}
