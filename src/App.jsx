@@ -85,6 +85,7 @@ import ReserveBudget from './components/investors/ReserveBudget'
 import MyInvestment from './components/investors/MyInvestment'
 import MessagesBell from './components/MessagesBell'
 import { advancesService } from './services/advances'
+import LinkedDeliveries from './components/site/LinkedDeliveries'
 import { paymentRequestsService } from './services/paymentRequests'
 import { truckLoadingService, labourPoolService } from './services/labour'
 import { leaveService } from './services/leave'
@@ -8904,6 +8905,7 @@ function PaymentRequests({ userProfile, assignedSiteId }) {
                   )}
                 </div>
               )}
+              <LinkedDeliveries requestId={req.id} category={catMap[req.expense_category_id]} />
               {(canUploadEvidence || closureLabel) && (
                 <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: '16px', marginTop: '4px' }}>
                   <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '12px' }}>Closure Evidence</div>

@@ -1,3 +1,4 @@
+import { useSiteRead } from './useSiteRead'
 import { requisitionsService } from '../../services/requisitions'
 import { RECEIPT_STATUSES, number } from '../../utils/requisitionText'
 import { withAssignedSite } from '../AssignedSite'
@@ -20,6 +21,8 @@ import { theme, ui, Pill, fmtDec, fmtNaira, fmtDate, ErrorBox, SkeletonRows, Pho
 export const RECEIVING_WRITE_ROLES = ['md', 'store_officer', 'production_manager', 'assistant_production_manager']
 export const RECEIVING_VOID_ROLES = ['md', 'store_officer']
 
+const paymentStatuses = { disbursed: 'Paid', md_approved: 'Approved', funded: 'Funded' }
+
 const toNum = (v) => (v === '' || v == null ? NaN : Number(v))
 
 // Why the form can't be submitted yet, or null when it can. The DB enforces
@@ -39,6 +42,7 @@ const isDustOrChippings = (item) => item?.material === 'dust' || item?.material 
 const itemFields = (item) => ({
   itemId: item?.id ?? '',
   price: '',
+  paymentRequestId: '',
   unit: item?.unit === 'kg' && isDustOrChippings(item) ? 'tonnes' : 'kg',
 })
 const emptyForm = () => ({ ...itemFields(), receivedOn: lagosToday(), delivered: '', accepted: '', reason: '', supplier: '', ref: '', notes: '', photo: null })
@@ -88,6 +92,21 @@ function MaterialReceiptForm({ onSaved, assignedSiteId }) {
   const accRaw = form.accepted === '' ? form.delivered : form.accepted
   const rejected = (toNum(form.delivered) || 0) - (toNum(accRaw) || 0)
   const apclItem = item?.owner === 'apcl'
+  const [requestsVersion, setRequestsVersion] = useState(0)
+  const refreshRequests = () => setRequestsVersion(version => version + 1)
+  const requests = useSiteRead(async () => ({
+    siteId, rows: await siteContractsService.openMaterialRequests(siteId),
+  }), [siteId, requestsVersion])
+  const paymentCategory = item?.material === 'diesel' ? 'Production Fuel' : 'Raw Materials'
+  const paymentOptions = apclItem && requests.data?.siteId === siteId
+    ? requests.data.rows.filter(request => request.category === paymentCategory)
+    : []
+  const chosenPayment = paymentOptions.find(request => request.id === form.paymentRequestId)
+  useEffect(() => {
+    if (form.paymentRequestId && !chosenPayment) {
+      setForm(current => ({ ...current, paymentRequestId: '' }))
+    }
+  }, [form.paymentRequestId, chosenPayment])
   const priceRequired = apclItem && site?.site_type === 'client_site'
   const priceUnit = ({ bags: 'bag', litres: 'litre', kg: 'tonne' })[item?.unit] || item?.unit
   const price = toNum(form.price)
@@ -127,6 +146,7 @@ function MaterialReceiptForm({ onSaved, assignedSiteId }) {
       }
       await siteContractsService.recordReceipt({
         ...lateEntry.payload,
+        ...(chosenPayment ? { paymentRequestId: chosenPayment.id } : {}),
         ...(apclItem && validPrice ? { unitCost } : {}),
         ...(requisitionOptions.some(row => row.site_id === siteId && row.id === requisitionId) ? { requisitionId } : {}),
         itemId: form.itemId,
@@ -141,6 +161,7 @@ function MaterialReceiptForm({ onSaved, assignedSiteId }) {
       })
       setOk(`Delivery recorded. ${fmtDec(Number(accRaw) * factor)} ${item.unit} added to ${item.name} stock.${photoWarn}`)
       lateEntry.reset()
+      refreshRequests()
       setForm(f => ({ ...emptyForm(), receivedOn: f.receivedOn }))
       const fresh = await siteContractsService.listSiteItems(siteId).catch(() => null)
       if (fresh) setItems(fresh)
@@ -177,6 +198,23 @@ function MaterialReceiptForm({ onSaved, assignedSiteId }) {
           {!itemsErr && items.length === 0 && <div style={ui.hint}>No stock items at this site yet.</div>}
           {item?.owner === 'client' && <div style={{ marginTop: '6px' }}><Pill label="Client-owned" color={theme.blue} /> <span style={ui.hint}>Not APCL stock or cost.</span></div>}
         </div>
+        {apclItem && <div style={{ ...ui.field, minWidth: 0 }}>
+          <label style={ui.label} htmlFor="rcv-payment">Paid by payment request</label>
+          <select id="rcv-payment" style={ui.input} value={chosenPayment?.id || ''} onChange={set('paymentRequestId')}
+            disabled={!paymentOptions.length || busy}>
+            <option value="">Not linked</option>
+            {paymentOptions.map(request => <option key={request.id} value={request.id}>
+              {request.reference} — {fmtNaira(request.amount)} — {request.purpose || request.payee_name || '—'} ({paymentStatuses[request.status]})
+            </option>)}
+          </select>
+          <div style={ui.hint}>Optional. A paid request closes automatically when you save this delivery.</div>
+          {requests.loading && <div role="status" style={ui.hint}>Loading payment requests…</div>}
+          {!requests.loading && !requests.error && !paymentOptions.length &&
+            <div style={ui.hint}>No approved or paid requests for this material at this site.</div>}
+          <ErrorBox error={requests.error} onRetry={refreshRequests} />
+          {chosenPayment?.status === 'disbursed' &&
+            <div style={ui.hint}>Saving this will close {chosenPayment.reference}.</div>}
+        </div>}
         {clientItem && <div style={ui.field}>
           <label style={ui.label} htmlFor="rcv-requisition">Against requisition</label>
           <select id="rcv-requisition" style={ui.input} value={requisitionId} onChange={e => setRequisitionChoice(e.target.value)}>
@@ -348,6 +386,9 @@ function MaterialReceiving({ userProfile }) {
                       <td style={ui.td}>{site}</td>
                       <td style={ui.td}>
                         {r.item?.name || '—'}
+                        {r.payment_request_id && <div style={{ marginTop: '4px' }}>
+                          <Pill label={r.payment_request?.reference ? `Paid by ${r.payment_request.reference}` : 'Linked to payment request'} color={theme.blue} />
+                        </div>}
                         {r.item?.owner === 'client' && <div style={{ marginTop: '4px' }}><Pill label="Client-owned" color={theme.blue} /></div>}
                         {r.voided && <div style={{ marginTop: '4px' }}><Pill status="voided" label="Voided" /><div style={ui.hint}>{r.void_reason}</div></div>}
                       </td>

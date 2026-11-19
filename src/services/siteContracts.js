@@ -112,19 +112,24 @@ export const siteContractsService = {
   },
 
   async listReceipts({ siteId, from, to, itemId } = {}) {
-    let q = supabase.from('material_receipts')
-      .select('*, item:item_id(name, unit, owner, material)')
-      .order('received_on', { ascending: false })
-      .order('created_at', { ascending: false })
-      .limit(300)
-    if (siteId) q = q.eq('site_id', siteId)
-    if (itemId) q = q.eq('item_id', itemId)
-    if (from) q = q.gte('received_on', from)
-    if (to) q = q.lte('received_on', to)
-    return must(await q)
+    const query = (embed) => {
+      let q = supabase.from('material_receipts')
+        .select('*, item:item_id(name, unit, owner, material)' + embed)
+        .order('received_on', { ascending: false })
+        .order('created_at', { ascending: false })
+        .limit(300)
+      if (siteId) q = q.eq('site_id', siteId)
+      if (itemId) q = q.eq('item_id', itemId)
+      if (from) q = q.gte('received_on', from)
+      if (to) q = q.lte('received_on', to)
+      return q
+    }
+    const result = await query(', payment_request:payment_request_id(reference)')
+    if (result.error?.code === '42501' || result.status === 403) return must(await query(''))
+    return must(result)
   },
 
-  async recordReceipt({ itemId, receivedOn, qtyDelivered, qtyAccepted, rejectionReason, supplier, ref, photoPath, notes, late_reason, requisitionId, unitCost }) {
+  async recordReceipt({ itemId, receivedOn, qtyDelivered, qtyAccepted, rejectionReason, supplier, ref, photoPath, notes, late_reason, requisitionId, unitCost, paymentRequestId }) {
     return must(await supabase.rpc('record_material_receipt', {
       p_item_id: itemId,
       p_received_on: receivedOn,
@@ -138,7 +143,12 @@ export const siteContractsService = {
       ...(late_reason !== undefined ? { p_late_reason: late_reason } : {}),
       ...(requisitionId ? { p_requisition_id: requisitionId } : {}),
       ...(unitCost !== undefined ? { p_unit_cost: unitCost } : {}),
+      ...(paymentRequestId ? { p_payment_request_id: paymentRequestId } : {}),
     }))
+  },
+
+  async openMaterialRequests(siteId) {
+    return must(await supabase.rpc('site_open_material_requests', { p_site_id: siteId })) || []
   },
 
   async voidReceipt(id, reason) {

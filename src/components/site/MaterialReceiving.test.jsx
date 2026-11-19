@@ -12,6 +12,7 @@ vi.mock('../../services/sites', () => ({
 vi.mock('../../services/siteContracts', () => ({
   lagosToday: () => '2026-12-21',
   siteContractsService: {
+    openMaterialRequests: vi.fn(async () => []),
     listSiteItems: vi.fn(async () => [
       { id: 'cem', name: 'Cement', unit: 'bags', owner: 'apcl', site_id: 'dutse' },
       { id: 'dust', name: 'Granite dust', unit: 'kg', material: 'dust' },
