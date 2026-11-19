@@ -1,3 +1,4 @@
+import MyTasks, { StaffTasks, TaskReminder, useTaskReminders } from './components/tasks/MyTasks'
 import SiteScorecard, { ScorecardDashboard } from './components/site/SiteScorecard'
 import BudgetWarnings, { BudgetWarningDashboardCards, SavedBudgetWarnings, useSavedBudgetWarnings } from './components/site/BudgetWarnings'
 import BudgetWarningSettings from './components/site/BudgetWarningSettings'
@@ -427,6 +428,7 @@ const NAV_ICONS = {
   trading_margin: TrendingUp,
   accounting: Calculator,
   payment_requests: Banknote,
+  staff_tasks: ClipboardList,
   my_investment: Wallet,
   investor_register: BookUser,
   capital: Landmark,
@@ -7592,7 +7594,7 @@ const ChangePasswordModal = ({ onClose }) => {
 };
 
 // ── MY PROFILE ────────────────────────────────────────────────
-const MyProfile = ({ userProfile }) => {
+const MyProfile = ({ userProfile, taskSource, targetId, onPaymentRequest }) => {
   const [tab, setTab] = useState('info');
   const [documents, setDocuments] = useState([]);
   const [uploading, setUploading] = useState(false);
@@ -7691,6 +7693,7 @@ const MyProfile = ({ userProfile }) => {
 
   return (
     <div>
+      <MyTasks key={targetId || 'my-tasks'} userProfile={userProfile} source={taskSource} targetId={targetId} onPaymentRequest={onPaymentRequest} />
       <div className="m-header" style={styles.header}>
         <div>
           <div style={styles.pageTitle}>My Profile</div>
@@ -8004,16 +8007,20 @@ const PaymentRequestAttachmentRow = ({ att }) => {
 
 // ── PAYMENT REQUESTS ──────────────────────────────────────────
 export const PaymentRequestsPage = withAssignedSite(PaymentRequests);
-function PaymentRequests({ userProfile, assignedSiteId }) {
-  const role = userProfile?.role;
+function PaymentRequests({ userProfile, assignedSiteId, initialRequest }) {
+  const isICO = hasRole(userProfile, 'ico');
+  const isMD = hasRole(userProfile, 'md');
+  const isAccountant = hasRole(userProfile, 'accountant');
+  const canProcess = isICO || isMD || isAccountant;
   const userId = userProfile?.id;
   const INITIATOR_ROLES = ['production_manager', 'logistics_manager', 'bdm', 'hr_officer'];
   const isSiteRequester = Boolean(assignedSiteId);
-  const isInitiator = INITIATOR_ROLES.includes(role) || isSiteRequester;
+  const isInitiator = hasRole(userProfile, ...INITIATOR_ROLES) || isSiteRequester;
+  const initiatorView = isInitiator && !canProcess;
   const canReadSuppliers = hasRole(userProfile, 'md', 'accountant', 'board_member', 'ico', ...INITIATOR_ROLES);
   const canRecall = hasRole(userProfile, 'ico', 'md', ...INITIATOR_ROLES);
   const defaultPayeeMode = canReadSuppliers ? 'existing' : 'new';
-  const canReviewVendors = ['md', 'ico', 'accountant'].includes(role);
+  const canReviewVendors = canProcess;
 
   const [requests, setRequests] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -8048,7 +8055,7 @@ function PaymentRequests({ userProfile, assignedSiteId }) {
   const [attachError, setAttachError] = useState(false);
   const [dupConfirm, setDupConfirm] = useState(false);
 
-  const emptyBackfillForm = { requested_by: '', amount: '', purpose: '', transaction_date: '', note: '', expense_category_id: '', disbursement_method: 'bank_transfer', bank_account_id: '', payeeMode: 'existing', supplier_id: '', payee_name: '', payee_bank_name: '', payee_account_number: '', payee_account_name: '' };
+  const emptyBackfillForm = { site_id: assignedSiteId || '', requested_by: '', amount: '', purpose: '', transaction_date: '', note: '', expense_category_id: '', disbursement_method: 'bank_transfer', bank_account_id: '', payeeMode: 'existing', supplier_id: '', payee_name: '', payee_bank_name: '', payee_account_number: '', payee_account_name: '' };
   const [showBackfill, setShowBackfill] = useState(false);
   const [backfillForm, setBackfillForm] = useState(emptyBackfillForm);
   const [backfillSaving, setBackfillSaving] = useState(false);
@@ -8060,8 +8067,8 @@ function PaymentRequests({ userProfile, assignedSiteId }) {
   const [prSiteFilter, setPrSiteFilter] = useState('');
   const { sites: prSites } = useSites();
 
-  const canBackfill = INITIATOR_ROLES.includes(role) || role === 'md';
-  const canQuery = ['ico', 'accountant'].includes(role);
+  const canBackfill = hasRole(userProfile, 'md', 'ico', 'accountant', ...INITIATOR_ROLES);
+  const canQuery = hasRole(userProfile, 'ico', 'accountant');
 
   const [resaleItems, setResaleItems] = useState([]);
   const [resaleOrderMap, setResaleOrderMap] = useState({});
@@ -8096,18 +8103,30 @@ function PaymentRequests({ userProfile, assignedSiteId }) {
     setLoading(true);
     try {
       const [reqs, cats] = await Promise.all([
-        isInitiator ? paymentRequestsService.listMine(userId) : paymentRequestsService.list(),
+        initiatorView ? paymentRequestsService.listMine(userId) : paymentRequestsService.list(),
         expenseCategoriesService.getActive(),
       ]);
       setRequests(reqs);
       setCategories(cats);
-      if (canReadSuppliers && (isInitiator || role === 'md')) paymentRequestsService.getActiveSuppliers().then(setActiveSuppliers).catch(e => setAlert({ type: 'error', msg: 'Could not load the vendor list: ' + (e?.message || e) }));
+      if (canReadSuppliers && (isInitiator || canBackfill)) paymentRequestsService.getActiveSuppliers().then(setActiveSuppliers).catch(e => setAlert({ type: 'error', msg: 'Could not load the vendor list: ' + (e?.message || e) }));
       if (canReviewVendors) paymentRequestsService.getPendingVendors().then(setPendingVendors).catch(e => setAlert({ type: 'error', msg: 'Could not load vendors awaiting review: ' + (e?.message || e) }));
     } catch (e) { setAlert({ type: 'error', msg: e.message }); }
     finally { setLoading(false); }
   };
 
   useEffect(() => { load(); }, []);
+  useEffect(() => {
+    const id = initialRequest?.id;
+    if (!id) return;
+    let current = true;
+    paymentRequestsService.getById(id).then(request => {
+      if (!current) return;
+      if (request) setDetailReq(request);
+      else setAlert({ type: 'error', msg: 'This payment request is unavailable.' });
+    }).catch(error => { if (current) setAlert({ type: 'error', msg: error.message }); });
+    return () => { current = false; };
+  }, [initialRequest]);
+
   useEffect(() => { bankAccountsService.getAll().then(setBankAccounts).catch(e => setAlert({ type: 'error', msg: 'Could not load bank accounts: ' + (e?.message || e) })); }, []);
   useEffect(() => {
     // Names for the "requested by" display only; ids still work without them.
@@ -8237,6 +8256,7 @@ function PaymentRequests({ userProfile, assignedSiteId }) {
   };
 
   const handleBackfill = async () => {
+    if (!backfillForm.site_id) return setAlert({ type: 'error', msg: 'Select a site.' });
     if (!backfillForm.requested_by) return setAlert({ type: 'error', msg: 'Select who this payment was for.' });
     if (!backfillForm.amount || !backfillForm.purpose.trim()) return setAlert({ type: 'error', msg: 'Amount and purpose are required.' });
     if (!backfillForm.transaction_date) return setAlert({ type: 'error', msg: 'Transaction date is required.' });
@@ -8248,7 +8268,8 @@ function PaymentRequests({ userProfile, assignedSiteId }) {
     setBackfillSaving(true); setAlert(null);
     try {
       const usePayeeFields = backfillForm.payeeMode === 'new';
-      await paymentRequestsService.backfill({
+      await paymentRequestsService.backfillAtSite({
+        site_id: backfillForm.site_id,
         requested_by: backfillForm.requested_by,
         amount: Number(backfillForm.amount),
         purpose: backfillForm.purpose.trim(),
@@ -8333,10 +8354,11 @@ function PaymentRequests({ userProfile, assignedSiteId }) {
   const rowActions = (req) => {
     const { id, status, disbursement_method } = req;
     const btns = [];
-    if (role === 'ico' && status === 'draft') {
+    if (isICO && status === 'draft') {
       btns.push(<button key="approve" style={{ ...styles.btn('primary'), ...sm }} onClick={() => handleAction(id, 'ico_approve')} disabled={actionSaving}><IconText icon={Check}>Approve</IconText></button>);
       if (canRecall) btns.push(<button key="recall" style={{ ...styles.btn('danger'), ...sm }} onClick={() => setRecallTarget({ id })}><IconText icon={Undo2}>Recall</IconText></button>);
-    } else if (role === 'md') {
+    }
+    if (isMD) {
       if (status === 'ico_approved') {
         btns.push(<button key="approve" style={{ ...styles.btn('primary'), ...sm }} onClick={() => handleAction(id, 'md_approve')} disabled={actionSaving}><IconText icon={Check}>Approve</IconText></button>);
         if (canRecall) btns.push(<button key="recall" style={{ ...styles.btn('danger'), ...sm }} onClick={() => setRecallTarget({ id })}><IconText icon={Undo2}>Recall</IconText></button>);
@@ -8344,19 +8366,16 @@ function PaymentRequests({ userProfile, assignedSiteId }) {
       if (status === 'funded') {
         if (canRecall) btns.push(<button key="recall" style={{ ...styles.btn('danger'), ...sm }} onClick={() => setRecallTarget({ id })}><IconText icon={Undo2}>Recall</IconText></button>);
       }
-    } else if (role === 'accountant') {
+    }
+    if (isAccountant) {
       if (status === 'md_approved') {
         btns.push(<button key="fund" style={{ ...styles.btn('primary'), ...sm, background: theme.green, color: '#000' }} onClick={() => handleAction(id, 'mark_funded')} disabled={actionSaving}><IconText icon={Banknote}>Mark Funded</IconText></button>);
       }
       if (status === 'funded') {
         btns.push(<button key="disburse" style={{ ...styles.btn('primary'), ...sm }} onClick={() => disbursement_method === 'cash' ? handleAction(id, 'mark_disbursed') : setDisburseTarget({ id })} disabled={actionSaving}><IconText icon={Check}>Mark Disbursed</IconText></button>);
       }
-      if (status === 'disbursed') {
-        btns.push(<button key="close" style={{ ...styles.btn('primary'), ...sm, background: '#a78bfa', color: '#000' }} onClick={() => handleAction(id, 'close')} disabled={actionSaving}><IconText icon={Check}>Close</IconText></button>);
-        btns.push(<button key="override-close" style={{ ...styles.btn('secondary'), ...sm }} onClick={() => setOverrideCloseTarget({ id })}>Override Close</button>);
-      }
     }
-    if (role === 'md' && status === 'disbursed') {
+    if ((isMD || isAccountant) && status === 'disbursed') {
       btns.push(<button key="close" style={{ ...styles.btn('primary'), ...sm, background: '#a78bfa', color: '#000' }} onClick={() => handleAction(id, 'close')} disabled={actionSaving}><IconText icon={Check}>Close</IconText></button>);
       btns.push(<button key="override-close" style={{ ...styles.btn('secondary'), ...sm }} onClick={() => setOverrideCloseTarget({ id })}>Override Close</button>);
     }
@@ -8364,7 +8383,7 @@ function PaymentRequests({ userProfile, assignedSiteId }) {
       btns.push(<button key="query" style={{ ...styles.btn('secondary'), ...sm }} onClick={() => setQueryTarget({ id })}><IconText icon={Flag}>Query</IconText></button>);
     }
     if (status === 'queried') {
-      if (req.requested_by === userId || role === 'md') {
+      if (req.requested_by === userId || isMD) {
         btns.push(<button key="edit-queried" style={{ ...styles.btn('secondary'), ...sm }} onClick={() => openEdit(req)}><IconText icon={Pencil}>Edit</IconText></button>);
         btns.push(<button key="resolve" style={{ ...styles.btn('primary'), ...sm, background: theme.green, color: '#000' }} onClick={() => handleAction(id, 'resolve_query')} disabled={actionSaving}><IconText icon={Check}>Resolve</IconText></button>);
       }
@@ -8372,18 +8391,14 @@ function PaymentRequests({ userProfile, assignedSiteId }) {
     return btns;
   };
 
-  const actionQueue = isInitiator
-    ? requests
-    : role === 'ico'
-    ? requests.filter(r => r.status === 'draft')
-    : role === 'md'
-    ? requests.filter(r => ['ico_approved', 'funded', 'disbursed'].includes(r.status))
-    : role === 'accountant'
-    ? requests.filter(r => ['md_approved', 'funded', 'disbursed'].includes(r.status))
-    : requests;
-  const queriedRequests = requests.filter(r => r.status === 'queried' &&
-    (['ico', 'accountant', 'md'].includes(role) || r.requested_by === userId));
-  const baseQueue = showQueried ? queriedRequests : ((!isInitiator && showHistory) ? requests : actionQueue);
+  const queueStatuses = [
+    ...(isICO ? ['draft'] : []),
+    ...(isMD ? ['ico_approved', 'funded', 'disbursed'] : []),
+    ...(isAccountant ? ['md_approved', 'funded', 'disbursed'] : []),
+  ];
+  const actionQueue = canProcess ? requests.filter(r => queueStatuses.includes(r.status)) : requests;
+  const queriedRequests = requests.filter(r => r.status === 'queried' && (canProcess || r.requested_by === userId));
+  const baseQueue = showQueried ? queriedRequests : (showHistory ? requests : actionQueue);
   // Status filter takes precedence over the Action Queue / All / Queried toggle when active
   const statusQueue = statusFilter !== 'all' ? requests.filter(r => r.status === statusFilter) : baseQueue;
   const queue = prSiteFilter ? statusQueue.filter(r => r.site_id === prSiteFilter) : statusQueue;
@@ -8400,13 +8415,13 @@ function PaymentRequests({ userProfile, assignedSiteId }) {
         <div>
           <div style={styles.pageTitle}>Payment Requests</div>
           <div style={styles.pageSubtitle}>
-            {isInitiator ? 'Submit and track your payment requests' : 'Review and process payment requests'}
+            {initiatorView ? 'Submit and track your payment requests' : 'Review and process payment requests'}
           </div>
         </div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-          {!isInitiator && (
+          {!initiatorView && (
             <div className="m-wrap" style={{ display: 'flex', gap: '4px' }}>
-              {[['Action Queue', 'queue'], ['All Requests', 'all'], ...((canQuery || role === 'md') ? [['Queried', 'queried']] : [])].map(([label, val]) => {
+              {[['Action Queue', 'queue'], ['All Requests', 'all'], ...((canQuery || isMD) ? [['Queried', 'queried']] : [])].map(([label, val]) => {
                 const active = val === 'queried' ? showQueried : (!showQueried && showHistory === (val === 'all'));
                 return (
                   <button key={label}
@@ -8444,11 +8459,11 @@ function PaymentRequests({ userProfile, assignedSiteId }) {
             <div style={{ ...styles.statValue, color: theme.green }}>{naira(outstandingTotal)}</div>
             <div style={styles.statSub}>
               {fundedRequests.length} request{fundedRequests.length !== 1 ? 's' : ''} funded but not yet disbursed
-              {isInitiator && ' (your requests)'}
+              {initiatorView && ' (your requests)'}
             </div>
           </div>
           <div style={{ fontSize: '12px', color: theme.textMuted, maxWidth: '320px' }}>
-            Funding has been set aside for {isInitiator ? 'these requests' : 'these requests across all initiators'} — pending final disbursement by the accountant.
+            Funding has been set aside for {initiatorView ? 'these requests' : 'these requests across all initiators'} — pending final disbursement by the accountant.
           </div>
         </div>
       )}
@@ -8491,7 +8506,7 @@ function PaymentRequests({ userProfile, assignedSiteId }) {
                 onChange={e => {
                   const val = e.target.value;
                   setForm(f => ({ ...f, expense_category_id: val, order_item_id: '', _order_id: '' }));
-                  if (role === 'bdm' && tradingPurchasesId && val === tradingPurchasesId) loadResaleItems();
+                  if (hasRole(userProfile, 'bdm') && tradingPurchasesId && val === tradingPurchasesId) loadResaleItems();
                 }}>
                 <option value="">— None —</option>
                 {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -8507,7 +8522,7 @@ function PaymentRequests({ userProfile, assignedSiteId }) {
                 onChange={e => setForm(f => ({ ...f, category_other_note: e.target.value }))} />
             </div>
           )}
-          {role === 'bdm' && isTradingPurchases && (
+          {hasRole(userProfile, 'bdm') && isTradingPurchases && (
             <div style={{ padding: '12px', marginTop: '4px', marginBottom: '4px', background: theme.surface, borderRadius: '8px', border: `1px solid ${theme.blue}33` }}>
               <div style={{ fontSize: '11px', fontWeight: '700', color: theme.textMuted, marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
                 Link to Order Item (optional)
@@ -8617,6 +8632,14 @@ function PaymentRequests({ userProfile, assignedSiteId }) {
           <div style={styles.sectionTitle}>Backfill Historical Entry <span style={{ fontSize: '12px', fontWeight: 400, color: '#f59e0b' }}>— lands directly in Disbursed</span></div>
           <div style={styles.grid(2)}>
             <div style={styles.formGroup}>
+              <label htmlFor="backfill-site" style={styles.label}>Site *</label>
+              <select id="backfill-site" style={styles.input} required value={backfillForm.site_id}
+                onChange={e => setBackfillForm(f => ({ ...f, site_id: e.target.value }))}>
+                <option value="">Choose a site</option>
+                {prSites.map(site => <option key={site.id} value={site.id}>{site.name}</option>)}
+              </select>
+            </div>
+            <div style={styles.formGroup}>
               <label style={styles.label}>On behalf of (who was paid) *</label>
               <select style={styles.input} value={backfillForm.requested_by}
                 onChange={e => setBackfillForm(f => ({ ...f, requested_by: e.target.value }))}>
@@ -8626,7 +8649,7 @@ function PaymentRequests({ userProfile, assignedSiteId }) {
             </div>
             <div style={styles.formGroup}>
               <label style={styles.label}>Transaction Date *</label>
-              <input style={styles.input} type="date" max={new Date().toISOString().split('T')[0]}
+              <input style={styles.input} type="date" max={lagosToday()}
                 value={backfillForm.transaction_date}
                 onChange={e => setBackfillForm(f => ({ ...f, transaction_date: e.target.value }))} />
             </div>
@@ -8730,7 +8753,7 @@ function PaymentRequests({ userProfile, assignedSiteId }) {
               </div>
             )}
           </div>
-          <button style={{ ...styles.btn('primary'), marginTop: '14px', background: '#f59e0b', color: '#000' }} onClick={handleBackfill} disabled={backfillSaving}>
+          <button style={{ ...styles.btn('primary'), marginTop: '14px', background: '#f59e0b', color: '#000' }} onClick={handleBackfill} disabled={backfillSaving || !backfillForm.site_id}>
             {backfillSaving ? 'Recording…' : 'Record Historical Entry'}
           </button>
         </div>
@@ -8830,7 +8853,7 @@ function PaymentRequests({ userProfile, assignedSiteId }) {
         const cat = categories.find(c => c.id === req.expense_category_id);
         const closureMechanism = cat?.closure_mechanism;
         const CLOSURE_LABELS = { stock_movements: 'Stock records', vehicle_maintenance: 'Vehicle Maintenance records', vehicle_fuel_log: 'Vehicle Fuel records', truck_loading_log: 'Loading records', external_haulage_log: 'Haulage records' };
-        const canUploadEvidence = closureMechanism === 'receipt' && (isInitiator || ['md', 'accountant'].includes(role));
+        const canUploadEvidence = isMD || isAccountant || (isInitiator && closureMechanism === 'receipt');
         const closureLabel = closureMechanism && closureMechanism !== 'receipt' ? CLOSURE_LABELS[closureMechanism] : null;
         const DL = ({ label, value, mono }) => value ? (
           <div style={{ marginBottom: '12px' }}>
@@ -8880,7 +8903,7 @@ function PaymentRequests({ userProfile, assignedSiteId }) {
                   <div style={{ fontSize: '13px', color: theme.textMuted }}>No payee details recorded.</div>
                 )}
               </div>
-              {!isInitiator && req.requester?.full_name && (
+              {!initiatorView && req.requester?.full_name && (
                 <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: '16px', marginTop: '4px' }}>
                   <DL label="Requested by" value={req.requester.full_name} />
                   <DL label="Date" value={req.created_at ? fmtDay(req.created_at) : null} />
@@ -8980,7 +9003,7 @@ function PaymentRequests({ userProfile, assignedSiteId }) {
       <div style={styles.card}>
         {loading ? <Spinner /> : queue.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '30px', color: theme.textMuted }}>
-            {prSiteFilter && statusQueue.length > 0 ? `No requests for ${siteName(prSiteFilter, prSites)} in this view.` : statusFilter !== 'all' ? `No ${statusFilter.replace(/_/g, ' ')} requests.` : isInitiator ? 'No payment requests yet.' : showHistory ? 'No payment requests found.' : 'No requests pending in this queue.'}
+            {prSiteFilter && statusQueue.length > 0 ? `No requests for ${siteName(prSiteFilter, prSites)} in this view.` : statusFilter !== 'all' ? `No ${statusFilter.replace(/_/g, ' ')} requests.` : initiatorView ? 'No payment requests yet.' : showHistory ? 'No payment requests found.' : 'No requests pending in this queue.'}
           </div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
@@ -8988,7 +9011,7 @@ function PaymentRequests({ userProfile, assignedSiteId }) {
               <thead>
                 <tr>
                   {['Reference', 'Site', 'Amount', 'Purpose', 'Category', 'Method', 'Payee',
-                    ...(!isInitiator ? ['Requested By'] : []),
+                    ...(!initiatorView ? ['Requested By'] : []),
                     'Status', 'Date', 'Actions'].map(h => (
                     <th key={h} style={styles.th}>{h}</th>
                   ))}
@@ -9006,7 +9029,7 @@ function PaymentRequests({ userProfile, assignedSiteId }) {
                       <td style={styles.td}>{req.expense_category_id ? (catMap[req.expense_category_id] || '—') : <span style={{ color: theme.textMuted }}>—</span>}</td>
                       <td style={styles.td}>{req.disbursement_method === 'bank_transfer' ? 'Bank Transfer' : 'Cash'}</td>
                       <td style={styles.td}>{req.supplier?.company_name || req.payee_name || <span style={{ color: theme.textMuted }}>—</span>}</td>
-                      {!isInitiator && <td style={styles.td}>{req.requester?.full_name || '—'}</td>}
+                      {!initiatorView && <td style={styles.td}>{req.requester?.full_name || '—'}</td>}
                       <td style={styles.td}>
                         <span style={styles.badge(statusColor(req.status))}>{req.status}</span>
                         {req.transaction_date && <span style={{ ...styles.badge('#f59e0b'), marginLeft: '4px', fontSize: '10px', color: '#000' }}>Historical</span>}
@@ -9015,7 +9038,7 @@ function PaymentRequests({ userProfile, assignedSiteId }) {
                       <td style={styles.td}>
                         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                           <button style={{ ...styles.btn('secondary'), ...sm }} onClick={() => setDetailReq(req)}>View</button>
-                          {isInitiator && req.status === 'draft' && (
+                          {req.status === 'draft' && req.requested_by === userId && (
                             <button style={{ ...styles.btn('secondary'), ...sm }} onClick={() => openEdit(req)}><IconText icon={Pencil}>Edit</IconText></button>
                           )}
                           {actions}
@@ -10877,6 +10900,7 @@ const navItems = [
   ]},
   { section: "Finance", items: [
     { id: "accounting", label: "Accounting", icon: "accounting" },
+    { id: "staff_tasks", label: "Staff Tasks", icon: "staff_tasks" },
     { id: "payment_requests", label: "Payment Requests", icon: "payment_requests" },
   ]},
   { section: "Investors (SPV)", items: [
@@ -11333,6 +11357,9 @@ const UserManagement = ({ userProfile }) => {
 export default function App() {
   const [session, setSession] = useState(undefined); // undefined = loading
   const [userProfile, setUserProfile] = useState(null);
+  const taskSource = useTaskReminders(userProfile?.id);
+  const [initialPayment, setInitialPayment] = useState(null);
+  const [initialTask, setInitialTask] = useState(null);
   const [authMessage, setAuthMessage] = useState(''); // shown on LoginScreen after a forced sign-out
   const [profileLoadError, setProfileLoadError] = useState(false); // transient fetch failure, not a missing/inactive verdict
   const [active, setActive] = useState("dashboard");
@@ -11364,7 +11391,7 @@ export default function App() {
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       acceptSession(session);
-      if (!session) { setUserProfile(null); }
+      if (!session) { setUserProfile(null); setInitialPayment(null); setInitialTask(null); }
     });
     return () => subscription.unsubscribe();
   }, []);
@@ -11531,6 +11558,7 @@ export default function App() {
   const grantedRoles = effRoles.filter(r => r !== role);
   const grantedPages = new Set(grantedRoles.flatMap(r => (ROLE_PAGES[r] && ROLE_PAGES[r] !== 'all') ? ROLE_PAGES[r] : []));
   const canSee = (pageId) => {
+    if (pageId === 'staff_tasks') return hasRole(userProfile, 'md');
     if (pageId === 'late_entries') return hasRole(userProfile, 'md', 'ico');
     if (pageId === 'my_profile') return true;
     if (pageId === 'my_hr') return !!userProfile?.staff_id;
@@ -11562,6 +11590,10 @@ export default function App() {
   const scorecardDashboard = canSee("site_scorecard")
     ? <ScorecardDashboard userProfile={userProfile} onOpen={openScorecard} /> : null;
   const budgetCards = <BudgetWarningDashboardCards userProfile={userProfile} onOpen={openBudgetWarnings} />;
+  const openPaymentRequest = id => {
+    setInitialPayment(id && canSee('payment_requests') ? { id } : null);
+    setActive('payment_requests');
+  };
   const pages = {
     dashboard: isBoard
       ? <>{budgetCards}{scorecardDashboard}<SiteDashboardCards userProfile={userProfile} onOpenSite={openSiteContracts} /><RequisitionsDashboardBanner userProfile={userProfile} onOpen={openRequisitions} /><BoardDashboard userProfile={userProfile} /></>
@@ -11599,14 +11631,15 @@ export default function App() {
     maintenance: <MobileScope fit><Maintenance userProfile={userProfile} /></MobileScope>,
     truck_loading: <MobileScope><TruckLoadingPage userProfile={userProfile} /></MobileScope>,
     advances: <MobileScope fit><AdvancesPage userProfile={userProfile} /></MobileScope>,
-    payment_requests: <MobileScope fit><PaymentRequestsPage userProfile={userProfile} /></MobileScope>,
+    payment_requests: <MobileScope fit><PaymentRequestsPage userProfile={userProfile} initialRequest={initialPayment} /></MobileScope>,
     leave: <MobileScope fit><LeavePage userProfile={userProfile} /></MobileScope>,
     disciplinary: <MobileScope fit><DisciplinaryPage userProfile={userProfile} /></MobileScope>,
     attendance_kiosk: <AttendanceKiosk userProfile={userProfile} />,
     attendance_flags: <MobileScope fit><AttendanceFlagsPage userProfile={userProfile} /></MobileScope>,
     messages: <MobileScope fit><Messages userProfile={userProfile} onUnreadChange={setUnreadMsgCount} /></MobileScope>,
     my_hr: <MyHRPage userProfile={userProfile} />,
-    my_profile: <MobileScope fit><MyProfile userProfile={userProfile} /></MobileScope>,
+    staff_tasks: <MobileScope fit><StaffTasks key={initialTask || 'staff-tasks'} userProfile={userProfile} source={taskSource} targetId={initialTask} onPaymentRequest={openPaymentRequest} /></MobileScope>,
+    my_profile: <MobileScope fit><MyProfile userProfile={userProfile} taskSource={taskSource} targetId={initialTask} onPaymentRequest={openPaymentRequest} /></MobileScope>,
     investor_register: <InvestorRegister userProfile={userProfile} />,
     capital: <Capital userProfile={userProfile} />,
     terms: <Terms userProfile={userProfile} />,
@@ -11652,7 +11685,7 @@ export default function App() {
               {section.items.map(item => {
                 const badge = getBadge(item.id);
                 return (
-                  <div key={item.id} style={{ ...styles.navItem(active === item.id), ...(isMobile ? { minHeight: '44px' } : {}) }} onClick={() => { if (item.id === 'production_exceptions') setInitialWarning(null); if (item.id === 'site_scorecard') setInitialScorecard(null); setActive(item.id); setContractsReport(false); if (isMobile) setSidebarOpen(false); }}>
+                  <div key={item.id} style={{ ...styles.navItem(active === item.id), ...(isMobile ? { minHeight: '44px' } : {}) }} onClick={() => { if (item.id === 'payment_requests') setInitialPayment(null); if (item.id === 'staff_tasks' || item.id === 'my_profile') setInitialTask(null); if (item.id === 'production_exceptions') setInitialWarning(null); if (item.id === 'site_scorecard') setInitialScorecard(null); setActive(item.id); setContractsReport(false); if (isMobile) setSidebarOpen(false); }}>
                     <Icon name={item.icon} size={20} />
                     <span style={{ flex: 1 }}>{item.label}</span>
                     {badge > 0 && (
@@ -11686,7 +11719,11 @@ export default function App() {
         userProfile={userProfile}
         onNavigate={(page, relatedId) => {
           if (page === "production_exceptions") openBudgetWarnings(relatedId ? { id: relatedId } : null);
-          else setActive(page);
+          else if (page === "payment_requests") openPaymentRequest(relatedId);
+          else {
+            if (page === "staff_tasks" || page === "my_profile") setInitialTask(relatedId || null);
+            setActive(page);
+          }
           if (isMobile) setSidebarOpen(false);
         }}
         isMobile={isMobile}
@@ -11696,6 +11733,7 @@ export default function App() {
         {isMobile && (
           <IconButton data-board-allow data-ico-allow aria-label="Open menu" onClick={() => setSidebarOpen(s => !s)} style={{ position: 'fixed', top: '10px', left: '12px', zIndex: Z.floating, width: '44px', height: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '8px', padding: 0, cursor: 'pointer', fontSize: '20px', color: theme.text, lineHeight: 1, boxShadow: '0 2px 8px rgba(0,0,0,0.3)' }}><Ico icon={Menu} size={20} /></IconButton>
         )}
+        <TaskReminder tasks={taskSource.rows} userId={userProfile.id} onView={() => { setInitialTask(null); setActive('my_profile'); }} />
         {clockWarning && <div role="status" style={{ padding: "12px", marginBottom: "12px", color: theme.accent, border: `1px solid ${theme.accent}`, borderRadius: "8px" }}>{CLOCK_WARNING}<button data-ico-allow data-board-allow style={{ ...styles.btn("secondary"), marginLeft: "12px", minHeight: "44px" }} onClick={() => setClockWarning(false)}>Dismiss</button></div>}
         {sessionWarning && (
           <div style={{ background: "#7c3a0022", border: "1px solid #c47d0e88", borderRadius: "8px", padding: "10px 16px", marginBottom: "16px", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "13px", color: theme.accent }}>
@@ -11716,7 +11754,7 @@ export default function App() {
         )}
         {isICO && (
           <style>{`
-            [data-ico-view] button:not([data-ico-allow]) { display: none !important; }
+            [data-ico-view] button:not([data-ico-allow], [data-task-controls] *) { display: none !important; }
           `}</style>
         )}
         {boardMasked && (
