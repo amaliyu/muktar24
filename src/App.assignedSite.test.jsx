@@ -62,7 +62,11 @@ afterEach(cleanup)
 
 it('waits for assignment, then opens Production on the assigned site with its machine and dust standard', async () => {
   const onOpen = vi.fn()
-  fixture.warnings = [{ id: 'cement-warning', site_id: fixture.site, date: lagosToday(), status: 'open', parameter: 'cement', direction: 'over', variance_pct: 40 }]
+  const warning = { site_id: fixture.site, date: lagosToday(), status: 'open', direction: 'over' }
+  fixture.warnings = [
+    { ...warning, id: 'cement-warning', parameter: 'cement', variance_pct: 40 },
+    { ...warning, id: 'diesel-warning', parameter: 'diesel', variance_pct: 87.5 },
+  ]
   let resolve
   fixture.assignment = () => new Promise(r => { resolve = r })
   const { container } = render(session(<Production userProfile={profile} onOpenBudgetWarnings={onOpen} />))
@@ -86,7 +90,7 @@ it('waits for assignment, then opens Production on the assigned site with its ma
   await waitFor(() => expect(fixture.calls.find(call => call.table === 'production_log'
     && call.ops.some(op => op[0] === 'insert'))?.ops.find(op => op[0] === 'insert')[1])
     .toMatchObject({ site_id: fixture.site, asset_id: 'life-camp-machine', granite_dust_kg: 360 }))
-  expect(await screen.findByText(/Cement 40% over budget/)).toBeInTheDocument()
+  expect(await screen.findByText(/Budget warning for .*: Cement \+40% · Diesel \+87\.5%/)).toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: 'Explain now' }))
   expect(onOpen).toHaveBeenCalledWith({ id: 'cement-warning', siteId: fixture.site, action: 'explain' })
   expect(fixture.calls.find(call => call.table === 'production_exceptions').ops).toEqual(expect.arrayContaining([

@@ -136,7 +136,7 @@ export default function NotificationBell({ userProfile, onNavigate, isMobile }) 
     // Navigate if we know the page
     const page = n.related_table ? TABLE_PAGE[n.related_table] : null
     if (page && onNavigate) {
-      onNavigate(page)
+      onNavigate(page, n.related_id)
       setOpen(false)
     }
   }
