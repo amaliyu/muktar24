@@ -1,4 +1,6 @@
-import React, { useEffect, useState } from 'react'
+import React, { useState } from 'react'
+import RequisitionBudget from './RequisitionBudget'
+import { useSiteRead } from './useSiteRead'
 import { Check, ClipboardList } from 'lucide-react'
 import { hasRole } from '../../lib/roles'
 import { requisitionsService as api } from '../../services/requisitions'
@@ -21,21 +23,6 @@ const input = { ...ui.input, width: '100%', minWidth: 0, minHeight: 44, boxSizin
 const statusLabel = status => status.replaceAll('_', ' ')
 const siteMatches = (site, id) => site?.id === id
 const whole = value => Number.isSafeInteger(Number(value)) && Number(value) >= 0 && Number(value) <= 2147483647
-
-function useRead(load, deps) {
-  const [state, setState] = useState({ data: null, error: null, loading: true })
-  useEffect(() => {
-    let current = true
-    setState({ data: null, error: null, loading: true })
-    Promise.resolve().then(load).then(data => {
-      if (current) setState({ data, error: null, loading: false })
-    }, error => {
-      if (current) setState({ data: null, error, loading: false })
-    })
-    return () => { current = false }
-  }, deps)
-  return state
-}
 
 export function RequisitionProgress({ progress, canRaise, canSend, busy, onRaise, onOpen, onReminder }) {
   if (!progress) return null
@@ -63,7 +50,7 @@ export function RequisitionsDashboardBanner({ userProfile, onOpen }) {
   const { sites, error: siteError } = useSites()
   const md = hasRole(userProfile, 'md')
   const eligible = md || Boolean(assignment.siteId)
-  const lookup = useRead(async () => {
+  const lookup = useSiteRead(async () => {
     if (!eligible) return { rows: [], errors: [] }
     const clientSites = sites.filter(site => site.site_type === 'client_site' && (md || site.id === assignment.siteId))
     const results = await Promise.allSettled(clientSites.map(async site => ({ site, progress: await api.progress(site.id) })))
@@ -149,9 +136,9 @@ function RequisitionDetail({ req, site, md, canSend, userId, revision, busy, onB
   const [prompt, setPrompt] = useState(null)
   const [note, setNote] = useState('')
   const showReceived = [...RECEIPT_STATUSES, 'closed'].includes(req.status) || (req.status === 'cancelled' && Boolean(req.sent_at))
-  const lines = useRead(() => api.lines(req.id), [req.id, revision])
-  const events = useRead(() => api.events(req.id), [req.id, revision])
-  const supplied = useRead(() => showReceived ? api.supplied(req.id) : [], [req.id, revision, showReceived])
+  const lines = useSiteRead(() => api.lines(req.id), [req.id, revision])
+  const events = useSiteRead(() => api.events(req.id), [req.id, revision])
+  const supplied = useSiteRead(() => showReceived ? api.supplied(req.id) : [], [req.id, revision, showReceived])
   const ownDraft = req.status === 'draft' && (md || req.raised_by === userId)
   const editable = ownDraft || (md && req.status === 'submitted')
   const request = action => {
@@ -189,6 +176,7 @@ function RequisitionDetail({ req, site, md, canSend, userId, revision, busy, onB
       {md && req.status === 'client_approved' && action('close')}
     </div>
     {canSend && req.status === 'sent' && <ClientApproval busy={busy} onSave={fields => onApproveClient(req.id, fields)} />}
+    {['client_approved', 'closed'].includes(req.status) && <RequisitionBudget id={req.id} siteId={site.id} revision={revision} />}
     <h4>Timeline</h4>
     <ErrorBox error={events.error} />
     {events.loading && <p role="status">Loading timeline…</p>}
@@ -219,8 +207,8 @@ function Requisitions({ userProfile, assignedSiteId, initialSiteId }) {
   const md = hasRole(userProfile, 'md')
   const canSend = Boolean(md || (assignedSiteId && siteId === assignedSiteId))
   const canRaise = Boolean(site && (canSend || hasRole(userProfile, 'production_manager')))
-  const list = useRead(() => siteId ? api.list(siteId) : [], [siteId, revision])
-  const progress = useRead(() => siteId ? api.progress(siteId) : null, [siteId, revision])
+  const list = useSiteRead(() => siteId ? api.list(siteId) : [], [siteId, revision])
+  const progress = useSiteRead(() => siteId ? api.progress(siteId) : null, [siteId, revision])
   const rows = list.data || []
   const active = (detail?.site_id === siteId ? detail : null) || rows.find(row => row.id === detail && row.site_id === siteId)
   const run = async (task, refresh = true) => {
