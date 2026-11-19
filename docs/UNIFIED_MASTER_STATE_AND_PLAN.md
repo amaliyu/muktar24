@@ -1436,6 +1436,11 @@ Interim until A–C: Umar records Kado now; Abubakar gets a temporary assistant_
 - **Database — DONE, inert** (`20261119065817_production_variance_exceptions_and_requisition_budget`): `production_exceptions` + `_comments`; triggers on production_log and damage_log; `respond_production_exception(id, explain|comment|ask|close, text)`; notifications to the site's assigned users, MD and ICO at each step; `backfill_production_exceptions(from)`; `client_requisition_budget(req)` (budget, requested, received, budget for blocks made, used, variance). Flag `production_variance_checks` OFF until the screens ship; then switch on and backfill from 10 Nov.
 - **Next:** Codex b6 (exceptions screens, dashboard cards, requisition-vs-budget table, site tolerance settings) after b5.
 
+### Budget warnings live (2026-11-19)
+- **Switched ON** 19 Nov after PR #147; backfilled from 10 Nov: 16 lines (Kado 10, Life Camp 6). Kado standards set: 40 / 43 blocks per bag; diesel 20 L per 1,000 (Kado's own figure from site reports — larger generator than Life Camp). Life Camp diesel stays 20 provisionally (matches requisition 1); its own figure to be proposed after the first full week (review scheduled 26 Nov). Life Camp 17–18 Nov = test production (MD).
+- **One warning per site per day (MD, `20261119083947_production_warnings_one_per_site_day`):** lines stay per parameter; one notification per site-day listing every line out; explain / ask / close act on the whole day; a line added later the same day sends one more note. Screens to group by day next (Codex b7).
+- **Duplicate-deduction check 19 Nov:** clean — one movement per material per entry since the switch; dust = blocks × standard.
+
 ### Dutse while production is on hold
 - Any block leaving the yard needs a same-day waybill; owner to be named now Abubakar has moved.
 - Weekly yard count continues; best window to close the ICO stock reconciliation (unexplained ~77,000 blocks, ₦37–48m at cost, pending ICO checks due 20 Nov).
