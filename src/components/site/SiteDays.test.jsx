@@ -47,7 +47,7 @@ afterEach(cleanup)
 it('shows produced, no-production, missing, today and no-roster chips', () => {
   const open = vi.fn(), labour = vi.fn()
   render(<SiteDayStrip overview={overview} canWrite onOpen={open} onLabour={labour} />)
-  expect(screen.getByText('✓ 3,420 blocks')).toBeInTheDocument()
+  expect(screen.getByText('3,420 blocks')).toBeInTheDocument()
   expect(screen.getByText('Today')).toBeInTheDocument()
   click(screen.getByRole('button', { name: /No production — Machine breakdown/ }))
   expect(open).toHaveBeenCalledWith(overview.days[2].date)

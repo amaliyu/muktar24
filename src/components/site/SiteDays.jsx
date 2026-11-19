@@ -1,3 +1,4 @@
+import { Check } from 'lucide-react'
 import { useEffect, useId, useState } from 'react'
 import { hasRole } from '../../lib/roles'
 import { siteDays } from '../../services/siteDays'
@@ -38,13 +39,13 @@ export function SiteDayStrip({ overview, canWrite, onOpen, onLabour }) {
     <h2 style={ui.section}>Last 14 days · {overview.site_name}</h2>
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 142px), 1fr))', gap: 8 }}>
       {(overview.days || []).map(day => {
-        const text = day.has_production ? '✓ ' + fmtDec(day.blocks) + ' blocks'
+        const text = day.has_production ? fmtDec(day.blocks) + ' blocks'
           : day.status ? 'No production — ' + DAY_REASONS[day.status.reason]
           : day.missing_record ? 'Missing' : day.date === today ? 'Today' : null
         if (!text) return null
         const color = day.has_production ? theme.green : day.status ? theme.blue : day.missing_record ? theme.red : theme.textMuted
         const chip = { ...ui.btn(), display: 'block', width: '100%', textAlign: 'left', padding: '6px 10px', color, overflowWrap: 'anywhere' }
-        const content = <><span>{fmtDate(day.date)}</span><br /><strong>{text}</strong></>
+        const content = <><span>{fmtDate(day.date)}</span><br /><strong>{day.has_production && <Check size={14} aria-hidden="true" style={{ verticalAlign: 'middle', marginRight: 4 }} />}{text}</strong></>
         return <div key={day.date} style={{ minWidth: 0 }}>
           {canWrite && (day.missing_record || day.status)
             ? <button {...controls} type="button" style={chip} onClick={() => onOpen(day.date)}>{content}</button>
