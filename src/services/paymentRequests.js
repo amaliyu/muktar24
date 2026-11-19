@@ -1,6 +1,16 @@
 import { supabase } from '../lib/supabase';
 
 export const paymentRequestsService = {
+  async listLinkedDeliveries(paymentRequestId) {
+    const { data, error, status } = await supabase.from('material_receipts')
+      .select('id, received_on, qty_accepted, unit_cost, truck_or_waybill_ref, received_by_name, voided, item:item_id(name, unit)')
+      .eq('payment_request_id', paymentRequestId)
+      .order('received_on');
+    if (error?.code === '42501' || status === 403) return null;
+    if (error) throw error;
+    return data || [];
+  },
+
   async list() {
     const { data, error } = await supabase
       .from('payment_requests')
