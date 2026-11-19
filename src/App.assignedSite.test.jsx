@@ -14,6 +14,7 @@ const fixture = vi.hoisted(() => ({
   calls: [],
   assignment: null,
   production: [],
+  warnings: [],
 }))
 vi.mock('pdfjs-dist', () => ({ GlobalWorkerOptions: {} }))
 vi.mock('./lib/supabase', async () => {
@@ -33,6 +34,7 @@ vi.mock('./lib/supabase', async () => {
       assets: [{ id: 'life-camp-machine', site_id: fixture.site, name: 'Bilaad machine', code: 'LC-1' }],
       products: [{ id: 'product', name: fixture.blockType, category: 'Blocks' }],
       production_log: fixture.production,
+      production_exceptions: fixture.warnings,
       inventory_items: [{ id: 'bilaad-cement', name: 'Bilaad cement', site_id: fixture.site, unit: 'bags' }],
       v_site_yard: [{ site_id: fixture.site, site_name: fixture.siteName, block_type: fixture.blockType, in_yard: 100 }],
     }[table] || []
@@ -54,13 +56,16 @@ beforeEach(() => {
   fixture.calls.length = 0
   fixture.assignment = () => ({ data: fixture.site, error: null })
   fixture.production = []
+  fixture.warnings = []
 })
 afterEach(cleanup)
 
 it('waits for assignment, then opens Production on the assigned site with its machine and dust standard', async () => {
+  const onOpen = vi.fn()
+  fixture.warnings = [{ id: 'cement-warning', site_id: fixture.site, date: lagosToday(), status: 'open', parameter: 'cement', direction: 'over', variance_pct: 40 }]
   let resolve
   fixture.assignment = () => new Promise(r => { resolve = r })
-  const { container } = render(session(<Production userProfile={profile} />))
+  const { container } = render(session(<Production userProfile={profile} onOpenBudgetWarnings={onOpen} />))
   expect(screen.getByRole('status')).toHaveTextContent('Loading assigned site')
   expect(screen.queryByRole('button', { name: /Log Today's Production/ })).not.toBeInTheDocument()
   expect(siteQuery('assets', DUTSE_SITE_ID)).toBe(false)
@@ -81,6 +86,12 @@ it('waits for assignment, then opens Production on the assigned site with its ma
   await waitFor(() => expect(fixture.calls.find(call => call.table === 'production_log'
     && call.ops.some(op => op[0] === 'insert'))?.ops.find(op => op[0] === 'insert')[1])
     .toMatchObject({ site_id: fixture.site, asset_id: 'life-camp-machine', granite_dust_kg: 360 }))
+  expect(await screen.findByText(/Cement 40% over budget/)).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Explain now' }))
+  expect(onOpen).toHaveBeenCalledWith({ id: 'cement-warning', siteId: fixture.site, action: 'explain' })
+  expect(fixture.calls.find(call => call.table === 'production_exceptions').ops).toEqual(expect.arrayContaining([
+    ['eq', 'site_id', fixture.site], ['eq', 'date', lagosToday()], ['in', 'status', ['open']],
+  ]))
   expect(siteQuery('assets', DUTSE_SITE_ID)).toBe(false)
 })
 
