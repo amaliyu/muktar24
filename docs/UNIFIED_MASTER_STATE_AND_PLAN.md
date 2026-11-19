@@ -1472,6 +1472,18 @@ Interim until A–C: Umar records Kado now; Abubakar gets a temporary assistant_
 - **Kayode's tasks (created 19 Nov, due 4 Dec):** "Receipts for 95 paid payment requests (₦11,869,800)" (pr_closure) and "Backfill September–November 2026 spending" (checklist Sep / Oct / Nov).
 - **Frontend:** b10 — My Tasks on the profile, banner on every page, MD task page, payment request screens honouring granted roles, site on backfill.
 
+### Every site day accounted for (MD 2026-11-19)
+- **Problem:** a day without production was a blank — no way to tell a rest day from a breakdown or a forgotten entry. Kado 13–15 Nov had nothing; no Kado or Life Camp roster ever; attendance not site-based. Idle-day wages fell out of cost per block.
+- **Database — DONE** (`20261119205758_site_day_status_and_daily_checks`, `20261119205826_site_day_status_breakdown_join_fix`):
+  - `production_sites.day_status_from` (Kado 10 Nov, Life Camp 17 Nov, Dutse null while on hold).
+  - `site_day_status` (one per site per day): reason `rest_day | breakdown | no_materials | no_diesel_power | rain | client_hold | other` (other needs a note), `staff_worked` + `work_done` (`stacking, offloading, maintenance, cleaning, other`) + note. Late-entry rules apply (`fn_entry_date` knows it). Writes only via `record_site_day_status(site, date, reason, note, staff_worked, work_done[], work_note, late_reason)` / `clear_site_day_status(site, date)`; roles md / production_manager / assistant_production_manager; site access enforced.
+  - Breakdown opens a downtime record for the site machine at 07:00 that day, or joins an open one that started on or before the day.
+  - Cannot mark a day that has production; production cannot be recorded on a marked day (`DAY_MARKED:` error) — remove the status first.
+  - `site_daily_scorecard` now returns `day_status` and `idle_labour`. New `site_day_overview(site, from, to)` (≤ 3 months): per day blocks, status, roster, labour and material cost, `missing_record`, `missing_roster`; totals incl. idle labour and cost per block with and without idle days.
+  - `run_site_day_checks()` via pg_cron `site-day-checks-daily` 05:05 UTC (06:05 Lagos): for yesterday, "no production and no day status" and/or "no labour roster" (when blocks were made or staff worked) → one notification to the site's users and the MD (`related_table = 'site_day_status'`, `related_id` = site).
+- **Open:** Umar to fill Kado 13–15 Nov; no Kado/Life Camp roster yet, so the roster warning fires daily until rosters are recorded.
+- **Frontend:** b11.
+
 ### Dutse while production is on hold
 - Any block leaving the yard needs a same-day waybill; owner to be named now Abubakar has moved.
 - Weekly yard count continues; best window to close the ICO stock reconciliation (unexplained ~77,000 blocks, ₦37–48m at cost, pending ICO checks due 20 Nov).
