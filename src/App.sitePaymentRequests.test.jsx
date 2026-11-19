@@ -41,7 +41,8 @@ const change = (element, value) => fireEvent.change(element, { target: { value }
 
 it('lets a Kado assistant manager submit a typed-payee request for Kado', async () => {
   const pages = ROLE_PAGES.assistant_production_manager
-  expect(pages.slice(pages.indexOf('payment_requests'), pages.indexOf('payment_requests') + 2)).toEqual(['payment_requests', 'messages'])
+  expect(pages).toContain('payment_requests')
+  expect(pages.indexOf('payment_requests')).toBeLessThan(pages.indexOf('messages'))
   openPage('assistant_production_manager')
   const form = within(await newRequest())
   expect(await form.findByText('Kado Site (Sequoia)')).toBeInTheDocument()

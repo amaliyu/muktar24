@@ -12,7 +12,7 @@ export async function productionMaterialsInDb() {
 
 export async function loadDustStandards() {
   const { data, error } = await supabase.from('site_block_standards')
-    .select('site_id, block_type, dust_kg_per_block, set_by_name, set_at, notes')
+    .select('site_id, block_type, dust_kg_per_block, chippings_kg_per_block, blocks_per_bag, diesel_l_per_1000, set_by_name, set_at, notes')
     .order('block_type')
   if (error) throw error
   return data || []
@@ -24,6 +24,9 @@ export async function saveDustStandard(row, fullName) {
   if (!fullName?.trim()) throw new Error('MD full name is required')
   const { data, error } = await supabase.from('site_block_standards').upsert({
     site_id: row.site_id, block_type: row.block_type,
+    chippings_kg_per_block: row.chippings_kg_per_block ?? null,
+    blocks_per_bag: row.blocks_per_bag ?? null,
+    diesel_l_per_1000: row.diesel_l_per_1000 ?? null,
     dust_kg_per_block: kg, set_by_name: fullName.trim(), set_at: new Date().toISOString(),
   }, { onConflict: 'site_id,block_type' }).select('site_id, block_type').single()
   if (error) throw error

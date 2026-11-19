@@ -1,3 +1,4 @@
+import Requisitions, { RequisitionsDashboardBanner } from './components/site/Requisitions'
 import { AssignedSiteProvider, withAssignedSite } from './components/AssignedSite'
 import { LateReasonField, useLateReason } from './components/LateReasonField'
 import { lagosToday } from './utils/lateEntry'
@@ -175,18 +176,18 @@ const APP_ROLES = [
 // Pages each role is allowed to access. 'all' = unrestricted.
 export const ROLE_PAGES = {
   md:                 'all',
-  ico:                ['dashboard','payroll_approvals','investor_register','capital','terms','monthly_close','spv_ledger','reserve_budget','production','inventory','batches','maintenance','asset_register','site_contracts','material_receiving','handovers','waybills','vehicles','labour','truck_loading','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','advances','leave','payment_requests','messages'],
-  accountant:         ['dashboard','payroll_approvals','investor_register','capital','terms','monthly_close','spv_ledger','reserve_budget','asset_register','site_contracts','material_receiving','handovers','customers','orders','reports','kpi_dashboard','accounting','suppliers','products','my_profile','data_import','labour','waybills','advances','leave','payment_requests','truck_loading','trading_margin','messages'],
-  board_member:       ['dashboard','investor_register','capital','terms','monthly_close','spv_ledger','reserve_budget','production','inventory','batches','maintenance','asset_register','site_contracts','handovers','waybills','vehicles','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','trading_margin','messages'],
+  ico:                ['dashboard','payroll_approvals','investor_register','capital','terms','monthly_close','spv_ledger','reserve_budget','production','inventory','batches','maintenance','asset_register','site_contracts','material_receiving','handovers','waybills','vehicles','labour','truck_loading','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','advances','leave','payment_requests','requisitions','messages'],
+  accountant:         ['dashboard','payroll_approvals','investor_register','capital','terms','monthly_close','spv_ledger','reserve_budget','asset_register','site_contracts','material_receiving','handovers','customers','orders','reports','kpi_dashboard','accounting','suppliers','products','my_profile','data_import','labour','waybills','advances','leave','payment_requests','truck_loading','trading_margin','requisitions','messages'],
+  board_member:       ['dashboard','investor_register','capital','terms','monthly_close','spv_ledger','reserve_budget','production','inventory','batches','maintenance','asset_register','site_contracts','handovers','waybills','vehicles','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','trading_margin','requisitions','messages'],
   bdm:                ['dashboard','customers','orders','pending_register','daily_schedule','lpo_approvals','reports','kpi_dashboard','my_profile','payment_requests','trading_margin','messages'],
   store_officer:      ['dashboard','inventory','batches','maintenance','asset_register','site_contracts','material_receiving','handovers','waybills','pending_register','daily_schedule','products','reports','my_profile','messages'],
-  logistics_manager:  ['dashboard','asset_register','site_contracts','handovers','waybills','vehicles','labour','truck_loading','maintenance','pending_register','daily_schedule','customers','my_profile','payment_requests','messages'],
+  logistics_manager:  ['dashboard','asset_register','site_contracts','handovers','waybills','vehicles','labour','truck_loading','maintenance','pending_register','daily_schedule','customers','my_profile','payment_requests','requisitions','messages'],
   marketer:           ['dashboard','customers','orders','products','my_profile','messages'],
   driver:             ['dashboard','waybills','my_profile','messages'],
   hr_officer:         ['dashboard','site_contracts','staff','reports','labour','my_profile','advances','leave','disciplinary','attendance_kiosk','attendance_flags','payment_requests','messages'],
   kiosk_device:       ['attendance_kiosk'],
-  production_manager:           ['dashboard','production','inventory','batches','maintenance','asset_register','site_contracts','material_receiving','handovers','reports','products','labour','truck_loading','my_profile','attendance_flags','payment_requests','messages'],
-  assistant_production_manager: ['dashboard','production','inventory','batches','maintenance','asset_register','site_contracts','material_receiving','handovers','reports','products','labour','truck_loading','my_profile','attendance_flags','payment_requests','messages'],
+  production_manager:           ['dashboard','production','inventory','batches','maintenance','asset_register','site_contracts','material_receiving','handovers','reports','products','labour','truck_loading','my_profile','attendance_flags','payment_requests','requisitions','messages'],
+  assistant_production_manager: ['dashboard','production','inventory','batches','maintenance','asset_register','site_contracts','material_receiving','handovers','reports','products','labour','truck_loading','my_profile','attendance_flags','payment_requests','requisitions','messages'],
   // legacy roles — kept for any existing users
   operations:         ['dashboard','production','inventory','batches','waybills','vehicles','pending_register','daily_schedule','lpo_approvals','my_profile'],
   sales:              ['dashboard','customers','orders','my_profile'],
@@ -204,8 +205,8 @@ export const ROLE_PAGES = {
 // (accounting, reports, kpi_dashboard, daily_schedule) are NOT listed here —
 // those buttons carry per-element data-ico-allow / data-board-allow instead,
 // so write actions stay hidden.
-const ICO_EXEMPT_PAGES   = ['late_entries', 'dashboard', 'payroll_approvals', 'labour', 'truck_loading', 'schedule_approvals', 'advances', 'leave', 'my_hr', 'payment_requests', 'maintenance'];
-const BOARD_EXEMPT_PAGES = ['dashboard', 'my_profile', 'my_hr', 'maintenance'];
+const ICO_EXEMPT_PAGES   = ['requisitions', 'late_entries', 'dashboard', 'payroll_approvals', 'labour', 'truck_loading', 'schedule_approvals', 'advances', 'leave', 'my_hr', 'payment_requests', 'maintenance'];
+const BOARD_EXEMPT_PAGES = ['requisitions', 'dashboard', 'my_profile', 'my_hr', 'maintenance'];
 
 // ── UI HELPERS ───────────────────────────────────────────────
 const Spinner = () => (
@@ -396,6 +397,7 @@ const NAV_ICONS = {
   asset_register: ClipboardList,
   site_contracts: FileSignature,
   material_receiving: PackageCheck,
+  requisitions: ClipboardList,
   handovers: Handshake,
   waybills: FileText,
   vehicles: Truck,
@@ -480,7 +482,7 @@ const StatCard = ({ label, value, sub, accent, pct }) => (
 );
 
 // ── DASHBOARD ─────────────────────────────────────────────────
-export const Dashboard = ({ onNavigate, onOpenSite, userProfile }) => {
+export const Dashboard = ({ onNavigate, onOpenSite, onOpenRequisitions, userProfile }) => {
   const role = userProfile?.role || 'staff';
   const can = (...roles) => roles.includes(role);
   const isDriver = role === 'driver';
@@ -680,6 +682,7 @@ export const Dashboard = ({ onNavigate, onOpenSite, userProfile }) => {
         </div>
       )}
       {!dashboardError && <UnpricedDeliveries rows={stats.deliveredUnpriced} />}
+      <RequisitionsDashboardBanner userProfile={userProfile} onOpen={onOpenRequisitions || (() => onNavigate?.("requisitions"))} />
       <LateEntriesCard userProfile={userProfile} onOpen={() => onNavigate('late_entries')} />
       {/* Phase 7B-1 site cards — loads on its own, independent of the date range. */}
       {hasRole(userProfile, 'md', 'production_manager', 'assistant_production_manager', 'ico') && (
@@ -10810,6 +10813,7 @@ const navItems = [
     { id: "asset_register", label: "Asset Register", icon: "asset_register" },
     { id: "site_contracts", label: "Site Contracts", icon: "site_contracts" },
     { id: "material_receiving", label: "Material Receiving", icon: "material_receiving" },
+    { id: "requisitions", label: "Material Requisitions", icon: "requisitions" },
     { id: "handovers", label: "Handovers", icon: "handovers" },
   ]},
   { section: "Logistics", items: [
@@ -11303,6 +11307,7 @@ export default function App() {
   const [active, setActive] = useState("dashboard");
   // Site preselected when the Dashboard opens Site Contracts from a site card.
   const [contractsSite, setContractsSite] = useState('');
+  const [requisitionSite, setRequisitionSite] = useState('');
   const [contractsReport, setContractsReport] = useState(false);
   const [lowStockCount, setLowStockCount] = useState(0);
   const [lpoCount, setLpoCount] = useState(0);
@@ -11512,16 +11517,18 @@ export default function App() {
 
   const openSiteContracts = (siteId, opts = {}) => { setContractsSite(siteId || ''); setContractsReport(!!opts.report); setActive('site_contracts'); };
 
+  const openRequisitions = siteId => { setRequisitionSite(siteId); setActive("requisitions"); };
   const pages = {
     dashboard: isBoard
-      ? <><SiteDashboardCards userProfile={userProfile} onOpenSite={openSiteContracts} /><BoardDashboard userProfile={userProfile} /></>
-      : <MobileScope><Dashboard onNavigate={setActive} onOpenSite={openSiteContracts} userProfile={userProfile} /></MobileScope>,
+      ? <><SiteDashboardCards userProfile={userProfile} onOpenSite={openSiteContracts} /><RequisitionsDashboardBanner userProfile={userProfile} onOpen={openRequisitions} /><BoardDashboard userProfile={userProfile} /></>
+      : <MobileScope><Dashboard onOpenRequisitions={openRequisitions} onNavigate={setActive} onOpenSite={openSiteContracts} userProfile={userProfile} /></MobileScope>,
     late_entries: <MobileScope fit><LateEntries /></MobileScope>,
     production: <MobileScope><Production userProfile={userProfile} /></MobileScope>,
     inventory: <MobileScope><Inventory onLowStockChange={setLowStockCount} userProfile={userProfile} onNavigate={setActive} /></MobileScope>,
     site_contracts: <SiteContracts userProfile={userProfile} initialSiteId={contractsSite} initialReport={contractsReport} />,
     asset_register: <AssetRegister userProfile={userProfile} />,
     material_receiving: <MaterialReceiving userProfile={userProfile} />,
+    requisitions: <Requisitions userProfile={userProfile} initialSiteId={requisitionSite} />,
     handovers: <Handovers userProfile={userProfile} />,
     batches: <MobileScope><Batches userProfile={userProfile} /></MobileScope>,
     waybills: <MobileScope><Waybills userProfile={userProfile} /></MobileScope>,
