@@ -131,7 +131,41 @@ export const authService = {
       .select('id, user_id, role, granted_by_name, granted_at, expires_at, reason')
       .is('revoked_at', null)
       .or('expires_at.is.null,expires_at.gt.' + new Date().toISOString())
+      .order('expires_at', { ascending: true, nullsFirst: false })
       .order('granted_at', { ascending: false })
+    if (error) throw error
+    return data || []
+  },
+
+  async listMyGrants() {
+    const { data: identity, error: identityError } = await supabase.auth.getUser()
+    if (identityError) throw identityError
+    if (!identity?.user) return []
+    const { data, error } = await supabase.from('user_role_grants')
+      .select('id, role, expires_at')
+      .eq('user_id', identity.user.id)
+      .is('revoked_at', null)
+      .or('expires_at.is.null,expires_at.gt.' + new Date().toISOString())
+      .order('expires_at', { ascending: true, nullsFirst: false })
+    if (error) throw error
+    return data || []
+  },
+
+  async extendGrant(grantId, newDate, note) {
+    const { data, error } = await supabase.rpc('extend_role_grant', {
+      p_grant_id: grantId,
+      p_new_expires_at: newDate + 'T23:59:59+01:00',
+      p_note: note || null,
+    })
+    if (error) throw error
+    return data
+  },
+
+  async listGrantEvents(grantId) {
+    const { data, error } = await supabase.from('role_grant_events')
+      .select('id, action, old_expires_at, new_expires_at, actor_name, note, created_at')
+      .eq('grant_id', grantId)
+      .order('created_at', { ascending: false })
     if (error) throw error
     return data || []
   },

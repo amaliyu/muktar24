@@ -19,3 +19,10 @@ export function hasRole(userProfile, ...roles) {
   const eff = effectiveRolesOf(userProfile);
   return roles.some(r => eff.includes(r));
 }
+
+const roleLabels = { md: 'MD', ico: 'ICO', bdm: 'BDM', hr_officer: 'HR Officer' }
+
+export function roleLabel(role) {
+  return roleLabels[role] || (role || '').split('_').filter(Boolean)
+    .map(word => word[0].toUpperCase() + word.slice(1)).join(' ')
+}
