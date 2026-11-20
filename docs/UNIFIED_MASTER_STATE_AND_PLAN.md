@@ -1482,7 +1482,8 @@ Interim until A–C: Umar records Kado now; Abubakar gets a temporary assistant_
   - `site_daily_scorecard` now returns `day_status` and `idle_labour`. New `site_day_overview(site, from, to)` (≤ 3 months): per day blocks, status, roster, labour and material cost, `missing_record`, `missing_roster`; totals incl. idle labour and cost per block with and without idle days.
   - `run_site_day_checks()` via pg_cron `site-day-checks-daily` 05:05 UTC (06:05 Lagos): for yesterday, "no production and no day status" and/or "no labour roster" (when blocks were made or staff worked) → one notification to the site's users and the MD (`related_table = 'site_day_status'`, `related_id` = site).
 - **Open:** Umar to fill Kado 13–15 Nov; no Kado/Life Camp roster yet, so the roster warning fires daily until rosters are recorded.
-- **Frontend:** b11.
+- **Fix 20 Nov** (`20261120042128_site_day_overview_null_cost_per_block`): cost per block is null (shown as —), not ₦0, when no material cost or labour is recorded (Life Camp: client materials, no roster).
+- **Frontend:** b11 — DONE (PR #157, live 20 Nov).
 
 ### Dutse while production is on hold
 - Any block leaving the yard needs a same-day waybill; owner to be named now Abubakar has moved.
