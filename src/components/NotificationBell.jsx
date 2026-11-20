@@ -59,7 +59,9 @@ function BellIcon({ hasUnread }) {
 export default function NotificationBell({ userProfile, onNavigate, isMobile }) {
   const targetPage = table => table === 'staff_tasks'
     ? (hasRole(userProfile, 'md') ? 'staff_tasks' : 'my_profile')
-    : TABLE_PAGE[table];
+    : table === 'user_role_grants'
+      ? (hasRole(userProfile, 'md') ? 'user_management' : 'my_profile')
+      : TABLE_PAGE[table];
   const [open, setOpen] = useState(false)
   const [notifications, setNotifications] = useState([])
   const [unreadCount, setUnreadCount] = useState(0)

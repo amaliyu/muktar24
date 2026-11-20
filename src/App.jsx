@@ -1,3 +1,4 @@
+import { GrantActions, GrantExpiry, MyAccess } from './components/GrantExpiry'
 import { SiteDayDashboard, SiteDayForm, SiteDayStrip, SITE_DAY_WRITE_ROLES, SITE_DAY_READ_ROLES, useSiteDayOverview } from './components/site/SiteDays'
 import { siteDays } from './services/siteDays'
 import MyTasks, { StaffTasks, TaskReminder, useTaskReminders } from './components/tasks/MyTasks'
@@ -24,7 +25,7 @@ import { AlertTriangle, ArrowLeft, ArrowRight, Banknote, BarChart3, Blocks, Book
 import { Ico, IconText, IconButton } from './components/Ico';
 import { supabase } from './lib/supabase';
 import { authService } from './services/authService';
-import { hasRole, effectiveRolesOf } from './lib/roles';
+import { hasRole, effectiveRolesOf, roleLabel } from './lib/roles';
 import { checkProfileAccess } from './lib/profileAccess';
 import LoginScreen from './components/LoginScreen';
 import BoardDashboard from './components/BoardDashboard';
@@ -104,7 +105,7 @@ import autoTable from 'jspdf-autotable'
 import { Z } from './lib/zIndex'
 import { defaultMachineId, resolveMachine } from './utils/productionMachine'
 import MobileScope, { revealOnPhone } from './components/MobileScope'
-import { ConfirmDialog, fmtDate, fmtDay, fmtDateTime } from './components/site/siteUi'
+import { ConfirmDialog, fmtDate, fmtDay, fmtDateTime, StackTable } from './components/site/siteUi'
 import { deleteWhere } from './utils/checkedDelete'
 
 const theme = {
@@ -7739,12 +7740,13 @@ const MyProfile = ({ userProfile, taskSource, targetId, onPaymentRequest }) => {
   };
 
   const role = userProfile?.role;
-  const roleLabel = APP_ROLES.find(r => r.id === role)?.label || role;
+  const primaryRoleLabel = APP_ROLES.find(r => r.id === role)?.label || role;
   const fmtBytes = (b) => b > 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${(b / 1024).toFixed(0)} KB`;
 
   return (
     <div>
       <MyTasks key={targetId || 'my-tasks'} userProfile={userProfile} source={taskSource} targetId={targetId} onPaymentRequest={onPaymentRequest} />
+      <MyAccess key={userProfile.id} userId={userProfile.id} />
       <div className="m-header" style={styles.header}>
         <div>
           <div style={styles.pageTitle}>My Profile</div>
@@ -7765,7 +7767,7 @@ const MyProfile = ({ userProfile, taskSource, targetId, onPaymentRequest }) => {
           <div style={{ display: 'flex', gap: '32px', flexWrap: 'wrap' }}>
             <div style={{ flex: 1, minWidth: '260px' }}>
               <div style={{ fontSize: '13px', fontWeight: '700', color: theme.textMuted, marginBottom: '16px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Account</div>
-              {[['Full Name', userProfile?.full_name], ['Email', userProfile?.email], ['Role', roleLabel], ['Account Status', userProfile?.is_active ? 'Active' : 'Inactive']].map(([label, val]) => (
+              {[['Full Name', userProfile?.full_name], ['Email', userProfile?.email], ['Role', primaryRoleLabel], ['Account Status', userProfile?.is_active ? 'Active' : 'Inactive']].map(([label, val]) => (
                 <div key={label} style={{ marginBottom: '14px' }}>
                   <div style={{ fontSize: '11px', color: theme.textMuted, fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '3px' }}>{label}</div>
                   <div style={{ fontSize: '14px', color: theme.text, fontWeight: '500' }}>{val || '—'}</div>
@@ -10979,7 +10981,7 @@ const navItems = [
 // ── ROLE GRANTS (MD-only) ─────────────────────────────────────
 // Temporary additional roles: grant/revoke, with a separation-of-duties
 // warning (advisory — MD may accept and proceed). MD is never grantable.
-const RoleGrantsManager = ({ users }) => {
+export const RoleGrantsManager = ({ users }) => {
   const [grants, setGrants]   = useState([]);
   const [loading, setLoading] = useState(true);
   const [gErr, setGErr]       = useState('');
@@ -10993,7 +10995,6 @@ const RoleGrantsManager = ({ users }) => {
   const grantableRoles = APP_ROLES.filter(r => r.id !== 'md' && r.id !== 'investor');
   const userName = (id) => users.find(u => u.id === id)?.full_name || users.find(u => u.id === id)?.email || 'Unknown';
   const userPrimary = (id) => { const u = users.find(u => u.id === id); return u ? (APP_ROLES.find(r => r.id === u.role)?.label || u.role) : '—'; };
-  const roleLabel = (id) => APP_ROLES.find(r => r.id === id)?.label || id;
 
   const load = async () => {
     setLoading(true);
@@ -11014,7 +11015,7 @@ const RoleGrantsManager = ({ users }) => {
         const warning = await authService.checkRoleConflict(form.user_id, form.role);
         if (warning) { setConflict(warning); setBusy(false); return; }
       }
-      const expiresIso = form.expires_at ? new Date(form.expires_at + 'T23:59:59').toISOString() : null;
+      const expiresIso = form.expires_at ? form.expires_at + 'T23:59:59+01:00' : null;
       await authService.grantRole(form.user_id, form.role, form.reason.trim() || null, expiresIso);
       setConflict(null);
       setForm({ user_id: '', role: '', reason: '', expires_at: '' });
@@ -11033,7 +11034,6 @@ const RoleGrantsManager = ({ users }) => {
   };
 
   const fmtD = fmtDay;
-  const expiringSoon = (d) => d && new Date(d) < new Date(Date.now() + 14 * 86400000);
 
   return (
     <div style={{ ...styles.card, marginTop: '20px' }}>
@@ -11085,32 +11085,22 @@ const RoleGrantsManager = ({ users }) => {
 
       {/* Active grants */}
       <div style={{ fontWeight: '700', fontSize: '13px', margin: '20px 0 8px' }}>Active grants ({grants.length})</div>
-      {loading ? <Spinner /> : grants.length === 0 ? (
+      {loading && grants.length === 0 ? <Spinner /> : grants.length === 0 ? (
         <div style={{ fontSize: '13px', color: theme.textMuted, padding: '8px 0' }}>No active role grants.</div>
       ) : (
-        <div style={{ overflowX: 'auto' }}>
-          <table style={styles.table}>
-            <thead><tr>{['User', 'Primary Role', 'Granted Role', 'Granted By', 'Granted', 'Expires', ''].map(h => <th key={h} style={styles.th}>{h}</th>)}</tr></thead>
-            <tbody>
-              {grants.map(g => (
-                <tr key={g.id}>
-                  <td style={styles.td}>{userName(g.user_id)}</td>
-                  <td style={styles.td}><span style={{ fontSize: '12px', color: theme.textMuted }}>{userPrimary(g.user_id)}</span></td>
-                  <td style={styles.td}><span style={styles.badge(theme.accent)}>{roleLabel(g.role)}</span></td>
-                  <td style={styles.td}>{g.granted_by_name || '—'}</td>
-                  <td style={styles.td}>{fmtD(g.granted_at)}</td>
-                  <td style={styles.td}>
-                    {fmtD(g.expires_at)}
-                    {expiringSoon(g.expires_at) && <span style={{ marginLeft: '6px', fontSize: '10px', padding: '1px 6px', borderRadius: '4px', background: '#f59e0b22', color: '#f59e0b', border: '1px solid #f59e0b44', fontWeight: '700' }}>expiring soon</span>}
-                  </td>
-                  <td style={styles.td}>
-                    <button style={{ ...styles.btn('danger'), padding: '4px 10px', fontSize: '11px' }} disabled={revoking === g.id} onClick={() => revoke(g)}>{revoking === g.id ? '…' : 'Revoke'}</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <StackTable headers={['User', 'Primary Role', 'Granted Role', 'Granted By', 'Granted', 'End date', '']}>
+          {grants.map(g => (
+            <tr key={g.id}>
+              <td style={styles.td}>{userName(g.user_id)}</td>
+              <td style={styles.td}><span style={{ fontSize: '12px', color: theme.textMuted }}>{userPrimary(g.user_id)}</span></td>
+              <td style={styles.td}><span style={styles.badge(theme.accent)}>{roleLabel(g.role)}</span></td>
+              <td style={styles.td}>{g.granted_by_name || '—'}</td>
+              <td style={styles.td}>{fmtD(g.granted_at)}</td>
+              <td style={styles.td}><GrantExpiry expiresAt={g.expires_at} /></td>
+              <td style={styles.td}><GrantActions grant={g} onExtended={load} onRevoke={revoke} revoking={revoking === g.id} /></td>
+            </tr>
+          ))}
+        </StackTable>
       )}
     </div>
   );
