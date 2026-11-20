@@ -1485,6 +1485,15 @@ Interim until A–C: Umar records Kado now; Abubakar gets a temporary assistant_
 - **Fix 20 Nov** (`20261120042128_site_day_overview_null_cost_per_block`): cost per block is null (shown as —), not ₦0, when no material cost or labour is recorded (Life Camp: client materials, no roster).
 - **Frontend:** b11 — DONE (PR #157, live 20 Nov).
 
+### Granted-role expiry warnings and one-step extend (MD 2026-11-20)
+- **Why:** Kayode's accountant grant (needed for the receipts/backfill tasks) and Abubakar's assistant production manager grant (needed to record Life Camp production, deliveries and day status) both end 31 Dec 2026; Kayode's HR grant ends 11 Feb 2027. Nothing warned anyone, and changing an end date meant revoke + re-grant.
+- **Database — DONE** (`20261120044500_role_grant_expiry_warnings_and_extend`, `20261120044510_extend_role_grant_keep_old_expiry`):
+  - `role_grant_events` (extended / warned_14 / warned_3 / ended_notice; one warning of each kind per end date).
+  - `extend_role_grant(grant_id, new_expires_at, note)` — MD only; active grants only; new date must be later; notifies the person.
+  - `run_role_grant_expiry_warnings()` via pg_cron `role-grant-expiry-warnings-daily` 07:10 UTC (08:10 Lagos): at ≤14 days and again at ≤3 days, notifies the person and the MD; when a grant ends (within the last 7 days), an "access has ended" notice. `related_table = 'user_role_grants'`.
+  - `fn_role_label(role)` for friendly names.
+- **Frontend:** b12 — Extend on User Management grants, days-left display, "My access" on My Profile, bell routing.
+
 ### Dutse while production is on hold
 - Any block leaving the yard needs a same-day waybill; owner to be named now Abubakar has moved.
 - Weekly yard count continues; best window to close the ICO stock reconciliation (unexplained ~77,000 blocks, ₦37–48m at cost, pending ICO checks due 20 Nov).
