@@ -186,7 +186,10 @@ export function StockCountPage({ userProfile, assignedSiteId, initial }) {
     ? { siteId, rows: await stockCounts.list(siteId) } : null, [siteId, revision, counting])
   const sheetRead = useSiteRead(() => counting && siteId && canCount ? stockCounts.sheet(siteId) : null, [counting, siteId, canCount])
   const sheet = sheetRead.data?.site_id === siteId ? sheetRead.data : null
-  const choices = canCount ? sites.filter(site => eligibleIds.has(site.id) || site.id === siteId) : sites
+  const choices = canCount ? [
+    ...(eligible.data || []),
+    ...sites.filter(site => site.id === siteId && !eligibleIds.has(site.id)),
+  ] : sites
   const refresh = () => setRevision(previous => previous + 1)
 
   return <div style={{ minWidth: 0 }}>
@@ -194,7 +197,7 @@ export function StockCountPage({ userProfile, assignedSiteId, initial }) {
     <ErrorBox error={siteError || eligible.error} />
     <div style={panel}>
       <label style={ui.label} htmlFor="stock-count-site">Site</label>
-      {assignedSiteId ? <FixedSite id="stock-count-site" siteId={assignedSiteId} sites={sites} style={ui.input} />
+      {assignedSiteId ? <FixedSite id="stock-count-site" siteId={assignedSiteId} sites={choices} style={ui.input} />
         : <select {...readControl} id="stock-count-site" style={ui.input} value={siteId} disabled={counting} onChange={event => {
           setSelected(event.target.value); setCountId(null); setSent(false); setCounting(false)
         }}>
