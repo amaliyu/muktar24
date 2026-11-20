@@ -1494,6 +1494,20 @@ Interim until A–C: Umar records Kado now; Abubakar gets a temporary assistant_
   - `fn_role_label(role)` for friendly names.
 - **Frontend:** b12 — Extend on User Management grants, days-left display, "My access" on My Profile, bell routing.
 
+### Weekly stock count (MD 2026-11-20) — first input for the weekly KPI
+- **Why:** the weekly KPI (Claude Doc "Site Manager Daily Scorecard and Weekly KPI") needs material variance (physical count vs app) and accepted blocks; neither existed (no count screen; zero handovers recorded at any site). KPI build deferred until two Fridays of counts and handovers exist. MD to tell Umar and Abubakar to record handovers.
+- **Data fixes 20 Nov:**
+  - Kado dust deliveries entered 19 Nov evening as 30,440,000 kg (16 Nov) and 28,760,000 kg (18 Nov) — tonnes typed as kg (₦1.0bn at ₦17/kg). Voided and re-entered by the MD account as 30,440 kg and 28,760 kg with notes; reversal movements re-dated to the delivery dates. Kado dust book stock −49.8 t (only these two deliveries recorded vs ~109 t used).
+  - Old test receipt "TEST 7B1" (cement, dated 30 Dec 2026, voided 22 Oct): reversal re-dated to 30 Dec so balances between 22 Oct and 30 Dec are right.
+- **Database — DONE** (`20261120051319_stock_counts_weekly_and_receipt_limits`, `20261120051410_void_receipt_reversal_on_receipt_date`):
+  - `record_material_receipt` rejects > 100 t (kg items), > 40,000 L, > 3,000 bags in one delivery.
+  - `void_material_receipt` dates the reversal on the delivery date (today if that date is locked by a count).
+  - `stock_counts` (one live per site per day; `is_opening`; submitted → approved | rejected) + `stock_count_lines` (counted, book, variance qty/%, value at weighted cost for APCL items, over-tolerance vs `production_sites.variance_tolerance_pct`). Late-entry rules on `count_date`.
+  - `fn_stock_as_of(item, date)` = book stock at end of a day. `stock_count_sheet(site)` (ico/md; blind — no book figures). `submit_stock_count(site, date, lines jsonb [{item_id, counted_qty, note}], notes, is_opening, late_reason)` (ico/md; every item at the site required; MD notified with a variance summary). `review_stock_count(id, approve|reject, note)` (MD): approval needs the day's production or day status; recomputes against book stock and posts adjustments (`COUNT-xxxxxxxx`, dated the count day; supplier/issued_to 'Stock count'); notifies site users and counter.
+  - Lock: after an approved count, stock movements dated on or before the count date for that site's items are refused (`STOCK_LOCKED:`), except the count's own postings.
+  - `run_stock_count_reminders()` via pg_cron `stock-count-reminders-daily` 07:20 UTC (08:20 Lagos): Friday → ICO reminder for sites not yet counted this week; Saturday → MD + ICO notice for any site not counted this week.
+- **Frontend:** b13.
+
 ### Dutse while production is on hold
 - Any block leaving the yard needs a same-day waybill; owner to be named now Abubakar has moved.
 - Weekly yard count continues; best window to close the ICO stock reconciliation (unexplained ~77,000 blocks, ₦37–48m at cost, pending ICO checks due 20 Nov).
