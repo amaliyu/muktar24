@@ -10,6 +10,7 @@ import { ConfirmDialog, ErrorBox, StackTable, fmtDate, fmtDateTime, ui } from '.
 const recordTypes = {
   production_log: 'Production',
   site_day_status: 'Site day status',
+  stock_counts: 'Stock count',
   damage_log: 'Breakage',
   waybills: 'Waybill',
   block_handovers: 'Handover',

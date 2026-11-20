@@ -20,6 +20,7 @@ const TYPE_META = {
 
 // Map notification related_table → page id
 const TABLE_PAGE = {
+  stock_counts: 'stock_counts',
   site_day_status: 'production',
   payment_requests:     'payment_requests',
   weekly_labour_payroll: 'labour',

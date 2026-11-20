@@ -16,6 +16,7 @@ const fixture = vi.hoisted(() => ({
   assignment: null,
   production: [],
   marked: false,
+  lockError: null,
   warnings: [],
 }))
 vi.mock('pdfjs-dist', () => ({ GlobalWorkerOptions: {} }))
@@ -24,6 +25,9 @@ vi.mock('./lib/supabase', async () => {
   const mock = createSupabaseMock((table, ops) => {
     if (table === 'rpc:my_assigned_site') return fixture.assignment()
     if (table === 'rpc:clear_site_day_status') { fixture.marked = false; return { data: null, error: null } }
+    if (table === 'production_log' && fixture.lockError && ops.some(op => op[0] === 'insert')) {
+      return { data: null, error: { message: fixture.lockError } }
+    }
     if (table === 'production_log' && fixture.marked && ops.some(op => op[0] === 'insert')) {
       return { data: null, error: { message: 'DAY_MARKED: Remove the day status before saving.' } }
     }
@@ -71,6 +75,7 @@ beforeEach(() => {
   fixture.assignment = () => ({ data: fixture.site, error: null })
   fixture.production = []
   fixture.marked = false
+  fixture.lockError = null
   fixture.warnings = []
 })
 afterEach(cleanup)
@@ -236,4 +241,17 @@ it('removes a marked day after the production error and preserves the entry for 
   expect(screen.getByPlaceholderText('e.g. 850')).toHaveValue(20)
   fireEvent.click(screen.getByRole('button', { name: 'Save Entry' }))
   expect(await screen.findByText(/Production entry saved/)).toBeInTheDocument()
+})
+
+it('shows the complete STOCK_LOCKED message when production is blocked', async () => {
+  fixture.lockError = 'STOCK_LOCKED: Kado was counted on 20 Nov. Stock movements dated on or before that day are locked.'
+  const { container } = render(session(<Production userProfile={profile} />))
+  await showProduction()
+  await screen.findByText(/Dust and 3\/8 are calculated by the app/)
+  await screen.findByRole('option', { name: /Bilaad machine/ })
+  change(container.querySelector('input[type=date]'), lagosToday())
+  change(screen.getByPlaceholderText('e.g. 850'), '20')
+  fireEvent.click(screen.getByRole('button', { name: 'Save Entry' }))
+  expect(await screen.findByText(fixture.lockError, { exact: true })).toBeInTheDocument()
+  expect(screen.queryByText(/Failed to save/)).not.toBeInTheDocument()
 })

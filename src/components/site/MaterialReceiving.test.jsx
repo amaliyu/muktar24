@@ -129,15 +129,19 @@ describe('ReceivingForm', () => {
     })))
   })
 
-  it('shows the RPC error instead of swallowing it', async () => {
-    siteContractsService.recordReceipt.mockRejectedValueOnce(new Error('You do not have permission to record material deliveries.'))
+  it.each([
+    'You do not have permission to record material deliveries.',
+    'STOCK_LOCKED: This site was counted on 20 Nov. Earlier stock movements are locked.',
+    'That is 101 tonnes in one delivery. Check that you entered tonnes, not kilograms.',
+  ])('shows the full receipt RPC message: %s', async message => {
+    siteContractsService.recordReceipt.mockRejectedValueOnce(new Error(message))
     const user = userEvent.setup()
     render(<ReceivingForm />)
     await waitFor(() => expect(screen.getByRole('option', { name: /Cement/ })).toBeInTheDocument())
     await user.selectOptions(screen.getByLabelText(/^Item/), 'cem')
     await user.type(screen.getByLabelText(/^Delivered/), '5')
     await user.click(screen.getByRole('button', { name: /record delivery/i }))
-    expect(await screen.findByRole('alert')).toHaveTextContent('You do not have permission to record material deliveries.')
+    expect(await screen.findByRole('alert')).toHaveTextContent(message)
   })
 
   it('receiptFormProblem enforces the reason rule', () => {
