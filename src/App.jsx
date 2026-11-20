@@ -1,3 +1,4 @@
+import StockCountPage, { StockCountDashboard } from './components/site/StockCounts'
 import { GrantActions, GrantExpiry, MyAccess } from './components/GrantExpiry'
 import { SiteDayDashboard, SiteDayForm, SiteDayStrip, SITE_DAY_WRITE_ROLES, SITE_DAY_READ_ROLES, useSiteDayOverview } from './components/site/SiteDays'
 import { siteDays } from './services/siteDays'
@@ -184,18 +185,18 @@ const APP_ROLES = [
 // Pages each role is allowed to access. 'all' = unrestricted.
 export const ROLE_PAGES = {
   md:                 'all',
-  ico:                ['dashboard','payroll_approvals','investor_register','capital','terms','monthly_close','spv_ledger','reserve_budget','production','inventory','batches','maintenance','asset_register','site_contracts','material_receiving','handovers','waybills','vehicles','labour','truck_loading','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','advances','leave','payment_requests','requisitions','production_exceptions','site_scorecard','messages'],
-  accountant:         ['dashboard','payroll_approvals','investor_register','capital','terms','monthly_close','spv_ledger','reserve_budget','asset_register','site_contracts','material_receiving','handovers','customers','orders','reports','kpi_dashboard','accounting','suppliers','products','my_profile','data_import','labour','waybills','advances','leave','payment_requests','truck_loading','trading_margin','requisitions','production_exceptions','site_scorecard','messages'],
-  board_member:       ['dashboard','investor_register','capital','terms','monthly_close','spv_ledger','reserve_budget','production','inventory','batches','maintenance','asset_register','site_contracts','handovers','waybills','vehicles','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','trading_margin','requisitions','production_exceptions','site_scorecard','messages'],
+  ico:                ['dashboard','stock_counts','payroll_approvals','investor_register','capital','terms','monthly_close','spv_ledger','reserve_budget','production','inventory','batches','maintenance','asset_register','site_contracts','material_receiving','handovers','waybills','vehicles','labour','truck_loading','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','advances','leave','payment_requests','requisitions','production_exceptions','site_scorecard','messages'],
+  accountant:         ['dashboard','stock_counts','payroll_approvals','investor_register','capital','terms','monthly_close','spv_ledger','reserve_budget','asset_register','site_contracts','material_receiving','handovers','customers','orders','reports','kpi_dashboard','accounting','suppliers','products','my_profile','data_import','labour','waybills','advances','leave','payment_requests','truck_loading','trading_margin','requisitions','production_exceptions','site_scorecard','messages'],
+  board_member:       ['dashboard','stock_counts','investor_register','capital','terms','monthly_close','spv_ledger','reserve_budget','production','inventory','batches','maintenance','asset_register','site_contracts','handovers','waybills','vehicles','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','trading_margin','requisitions','production_exceptions','site_scorecard','messages'],
   bdm:                ['dashboard','customers','orders','pending_register','daily_schedule','lpo_approvals','reports','kpi_dashboard','my_profile','payment_requests','trading_margin','messages'],
   store_officer:      ['dashboard','inventory','batches','maintenance','asset_register','site_contracts','material_receiving','handovers','waybills','pending_register','daily_schedule','products','reports','my_profile','messages'],
-  logistics_manager:  ['dashboard','asset_register','site_contracts','handovers','waybills','vehicles','labour','truck_loading','maintenance','pending_register','daily_schedule','customers','my_profile','payment_requests','requisitions','production_exceptions','site_scorecard','messages'],
+  logistics_manager:  ['dashboard','stock_counts','asset_register','site_contracts','handovers','waybills','vehicles','labour','truck_loading','maintenance','pending_register','daily_schedule','customers','my_profile','payment_requests','requisitions','production_exceptions','site_scorecard','messages'],
   marketer:           ['dashboard','customers','orders','products','my_profile','messages'],
   driver:             ['dashboard','waybills','my_profile','messages'],
   hr_officer:         ['dashboard','site_contracts','staff','reports','labour','my_profile','advances','leave','disciplinary','attendance_kiosk','attendance_flags','payment_requests','messages'],
   kiosk_device:       ['attendance_kiosk'],
-  production_manager:           ['dashboard','production','inventory','batches','maintenance','asset_register','site_contracts','material_receiving','handovers','reports','products','labour','truck_loading','my_profile','attendance_flags','payment_requests','requisitions','production_exceptions','site_scorecard','messages'],
-  assistant_production_manager: ['dashboard','production','inventory','batches','maintenance','asset_register','site_contracts','material_receiving','handovers','reports','products','labour','truck_loading','my_profile','attendance_flags','payment_requests','requisitions','production_exceptions','site_scorecard','messages'],
+  production_manager:           ['dashboard','stock_counts','production','inventory','batches','maintenance','asset_register','site_contracts','material_receiving','handovers','reports','products','labour','truck_loading','my_profile','attendance_flags','payment_requests','requisitions','production_exceptions','site_scorecard','messages'],
+  assistant_production_manager: ['dashboard','stock_counts','production','inventory','batches','maintenance','asset_register','site_contracts','material_receiving','handovers','reports','products','labour','truck_loading','my_profile','attendance_flags','payment_requests','requisitions','production_exceptions','site_scorecard','messages'],
   // legacy roles — kept for any existing users
   operations:         ['dashboard','production','inventory','batches','waybills','vehicles','pending_register','daily_schedule','lpo_approvals','my_profile'],
   sales:              ['dashboard','customers','orders','my_profile'],
@@ -213,7 +214,7 @@ export const ROLE_PAGES = {
 // (accounting, reports, kpi_dashboard, daily_schedule) are NOT listed here —
 // those buttons carry per-element data-ico-allow / data-board-allow instead,
 // so write actions stay hidden.
-const ICO_EXEMPT_PAGES   = ['site_scorecard', 'production_exceptions', 'requisitions', 'late_entries', 'dashboard', 'payroll_approvals', 'labour', 'truck_loading', 'schedule_approvals', 'advances', 'leave', 'my_hr', 'payment_requests', 'maintenance'];
+const ICO_EXEMPT_PAGES   = ['stock_counts', 'site_scorecard', 'production_exceptions', 'requisitions', 'late_entries', 'dashboard', 'payroll_approvals', 'labour', 'truck_loading', 'schedule_approvals', 'advances', 'leave', 'my_hr', 'payment_requests', 'maintenance'];
 const BOARD_EXEMPT_PAGES = ['site_scorecard', 'production_exceptions', 'requisitions', 'dashboard', 'my_profile', 'my_hr', 'maintenance'];
 
 // ── UI HELPERS ───────────────────────────────────────────────
@@ -402,6 +403,7 @@ const NAV_ICONS = {
   production_exceptions: AlertTriangle,
   site_scorecard: Gauge,
   inventory: Package,
+  stock_counts: ClipboardCheck,
   batches: Layers,
   maintenance: Wrench,
   asset_register: ClipboardList,
@@ -1090,7 +1092,7 @@ export const Production = withAssignedSite(function Production({ userProfile, as
       }
       if (!savedProduction && lateEntry.handleError(e)) return;
       if (savedProduction) { setShowForm(false); setEditTarget(null); await load(); }
-      setAlert({ type: "error", msg: e.code === "22007" ? e.message : (savedProduction ? "Production saved, but a follow-up step failed. " : "Failed to save. ") + e.message });
+      setAlert({ type: "error", msg: (e.code === "22007" || e.message?.startsWith("STOCK_LOCKED:")) ? e.message : (savedProduction ? "Production saved, but a follow-up step failed. " : "Failed to save. ") + e.message });
     } finally {
       if (savedProduction) {
         refreshDays();
@@ -10913,6 +10915,7 @@ const navItems = [
   { section: "Production", items: [
     { id: "production", label: "Production", icon: "production" },
     { id: "inventory", label: "Inventory", icon: "inventory" },
+    { id: "stock_counts", label: "Stock Count", icon: "stock_counts" },
     { id: "batches", label: "Batches", icon: "batches" },
     { id: "maintenance", label: "Maintenance", icon: "maintenance" },
     { id: "asset_register", label: "Asset Register", icon: "asset_register" },
@@ -11409,6 +11412,7 @@ export default function App() {
   const [requisitionSite, setRequisitionSite] = useState('');
   const [initialScorecard, setInitialScorecard] = useState(null);
   const [initialProduction, setInitialProduction] = useState(null);
+  const [initialStockCount, setInitialStockCount] = useState(null);
   const [initialWarning, setInitialWarning] = useState(null);
   const [contractsReport, setContractsReport] = useState(false);
   const [lowStockCount, setLowStockCount] = useState(0);
@@ -11633,6 +11637,8 @@ export default function App() {
   const scorecardDashboard = canSee("site_scorecard")
     ? <ScorecardDashboard userProfile={userProfile} onOpen={openScorecard} /> : null;
   const openProduction = siteId => { setInitialProduction(previous => ({ siteId, key: (previous?.key || 0) + 1 })); setActive("production"); };
+  const openStockCount = id => { setInitialStockCount(previous => ({ id, key: (previous?.key || 0) + 1 })); setActive("stock_counts"); };
+  const stockCountCards = <StockCountDashboard userProfile={userProfile} onOpen={openStockCount} />;
   const dayCards = <SiteDayDashboard userProfile={userProfile} onProduction={openProduction} />;
   const budgetCards = <BudgetWarningDashboardCards userProfile={userProfile} onOpen={openBudgetWarnings} />;
   const openPaymentRequest = id => {
@@ -11641,9 +11647,10 @@ export default function App() {
   };
   const pages = {
     dashboard: isBoard
-      ? <>{dayCards}{budgetCards}{scorecardDashboard}<SiteDashboardCards userProfile={userProfile} onOpenSite={openSiteContracts} /><RequisitionsDashboardBanner userProfile={userProfile} onOpen={openRequisitions} /><BoardDashboard userProfile={userProfile} /></>
-      : <MobileScope>{dayCards}{budgetCards}{scorecardDashboard}<Dashboard onOpenRequisitions={openRequisitions} onNavigate={setActive} onOpenSite={openSiteContracts} userProfile={userProfile} /></MobileScope>,
+      ? <>{stockCountCards}{dayCards}{budgetCards}{scorecardDashboard}<SiteDashboardCards userProfile={userProfile} onOpenSite={openSiteContracts} /><RequisitionsDashboardBanner userProfile={userProfile} onOpen={openRequisitions} /><BoardDashboard userProfile={userProfile} /></>
+      : <MobileScope>{stockCountCards}{dayCards}{budgetCards}{scorecardDashboard}<Dashboard onOpenRequisitions={openRequisitions} onNavigate={setActive} onOpenSite={openSiteContracts} userProfile={userProfile} /></MobileScope>,
     late_entries: <MobileScope fit><LateEntries /></MobileScope>,
+    stock_counts: <StockCountPage key={initialStockCount?.key || "default"} initial={initialStockCount} userProfile={userProfile} />,
     production: <MobileScope><Production key={initialProduction?.key || 'default'} userProfile={userProfile}
       initialSiteId={initialProduction?.siteId} onLabour={() => setActive("labour")} onOpenBudgetWarnings={openBudgetWarnings} /></MobileScope>,
     inventory: <MobileScope><Inventory onLowStockChange={setLowStockCount} userProfile={userProfile} onNavigate={setActive} /></MobileScope>,
@@ -11731,7 +11738,7 @@ export default function App() {
               {section.items.map(item => {
                 const badge = getBadge(item.id);
                 return (
-                  <div key={item.id} style={{ ...styles.navItem(active === item.id), ...(isMobile ? { minHeight: '44px' } : {}) }} onClick={() => { if (item.id === 'payment_requests') setInitialPayment(null); if (item.id === 'staff_tasks' || item.id === 'my_profile') setInitialTask(null); if (item.id === 'production_exceptions') setInitialWarning(null); if (item.id === 'site_scorecard') setInitialScorecard(null); if (item.id === 'production') setInitialProduction(null); setActive(item.id); setContractsReport(false); if (isMobile) setSidebarOpen(false); }}>
+                  <div key={item.id} style={{ ...styles.navItem(active === item.id), ...(isMobile ? { minHeight: '44px' } : {}) }} onClick={() => { if (item.id === 'payment_requests') setInitialPayment(null); if (item.id === 'staff_tasks' || item.id === 'my_profile') setInitialTask(null); if (item.id === 'production_exceptions') setInitialWarning(null); if (item.id === 'site_scorecard') setInitialScorecard(null); if (item.id === 'production') setInitialProduction(null); if (item.id === 'stock_counts') setInitialStockCount(null); setActive(item.id); setContractsReport(false); if (isMobile) setSidebarOpen(false); }}>
                     <Icon name={item.icon} size={20} />
                     <span style={{ flex: 1 }}>{item.label}</span>
                     {badge > 0 && (
@@ -11765,6 +11772,7 @@ export default function App() {
         userProfile={userProfile}
         onNavigate={(page, relatedId) => {
           if (page === "production_exceptions") openBudgetWarnings(relatedId ? { id: relatedId } : null);
+          else if (page === "stock_counts") openStockCount(relatedId);
           else if (page === "production" && relatedId) openProduction(relatedId);
           else if (page === "payment_requests") openPaymentRequest(relatedId);
           else {
