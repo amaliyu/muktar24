@@ -1,3 +1,4 @@
+import { NoProductionDay, SiteDayPeriod } from './SiteDays'
 import { useState } from 'react'
 import { ChevronLeft, ChevronRight, Share2 } from 'lucide-react'
 import { withAssignedSite, useAssignedSite } from '../AssignedSite'
@@ -75,7 +76,7 @@ function ScorecardBody({ score, onOpenBudgetWarnings }) {
   </>
 }
 
-export function SiteScorecard({ assignedSiteId, initial, onOpenBudgetWarnings }) {
+export function SiteScorecard({ assignedSiteId, initial, onOpenBudgetWarnings, onProduction }) {
   const { sites, error } = useSites()
   const [selected, setSelected] = useState(initial?.siteId || '')
   const [date, setDate] = useState(initial?.date || lagosToday)
@@ -102,8 +103,10 @@ export function SiteScorecard({ assignedSiteId, initial, onOpenBudgetWarnings })
     </div>
     <ErrorBox error={error || result.error} />
     {result.loading && siteId && <p role="status">Loading scorecard…</p>}
-    {score?.blocks_total > 0 ? <ScorecardBody key={`${siteId}:${date}`} score={score} onOpenBudgetWarnings={onOpenBudgetWarnings} />
+    {score?.day_status ? <NoProductionDay status={score.day_status} idleLabour={score.idle_labour} />
+      : score?.blocks_total > 0 ? <ScorecardBody key={`${siteId}:${date}`} score={score} onOpenBudgetWarnings={onOpenBudgetWarnings} />
       : !result.loading && !result.error && siteId && <p>No production recorded for {scorecardDate(date)}.</p>}
+    <SiteDayPeriod siteId={siteId} onProduction={onProduction} />
   </section>
 }
 

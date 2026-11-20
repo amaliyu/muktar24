@@ -15,6 +15,7 @@ const fixture = vi.hoisted(() => ({
   calls: [],
   assignment: null,
   production: [],
+  marked: false,
   warnings: [],
 }))
 vi.mock('pdfjs-dist', () => ({ GlobalWorkerOptions: {} }))
@@ -22,6 +23,10 @@ vi.mock('./lib/supabase', async () => {
   const { createSupabaseMock } = await import('./test/supabaseMock')
   const mock = createSupabaseMock((table, ops) => {
     if (table === 'rpc:my_assigned_site') return fixture.assignment()
+    if (table === 'rpc:clear_site_day_status') { fixture.marked = false; return { data: null, error: null } }
+    if (table === 'production_log' && fixture.marked && ops.some(op => op[0] === 'insert')) {
+      return { data: null, error: { message: 'DAY_MARKED: Remove the day status before saving.' } }
+    }
     if (table === 'rpc:app_flag') return { data: true, error: null }
     if (table === 'rpc:record_material_receipt') return { data: 'receipt', error: null }
     if (ops.some(op => op[0] === 'insert')) return { data: { id: 'inserted' }, error: null }
@@ -65,6 +70,7 @@ beforeEach(() => {
   fixture.calls.length = 0
   fixture.assignment = () => ({ data: fixture.site, error: null })
   fixture.production = []
+  fixture.marked = false
   fixture.warnings = []
 })
 afterEach(cleanup)
@@ -212,4 +218,22 @@ it('omits an empty delivery price at Dutse', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Record delivery' }))
   await waitFor(() => expect(fixture.calls.find(call => call.rpc === 'record_material_receipt')?.args).toBeDefined())
   expect(fixture.calls.find(call => call.rpc === 'record_material_receipt').args).not.toHaveProperty('p_unit_cost')
+})
+
+it('removes a marked day after the production error and preserves the entry for retry', async () => {
+  fixture.marked = true
+  const { container } = render(session(<Production userProfile={profile} />))
+  await showProduction()
+  await screen.findByText(/Dust and 3\/8 are calculated by the app/)
+  await screen.findByRole('option', { name: /Bilaad machine/ })
+  change(container.querySelector('input[type=date]'), lagosToday())
+  change(screen.getByPlaceholderText('e.g. 850'), '20')
+  fireEvent.click(screen.getByRole('button', { name: 'Save Entry' }))
+  expect(await screen.findByText(/DAY_MARKED:/)).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: /Remove day status for/ }))
+  await waitFor(() => expect(fixture.calls.find(call => call.rpc === 'clear_site_day_status')?.args)
+    .toEqual({ p_site_id: fixture.site, p_on_date: lagosToday() }))
+  expect(screen.getByPlaceholderText('e.g. 850')).toHaveValue(20)
+  fireEvent.click(screen.getByRole('button', { name: 'Save Entry' }))
+  expect(await screen.findByText(/Production entry saved/)).toBeInTheDocument()
 })
