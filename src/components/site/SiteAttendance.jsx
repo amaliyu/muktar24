@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { ScanFace } from 'lucide-react'
+import { Check, ScanFace } from 'lucide-react'
 import SitePicker from '../SitePicker'
 import { withAssignedSite } from '../AssignedSite'
 import MobileScope from '../MobileScope'
@@ -173,7 +173,7 @@ export function useMorningScan({ camera, fix, threshold, site, refresh, lastCall
             const result = await siteAttendance.checkIn(site, frame, currentFix, deviceId())
             latest.current.refresh()
             if (!stopped) setNotice({
-              message: (result.already ? result.name + ' · Already checked in at ' : '✓ ' + result.name + ' ') + attendanceTime(result.checked_at),
+              message: (result.already ? result.name + ' · Already checked in at ' : result.name + ' ') + attendanceTime(result.checked_at),
               success: true,
             })
           } catch (error) { if (!stopped) setNotice({ message: error.message, error: true }) }
@@ -251,7 +251,7 @@ function Morning({ site, workers, location, refresh, lastCall }) {
       </div>
       {scanning && <>
         <CameraPreview camera={camera} />
-        <p role={notice.error ? 'alert' : 'status'} style={{ fontSize: notice.success ? 24 : 16, color: notice.success ? '#2dd4a0' : undefined }}>{notice.message}</p>
+        <p role={notice.error ? 'alert' : 'status'} style={{ fontSize: notice.success ? 24 : 16, color: notice.success ? '#2dd4a0' : undefined }}>{notice.success && <Check size={22} aria-hidden="true" />} {notice.message}</p>
       </>}
     </>}
     {manual && <ManualCheckIn site={site} workers={workers} fix={location.fix} refresh={refresh} onCancel={() => setManual(false)} />}
