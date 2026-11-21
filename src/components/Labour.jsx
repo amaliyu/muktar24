@@ -1,3 +1,4 @@
+import { siteAttendance } from '../services/siteAttendance'
 import { WagesToPay } from './DailyWages'
 import { withAssignedSite } from './AssignedSite'
 import { LateReasonField, useLateReason } from './LateReasonField'
@@ -684,7 +685,30 @@ function RosterForm({ pool, roles, userProfile, editRoster, onSave, onCancel, as
     })
   }, [editRoster])
 
-  const addRow = (labourId = '') => setEntries(e => [...e, { labour_id: labourId, role_id: defaultRole?.id || '', base_rate: defaultRole?.base_rate || 0, attendance_type: 'full_day', manual_amount: '', bonus_applicable: false, bonus_amount: 0, bonus_description: '', advance_amount: 0, deduction_amount: 0, deduction_reason: '', net_pay: 0, notes: '' }])
+  const newRow = (labourId = '') => ({ labour_id: labourId, role_id: defaultRole?.id || '', base_rate: defaultRole?.base_rate || 0, attendance_type: 'full_day', manual_amount: '', bonus_applicable: false, bonus_amount: 0, bonus_description: '', advance_amount: 0, deduction_amount: 0, deduction_reason: '', net_pay: 0, notes: '' })
+  const addRow = (labourId = '') => setEntries(rows => [...rows, newRow(labourId)])
+  const [crew, setCrew] = useState(null)
+  const [crewError, setCrewError] = useState('')
+  useEffect(() => {
+    setCrew(null)
+    setCrewError('')
+    if (!dailyPay || !date) return
+    let active = true
+    siteAttendance.register(siteId, date).then(data => { if (active && Array.isArray(data?.check_ins)) setCrew(data) })
+      .catch(error => { if (active) setCrewError(error.message) })
+    return () => { active = false }
+  }, [dailyPay, date, siteId])
+
+  function fillFromRegister() {
+    if (!crew || !defaultRole || date !== todayLagos()) return
+    setEntries(rows => {
+      const current = new Set(rows.map(row => String(row.labour_id)))
+      const additions = crew.check_ins.filter(worker => !current.has(String(worker.labour_id))).map(worker => newRow(worker.labour_id))
+      return [...rows.filter(row => row.labour_id), ...additions]
+    })
+  }
+  const checkedIn = new Set(crew?.check_ins.map(row => String(row.labour_id)))
+  const unregistered = crew ? entries.filter(row => row.labour_id && !checkedIn.has(String(row.labour_id))) : []
   const removeRow = (i) => setEntries(e => e.filter((_, j) => j !== i))
 
   const updateRow = (i, field, value) => {
@@ -822,6 +846,9 @@ function RosterForm({ pool, roles, userProfile, editRoster, onSave, onCancel, as
         <button style={styles.btn('ghost')} onClick={onCancel}>Cancel</button>
       </div>
       {err && <AlertBar msg={err} type="error" onClose={() => setErr('')} />}
+      {dailyPay && date === todayLagos() && <button style={{ ...styles.btn('ghost'), minHeight: 44 }} disabled={!entriesLoaded || !crew || !defaultRole || !crew.check_ins.some(worker => !entries.some(row => String(row.labour_id) === String(worker.labour_id)))} onClick={fillFromRegister}>Fill from today's register</button>}
+      {crewError && <p role="alert">{crewError}</p>}
+      {unregistered.length > 0 && <p style={{ color: theme.red }}>Not checked in: {unregistered.map(row => activePool.find(worker => String(worker.id) === String(row.labour_id))?.full_name || crew.on_roster_not_checked_in.find(worker => String(worker.labour_id) === String(row.labour_id))?.name || 'Worker').join(', ')}</p>}
       {dailyPay && <p>Wages here are paid every day. Record today's roster before the transfer is made.</p>}
       {assignedSiteId && defaultRole && (
         <div className="m-form" style={{ marginBottom: 16 }}>

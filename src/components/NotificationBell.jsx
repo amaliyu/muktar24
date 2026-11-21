@@ -19,7 +19,16 @@ const TYPE_META = {
 }
 
 // Map notification related_table → page id
+export const notificationTarget = (table, profile) => table === 'staff_tasks'
+  ? (hasRole(profile, 'md') ? 'staff_tasks' : 'my_profile')
+  : table === 'user_role_grants'
+    ? (hasRole(profile, 'md') ? 'user_management' : 'my_profile')
+    : table === 'production_sites'
+      ? (hasRole(profile, 'md') ? 'site_attendance' : undefined)
+      : TABLE_PAGE[table];
+
 const TABLE_PAGE = {
+  crew_check_ins: 'site_attendance',
   stock_counts: 'stock_counts',
   daily_roster: 'labour',
   site_day_status: 'production',
@@ -59,11 +68,7 @@ function BellIcon({ hasUnread }) {
 }
 
 export default function NotificationBell({ userProfile, onNavigate, isMobile }) {
-  const targetPage = table => table === 'staff_tasks'
-    ? (hasRole(userProfile, 'md') ? 'staff_tasks' : 'my_profile')
-    : table === 'user_role_grants'
-      ? (hasRole(userProfile, 'md') ? 'user_management' : 'my_profile')
-      : TABLE_PAGE[table];
+  const targetPage = table => notificationTarget(table, userProfile);
   const [open, setOpen] = useState(false)
   const [notifications, setNotifications] = useState([])
   const [unreadCount, setUnreadCount] = useState(0)
@@ -145,7 +150,7 @@ export default function NotificationBell({ userProfile, onNavigate, isMobile }) 
     // Navigate if we know the page
     const page = n.related_table ? targetPage(n.related_table) : null
     if (page && onNavigate) {
-      onNavigate(page, n.related_id)
+      onNavigate(page, n.related_table === 'crew_check_ins' ? null : n.related_id)
       setOpen(false)
     }
   }
