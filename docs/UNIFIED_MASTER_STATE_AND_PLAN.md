@@ -1508,6 +1508,13 @@ Interim until A–C: Umar records Kado now; Abubakar gets a temporary assistant_
   - `run_stock_count_reminders()` via pg_cron `stock-count-reminders-daily` 07:20 UTC (08:20 Lagos): Friday → ICO reminder for sites not yet counted this week; Saturday → MD + ICO notice for any site not counted this week.
 - **Frontend:** b13.
 
+### Clock warning fix and delivery guidance (MD 2026-11-21)
+- **False clock banner:** "Your phone's date/time looks wrong" compared `session.expires_at` with device time + `expires_in`. auth-js computes `expires_at` from the device clock at sign-in and keeps `expires_in` fixed on a restored session, so the check can never detect a wrong clock and fires whenever the app is reopened more than 5 minutes after sign-in. Seen on correct phones and a correct PC.
+- **Database — DONE** (`20261121020853_server_time_for_clock_check`): `server_time()` (authenticated) so the app compares the device clock with the server's.
+- **Guides updated 21 Nov:** "Recording a delivery, box by box" added to the Life Camp (Abubakar) and Kado (Umar) app guides — Supplier/Source = the company on the waybill (Life Camp: the quarry/depot/seller Bilaad bought from; Kado: the supplier APCL paid).
+- **Open:** Requisition 1 is not in the app (no client requisitions recorded), so Life Camp deliveries cannot be linked to it. Abubakar to enter it, MD approve, mark sent.
+- **Frontend:** b15 — server-based clock check; delivery box hints and source suggestions.
+
 ### Dutse while production is on hold
 - Any block leaving the yard needs a same-day waybill; owner to be named now Abubakar has moved.
 - Weekly yard count continues; best window to close the ICO stock reconciliation (unexplained ~77,000 blocks, ₦37–48m at cost, pending ICO checks due 20 Nov).
