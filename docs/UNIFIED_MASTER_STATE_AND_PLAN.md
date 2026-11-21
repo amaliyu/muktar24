@@ -1514,6 +1514,14 @@ Interim until A–C: Umar records Kado now; Abubakar gets a temporary assistant_
 - **Guides updated 21 Nov:** "Recording a delivery, box by box" added to the Life Camp (Abubakar) and Kado (Umar) app guides — Supplier/Source = the company on the waybill (Life Camp: the quarry/depot/seller Bilaad bought from; Kado: the supplier APCL paid).
 - **Open:** Requisition 1 is not in the app (no client requisitions recorded), so Life Camp deliveries cannot be linked to it. Abubakar to enter it, MD approve, mark sent.
 - **Frontend:** b15 — server-based clock check; delivery box hints and source suggestions.
+### REQ-LIFECAMP-BIL-001 in the app; material position (MD 2026-11-21)
+- **Email of 20 Nov to Bilaad** (contract BR/PMO/BALI GROVE/APCL/2026/001): 11,994 nine-inch + 4,255 six-inch = 16,249 blocks; 403 bags cement (BUA or Mangal only); 8 trips stone dust + 5 trips 3/8 granite on 24-hour call-off; cash ₦725,909.44 site operating allocation + ₦658,000 for 329 L production diesel at ₦2,000/L = ₦1,383,909.44. Delivery logistics to follow separately.
+- **Data 21 Nov:** Life Camp `site_block_standards.chippings_kg_per_block` set to 8.8 kg (9") and 7.7 kg (6") — the 23/20 kg aggregate split 8:5 like the trips (MD: "use the split"). REQ-LIFECAMP-BIL-001 created by the MD account (submit → approve → mark sent on 21 Nov; note records the 20 Nov email): cement 403 bags, dust 224,878 kg, 3/8 139,694 kg, diesel 329 L — same cement and diesel as the email. Abubakar's 20 Nov dust (29,530 kg) and cement (12 bags) receipts linked to it; 19 Nov diesel (30 L, before the email) left unlinked.
+- **Interim Excel log** (made in another chat): duplicates the app (manual usage, trips as a unit) — use only until the app view ships, then stop.
+- **Database — DONE** (`20261121025244_client_requisition_material_position`): `client_requisition_material_position(site)` — per material across the site's sent/client-approved/closed requisitions: requested, received, rejected, deliveries, outstanding, over-supplied, client-owned receipts not linked to a requisition, used in production since `covers_from`, on site now.
+- **Position 21 Nov (Life Camp):** cement 12 of 403 received, 66 used, −54 on site; dust 29.5 of 224.9 t received, 43.2 t used, −13.7 t on site; 3/8 none; diesel 30 L received unlinked, 30 L used. The 17–18 Nov test production used Bilaad material that was never recorded as received — opening stock count resets the balance.
+- **Not in the app yet:** Bilaad's cash (operating allocation and diesel fund), what it was spent on and the balance — next build (client funds ledger).
+- **Frontend:** b14 (combined: share menu, clock fix, delivery hints, material position card).
 
 ### Dutse while production is on hold
 - Any block leaving the yard needs a same-day waybill; owner to be named now Abubakar has moved.
