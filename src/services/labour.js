@@ -163,7 +163,7 @@ export const rosterService = {
     const result = await supabase.from('daily_roster').insert({ ...roster, total_daily_cost: 0, worker_count: 0 }).select().single()
     const created = checkedWrite(result)
     try { await rosterService.saveEntriesFirst(created.id, roster, entries) }
-    catch (e) { throw new Error(`Roster ${created.id} exists, but its entries or totals were not saved: ${e.message}`) }
+    catch (e) { throw new Error(`Roster ${created.id} exists, but its entries or totals were not saved: ${e.message}`, { cause: e }) }
     return created
   },
 
@@ -326,4 +326,31 @@ export const payrollService = {
   async markPaid(id) {
     return checkedWrite(await supabase.rpc('advance_weekly_payroll', { p_payroll_id: id, p_action: 'mark_paid', p_reason: null }))
   },
+}
+
+
+export const dailyWagesService = {
+  async due() {
+    const { data, error } = await supabase.rpc('daily_wages_due')
+    if (error) throw error
+    return data || []
+  },
+  async pay(id, { amount, paidTo, reference, account, note }) {
+    const { error } = await supabase.rpc('pay_daily_roster', {
+      p_roster_id: id, p_amount: Number(amount), p_paid_to: paidTo.trim(),
+      p_reference: reference.trim(), p_bank_account_id: account || null, p_note: note.trim() || null,
+    })
+    if (error) throw error
+  },
+}
+
+export async function addLabourWorker(fields) {
+  const { count, error } = await supabase.from('labour_pool').select('id', { count: 'exact', head: true })
+  if (error) throw error
+  const { data, error: insertError } = await supabase.from('labour_pool').insert({
+    ...fields, labour_number: `APC-LAB-${String((count || 0) + 1).padStart(3, '0')}`,
+    date_registered: new Date().toISOString().slice(0, 10), is_active: true,
+  }).select().single()
+  if (insertError) throw insertError
+  return data
 }
