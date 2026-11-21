@@ -1523,6 +1523,18 @@ Interim until A–C: Umar records Kado now; Abubakar gets a temporary assistant_
 - **Not in the app yet:** Bilaad's cash (operating allocation and diesel fund), what it was spent on and the balance — next build (client funds ledger).
 - **Frontend:** b14 (combined: share menu, clock fix, delivery hints, material position card).
 
+### Site crews paid daily (MD 2026-11-21)
+- **MD:** Kado and Life Camp crews are temporary (no permanent workers yet) and paid every day by one bank transfer per site; Life Camp ₦8,000/day, Kado daily (₦6,000/day from Umar's reports). May move to weekly once settled.
+- **Database — DONE** (`20261121045958_site_daily_wages`):
+  - `production_sites.labour_pay_mode` ('weekly' | 'daily'); Kado and Life Camp 'daily', Dutse 'weekly'.
+  - `labour_roles.site_id`; new roles "Site crew — Kado" ₦6,000/day and "Site crew — Life Camp" ₦8,000/day. Trigger `trg_roster_entry_site_role`: an entry's job must belong to the roster's site; client sites must use their own site jobs.
+  - `daily_roster` + paid_at, paid_amount, paid_to, payment_reference, paid_by_name, paid_from_account_id.
+  - `pay_daily_roster(roster, amount, paid_to, reference, bank_account, note)` — md/accountant; daily-pay sites only; amount must equal the roster total; accountant needs MD approval first (MD paying approves); sets payment_status 'paid' (so it can never join a weekly payroll — existing `fn_payroll_link_guard`); notifies the site.
+  - `daily_wages_due()` — md/accountant/ico: unpaid rosters at daily-pay sites.
+  - Labour expense is still created from the roster when it is recorded (`sync_expense_from_roster`); no payment request for daily wages.
+- **Later:** Life Camp wages draw on Bilaad's operating allocation (client funds ledger); a signed pay sheet photo when the transfer goes to one person who pays the crew.
+- **Frontend:** b15.
+
 ### Dutse while production is on hold
 - Any block leaving the yard needs a same-day waybill; owner to be named now Abubakar has moved.
 - Weekly yard count continues; best window to close the ICO stock reconciliation (unexplained ~77,000 blocks, ₦37–48m at cost, pending ICO checks due 20 Nov).
