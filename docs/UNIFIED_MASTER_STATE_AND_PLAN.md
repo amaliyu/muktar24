@@ -1535,6 +1535,18 @@ Interim until A–C: Umar records Kado now; Abubakar gets a temporary assistant_
 - **Later:** Life Camp wages draw on Bilaad's operating allocation (client funds ledger); a signed pay sheet photo when the transfer goes to one person who pays the crew.
 - **Frontend:** b15.
 
+### Site attendance: face recognition on the site manager's phone (MD 2026-11-21)
+- **MD:** proof the crew were present is needed because the single daily transfer goes to one person. Not all labourers have smartphones, so the crew register runs on the site manager's phone, with face recognition (no daily photos) and a location stamp. Site managers no longer report at Dutse (kiosk there, PIN only, last punch 10 Nov), so they clock themselves in on their own phones with a location stamp. Claude flagged: geotag proves the phone, not the person; face data is sensitive personal data under the NDPA 2023 (consent recorded at enrolment); no liveness check is perfect.
+- **Database — DONE** (`20261121052821_site_attendance_face_and_geo`, `20261121052909_site_manager_clock_enum_fix`):
+  - Site location: `production_sites.geo_lat/geo_lng/geo_radius_m (300)/geo_status (unset|pending|approved)`; `propose_site_location(site, lat, lng, accuracy ≤ 50 m)` by site manager (MD's own = approved), `approve_site_location(site, approve, radius)` MD. `fn_site_geo_check` (approved location, accuracy ≤ 150 m, inside radius) used by every clock-in.
+  - Storage bucket `site-attendance` (private; folder = site id) for enrolment photos and manual check-in photos only.
+  - `face_match_settings` (model 'human-faceres': min cosine similarity 0.6, min liveness 0.5, replay ≥ 0.9995 — tune here). `fn_vec_cosine`.
+  - `labour_face_profiles` (one per worker: descriptor, enrolment photo, consent, witness). `enroll_worker_face(labour, site, descriptor, model, photo_path, consent)` — refuses a face already registered under another name.
+  - `crew_check_ins` (one per worker per day; face or manual). `crew_check_in(site, descriptor, model, liveness, lat, lng, accuracy, device)` — matching on the server; refuses low liveness, off-site, identical replayed capture (30 days), unknown face. `crew_check_in_manual(...)` needs a reason ≥ 10 chars and a photo; notifies the MD. `site_crew_register(site, date)` — check-ins and roster workers not checked in. Check-in descriptors cleared after 30 days (cron `purge-check-in-descriptors`).
+  - `pay_daily_roster` now refuses until every worker on the roster has checked in that day.
+  - `attendance_punches` + lat/lng/accuracy_m/distance_m/site_id; enum value `geo_mobile`. `site_manager_clock(IN|OUT, lat, lng, accuracy, device)` for users with a staff record and an assigned site; feeds the normal attendance reconciliation.
+- **Next:** site managers set each site's location from the site; MD approves. Frontend b16 (after b15).
+
 ### Dutse while production is on hold
 - Any block leaving the yard needs a same-day waybill; owner to be named now Abubakar has moved.
 - Weekly yard count continues; best window to close the ICO stock reconciliation (unexplained ~77,000 blocks, ₦37–48m at cost, pending ICO checks due 20 Nov).
