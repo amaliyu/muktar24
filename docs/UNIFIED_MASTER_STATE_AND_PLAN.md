@@ -1508,6 +1508,12 @@ Interim until A–C: Umar records Kado now; Abubakar gets a temporary assistant_
   - `run_stock_count_reminders()` via pg_cron `stock-count-reminders-daily` 07:20 UTC (08:20 Lagos): Friday → ICO reminder for sites not yet counted this week; Saturday → MD + ICO notice for any site not counted this week.
 - **Frontend:** b13.
 
+### Clock warning fix and delivery guidance (MD 2026-11-21)
+- **False clock banner:** "Your phone's date/time looks wrong" compared `session.expires_at` with device time + `expires_in`. auth-js computes `expires_at` from the device clock at sign-in and keeps `expires_in` fixed on a restored session, so the check can never detect a wrong clock and fires whenever the app is reopened more than 5 minutes after sign-in. Seen on correct phones and a correct PC.
+- **Database — DONE** (`20261121020853_server_time_for_clock_check`): `server_time()` (authenticated) so the app compares the device clock with the server's.
+- **Guides updated 21 Nov:** "Recording a delivery, box by box" added to the Life Camp (Abubakar) and Kado (Umar) app guides — Supplier/Source = the company on the waybill (Life Camp: the quarry/depot/seller Bilaad bought from; Kado: the supplier APCL paid).
+- **Open:** Requisition 1 is not in the app (no client requisitions recorded), so Life Camp deliveries cannot be linked to it. Abubakar to enter it, MD approve, mark sent.
+- **Frontend:** b15 — server-based clock check; delivery box hints and source suggestions.
 ### REQ-LIFECAMP-BIL-001 in the app; material position (MD 2026-11-21)
 - **Email of 20 Nov to Bilaad** (contract BR/PMO/BALI GROVE/APCL/2026/001): 11,994 nine-inch + 4,255 six-inch = 16,249 blocks; 403 bags cement (BUA or Mangal only); 8 trips stone dust + 5 trips 3/8 granite on 24-hour call-off; cash ₦725,909.44 site operating allocation + ₦658,000 for 329 L production diesel at ₦2,000/L = ₦1,383,909.44. Delivery logistics to follow separately.
 - **Data 21 Nov:** Life Camp `site_block_standards.chippings_kg_per_block` set to 8.8 kg (9") and 7.7 kg (6") — the 23/20 kg aggregate split 8:5 like the trips (MD: "use the split"). REQ-LIFECAMP-BIL-001 created by the MD account (submit → approve → mark sent on 21 Nov; note records the 20 Nov email): cement 403 bags, dust 224,878 kg, 3/8 139,694 kg, diesel 329 L — same cement and diesel as the email. Abubakar's 20 Nov dust (29,530 kg) and cement (12 bags) receipts linked to it; 19 Nov diesel (30 L, before the email) left unlinked.
