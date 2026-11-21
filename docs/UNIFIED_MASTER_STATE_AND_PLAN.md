@@ -1533,7 +1533,8 @@ Interim until A–C: Umar records Kado now; Abubakar gets a temporary assistant_
   - `daily_wages_due()` — md/accountant/ico: unpaid rosters at daily-pay sites.
   - Labour expense is still created from the roster when it is recorded (`sync_expense_from_roster`); no payment request for daily wages.
 - **Later:** Life Camp wages draw on Bilaad's operating allocation (client funds ledger); a signed pay sheet photo when the transfer goes to one person who pays the crew.
-- **Frontend:** b15.
+- **Guard 21 Nov** (`20261121054815_daily_wages_paid_only_via_payment`): at daily-pay sites a roster becomes 'paid' only through `pay_daily_roster` (trigger `trg_daily_roster_paid_guard`); direct updates by site managers/HR/ICO are refused.
+- **Frontend:** b15 — PR #168.
 
 ### Site attendance: face recognition on the site manager's phone (MD 2026-11-21)
 - **MD:** proof the crew were present is needed because the single daily transfer goes to one person. Not all labourers have smartphones, so the crew register runs on the site manager's phone, with face recognition (no daily photos) and a location stamp. Site managers no longer report at Dutse (kiosk there, PIN only, last punch 10 Nov), so they clock themselves in on their own phones with a location stamp. Claude flagged: geotag proves the phone, not the person; face data is sensitive personal data under the NDPA 2023 (consent recorded at enrolment); no liveness check is perfect.
