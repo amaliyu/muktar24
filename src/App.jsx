@@ -70,6 +70,9 @@ import DataImport from './components/DataImport'
 import { vehiclesService, fuelLogService } from './services/vehicles'
 import SupplierRegistry from './components/SupplierRegistry'
 import { suppliersService, supplierTransactionsService } from './services/suppliers'
+import SiteAttendance from './components/site/SiteAttendance';
+import SiteManagerClock from './components/site/SiteManagerClock';
+import { ScanFace } from 'lucide-react';
 import { WageDashboard } from './components/DailyWages'
 import Labour, { getLastSaturday, shiftWeek, shiftDays } from './components/Labour'
 import Maintenance from './components/Maintenance'
@@ -187,18 +190,18 @@ const APP_ROLES = [
 // Pages each role is allowed to access. 'all' = unrestricted.
 export const ROLE_PAGES = {
   md:                 'all',
-  ico:                ['dashboard','stock_counts','payroll_approvals','investor_register','capital','terms','monthly_close','spv_ledger','reserve_budget','production','inventory','batches','maintenance','asset_register','site_contracts','material_receiving','handovers','waybills','vehicles','labour','truck_loading','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','advances','leave','payment_requests','requisitions','production_exceptions','site_scorecard','messages'],
+  ico:                ['dashboard','site_attendance','stock_counts','payroll_approvals','investor_register','capital','terms','monthly_close','spv_ledger','reserve_budget','production','inventory','batches','maintenance','asset_register','site_contracts','material_receiving','handovers','waybills','vehicles','labour','truck_loading','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','advances','leave','payment_requests','requisitions','production_exceptions','site_scorecard','messages'],
   accountant:         ['dashboard','stock_counts','payroll_approvals','investor_register','capital','terms','monthly_close','spv_ledger','reserve_budget','asset_register','site_contracts','material_receiving','handovers','customers','orders','reports','kpi_dashboard','accounting','suppliers','products','my_profile','data_import','labour','waybills','advances','leave','payment_requests','truck_loading','trading_margin','requisitions','production_exceptions','site_scorecard','messages'],
   board_member:       ['dashboard','stock_counts','investor_register','capital','terms','monthly_close','spv_ledger','reserve_budget','production','inventory','batches','maintenance','asset_register','site_contracts','handovers','waybills','vehicles','labour','pending_register','daily_schedule','customers','orders','lpo_approvals','schedule_approvals','reports','kpi_dashboard','accounting','suppliers','products','my_profile','trading_margin','requisitions','production_exceptions','site_scorecard','messages'],
   bdm:                ['dashboard','customers','orders','pending_register','daily_schedule','lpo_approvals','reports','kpi_dashboard','my_profile','payment_requests','trading_margin','messages'],
   store_officer:      ['dashboard','inventory','batches','maintenance','asset_register','site_contracts','material_receiving','handovers','waybills','pending_register','daily_schedule','products','reports','my_profile','messages'],
-  logistics_manager:  ['dashboard','stock_counts','asset_register','site_contracts','handovers','waybills','vehicles','labour','truck_loading','maintenance','pending_register','daily_schedule','customers','my_profile','payment_requests','requisitions','production_exceptions','site_scorecard','messages'],
+  logistics_manager:  ['dashboard','site_attendance','stock_counts','asset_register','site_contracts','handovers','waybills','vehicles','labour','truck_loading','maintenance','pending_register','daily_schedule','customers','my_profile','payment_requests','requisitions','production_exceptions','site_scorecard','messages'],
   marketer:           ['dashboard','customers','orders','products','my_profile','messages'],
   driver:             ['dashboard','waybills','my_profile','messages'],
-  hr_officer:         ['dashboard','site_contracts','staff','reports','labour','my_profile','advances','leave','disciplinary','attendance_kiosk','attendance_flags','payment_requests','messages'],
+  hr_officer:         ['dashboard','site_attendance','site_contracts','staff','reports','labour','my_profile','advances','leave','disciplinary','attendance_kiosk','attendance_flags','payment_requests','messages'],
   kiosk_device:       ['attendance_kiosk'],
-  production_manager:           ['dashboard','stock_counts','production','inventory','batches','maintenance','asset_register','site_contracts','material_receiving','handovers','reports','products','labour','truck_loading','my_profile','attendance_flags','payment_requests','requisitions','production_exceptions','site_scorecard','messages'],
-  assistant_production_manager: ['dashboard','stock_counts','production','inventory','batches','maintenance','asset_register','site_contracts','material_receiving','handovers','reports','products','labour','truck_loading','my_profile','attendance_flags','payment_requests','requisitions','production_exceptions','site_scorecard','messages'],
+  production_manager:           ['dashboard','site_attendance','stock_counts','production','inventory','batches','maintenance','asset_register','site_contracts','material_receiving','handovers','reports','products','labour','truck_loading','my_profile','attendance_flags','payment_requests','requisitions','production_exceptions','site_scorecard','messages'],
+  assistant_production_manager: ['dashboard','site_attendance','stock_counts','production','inventory','batches','maintenance','asset_register','site_contracts','material_receiving','handovers','reports','products','labour','truck_loading','my_profile','attendance_flags','payment_requests','requisitions','production_exceptions','site_scorecard','messages'],
   // legacy roles — kept for any existing users
   operations:         ['dashboard','production','inventory','batches','waybills','vehicles','pending_register','daily_schedule','lpo_approvals','my_profile'],
   sales:              ['dashboard','customers','orders','my_profile'],
@@ -402,6 +405,7 @@ const ConfirmModal = ({ msg, onConfirm, onCancel }) => (
 const NAV_ICONS = {
   dashboard: LayoutDashboard,
   production: Factory,
+  site_attendance: ScanFace,
   production_exceptions: AlertTriangle,
   site_scorecard: Gauge,
   inventory: Package,
@@ -10916,6 +10920,7 @@ const navItems = [
   { section: "Overview", items: [{ id: "dashboard", label: "Dashboard", icon: "dashboard" }] },
   { section: "Production", items: [
     { id: "production", label: "Production", icon: "production" },
+    { id: "site_attendance", label: "Site Attendance", icon: "site_attendance" },
     { id: "inventory", label: "Inventory", icon: "inventory" },
     { id: "stock_counts", label: "Stock Count", icon: "stock_counts" },
     { id: "batches", label: "Batches", icon: "batches" },
@@ -11415,6 +11420,7 @@ export default function App() {
   const [receivingSite, setReceivingSite] = useState('');
   const [initialScorecard, setInitialScorecard] = useState(null);
   const [initialProduction, setInitialProduction] = useState(null);
+  const [attendanceSite, setAttendanceSite] = useState(null);
   const [initialRoster, setInitialRoster] = useState(null);
   const [initialStockCount, setInitialStockCount] = useState(null);
   const [initialWarning, setInitialWarning] = useState(null);
@@ -11650,7 +11656,7 @@ export default function App() {
   const pages = {
     dashboard: isBoard
       ? <>{stockCountCards}{dayCards}{budgetCards}{scorecardDashboard}<SiteDashboardCards userProfile={userProfile} onOpenSite={openSiteContracts} /><RequisitionsDashboardBanner userProfile={userProfile} onOpen={openRequisitions} onReceive={openReceiving} /><BoardDashboard userProfile={userProfile} /></>
-      : <MobileScope><WageDashboard userProfile={userProfile} onOpen={() => { setInitialRoster(null); setActive('labour'); }} />{stockCountCards}{dayCards}{budgetCards}{scorecardDashboard}<Dashboard onOpenReceiving={openReceiving} onOpenRequisitions={openRequisitions} onNavigate={setActive} onOpenSite={openSiteContracts} userProfile={userProfile} /></MobileScope>,
+      : <MobileScope><SiteManagerClock userProfile={userProfile} /><WageDashboard userProfile={userProfile} onOpen={() => { setInitialRoster(null); setActive('labour'); }} />{stockCountCards}{dayCards}{budgetCards}{scorecardDashboard}<Dashboard onOpenReceiving={openReceiving} onOpenRequisitions={openRequisitions} onNavigate={setActive} onOpenSite={openSiteContracts} userProfile={userProfile} /></MobileScope>,
     late_entries: <MobileScope fit><LateEntries /></MobileScope>,
     stock_counts: <StockCountPage key={initialStockCount?.key || "default"} initial={initialStockCount} userProfile={userProfile} />,
     production: <MobileScope><Production key={initialProduction?.key || 'default'} userProfile={userProfile}
@@ -11661,6 +11667,7 @@ export default function App() {
     material_receiving: <MaterialReceiving key={receivingSite || "default"} userProfile={userProfile} initialSiteId={receivingSite}
       onNavigate={canSee("requisitions") ? (_page, siteId) => openRequisitions(siteId) : undefined} />,
     site_scorecard: <SiteScorecard userProfile={userProfile} initial={initialScorecard} onProduction={openProduction} onOpenBudgetWarnings={openBudgetWarnings} />,
+    site_attendance: <SiteAttendance key={attendanceSite || 'default'} initialSiteId={attendanceSite} userProfile={userProfile} />,
     production_exceptions: <BudgetWarnings key={initialWarning?.navigationKey || 'default'} userProfile={userProfile} initial={initialWarning} />,
     requisitions: <Requisitions userProfile={userProfile} initialSiteId={requisitionSite} onReceive={openReceiving} />,
     handovers: <Handovers userProfile={userProfile} />,
@@ -11776,6 +11783,7 @@ export default function App() {
         onNavigate={(page, relatedId) => {
           if (page === "production_exceptions") openBudgetWarnings(relatedId ? { id: relatedId } : null);
           else if (page === "stock_counts") openStockCount(relatedId);
+          else if (page === "site_attendance") { setAttendanceSite(relatedId); setActive(page); }
           else if (page === "production" && relatedId) openProduction(relatedId);
           else if (page === "payment_requests") openPaymentRequest(relatedId);
           else if (page === "labour") { setInitialRoster(previous => ({ id: relatedId, key: (previous?.key || 0) + 1 })); setActive(page); }

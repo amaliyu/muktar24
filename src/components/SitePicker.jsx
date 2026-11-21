@@ -50,7 +50,7 @@ export function FixedSite({ id, siteId, sites, style }) {
   </div>
 }
 
-export default function SitePicker({ id, value, onChange, allowAll = false, allLabel = 'All sites', disabled = false, style }) {
+export default function SitePicker({ id, value, onChange, allowAll = false, allLabel = 'All sites', disabled = false, allowIco = false, style }) {
   const { sites, error } = useSites()
   const assignment = useAssignedSite()
   // All-sites controls filter history. The assignment only fixes entry sites.
@@ -74,6 +74,7 @@ export default function SitePicker({ id, value, onChange, allowAll = false, allL
         id={id}
         // A site filter is read-only, so it stays usable on view-only (board) pages.
         data-board-allow={allowAll ? true : undefined}
+        data-ico-allow={allowAll && allowIco ? true : undefined}
         style={{ ...baseInput, ...style }}
         value={current}
         disabled={disabled}

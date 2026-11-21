@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { Banknote } from 'lucide-react'
 import { hasRole } from '../lib/roles'
 import { supabase } from '../lib/supabase'
+import { siteAttendance } from '../services/siteAttendance'
 import { dailyWagesService } from '../services/labour'
 
 const money = value => Number(value).toLocaleString('en-NG', { style: 'currency', currency: 'NGN', minimumFractionDigits: 0, maximumFractionDigits: 2 })
@@ -91,6 +92,23 @@ function PaymentForm({ row, onClose, onPaid }) {
   </dialog>
 }
 
+function RosterCoverage({ site, date, workers, revision }) {
+  const [missing, setMissing] = useState(null)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    let active = true
+    siteAttendance.register(site, date).then(data => {
+      if (active && data?.on_roster_not_checked_in) {
+        setMissing(data.on_roster_not_checked_in.length)
+        setError('')
+      }
+    }).catch(error => { if (active) setError(error.message) })
+    return () => { active = false }
+  }, [site, date, revision])
+  if (error) return <p role="alert">{error}</p>
+  return missing == null ? null : <p>Register: {Math.max(0, workers - missing)} of {workers} checked in</p>
+}
+
 export function WagesToPay({ userProfile, onRoster, revision, onPaid }) {
   const { rows, error } = useWages(userProfile, revision)
   const [selected, setSelected] = useState(null)
@@ -103,6 +121,7 @@ export function WagesToPay({ userProfile, onRoster, revision, onPaid }) {
       return <div key={row.roster_id} style={panel}>
         <button style={control} onClick={() => onRoster(row.roster_id)}>{row.site_name} · {row.roster_date} · View roster</button>
         <p>{row.workers} workers · {money(row.total)} · MD approval: {row.md_status || 'pending'}</p>
+        <RosterCoverage site={row.site_id} date={row.roster_date} workers={row.workers} revision={revision} />
         <p style={{ color: row.days_waiting > 1 ? '#f06b6b' : undefined }}>{row.days_waiting} days waiting</p>
         <button style={control} disabled={waiting} onClick={() => setSelected(row.roster_id)}>{waiting ? 'Waiting for MD approval' : 'Record payment'}</button>
         {selected === row.roster_id && !waiting && <PaymentForm row={row} onClose={() => setSelected(null)} onPaid={() => {
