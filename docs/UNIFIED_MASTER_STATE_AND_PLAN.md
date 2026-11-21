@@ -1547,6 +1547,7 @@ Interim until A–C: Umar records Kado now; Abubakar gets a temporary assistant_
   - `pay_daily_roster` now refuses until every worker on the roster has checked in that day.
   - `attendance_punches` + lat/lng/accuracy_m/distance_m/site_id; enum value `geo_mobile`. `site_manager_clock(IN|OUT, lat, lng, accuracy, device)` for users with a staff record and an assigned site; feeds the normal attendance reconciliation.
 - **Next:** site managers set each site's location from the site; MD approves. Frontend b16 (after b15).
+- **21 Nov** (`20261121055443_daily_wages_checkin_rule_after_site_setup`): the "everyone on the roster checked in" rule in `pay_daily_roster` applies only once the site's location is approved, so daily wages are not blocked before the attendance screens (b16) are in use.
 
 ### Dutse while production is on hold
 - Any block leaving the yard needs a same-day waybill; owner to be named now Abubakar has moved.
