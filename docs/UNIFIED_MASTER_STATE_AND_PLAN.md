@@ -1549,6 +1549,12 @@ Interim until A–C: Umar records Kado now; Abubakar gets a temporary assistant_
 - **Next:** site managers set each site's location from the site; MD approves. Frontend b16 (after b15).
 - **21 Nov** (`20261121055443_daily_wages_checkin_rule_after_site_setup`): the "everyone on the roster checked in" rule in `pay_daily_roster` applies only once the site's location is approved, so daily wages are not blocked before the attendance screens (b16) are in use.
 
+### Face matching calibrated (21 Nov, first field use)
+- **Field:** Kado location set and approved by the MD at 15:31 (9.0870731, 7.4261653). First worker (Ransom Osang) registered; the next two were refused as "already registered as Ransom Osang".
+- **Cause:** faceres embeddings are 1,024 non-negative values; cosine between different people is high. Emulated-phone test (Playwright Chromium as Pixel 5, fake camera from StyleGAN synthetic faces, fake GPS, the app's own siteFace.js and Human 3.3.6 models from the npm package): different people 0.28–0.73, same person on another "day" ~0.97 (Euclid 2.6–3.5 vs 9.2–14.4). Human's own similarity (order 2, ×25, 0.2–0.8) also lets impostors through at its 0.5 default (max 0.565).
+- **Fix** (`20261121150228_face_match_threshold_and_margin`): min_similarity 0.6 → 0.85; `min_margin` 0.03 — refuse to guess when two registered workers are both ≥ threshold and within the margin; scores shown in refusal messages; `labour_face_profiles.nearest_other_similarity` kept for tuning. Tested: look-alike (0.82) registers, same face under a new name refused, same person matched 0.997, stranger refused (0.69), halfway face refused as too close to call.
+- **Watch:** live check — a video of a still picture scored real/live ≈ 0.55 / 0.98, so min_liveness 0.5 would not stop a photo held to the camera. Compare with the first real check-ins and raise it.
+
 ### Dutse while production is on hold
 - Any block leaving the yard needs a same-day waybill; owner to be named now Abubakar has moved.
 - Weekly yard count continues; best window to close the ICO stock reconciliation (unexplained ~77,000 blocks, ₦37–48m at cost, pending ICO checks due 20 Nov).
