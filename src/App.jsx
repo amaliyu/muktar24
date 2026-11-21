@@ -70,6 +70,7 @@ import DataImport from './components/DataImport'
 import { vehiclesService, fuelLogService } from './services/vehicles'
 import SupplierRegistry from './components/SupplierRegistry'
 import { suppliersService, supplierTransactionsService } from './services/suppliers'
+import { WageDashboard } from './components/DailyWages'
 import Labour, { getLastSaturday, shiftWeek, shiftDays } from './components/Labour'
 import Maintenance from './components/Maintenance'
 import SitePicker, { FixedSite, useSites } from './components/SitePicker'
@@ -11414,6 +11415,7 @@ export default function App() {
   const [receivingSite, setReceivingSite] = useState('');
   const [initialScorecard, setInitialScorecard] = useState(null);
   const [initialProduction, setInitialProduction] = useState(null);
+  const [initialRoster, setInitialRoster] = useState(null);
   const [initialStockCount, setInitialStockCount] = useState(null);
   const [initialWarning, setInitialWarning] = useState(null);
   const [contractsReport, setContractsReport] = useState(false);
@@ -11648,7 +11650,7 @@ export default function App() {
   const pages = {
     dashboard: isBoard
       ? <>{stockCountCards}{dayCards}{budgetCards}{scorecardDashboard}<SiteDashboardCards userProfile={userProfile} onOpenSite={openSiteContracts} /><RequisitionsDashboardBanner userProfile={userProfile} onOpen={openRequisitions} onReceive={openReceiving} /><BoardDashboard userProfile={userProfile} /></>
-      : <MobileScope>{stockCountCards}{dayCards}{budgetCards}{scorecardDashboard}<Dashboard onOpenReceiving={openReceiving} onOpenRequisitions={openRequisitions} onNavigate={setActive} onOpenSite={openSiteContracts} userProfile={userProfile} /></MobileScope>,
+      : <MobileScope><WageDashboard userProfile={userProfile} onOpen={() => { setInitialRoster(null); setActive('labour'); }} />{stockCountCards}{dayCards}{budgetCards}{scorecardDashboard}<Dashboard onOpenReceiving={openReceiving} onOpenRequisitions={openRequisitions} onNavigate={setActive} onOpenSite={openSiteContracts} userProfile={userProfile} /></MobileScope>,
     late_entries: <MobileScope fit><LateEntries /></MobileScope>,
     stock_counts: <StockCountPage key={initialStockCount?.key || "default"} initial={initialStockCount} userProfile={userProfile} />,
     production: <MobileScope><Production key={initialProduction?.key || 'default'} userProfile={userProfile}
@@ -11681,7 +11683,7 @@ export default function App() {
     accounting: <MobileScope fit><Accounting userProfile={userProfile} /></MobileScope>,
     data_import: <MobileScope fit><DataImport /></MobileScope>,
     user_management: <MobileScope fit><UserManagement userProfile={userProfile} /></MobileScope>,
-    labour: <MobileScope><Labour userProfile={userProfile} /></MobileScope>,
+    labour: <MobileScope><Labour key={initialRoster?.key || 'default'} initialRosterId={initialRoster?.id} userProfile={userProfile} /></MobileScope>,
     maintenance: <MobileScope fit><Maintenance userProfile={userProfile} /></MobileScope>,
     truck_loading: <MobileScope><TruckLoadingPage userProfile={userProfile} /></MobileScope>,
     advances: <MobileScope fit><AdvancesPage userProfile={userProfile} /></MobileScope>,
@@ -11776,6 +11778,7 @@ export default function App() {
           else if (page === "stock_counts") openStockCount(relatedId);
           else if (page === "production" && relatedId) openProduction(relatedId);
           else if (page === "payment_requests") openPaymentRequest(relatedId);
+          else if (page === "labour") { setInitialRoster(previous => ({ id: relatedId, key: (previous?.key || 0) + 1 })); setActive(page); }
           else {
             if (page === "staff_tasks" || page === "my_profile") setInitialTask(relatedId || null);
             setActive(page);

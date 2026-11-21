@@ -3,11 +3,13 @@ import { checkedWrite } from '../utils/checkedWrite'
 import { availableForDraft } from '../utils/payrollMath'
 import { monthStart, monthEnd } from '../utils/lagosDate'
 
+const weeklyRoster = roster => roster.site?.labour_pay_mode !== 'daily' && roster.payment_status !== 'paid'
+
 const rows = ({ data, error }) => { if (error) throw error; return data || [] }
 export const weeklyPayrollService = {
   async loadRange(from, to, selectedId = null) {
     const [rosters, loads, byDate] = await Promise.all([
-      supabase.from('daily_roster').select('*, entries:daily_roster_entries(*), site:site_id(name)').gte('roster_date', from).lte('roster_date', to).then(rows),
+      supabase.from('daily_roster').select('*, entries:daily_roster_entries(*), site:site_id(name, labour_pay_mode)').gte('roster_date', from).lte('roster_date', to).then(rows),
       supabase.from('truck_loading_log').select('*, loaders:truck_loading_loaders(labour_id)').gte('date', from).lte('date', to).then(rows),
       supabase.from('weekly_labour_payroll').select('*').eq('week_ending', to).in('payroll_type', ['production','loading']).then(rows),
     ])
@@ -20,14 +22,19 @@ export const weeklyPayrollService = {
     const production = choose('production'), loading = choose('loading')
     // Always fetch the complete linked schedule, including rows outside a
     // widened/shifted display range. The payroll owns this selection.
-    const ownedRosters = production ? rows(await supabase.from('daily_roster').select('*, entries:daily_roster_entries(*), site:site_id(name)').eq('payroll_id', production.id)) : []
+    const ownedRosters = production ? rows(await supabase.from('daily_roster').select('*, entries:daily_roster_entries(*), site:site_id(name, labour_pay_mode)').eq('payroll_id', production.id)) : []
     const ownedLoads = loading ? rows(await supabase.from('truck_loading_log').select('*, loaders:truck_loading_loaders(labour_id)').eq('payroll_id', loading.id)) : []
     const merge = (a, b) => [...new Map([...a, ...b].map(r => [r.id, r])).values()]
-    return { rosters: merge(rosters, ownedRosters), loads: merge(loads, ownedLoads), payrolls, production, loading }
+    // Keep approved schedules readable as historical records. Only eligible
+    // rosters can appear in the builder for a new or draft payroll.
+    const schedule = merge(rosters, ownedRosters).filter(roster => weeklyRoster(roster)
+      || (production && production.status !== 'draft' && roster.payroll_id === production.id))
+    return { rosters: schedule, loads: merge(loads, ownedLoads), payrolls, production, loading }
   },
   async saveDraft({ payroll = null, type, from, to, ids, total, workerCount, preparedBy }) {
     const table = type === 'production' ? 'daily_roster' : 'truck_loading_log'
-    const selected = rows(await supabase.from(table).select('id, payroll_id, payment_status').in('id', ids))
+    const selected = rows(await supabase.from(table).select(type === 'production' ? 'id, payroll_id, payment_status, site:site_id(labour_pay_mode)' : 'id, payroll_id, payment_status').in('id', ids))
+    if (type === 'production' && selected.some(r => r.site?.labour_pay_mode === 'daily')) throw new Error('Daily wages are paid from the roster, outside weekly payroll.')
     if (selected.length !== ids.length || selected.some(r => !(availableForDraft(r) || (payroll?.status === 'draft' && r.payroll_id === payroll.id && r.payment_status !== 'paid')))) {
       throw new Error('Some selected work is already paid or belongs to another payroll — reload and try again.')
     }
