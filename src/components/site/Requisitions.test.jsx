@@ -8,7 +8,7 @@ import { lagosToday } from '../../utils/lateEntry'
 import { tomorrowLagos } from '../../utils/requisitionText'
 
 const f = vi.hoisted(() => ({
-  site: 'life', assignment: 'life', rows: [], calls: [], progress: {},
+  site: 'life', assignment: 'life', rows: [], calls: [], progress: {}, position: null,
   upload: vi.fn(async () => 'LIFE/requisitions/approval.png'),
 }))
 vi.mock('../../lib/supabase', async () => {
@@ -16,6 +16,7 @@ vi.mock('../../lib/supabase', async () => {
   const fixture = createSupabaseMock((table, ops) => {
     const responses = {
       'rpc:my_assigned_site': f.assignment,
+      'rpc:client_requisition_material_position': f.position,
       'rpc:client_requisition_progress': ops?.p_site_id === f.site ? f.progress : {},
       'rpc:create_client_requisition': { ...f.rows[0], status: 'draft' },
       'rpc:record_material_receipt': 'receipt',
@@ -53,7 +54,7 @@ const request = { id: 'req', reference: 'REQ-LC-001', site_id: 'life', kind: 'in
   qty_total: 1200, needed_by: '2027-01-02', raised_by: 'manager', status: 'draft',
   apcl_approved_by_name: 'MD', apcl_approved_at: '2026-11-19T00:00:00Z', sent_at: '2026-11-19T12:00:00Z' }
 beforeEach(() => {
-  f.assignment = 'life'; f.rows = [{ ...request }]; f.progress = {}; f.calls.length = 0; f.upload.mockClear()
+  f.assignment = 'life'; f.rows = [{ ...request }]; f.progress = {}; f.position = null; f.calls.length = 0; f.upload.mockClear()
 })
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
 const wrap = node => <AssignedSiteProvider>{node}</AssignedSiteProvider>
@@ -99,8 +100,10 @@ it.each([['md', true], ['assistant_production_manager', false]])('gates submitte
 it('shares approved quantities and marks the request sent', async () => {
   f.rows[0].status = 'apcl_approved'
   mount(); await open()
-  const link = await screen.findByRole('link', { name: 'Share on WhatsApp' })
-  const message = new URL(link.href).searchParams.get('text')
+  const launch = vi.spyOn(window, 'open').mockImplementation(() => null)
+  await click('Send to WhatsApp')
+  expect(screen.getByRole('button', { name: 'Copy text' })).toBeInTheDocument()
+  const message = new URL(launch.mock.calls[0][0]).searchParams.get('text')
   expect(message).toContain('Material Requisition REQ-LC-001')
   expect(message).toContain('1,000 × 9" + 200 × 6" = 1,200')
   expect(message).toContain('Dust: 304.6 t')
@@ -115,7 +118,7 @@ it('validates approval, uploads a screenshot and logs the exact WhatsApp reminde
   f.progress = { current: { reference: 'REQ-LC-000', pct: 55 } }
   const launch = vi.spyOn(window, 'open').mockImplementation(() => null)
   mount(); await open()
-  await click('Send reminder')
+  await click('Send to WhatsApp')
   await waitFor(() => expect(rpc('advance_client_requisition')).toMatchObject({
     p_action: 'log_reminder', p_note: new URL(launch.mock.calls[0][0]).searchParams.get('text'),
   }))
@@ -140,7 +143,7 @@ it.each([
   ['raise_next', 'Raise the balance requisition now.', 'Raise balance'],
   ['approve_next', 'waiting for MD approval', 'Open requisition'],
   ['send_next', 'send it to the client', 'Open requisition'],
-  ['remind_client', "Send today's reminder.", 'Send reminder'],
+  ['remind_client', "Send today's reminder.", 'Send to WhatsApp'],
 ])('renders the %s progress action', (action, message, button) => {
   const progress = { action, current: { reference: 'REQ-OLD', pct: 51 }, next_requisition: request, unapproved_production: 1250 }
   const { rerender } = render(<RequisitionProgress progress={progress} canRaise canSend />)
@@ -196,4 +199,40 @@ it('blocks 3/8 over the combined total and saves optional dust standard fields',
   await waitFor(() => expect(f.calls.flatMap(call => call.ops || []).find(op => op[0] === 'upsert')?.[1]).toMatchObject({
     dust_kg_per_block: 18, chippings_kg_per_block: 3, blocks_per_bag: 40, diesel_l_per_1000: null,
   }))
+})
+
+it('explains the client source and how to send the first requisition', async () => {
+  f.rows = []
+  const navigate = vi.fn()
+  render(wrap(<ReceivingForm onNavigate={navigate} receipts={[{ site_id: 'life', supplier_or_source: 'Client quarry' }]} />))
+  await screen.findByRole('option', { name: /Client cement/ })
+  change(screen.getByLabelText(/^Item/), 'cement')
+  expect(screen.getByText(/The company on the waybill/)).toBeInTheDocument()
+  expect(screen.queryByText(/The supplier APCL paid/)).not.toBeInTheDocument()
+  expect(await screen.findByText(/No sent requisition for this site yet/)).toBeInTheDocument()
+  await click('Material Requisitions')
+  expect(navigate).toHaveBeenCalledWith('requisitions', 'life')
+  expect(f.calls.some(call => call.table === 'suppliers')).toBe(false)
+  expect(document.querySelector('#rcv-sources option')).toHaveValue('Client quarry')
+})
+
+it('shows the material position in tonnes with short stock, over-delivery and unlinked warnings', async () => {
+  f.position = { site_id: 'life', covers_from: '2026-11-17', requisitions: [{ id: 'req', reference: 'REQ-LC-001' }], materials: [
+    { material: 'dust', unit: 'kg', requested: 30000, received: 31000, deliveries: 2, used: 35000, on_site: -4000,
+      outstanding: 0, over_supplied: 1000, received_unlinked: 10000, deliveries_unlinked: 2 },
+  ] }
+  const receive = vi.fn()
+  render(wrap(<Requisitions userProfile={{ role: 'ico' }} onReceive={receive} />))
+  const card = within(await screen.findByRole('region', { name: 'Materials against requisitions' }))
+  expect(await card.findByText('Stone dust')).toBeInTheDocument()
+  expect(card.getByText('Requisitions included: REQ-LC-001')).toBeInTheDocument()
+  expect(card.getByText('30.0 t')).toBeInTheDocument()
+  expect(card.getByText('31.0 t (2 deliveries)')).toBeInTheDocument()
+  expect(card.getByText('-4.0 t')).toHaveStyle({ color: '#f06b6b' })
+  expect(card.getByText(/Used more than recorded as received/)).toHaveStyle({ color: '#f06b6b' })
+  expect(card.getByText('Received more than requested')).toBeInTheDocument()
+  expect(card.getByText(/2 deliveries not linked/)).toBeInTheDocument()
+  fireEvent.click(card.getByRole('button', { name: 'Material Receiving' }))
+  expect(receive).toHaveBeenCalledWith('life')
+  expect(rpc('client_requisition_material_position')).toEqual({ p_site_id: 'life' })
 })

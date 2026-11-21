@@ -48,9 +48,9 @@ const itemFields = (item) => ({
 const emptyForm = () => ({ ...itemFields(), receivedOn: lagosToday(), delivered: '', accepted: '', reason: '', supplier: '', ref: '', notes: '', photo: null })
 
 export const ReceivingForm = withAssignedSite(MaterialReceiptForm)
-function MaterialReceiptForm({ onSaved, assignedSiteId }) {
+function MaterialReceiptForm({ onSaved, assignedSiteId, initialSiteId, receipts = [], onNavigate }) {
   const { sites, error: sitesError } = useSites()
-  const [siteId, setSiteId] = useState(assignedSiteId || DUTSE_SITE_ID)
+  const [siteId, setSiteId] = useState(assignedSiteId || initialSiteId || DUTSE_SITE_ID)
   const [items, setItems] = useState([])
   const [itemsErr, setItemsErr] = useState(null)
   const [form, setForm] = useState(emptyForm)
@@ -73,17 +73,16 @@ function MaterialReceiptForm({ onSaved, assignedSiteId }) {
   const item = items.find(i => i.id === form.itemId)
   const site = sites.find(row => row.id === siteId)
   const clientItem = item?.owner === 'client' && site?.site_type === 'client_site'
-  const [requisitionOptions, setRequisitionOptions] = useState([])
-  const [requisitionError, setRequisitionError] = useState(null)
   const [requisitionChoice, setRequisitionChoice] = useState(null)
-  useEffect(() => {
-    let active = true
-    setRequisitionOptions([]); setRequisitionChoice(null); setRequisitionError(null)
-    if (clientItem) requisitionsService.list(siteId, RECEIPT_STATUSES).then(rows => {
-      if (active) setRequisitionOptions(rows || [])
-    }, error => { if (active) setRequisitionError(error) })
-    return () => { active = false }
-  }, [siteId, clientItem])
+  useEffect(() => { setRequisitionChoice(null) }, [siteId, clientItem])
+  const requisitions = useSiteRead(() => clientItem ? requisitionsService.list(siteId, RECEIPT_STATUSES) : [], [siteId, clientItem])
+  const requisitionOptions = (requisitions.data || []).filter(row => row.site_id === siteId)
+  const suppliers = useSiteRead(() => item?.owner === 'apcl'
+    ? siteContractsService.listSupplierNames().catch(() => []) : [], [item?.owner])
+  const sources = [...new Set([
+    ...receipts.filter(receipt => receipt.site_id === siteId).map(receipt => receipt.supplier_or_source),
+    ...(item?.owner === 'apcl' ? suppliers.data || [] : []),
+  ].map(value => value?.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b))
   const requisitionId = clientItem ? (requisitionChoice ?? requisitionOptions.find(row => row.site_id === siteId && row.status === 'client_approved')?.id ?? '') : ''
   const isKg = item?.unit === 'kg'
   const bulkMaterial = isKg && isDustOrChippings(item)
@@ -221,7 +220,11 @@ function MaterialReceiptForm({ onSaved, assignedSiteId }) {
             <option value="">None</option>
             {requisitionOptions.filter(row => row.site_id === siteId).map(row => <option key={row.id} value={row.id}>{row.reference} — {number(row.qty_total)} blocks</option>)}
           </select>
-          <ErrorBox error={requisitionError} />
+          <ErrorBox error={requisitions.error} />
+          {!requisitions.loading && !requisitions.error && requisitionOptions.length === 0 && <div style={ui.hint}>
+            No sent requisition for this site yet — enter it in Material Requisitions and mark it sent, then pick it here.
+            {onNavigate && <div><button type="button" style={ui.btn()} onClick={() => onNavigate('requisitions', siteId)}>Material Requisitions</button></div>}
+          </div>}
         </div>}
         <div style={ui.field}>
           <label style={ui.label} htmlFor="rcv-date">Date received *</label>
@@ -263,11 +266,15 @@ function MaterialReceiptForm({ onSaved, assignedSiteId }) {
         </div>
         <div style={ui.field}>
           <label style={ui.label} htmlFor="rcv-sup">Supplier / source</label>
-          <input id="rcv-sup" style={ui.input} value={form.supplier} onChange={set('supplier')} />
+          <input id="rcv-sup" list="rcv-sources" style={ui.input} value={form.supplier} onChange={set('supplier')} />
+          <datalist id="rcv-sources">{sources.map(source => <option key={source} value={source} />)}</datalist>
+          {item?.owner === 'client' && <div style={ui.hint}>The company on the waybill — the quarry, depot or seller the client bought from. No paper? Write the client's name and who brought it.</div>}
+          {apclItem && <div style={ui.hint}>The supplier APCL paid, as on the receipt or waybill.</div>}
         </div>
         <div style={ui.field}>
           <label style={ui.label} htmlFor="rcv-ref">Truck / waybill ref</label>
           <input id="rcv-ref" style={ui.input} value={form.ref} onChange={set('ref')} />
+          <div style={ui.hint}>Plate number and waybill/receipt number, e.g. YAB 421 DX, WB 0457.</div>
         </div>
         <div style={ui.field}>
           <label style={ui.label} htmlFor="rcv-photo">Photo</label>
@@ -299,7 +306,7 @@ function MaterialReceiptForm({ onSaved, assignedSiteId }) {
   )
 }
 
-function MaterialReceiving({ userProfile }) {
+function MaterialReceiving({ userProfile, initialSiteId, onNavigate }) {
   const canWrite = hasRole(userProfile, ...RECEIVING_WRITE_ROLES)
   const canVoid = hasRole(userProfile, ...RECEIVING_VOID_ROLES)
   const { sites } = useSites()
@@ -354,7 +361,7 @@ function MaterialReceiving({ userProfile }) {
         </div>
       </div>
 
-      {canWrite && <ReceivingForm onSaved={load} />}
+      {canWrite && <ReceivingForm onSaved={load} receipts={rows} initialSiteId={initialSiteId} onNavigate={onNavigate} />}
 
       <div style={ui.panel}>
         <div style={ui.section}>Deliveries</div>

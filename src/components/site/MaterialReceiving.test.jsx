@@ -12,6 +12,7 @@ vi.mock('../../services/sites', () => ({
 vi.mock('../../services/siteContracts', () => ({
   lagosToday: () => '2026-12-21',
   siteContractsService: {
+    listSupplierNames: vi.fn(async () => ['Approved Quarry', 'Previous Supplier']),
     openMaterialRequests: vi.fn(async () => []),
     listSiteItems: vi.fn(async () => [
       { id: 'cem', name: 'Cement', unit: 'bags', owner: 'apcl', site_id: 'dutse' },
@@ -29,6 +30,24 @@ import { siteContractsService } from '../../services/siteContracts'
 
 describe('ReceivingForm', () => {
   beforeEach(() => vi.clearAllMocks())
+
+  it('suggests distinct past sources at this site and supplier names for APCL items', async () => {
+    const user = userEvent.setup()
+    render(<ReceivingForm receipts={[
+      { site_id: 'dutse', supplier_or_source: 'Previous Supplier' },
+      { site_id: 'dutse', supplier_or_source: ' Previous Supplier ' },
+      { site_id: 'kado', supplier_or_source: 'Other site seller' },
+    ]} />)
+    await screen.findByRole('option', { name: /Cement/ })
+    await user.selectOptions(screen.getByLabelText(/^Item/), 'cem')
+    expect(screen.getByText('The supplier APCL paid, as on the receipt or waybill.')).toBeInTheDocument()
+    expect(screen.getByText(/YAB 421 DX, WB 0457/)).toBeInTheDocument()
+    const input = screen.getByLabelText('Supplier / source')
+    const values = () => Array.from(document.getElementById(input.getAttribute('list')).options, option => option.value)
+    await waitFor(() => expect(values()).toEqual(['Approved Quarry', 'Previous Supplier']))
+    await user.type(input, 'New seller')
+    expect(input).toHaveValue('New seller')
+  })
 
   it('resets the selector to each item’s default unit', async () => {
     const user = userEvent.setup()
