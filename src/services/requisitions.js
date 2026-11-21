@@ -15,6 +15,7 @@ export const requisitionsService = {
   lines: id => read(supabase.from('client_requisition_lines').select('*').eq('requisition_id', id).order('id')),
   events: id => read(supabase.from('client_requisition_events').select('*').eq('requisition_id', id).order('at', { ascending: false })),
   cycle: id => read(supabase.from('contract_cycles').select('qty_9in,qty_6in').eq('id', id).maybeSingle()),
+  materialPosition: siteId => read(supabase.rpc('client_requisition_material_position', { p_site_id: siteId })),
   progress: siteId => read(supabase.rpc('client_requisition_progress', { p_site_id: siteId })),
   supplied: id => read(supabase.rpc('client_requisition_supplied', { p_requisition_id: id })),
   create(siteId, fields) {

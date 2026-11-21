@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { AssignedSiteProvider } from '../AssignedSite'
 import Scorecard, { ScorecardDashboard } from './SiteScorecard'
@@ -48,7 +48,14 @@ vi.mock('../../lib/supabase', async () => {
 })
 beforeEach(() => { f.assignment = null; f.idle = false; f.calls.length = 0 })
 afterEach(cleanup)
-const shareText = () => new URL(screen.getByRole('link', { name: 'Send to WhatsApp' }).href).searchParams.get('text')
+const shareText = async () => {
+  const launch = vi.spyOn(window, 'open').mockImplementation(() => null)
+  expect(screen.getByRole('button', { name: 'Copy text' })).toBeInTheDocument()
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Send to WhatsApp' })))
+  const text = new URL(launch.mock.calls[0][0]).searchParams.get('text')
+  launch.mockRestore()
+  return text
+}
 
 it('shows Kado’s rates, budget chips, missing roster and the link to the warning day', async () => {
   const onOpen = vi.fn()
@@ -62,7 +69,7 @@ it('shows Kado’s rates, budget chips, missing roster and the link to the warni
     expect(within(row).getByText(/budget$/i)).toHaveStyle({ color: theme.green })
   }
   expect(screen.getByText('Roster not recorded for this day')).toHaveStyle({ color: theme.red })
-  expect(shareText()).toBe([
+  expect(await shareText()).toBe([
     'Production report 18/11/2026 — Kado Site (Sequoia)',
     'Blocks: 1,095 (9": 1,095, 6": 0)',
     'Cement: 26 bags — 42.1 per bag (budget 40) on budget',
@@ -85,8 +92,8 @@ it('fixes the assigned site, shows labour, and keeps all costs out of a Life Cam
   expect(screen.getByText('Life Camp Site (Bilaad)')).toBeInTheDocument()
   expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
   expect(screen.getByText('Labour: 8 workers, ₦48,000 — ₦44 per block')).toBeInTheDocument()
-  expect(shareText()).toContain('Labour: 8 workers')
-  expect(shareText()).not.toMatch(/₦|Cost:|Materials:|Total:/)
+  expect(await shareText()).toContain('Labour: 8 workers')
+  expect(await shareText()).not.toMatch(/₦|Cost:|Materials:|Total:/)
 })
 
 it('defaults to the Lagos date and moves by calendar days', async () => {

@@ -1,3 +1,5 @@
+import MaterialPosition from './MaterialPosition'
+import ShareActions from '../ShareActions'
 import React, { useState } from 'react'
 import RequisitionBudget from './RequisitionBudget'
 import { useSiteRead } from './useSiteRead'
@@ -6,7 +8,7 @@ import { hasRole } from '../../lib/roles'
 import { requisitionsService as api } from '../../services/requisitions'
 import { siteContractsService } from '../../services/siteContracts'
 import { lagosToday } from '../../utils/lateEntry'
-import { actionText, blockMix, MATERIALS, number, quantity, RECEIPT_STATUSES, reminderText, requisitionText, tomorrowLagos, whatsappUrl } from '../../utils/requisitionText'
+import { actionText, blockMix, MATERIALS, number, quantity, RECEIPT_STATUSES, reminderText, requisitionText, tomorrowLagos } from '../../utils/requisitionText'
 import { useAssignedSite, withAssignedSite } from '../AssignedSite'
 import { FixedSite, useSites } from '../SitePicker'
 import { ConfirmDialog, ErrorBox, fmtDate, fmtDateTime, fmtTime, PhotoLink, Pill, StackTable, theme, ui, withPhase7Touch } from './siteUi'
@@ -24,10 +26,12 @@ const statusLabel = status => status.replaceAll('_', ' ')
 const siteMatches = (site, id) => site?.id === id
 const whole = value => Number.isSafeInteger(Number(value)) && Number(value) >= 0 && Number(value) <= 2147483647
 
-export function RequisitionProgress({ progress, canRaise, canSend, busy, onRaise, onOpen, onReminder }) {
+export function RequisitionProgress({ progress, canRaise, canSend, busy, onRaise, onOpen, onReminder, reminderFor }) {
   if (!progress) return null
   const { current, action, next_requisition: next } = progress
   const message = actionText(progress)
+  const reminder = action === 'remind_client' && !progress.reminded_today && next && canSend
+    ? (reminderFor ? reminderFor(next.id) : reminderText(next, current)) : null
   return <section style={panel} aria-label="Requisition progress">
     <p>Since {fmtDate(progress.counting_from)}: {number(progress.produced_total)} blocks made (9": {number(progress.produced_9in)} · 6": {number(progress.produced_6in)}). Approved: {number(progress.approved_total)}.</p>
     {current && <>
@@ -40,12 +44,13 @@ export function RequisitionProgress({ progress, canRaise, canSend, busy, onRaise
       {action === 'raise_next' && canRaise && <button style={btn('primary')} disabled={busy} onClick={onRaise}>Raise balance</button>}
       {['approve_next', 'send_next'].includes(action) && next && <button style={btn()} onClick={() => onOpen(next.id)}>Open requisition</button>}
       {action === 'remind_client' && progress.reminded_today && <span style={rowStyle}>Reminder sent today <Check size={16} aria-hidden="true" /> {fmtTime(progress.last_reminder_at)}</span>}
-      {action === 'remind_client' && !progress.reminded_today && next && canSend && <button style={btn()} disabled={busy} onClick={() => onReminder(next.id)}>Send reminder</button>}
+      {reminder && <ShareActions title="Requisition reminder" text={reminder}
+        disabled={busy} onShared={text => onReminder?.(next.id, text)} />}
     </div>}
   </section>
 }
 
-export function RequisitionsDashboardBanner({ userProfile, onOpen }) {
+export function RequisitionsDashboardBanner({ userProfile, onOpen, onReceive }) {
   const assignment = useAssignedSite()
   const { sites, error: siteError } = useSites()
   const md = hasRole(userProfile, 'md')
@@ -60,10 +65,13 @@ export function RequisitionsDashboardBanner({ userProfile, onOpen }) {
     }
   }, [eligible, md, sites, assignment.siteId])
   const result = lookup.data?.rows.find(row => actionText(row.progress))
+  const canViewMaterials = hasRole(userProfile, 'md', 'board_member', 'ico', 'accountant', 'production_manager', 'assistant_production_manager', 'store_officer', 'logistics_manager')
+  const lifeCamp = canViewMaterials && sites.find(site => site.site_type === 'client_site' && /life\s*camp/i.test(site.name) && (md || site.id === assignment.siteId))
   if (!eligible) return null
   return <>
     <ErrorBox error={siteError || lookup.error} />
     {lookup.data?.errors.map((error, index) => <ErrorBox key={index} error={error} />)}
+    {lifeCamp && <MaterialPosition siteId={lifeCamp.id} onReceive={onReceive} />}
     {result && <section style={panel} aria-label="Material requisition action">
       <strong>{result.site.name}</strong>
       <div>{actionText(result.progress)}</div>
@@ -132,7 +140,7 @@ function ClientApproval({ busy, onSave }) {
   </form>
 }
 
-function RequisitionDetail({ req, site, md, canSend, userId, revision, busy, onBack, onAdvance, onSaveLine, onApproveClient, onReminder }) {
+function RequisitionDetail({ req, site, md, canSend, userId, revision, busy, onBack, onAdvance, onSaveLine, onApproveClient, onReminder, reminderFor }) {
   const [prompt, setPrompt] = useState(null)
   const [note, setNote] = useState('')
   const showReceived = [...RECEIPT_STATUSES, 'closed'].includes(req.status) || (req.status === 'cancelled' && Boolean(req.sent_at))
@@ -169,10 +177,11 @@ function RequisitionDetail({ req, site, md, canSend, userId, revision, busy, onB
       {md && req.status === 'submitted' && [action('approve'), action('return')]}
       {(ownDraft || (md && !terminal.includes(req.status))) && action('cancel')}
       {canSend && req.status === 'apcl_approved' && <>
-        {lines.data && <a style={{ ...btn(), display: 'inline-flex', alignItems: 'center', textDecoration: 'none' }} href={whatsappUrl(requisitionText(req, site.name, lines.data))} target="_blank" rel="noopener noreferrer">Share on WhatsApp</a>}
+        {lines.data && <ShareActions text={requisitionText(req, site.name, lines.data)} title="Material requisition" /> }
         {action('mark_sent')}
       </>}
-      {canSend && req.status === 'sent' && <button style={btn()} disabled={busy} onClick={() => onReminder(req.id)}>Send reminder</button>}
+      {canSend && req.status === 'sent' && <ShareActions title="Requisition reminder" text={reminderFor(req.id)}
+        disabled={busy || !reminderFor(req.id)} onShared={text => onReminder(req.id, text)} />}
       {md && req.status === 'client_approved' && action('close')}
     </div>
     {canSend && req.status === 'sent' && <ClientApproval busy={busy} onSave={fields => onApproveClient(req.id, fields)} />}
@@ -191,7 +200,7 @@ function RequisitionDetail({ req, site, md, canSend, userId, revision, busy, onB
   </section>
 }
 
-function Requisitions({ userProfile, assignedSiteId, initialSiteId }) {
+function Requisitions({ userProfile, assignedSiteId, initialSiteId, onReceive }) {
   const { sites, error: sitesError } = useSites()
   const [choice, setChoice] = useState(initialSiteId || '')
   const [filter, setFilter] = useState('open')
@@ -227,13 +236,11 @@ function Requisitions({ userProfile, assignedSiteId, initialSiteId }) {
     const saved = await api.advance(id, action, values)
     if (saved?.id === id) setDetail(previous => previous && saved)
   })
-  const remind = id => {
+  const reminderFor = id => {
     const req = rows.find(row => row.id === id && row.site_id === siteId) || (active?.id === id ? active : null)
-    if (busy || !canSend || req?.status !== 'sent') return
-    const message = reminderText(req, progress.data?.current)
-    window.open(whatsappUrl(message), '_blank', 'noopener,noreferrer')
-    return run(() => api.advance(id, 'log_reminder', { p_note: message }))
+    return req?.status === 'sent' ? reminderText(req, progress.data?.current) : ''
   }
+  const remind = (id, text) => run(() => api.advance(id, 'log_reminder', { p_note: text }))
   const raiseBalance = () => run(async () => {
     const draft = { kind: 'balance' }
     const current = rows.find(row => row.id === progress.data?.current?.id)
@@ -255,14 +262,15 @@ function Requisitions({ userProfile, assignedSiteId, initialSiteId }) {
         onChange={e => { setChoice(e.target.value); setSeed(null); setDetail(null); setError(null) }}>
         {!clients.length && <option value="">No client sites</option>}{clients.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}
       </select></label>}
+    <MaterialPosition siteId={siteId} revision={revision} onReceive={onReceive} />
     <RequisitionProgress progress={progress.data} canRaise={canRaise} canSend={canSend} busy={busy}
-      onRaise={raiseBalance} onOpen={open} onReminder={remind} />
+      onRaise={raiseBalance} onOpen={open} onReminder={remind} reminderFor={reminderFor} />
     {site && seed && <NewRequisition site={site} seed={seed} busy={busy} onCancel={() => setSeed(null)}
       onCreate={fields => run(async () => { const created = await api.create(siteId, fields); setSeed(null); setDetail(created) })} />}
     {site && active && <RequisitionDetail key={active.id} req={active} site={site} md={md} canSend={canSend}
       userId={userProfile?.id} revision={revision} busy={busy} onBack={() => setDetail(null)} onAdvance={advance}
       onSaveLine={(id, line, qty) => run(() => api.saveLine(id, line, qty))}
-      onReminder={remind} onApproveClient={(id, values) => run(async () => {
+      onReminder={remind} reminderFor={reminderFor} onApproveClient={(id, values) => run(async () => {
         const photo = values.file ? await siteContractsService.uploadPhoto({ siteCode: site.code, kind: 'requisitions', date: values.date, file: values.file }) : null
         const saved = await api.advance(id, 'record_client_approval', {
           p_client_approved_by: values.name, p_client_approved_on: values.date, p_note: values.note || null, p_photo_path: photo,

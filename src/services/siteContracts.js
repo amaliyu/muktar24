@@ -111,6 +111,12 @@ export const siteContractsService = {
       .eq('site_id', siteId).order('name'))
   },
 
+  async listSupplierNames() {
+    const { data, error } = await supabase.from('suppliers').select('company_name').order('company_name')
+    if (error) throw error
+    return (data || []).map(row => row.company_name)
+  },
+
   async listReceipts({ siteId, from, to, itemId } = {}) {
     const query = (embed) => {
       let q = supabase.from('material_receipts')

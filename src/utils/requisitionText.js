@@ -36,8 +36,6 @@ export function reminderText(req, current) {
     ' Please approve so production does not stop. Thank you.'
 }
 
-export const whatsappUrl = text => 'https://wa.me/?text=' + encodeURIComponent(text)
-
 export function actionText(progress) {
   const current = progress?.current
   const next = progress?.next_requisition

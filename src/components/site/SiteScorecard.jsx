@@ -1,6 +1,7 @@
+import ShareActions from '../ShareActions'
 import { NoProductionDay, SiteDayPeriod } from './SiteDays'
 import { useState } from 'react'
-import { ChevronLeft, ChevronRight, Share2 } from 'lucide-react'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { withAssignedSite, useAssignedSite } from '../AssignedSite'
 import { FixedSite, useSites } from '../SitePicker'
 import { hasRole } from '../../lib/roles'
@@ -66,12 +67,7 @@ function ScorecardBody({ score, onOpenBudgetWarnings }) {
         : labour && <div>Labour: {labour}{costs.labour_per_block != null && ` — ${fmtNaira(costs.labour_per_block)} per block`}</div>}
       {costs?.total != null && <div><strong>Total: {fmtNaira(costs.total)}</strong>
         {costs.total_per_block != null && ` — ${fmtNaira(costs.total_per_block)} per block`}</div>}
-      <div>
-        <a href={`https://wa.me/?text=${encodeURIComponent(scorecardWhatsAppText(score))}`} target="_blank" rel="noopener noreferrer"
-          style={{ ...ui.btn('primary'), display: 'inline-flex', alignItems: 'center', gap: 8, textDecoration: 'none', boxSizing: 'border-box' }}>
-          <Share2 size={16} aria-hidden="true" /> Send to WhatsApp
-        </a>
-      </div>
+      <ShareActions text={scorecardWhatsAppText(score)} title="Production report" label="Share report" />
     </section>
   </>
 }

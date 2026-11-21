@@ -1,3 +1,4 @@
+import DeviceClockBanner from './components/DeviceClockBanner'
 import StockCountPage, { StockCountDashboard } from './components/site/StockCounts'
 import { GrantActions, GrantExpiry, MyAccess } from './components/GrantExpiry'
 import { SiteDayDashboard, SiteDayForm, SiteDayStrip, SITE_DAY_WRITE_ROLES, SITE_DAY_READ_ROLES, useSiteDayOverview } from './components/site/SiteDays'
@@ -14,7 +15,7 @@ import LateEntries, { LateEntriesCard } from './components/LateEntries'
 import UnpricedDeliveries from './components/UnpricedDeliveries'
 import AccountingSummary from './components/AccountingSummary'
 import { accountingBasisService } from './services/accountingBasis'
-import { startSessionMonitor, CLOCK_WARNING } from './utils/sessionMonitor'
+import { startSessionMonitor } from './utils/sessionMonitor'
 import { siteContractsService } from './services/siteContracts'
 import { expenseCosts } from './utils/financialTotals'
 import { queryRows } from './utils/moneyQueries'
@@ -495,7 +496,7 @@ const StatCard = ({ label, value, sub, accent, pct }) => (
 );
 
 // ── DASHBOARD ─────────────────────────────────────────────────
-export const Dashboard = ({ onNavigate, onOpenSite, onOpenRequisitions, userProfile }) => {
+export const Dashboard = ({ onNavigate, onOpenSite, onOpenRequisitions, onOpenReceiving, userProfile }) => {
   const role = userProfile?.role || 'staff';
   const can = (...roles) => roles.includes(role);
   const isDriver = role === 'driver';
@@ -695,7 +696,7 @@ export const Dashboard = ({ onNavigate, onOpenSite, onOpenRequisitions, userProf
         </div>
       )}
       {!dashboardError && <UnpricedDeliveries rows={stats.deliveredUnpriced} />}
-      <RequisitionsDashboardBanner userProfile={userProfile} onOpen={onOpenRequisitions || (() => onNavigate?.("requisitions"))} />
+      <RequisitionsDashboardBanner userProfile={userProfile} onOpen={onOpenRequisitions || (() => onNavigate?.("requisitions"))} onReceive={onOpenReceiving} />
       <LateEntriesCard userProfile={userProfile} onOpen={() => onNavigate('late_entries')} />
       {/* Phase 7B-1 site cards — loads on its own, independent of the date range. */}
       {hasRole(userProfile, 'md', 'production_manager', 'assistant_production_manager', 'ico') && (
@@ -11410,6 +11411,7 @@ export default function App() {
   // Site preselected when the Dashboard opens Site Contracts from a site card.
   const [contractsSite, setContractsSite] = useState('');
   const [requisitionSite, setRequisitionSite] = useState('');
+  const [receivingSite, setReceivingSite] = useState('');
   const [initialScorecard, setInitialScorecard] = useState(null);
   const [initialProduction, setInitialProduction] = useState(null);
   const [initialStockCount, setInitialStockCount] = useState(null);
@@ -11420,8 +11422,6 @@ export default function App() {
   const [scheduleCount, setScheduleCount] = useState(0);
   const [unreadMsgCount, setUnreadMsgCount] = useState(0);
   const [showChangePwd, setShowChangePwd] = useState(false);
-  const [clockWarning, setClockWarning] = useState(false);
-  const clockWarned = useRef(false);
   const sessionReceivedAt = useRef(performance.now());
   const acceptSession = (next) => { sessionReceivedAt.current = performance.now(); setSession(next || null); };
   const [sessionWarning, setSessionWarning] = useState(false); // 15-min expiry warning
@@ -11463,7 +11463,6 @@ export default function App() {
       session, receivedAt: sessionReceivedAt.current, auth: supabase.auth,
       onSession: acceptSession,
       onWarning: (show, minutes) => { setSessionWarning(show); setSessionMinutes(minutes); },
-      onClockWarning: () => { if (!clockWarned.current) { clockWarned.current = true; setClockWarning(true); } },
       onRefreshFailure: () => setAuthMessage('Your session could not be refreshed. Please sign in again.'),
     });
   }, [session]);
@@ -11625,6 +11624,7 @@ export default function App() {
 
   const openSiteContracts = (siteId, opts = {}) => { setContractsSite(siteId || ''); setContractsReport(!!opts.report); setActive('site_contracts'); };
 
+  const openReceiving = canSee("material_receiving") ? siteId => { setReceivingSite(siteId); setActive("material_receiving"); } : undefined;
   const openRequisitions = siteId => { setRequisitionSite(siteId); setActive("requisitions"); };
   const openBudgetWarnings = initial => {
     setInitialWarning(previous => initial && { ...initial, navigationKey: (previous?.navigationKey || 0) + 1 });
@@ -11647,8 +11647,8 @@ export default function App() {
   };
   const pages = {
     dashboard: isBoard
-      ? <>{stockCountCards}{dayCards}{budgetCards}{scorecardDashboard}<SiteDashboardCards userProfile={userProfile} onOpenSite={openSiteContracts} /><RequisitionsDashboardBanner userProfile={userProfile} onOpen={openRequisitions} /><BoardDashboard userProfile={userProfile} /></>
-      : <MobileScope>{stockCountCards}{dayCards}{budgetCards}{scorecardDashboard}<Dashboard onOpenRequisitions={openRequisitions} onNavigate={setActive} onOpenSite={openSiteContracts} userProfile={userProfile} /></MobileScope>,
+      ? <>{stockCountCards}{dayCards}{budgetCards}{scorecardDashboard}<SiteDashboardCards userProfile={userProfile} onOpenSite={openSiteContracts} /><RequisitionsDashboardBanner userProfile={userProfile} onOpen={openRequisitions} onReceive={openReceiving} /><BoardDashboard userProfile={userProfile} /></>
+      : <MobileScope>{stockCountCards}{dayCards}{budgetCards}{scorecardDashboard}<Dashboard onOpenReceiving={openReceiving} onOpenRequisitions={openRequisitions} onNavigate={setActive} onOpenSite={openSiteContracts} userProfile={userProfile} /></MobileScope>,
     late_entries: <MobileScope fit><LateEntries /></MobileScope>,
     stock_counts: <StockCountPage key={initialStockCount?.key || "default"} initial={initialStockCount} userProfile={userProfile} />,
     production: <MobileScope><Production key={initialProduction?.key || 'default'} userProfile={userProfile}
@@ -11656,10 +11656,11 @@ export default function App() {
     inventory: <MobileScope><Inventory onLowStockChange={setLowStockCount} userProfile={userProfile} onNavigate={setActive} /></MobileScope>,
     site_contracts: <SiteContracts userProfile={userProfile} initialSiteId={contractsSite} initialReport={contractsReport} />,
     asset_register: <AssetRegister userProfile={userProfile} />,
-    material_receiving: <MaterialReceiving userProfile={userProfile} />,
+    material_receiving: <MaterialReceiving key={receivingSite || "default"} userProfile={userProfile} initialSiteId={receivingSite}
+      onNavigate={canSee("requisitions") ? (_page, siteId) => openRequisitions(siteId) : undefined} />,
     site_scorecard: <SiteScorecard userProfile={userProfile} initial={initialScorecard} onProduction={openProduction} onOpenBudgetWarnings={openBudgetWarnings} />,
     production_exceptions: <BudgetWarnings key={initialWarning?.navigationKey || 'default'} userProfile={userProfile} initial={initialWarning} />,
-    requisitions: <Requisitions userProfile={userProfile} initialSiteId={requisitionSite} />,
+    requisitions: <Requisitions userProfile={userProfile} initialSiteId={requisitionSite} onReceive={openReceiving} />,
     handovers: <Handovers userProfile={userProfile} />,
     batches: <MobileScope><Batches userProfile={userProfile} onOpenBudgetWarnings={openBudgetWarnings} /></MobileScope>,
     waybills: <MobileScope><Waybills userProfile={userProfile} /></MobileScope>,
@@ -11738,7 +11739,7 @@ export default function App() {
               {section.items.map(item => {
                 const badge = getBadge(item.id);
                 return (
-                  <div key={item.id} style={{ ...styles.navItem(active === item.id), ...(isMobile ? { minHeight: '44px' } : {}) }} onClick={() => { if (item.id === 'payment_requests') setInitialPayment(null); if (item.id === 'staff_tasks' || item.id === 'my_profile') setInitialTask(null); if (item.id === 'production_exceptions') setInitialWarning(null); if (item.id === 'site_scorecard') setInitialScorecard(null); if (item.id === 'production') setInitialProduction(null); if (item.id === 'stock_counts') setInitialStockCount(null); setActive(item.id); setContractsReport(false); if (isMobile) setSidebarOpen(false); }}>
+                  <div key={item.id} style={{ ...styles.navItem(active === item.id), ...(isMobile ? { minHeight: '44px' } : {}) }} onClick={() => { if (item.id === 'payment_requests') setInitialPayment(null); if (item.id === 'staff_tasks' || item.id === 'my_profile') setInitialTask(null); if (item.id === 'production_exceptions') setInitialWarning(null); if (item.id === 'site_scorecard') setInitialScorecard(null); if (item.id === 'production') setInitialProduction(null); if (item.id === 'stock_counts') setInitialStockCount(null); if (item.id === 'material_receiving') setReceivingSite(''); setActive(item.id); setContractsReport(false); if (isMobile) setSidebarOpen(false); }}>
                     <Icon name={item.icon} size={20} />
                     <span style={{ flex: 1 }}>{item.label}</span>
                     {badge > 0 && (
@@ -11789,7 +11790,7 @@ export default function App() {
           <IconButton data-board-allow data-ico-allow aria-label="Open menu" onClick={() => setSidebarOpen(s => !s)} style={{ position: 'fixed', top: '10px', left: '12px', zIndex: Z.floating, width: '44px', height: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '8px', padding: 0, cursor: 'pointer', fontSize: '20px', color: theme.text, lineHeight: 1, boxShadow: '0 2px 8px rgba(0,0,0,0.3)' }}><Ico icon={Menu} size={20} /></IconButton>
         )}
         <TaskReminder tasks={taskSource.rows} userId={userProfile.id} onView={() => { setInitialTask(null); setActive('my_profile'); }} />
-        {clockWarning && <div role="status" style={{ padding: "12px", marginBottom: "12px", color: theme.accent, border: `1px solid ${theme.accent}`, borderRadius: "8px" }}>{CLOCK_WARNING}<button data-ico-allow data-board-allow style={{ ...styles.btn("secondary"), marginLeft: "12px", minHeight: "44px" }} onClick={() => setClockWarning(false)}>Dismiss</button></div>}
+        <DeviceClockBanner userId={userProfile.id} />
         {sessionWarning && (
           <div style={{ background: "#7c3a0022", border: "1px solid #c47d0e88", borderRadius: "8px", padding: "10px 16px", marginBottom: "16px", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "13px", color: theme.accent }}>
             <span><Ico icon={AlertTriangle} size={20} style={{ marginRight: "8px" }} />Your session expires in <strong>{sessionMinutes} minute{sessionMinutes !== 1 ? 's' : ''}</strong>. Unsaved work may be lost.</span>
