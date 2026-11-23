@@ -1569,6 +1569,17 @@ Interim until A–C: Umar records Kado now; Abubakar gets a temporary assistant_
 - **Tested (rolled back):** cement 20% under → quality warning + 3 notifications; corrected to 13 bags → cost warning; corrected to 10 → resolved with the correction note; MD bulk close of Kado → 7 closed with comments; site manager refused.
 - **UI:** b17 — one card per site-day from `message`, Cost/Quality badge, tap-to-pick reasons, "I recorded it wrong" → Production page for that day, MD "Close all explained". The old `fn_upsert_production_exception` is no longer called (left in place).
 
+### Face check paused: the phone's engine computed wrong face patterns (23 Nov)
+- **Field:** two more different workers were refused as "matches Ransom Osang" (0.91, 0.92).
+- **Finding:** not the face model. The same two photos, computed correctly (Human 3.3.6 faceres, f32), are only 0.64 alike. Every correctly computed face pattern scores 0.11–0.23 against Ransom's phone-made pattern (strangers normally ~0.39). Correct patterns have 504–718 components ≥ 0.02 and a top value of 1.4–2.9 (102 captures, 17 faces); Ransom's has 322 and 4.5. The phone's WebGL engine (likely GPU precision / pixel upload on budget Android GPUs) produces wrong numbers that make everyone look alike. WebAssembly gives identical results to the reference (cosine ≥ 0.9988 on all 102); forced half-float WebGL in the emulator was also fine, so the fault is device-specific.
+- **Stronger models tried** (insightface mobilenet-emore / efficientnet-b0 / ghostnet, mobilefacenet from the Human repos): none better than faceres with Human's preprocessing; faceres stays.
+- **DB** (`20261123151532_face_engine_self_check_and_pause`, `20261123152044_face_pattern_plausibility_check`):
+  - Model `human-faceres` retired → enrol/face check-in refused with "Face check is paused until the app updates… Use 'Check in without face'". Manual check-in unchanged. Ransom's pattern switched off (`active = false`, kept).
+  - New model key `human-faceres-v2`; `face_engine_checks` table + `log_face_engine(site, model, backend, score, device_id, user_agent)` → passed when score ≥ `face_match_settings.engine_min_check` (0.98). Enrol and face check-in need a passing engine check by the same user in the last 12 h.
+  - `fn_face_pattern_check`: refuses a pattern unless it is 1,024 long, has ≥ 380 components ≥ 0.02 and a top value ≤ 4.0.
+  - Tested (rolled back): old model refused; v2 without a check refused; failed check (0.42) refused; passed check → enrol + check-in matched; Ransom-like pattern refused at enrol and check-in.
+- **App (b18):** face engine runs on WebAssembly only; self-test on load runs faceres on the fixed input in `public/face-selftest.json` and logs the cosine via `log_face_engine`; sends model `human-faceres-v2`. Everyone re-registers after b18.
+
 ### Dutse while production is on hold
 - Any block leaving the yard needs a same-day waybill; owner to be named now Abubakar has moved.
 - Weekly yard count continues; best window to close the ICO stock reconciliation (unexplained ~77,000 blocks, ₦37–48m at cost, pending ICO checks due 20 Nov).
