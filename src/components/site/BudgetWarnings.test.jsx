@@ -115,7 +115,7 @@ it('shows the three production sentences and colors', async () => {
 it('shows site counts and links, and shows MD review totals', async () => {
   const onOpen = vi.fn()
   const own = renderWithSite(<BudgetWarningDashboardCards userProfile={{ role: 'assistant_production_manager' }} onOpen={onOpen} />)
-  expect(await screen.findByText('Please explain: 1 days')).toBeInTheDocument()
+  expect(await screen.findByText('Please explain: 1 day')).toBeInTheDocument()
   fireEvent.click(screen.getAllByRole('button', { name: 'Explain' })[0])
   expect(onOpen).toHaveBeenCalledWith({ id: 'cement', siteId: 'life', action: 'explain' })
   own.unmount()
@@ -237,15 +237,16 @@ it('requires a ten-character note for Other and opens correction without respond
   expect(last()).toBeUndefined()
 })
 
-it.each(['kado', null])('bulk closes explained lines for %s and reports the RPC count', async site => {
+it.each([['kado', '1 day'], [null, '2 days']])('bulk closes explained lines for %s and reports %s', async (site, count) => {
   f.assignment = null
-  f.rows.push({ ...f.rows[3], id: 'extra-line' })
+  f.rows.push({ ...f.rows[3], id: 'extra-line', parameter: 'diesel' })
+  f.rows.find(row => row.id === 'life-explained').date = '2026-11-16'
   mount('md', { siteId: site, status: 'explained' })
-  await click('Close all explained (1)')
-  expect(screen.getByText('Close 1 explained warnings for ' + (site ? 'Kado' : 'all sites') + '?')).toBeInTheDocument()
+  await click('Close all explained (' + count + ')')
+  expect(screen.getByText('Close the explained warnings for ' + count + ' at ' + (site ? 'Kado' : 'all sites') + '?')).toBeInTheDocument()
   change(screen.getByLabelText('Note (optional)'), 'Reviewed today')
   await click('Yes, close them')
-  expect(await screen.findByText((site ? 2 : 3) + ' warnings closed.')).toBeInTheDocument()
+  expect(await screen.findByText('Closed warnings for ' + count + '.')).toBeInTheDocument()
   expect(f.calls.find(call => call.rpc === 'close_explained_exceptions').args).toEqual({ p_site_id: site, p_note: 'Reviewed today' })
 })
 
