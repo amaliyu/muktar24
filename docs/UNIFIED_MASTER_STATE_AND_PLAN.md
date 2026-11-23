@@ -1555,6 +1555,20 @@ Interim until A–C: Umar records Kado now; Abubakar gets a temporary assistant_
 - **Fix** (`20261121150228_face_match_threshold_and_margin`): min_similarity 0.6 → 0.85; `min_margin` 0.03 — refuse to guess when two registered workers are both ≥ threshold and within the margin; scores shown in refusal messages; `labour_face_profiles.nearest_other_similarity` kept for tuning. Tested: look-alike (0.82) registers, same face under a new name refused, same person matched 0.997, stranger refused (0.69), halfway face refused as too close to call.
 - **Watch:** live check — a video of a still picture scored real/live ≈ 0.55 / 0.98, so min_liveness 0.5 would not stop a photo held to the camera. Compare with the first real check-ins and raise it.
 
+### Simpler budget warnings (MD 2026-11-23)
+- **Why:** site managers and the ICO could not follow the warnings (percentages, rates per 1,000 blocks); some made no sense (diesel *under* budget). LC had 14 open, Kado 13 explained awaiting the MD.
+- **Rules** (`20261123132351_simpler_budget_warnings`, wording fixes `…132720`, `…132834`):
+  - Diesel warns only when **over**; breakage only when **over** the allowance (whole blocks, 1% of blocks made, rounded down).
+  - Cement over = **cost** warning; cement more than 10% under (`production_sites.cement_under_tolerance_pct`) = **quality** warning ("check the blocks are strong").
+  - Small differences ignored: under 2 bags, 3 L or 5 blocks (`warn_min_cement_bags`, `warn_min_diesel_l`, `warn_min_breakage_blocks`, per site).
+  - Plain-words `production_exceptions.message` in units, e.g. "Cement: used 14 bags for 480 blocks. Allowed 12. 2 bags too many." APCL materials add ₦ (`value_naira`, from the site's inventory unit cost); client materials say "The client's material — they can charge for it." (`client_owned`). Also `kind` (cost | quality) and `difference`.
+  - Notification title "Please explain: <site>, <DD Mon>", body = the messages + "Tap to explain."
+  - Lines that stop qualifying resolve from `open` **or** `explained`, with the system note "No longer flagged under the simpler warning rules of 23 Nov." (rule-change re-check) or "Back within budget after a correction."
+- **New RPC:** `close_explained_exceptions(p_site_id default null, p_note default null)` — MD/ICO bulk close of explained lines, adds a 'closed' comment each.
+- **Re-check of every client-site production day since 1 Nov (quiet, no notifications):** LC 14 open → 6 (cement 17, 18, 22 Nov; breakage 18, 20, 21 Nov); Kado 13 explained → 7 (diesel 10, 11, 16, 19 Nov; breakage 11, 16, 20 Nov).
+- **Tested (rolled back):** cement 20% under → quality warning + 3 notifications; corrected to 13 bags → cost warning; corrected to 10 → resolved with the correction note; MD bulk close of Kado → 7 closed with comments; site manager refused.
+- **UI:** b17 — one card per site-day from `message`, Cost/Quality badge, tap-to-pick reasons, "I recorded it wrong" → Production page for that day, MD "Close all explained". The old `fn_upsert_production_exception` is no longer called (left in place).
+
 ### Dutse while production is on hold
 - Any block leaving the yard needs a same-day waybill; owner to be named now Abubakar has moved.
 - Weekly yard count continues; best window to close the ICO stock reconciliation (unexplained ~77,000 blocks, ₦37–48m at cost, pending ICO checks due 20 Nov).
