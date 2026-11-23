@@ -39,7 +39,7 @@ vi.mock('../../lib/supabase', async () => {
       'rpc:site_day_overview': f.idle ? { totals: { blocks: 500, production_days: 1, no_production_days: 1, idle_labour_cost: 45000, cost_per_block: 210, cost_per_block_excl_idle: 120, missing_records: 1, missing_rosters: 0 } } : null,
       production_sites: f.sites,
       production_log: { date: f.date },
-      production_exceptions: [{ id: 'open-line' }],
+      production_exceptions: [{ id: 'open-line', parameter: 'cement', kind: 'quality', status: 'open', message: 'Cement: check the blocks are strong.' }],
     }[table]
     return { data, error: null }
   })
@@ -64,18 +64,19 @@ it('shows Kado’s rates, budget chips, missing roster and the link to the warni
   expect(screen.getByLabelText('Site')).toHaveValue('kado')
   expect(screen.getByText('26 bags')).toBeInTheDocument()
   expect(screen.getByText('22 L')).toBeInTheDocument()
-  for (const rate of ['42.1 per bag (budget 40)', '20.1 L per 1,000 (budget 20)', '₦706.01 per block (budget ₦791.29)']) {
-    const row = screen.getByText(rate).parentElement
-    expect(within(row).getByText(/budget$/i)).toHaveStyle({ color: theme.green })
+  expect(await screen.findByText('Check quality')).toHaveStyle({ color: theme.accent })
+  expect(screen.getByText('Cement: check the blocks are strong.')).toBeInTheDocument()
+  for (const [rate, label] of [['20.1 L per 1,000 (budget 20)', 'Within limits'], ['₦706.01 per block (budget ₦791.29)', 'Within budget']]) {
+    expect(within(screen.getByText(rate).parentElement).getByText(label)).toHaveStyle({ color: theme.green })
   }
   expect(screen.getByText('Roster not recorded for this day')).toHaveStyle({ color: theme.red })
   expect(await shareText()).toBe([
     'Production report 18/11/2026 — Kado Site (Sequoia)',
     'Blocks: 1,095 (9": 1,095, 6": 0)',
-    'Cement: 26 bags — 42.1 per bag (budget 40) on budget',
-    'Diesel: 22 L — 20.1 L per 1,000 (budget 20) on budget',
+    'Cement: 26 bags — 42.1 per bag (budget 40) check quality',
+    'Diesel: 22 L — 20.1 L per 1,000 (budget 20) within limits',
     'Dust: 25.185 t (calculated)',
-    'Breakage: 8 (0.73%, allowed 1%)',
+    'Breakage: 8 broken — 0.73% (allowed 1%) within limits',
     'Cost: cement ₦301,600 · dust ₦428,145 · diesel ₦43,335',
     'Materials: ₦706.01 per block (budget ₦791.29)',
     'Labour: roster not recorded',

@@ -856,7 +856,7 @@ const fmtRelativeTime = (iso) => {
   return `${Math.floor(months / 12)}y ago`;
 };
 
-export const Production = withAssignedSite(function Production({ userProfile, assignedSiteId, onOpenBudgetWarnings, initialSiteId, onLabour }) {
+export const Production = withAssignedSite(function Production({ userProfile, assignedSiteId, onOpenBudgetWarnings, initialSiteId, initialDate, onLabour }) {
   const savedWarnings = useSavedBudgetWarnings();
   const [showForm, setShowForm] = useState(false);
   const [dupWarning, setDupWarning] = useState(null);
@@ -1125,6 +1125,15 @@ export const Production = withAssignedSite(function Production({ userProfile, as
   };
 
   const shown = siteFilter ? records.filter(r => r.site_id === siteFilter) : records;
+  const correctionRow = useRef(null);
+  const correctionScrolled = useRef(false);
+  const correctionId = initialDate && shown.find(row => row.date === initialDate && row.site_id === (assignedSiteId || initialSiteId))?.id;
+  useEffect(() => {
+    if (correctionId && correctionRow.current && !correctionScrolled.current) {
+      correctionScrolled.current = true;
+      correctionRow.current.scrollIntoView?.({ block: 'center' });
+    }
+  }, [correctionId, loading]);
   const totalProduced = shown.reduce((s, r) => s + (r.quantity_produced || 0), 0);
   const totalCement = shown.reduce((s, r) => s + (r.cement_bags || 0), 0);
   const totalDiesel = shown.reduce((s, r) => s + (r.diesel_litres || 0), 0);
@@ -1166,6 +1175,7 @@ export const Production = withAssignedSite(function Production({ userProfile, as
       <div className="m-header" style={styles.header}>
         <div>
           <div style={styles.pageTitle}>Production Log</div>
+          {initialDate && <p role="status" style={{ color: theme.accent }}>Correct the entries for {new Date(initialDate + "T00:00:00Z").toLocaleDateString("en-GB", { timeZone: "Africa/Lagos", day: "2-digit", month: "short" })} below. The warning clears itself once the figures are right.</p>}
           <div style={styles.pageSubtitle}>Daily block production, material usage, and damage tracking</div>
         </div>
         <div style={{ display: "flex", gap: "8px" }}>
@@ -1335,9 +1345,10 @@ export const Production = withAssignedSite(function Production({ userProfile, as
             </thead>
             <tbody>
               {shown.map((p) => {
+                const correcting = initialDate === p.date && p.site_id === (assignedSiteId || initialSiteId);
                 const net = (p.quantity_produced || 0) - (p.damaged?.production || 0) - (p.damaged?.stacking || 0);
                 return (
-                  <tr key={p.id}>
+                  <tr key={p.id} ref={p.id === correctionId ? correctionRow : undefined} style={correcting ? { outline: `2px solid ${theme.accent}`, outlineOffset: -2 } : undefined}>
                     <td style={styles.td}>
                       {fmtDate(p.date)}
                       <div className="m-only" style={{ fontSize: "13px", fontWeight: "600", color: theme.blue }}>{p.block_type}</div>
@@ -11644,7 +11655,7 @@ export default function App() {
   };
   const scorecardDashboard = canSee("site_scorecard")
     ? <ScorecardDashboard userProfile={userProfile} onOpen={openScorecard} /> : null;
-  const openProduction = siteId => { setInitialProduction(previous => ({ siteId, key: (previous?.key || 0) + 1 })); setActive("production"); };
+  const openProduction = (siteId, date) => { setInitialProduction(previous => ({ siteId, date, key: (previous?.key || 0) + 1 })); setActive("production"); };
   const openStockCount = id => { setInitialStockCount(previous => ({ id, key: (previous?.key || 0) + 1 })); setActive("stock_counts"); };
   const stockCountCards = <StockCountDashboard userProfile={userProfile} onOpen={openStockCount} />;
   const dayCards = <SiteDayDashboard userProfile={userProfile} onProduction={openProduction} />;
@@ -11660,7 +11671,7 @@ export default function App() {
     late_entries: <MobileScope fit><LateEntries /></MobileScope>,
     stock_counts: <StockCountPage key={initialStockCount?.key || "default"} initial={initialStockCount} userProfile={userProfile} />,
     production: <MobileScope><Production key={initialProduction?.key || 'default'} userProfile={userProfile}
-      initialSiteId={initialProduction?.siteId} onLabour={() => setActive("labour")} onOpenBudgetWarnings={openBudgetWarnings} /></MobileScope>,
+      initialSiteId={initialProduction?.siteId} initialDate={initialProduction?.date} onLabour={() => setActive("labour")} onOpenBudgetWarnings={openBudgetWarnings} /></MobileScope>,
     inventory: <MobileScope><Inventory onLowStockChange={setLowStockCount} userProfile={userProfile} onNavigate={setActive} /></MobileScope>,
     site_contracts: <SiteContracts userProfile={userProfile} initialSiteId={contractsSite} initialReport={contractsReport} />,
     asset_register: <AssetRegister userProfile={userProfile} />,
@@ -11668,7 +11679,7 @@ export default function App() {
       onNavigate={canSee("requisitions") ? (_page, siteId) => openRequisitions(siteId) : undefined} />,
     site_scorecard: <SiteScorecard userProfile={userProfile} initial={initialScorecard} onProduction={openProduction} onOpenBudgetWarnings={openBudgetWarnings} />,
     site_attendance: <SiteAttendance key={attendanceSite || 'default'} initialSiteId={attendanceSite} userProfile={userProfile} />,
-    production_exceptions: <BudgetWarnings key={initialWarning?.navigationKey || 'default'} userProfile={userProfile} initial={initialWarning} />,
+    production_exceptions: <BudgetWarnings key={initialWarning?.navigationKey || 'default'} userProfile={userProfile} initial={initialWarning} onCorrect={({ siteId, date }) => openProduction(siteId, date)} />,
     requisitions: <Requisitions userProfile={userProfile} initialSiteId={requisitionSite} onReceive={openReceiving} />,
     handovers: <Handovers userProfile={userProfile} />,
     batches: <MobileScope><Batches userProfile={userProfile} onOpenBudgetWarnings={openBudgetWarnings} /></MobileScope>,

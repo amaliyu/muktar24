@@ -18,6 +18,26 @@ export function warningSentence(row) {
   }
 }
 
+export const lineText = row => row.message || warningSentence(row)
+
+export function lineBadge(row) {
+  if (row.status === 'resolved') return { label: 'Cleared', tone: 'textMuted' }
+  if (row.kind === 'cost') return { label: 'Too much', tone: 'red' }
+  if (row.kind === 'quality') return { label: 'Check quality', tone: 'accent' }
+  return null
+}
+
+export function statusText(day, viewer) {
+  if (day.status === 'open') return viewer === day.site_id ? 'Please explain' : 'Waiting for the site manager'
+  if (day.status === 'explained') return 'Explained — waiting for review'
+  return day.status === 'closed' ? 'Closed' : 'Cleared'
+}
+
+export function dayNaira(day) {
+  const priced = day.lines.filter(line => ['open', 'explained'].includes(line.status) && line.value_naira != null)
+  return priced.length ? priced.reduce((sum, line) => sum + Number(line.value_naira), 0) : null
+}
+
 export function warningAge(row) {
   const date = row.created_at ? lagosToday(new Date(row.created_at)) : row.date
   return Math.max(0, Math.round((Date.parse(lagosToday()) - Date.parse(date)) / 86400000)) || 0
