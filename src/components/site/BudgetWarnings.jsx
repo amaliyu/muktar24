@@ -21,6 +21,7 @@ const rowStyle = { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'cente
 const panel = { ...ui.panel, minWidth: 0, overflowWrap: 'anywhere' }
 const input = { ...ui.input, width: '100%', minWidth: 0, minHeight: 44, boxSizing: 'border-box' }
 const button = kind => ({ ...ui.btn(kind), minHeight: 44, whiteSpace: 'normal' })
+const dayCount = count => count + (count === 1 ? ' day' : ' days')
 const name = row => parameterName[row.parameter] || row.parameter
 
 const shortDate = date => new Date(date + 'T00:00:00Z').toLocaleDateString('en-GB', {
@@ -41,7 +42,7 @@ function WarningFacts({ day, sites, assignedSiteId }) {
     <strong>{siteName(day.site_id, sites)} · {shortDate(day.date)} · {fmtDec(day.lines[0].blocks)} blocks</strong>
     <div style={rowStyle}>
       <Pill status={day.status} label={statusText(day, assignedSiteId)} />
-      {day.age !== null && <span>waiting {day.age} {day.age === 1 ? 'day' : 'days'}</span>}
+      {day.age !== null && <span>waiting {dayCount(day.age)}</span>}
     </div>
     {day.lines.filter(line => line.status !== 'resolved').map(line => {
       const badge = lineBadge(line)
@@ -173,7 +174,8 @@ function BudgetWarnings({ assignedSiteId, userProfile, initial, onCorrect }) {
     setBulkBusy(true)
     setBulkError(null)
     try {
-      setClosedCount(await api.closeExplained(siteId, bulk.note.trim()))
+      await api.closeExplained(siteId, bulk.note.trim())
+      setClosedCount(bulk.count)
       setBulk(null)
       setRevision(n => n + 1)
     } catch (error) { setBulkError(error) }
@@ -195,11 +197,11 @@ function BudgetWarnings({ assignedSiteId, userProfile, initial, onCorrect }) {
         </div>
         <ErrorBox error={list.error} />
         {list.loading && <p role="status">Loading budget warnings…</p>}
-        {allSites && filter === 'explained' && days?.length > 0 && !bulk && <button style={button('secondary')} onClick={() => { setBulk({ note: '' }); setClosedCount(null) }}>Close all explained ({days.length})</button>}
+        {allSites && filter === 'explained' && days?.length > 0 && !bulk && <button style={button('secondary')} onClick={() => { setBulk({ note: '', count: days.length }); setClosedCount(null) }}>Close all explained ({dayCount(days.length)})</button>}
         {bulk && <form onSubmit={closeAll} style={panel}>
-          <strong>Close {days?.length} explained warnings for {siteId ? siteName(siteId, sites) : 'all sites'}?</strong>
+          <strong>Close the explained warnings for {dayCount(bulk.count)} at {siteId ? siteName(siteId, sites) : 'all sites'}?</strong>
           <label style={{ display: 'block' }}>Note (optional)
-            <textarea style={input} value={bulk.note} disabled={bulkBusy} onChange={e => setBulk({ note: e.target.value })} />
+            <textarea style={input} value={bulk.note} disabled={bulkBusy} onChange={e => setBulk({ ...bulk, note: e.target.value })} />
           </label>
           <ErrorBox error={bulkError} />
           <div style={rowStyle}>
@@ -207,7 +209,7 @@ function BudgetWarnings({ assignedSiteId, userProfile, initial, onCorrect }) {
             <button type="button" style={button('secondary')} disabled={bulkBusy} onClick={() => { setBulk(null); setBulkError(null) }}>Cancel</button>
           </div>
         </form>}
-        {closedCount != null && <p role="status">{closedCount} warnings closed.</p>}
+        {closedCount != null && <p role="status">Closed warnings for {dayCount(closedCount)}.</p>}
         {days?.length === 0 && <p>No warnings in this view.</p>}
         {days?.map(day => {
           const explain = assignedSiteId === day.site_id && day.status === 'open'
@@ -241,7 +243,7 @@ export function BudgetWarningDashboardCards({ userProfile, onOpen }) {
   return <>
     {siteId && <ErrorBox error={own.error} />}
     {siteId && own.data?.length > 0 && <section aria-label="Budget warnings to explain" style={panel}>
-      <strong>Please explain: {own.data.length} days</strong>
+      <strong>Please explain: {dayCount(own.data.length)}</strong>
       {own.data.slice(0, 3).map(day => <div key={day.key} style={{ marginTop: 8 }}>
         <WarningFacts day={day} sites={sites} assignedSiteId={siteId} />
         <button style={button()} onClick={() => onOpen({ id: day.actionLine.id, siteId, action: 'explain' })}>Explain</button>
