@@ -18,38 +18,30 @@ const dateButton = { ...ui.btn(), padding: 0, width: 44, display: 'inline-grid',
 
 function Metric({ label, metric, compact }) {
   if (compact ? !metric.rate : !metric.usage && !metric.rate) return null
-  return <div style={row}>
+  return <div><div style={row}>
     <strong>{label}</strong>
     {!compact && metric.usage && <span>{metric.usage}</span>}
     {metric.rate && <span>{metric.rate}</span>}
     {metric.chip && <Pill label={metric.chip.label} color={theme[metric.chip.tone]} />}
-  </div>
+  </div>{metric.hint && <div style={ui.hint}>{metric.hint}</div>}</div>
 }
 
 function ScorecardBody({ score, onOpenBudgetWarnings }) {
-  const [warningError, setWarningError] = useState(null)
-  const [openingWarning, setOpeningWarning] = useState(false)
+  const warnings = useSiteRead(() => productionExceptionsService.list({ siteId: score.site_id, date: score.date }), [score.site_id, score.date])
+  const lines = warnings.data ?? null
   const { costs } = score
-  const metrics = scorecardMetrics(score)
+  const metrics = scorecardMetrics(score, lines)
   const labour = scorecardLabour(costs)
-  const openWarning = async () => {
-    setOpeningWarning(true)
-    setWarningError(null)
-    try {
-      const [line] = await productionExceptionsService.list({ siteId: score.site_id, date: score.date, statuses: ['open'] })
-      onOpenBudgetWarnings(line ? { id: line.id, siteId: score.site_id } : { siteId: score.site_id, status: 'open' })
-    } catch (error) {
-      setWarningError(error)
-    } finally {
-      setOpeningWarning(false)
-    }
+  const openWarning = () => {
+    const line = lines?.find(row => row.status === 'open')
+    onOpenBudgetWarnings(line ? { id: line.id, siteId: score.site_id } : { siteId: score.site_id, status: 'open' })
   }
 
   return <>
+    <ErrorBox error={warnings.error} />
     {score.open_warnings > 0 && <div style={{ ...panel, ...row, color: theme.red }}>
       <strong>This day has a budget warning to explain</strong>
-      {onOpenBudgetWarnings && <button type="button" style={ui.btn()} onClick={openWarning} disabled={openingWarning}>View budget warning</button>}
-      <ErrorBox error={warningError} />
+      {onOpenBudgetWarnings && <button type="button" style={ui.btn()} onClick={openWarning} disabled={warnings.loading}>View budget warning</button>}
     </div>}
     <section style={{ ...panel, display: 'grid', gap: 14, ...ui.num }} aria-label="Production scorecard">
       <div><strong>Blocks: {fmtDec(score.blocks_total)}</strong><div>9": {fmtDec(score.blocks_9in)} · 6": {fmtDec(score.blocks_6in)}</div></div>
@@ -67,7 +59,7 @@ function ScorecardBody({ score, onOpenBudgetWarnings }) {
         : labour && <div>Labour: {labour}{costs.labour_per_block != null && ` — ${fmtNaira(costs.labour_per_block)} per block`}</div>}
       {costs?.total != null && <div><strong>Total: {fmtNaira(costs.total)}</strong>
         {costs.total_per_block != null && ` — ${fmtNaira(costs.total_per_block)} per block`}</div>}
-      <ShareActions text={scorecardWhatsAppText(score)} title="Production report" label="Share report" />
+      <ShareActions text={scorecardWhatsAppText(score, lines)} title="Production report" label="Share report" />
     </section>
   </>
 }
@@ -116,8 +108,12 @@ export function ScorecardDashboard({ userProfile, onOpen }) {
     if (!enabled) return []
     const ids = md ? sites.filter(site => site.site_type === 'client_site').map(site => site.id) : [assignedId]
     return Promise.all(ids.map(async id => {
-      try { return { id, score: await getLatestSiteScorecard(id) } }
-      catch (error) { return { id, error } }
+      try {
+        const score = await getLatestSiteScorecard(id)
+        if (!score?.blocks_total) return { id, score }
+        try { return { id, score, lines: await productionExceptionsService.list({ siteId: id, date: score.date }) } }
+        catch (warningError) { return { id, score, warningError } }
+      } catch (error) { return { id, error } }
     }))
   }, [md, assignedId, sites])
   if (!enabled) return null
@@ -127,13 +123,14 @@ export function ScorecardDashboard({ userProfile, onOpen }) {
   return <section style={panel} aria-label="Daily scorecard summaries">
     <h3 style={ui.section}>Daily Scorecard</h3>
     <ErrorBox error={md ? error : null} />
-    {rows.map(({ id, score, error }) => {
+    {rows.map(({ id, score, lines, error, warningError }) => {
       if (error) return <div key={id}><strong>{sites.find(site => site.id === id)?.name}</strong><ErrorBox error={error} /></div>
       if (!score?.blocks_total) return <div key={id} style={{ padding: '8px 0' }}>
         <strong>{sites.find(site => site.id === id)?.name}</strong> · No production recorded
       </div>
-      const metrics = scorecardMetrics(score)
+      const metrics = scorecardMetrics(score, lines ?? null)
       return <div key={id} style={{ display: 'grid', gap: 6, padding: '8px 0', borderTop: `1px solid ${theme.border}` }}>
+        <ErrorBox error={warningError} />
         <strong>{score.site_name} · {scorecardDate(score.date)} · {fmtDec(score.blocks_total)} blocks</strong>
         <div style={{ ...row, columnGap: 16 }}>
           <Metric label="Cement" metric={metrics.cement} compact />

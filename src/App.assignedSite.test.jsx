@@ -85,7 +85,7 @@ it('waits for assignment, then opens Production on the assigned site with its ma
   const warning = { site_id: fixture.site, date: lagosToday(), status: 'open', direction: 'over' }
   fixture.warnings = [
     { ...warning, id: 'cement-warning', parameter: 'cement', variance_pct: 40 },
-    { ...warning, id: 'diesel-warning', parameter: 'diesel', variance_pct: 87.5 },
+    { ...warning, id: 'diesel-warning', parameter: 'diesel', variance_pct: 87.5, message: 'Diesel: used too much.' },
   ]
   let resolve
   fixture.assignment = () => new Promise(r => { resolve = r })
@@ -112,7 +112,8 @@ it('waits for assignment, then opens Production on the assigned site with its ma
   await waitFor(() => expect(productionInsert()).toMatchObject({ site_id: fixture.site, asset_id: 'life-camp-machine' }))
   expect(productionInsert()).not.toHaveProperty('granite_dust_kg')
   expect(productionInsert()).not.toHaveProperty('chippings_kg')
-  expect(await screen.findByText(/Budget warning for .*: Cement \+40% · Diesel \+87\.5%/)).toBeInTheDocument()
+  expect(await screen.findByText('This entry needs an explanation:')).toBeInTheDocument()
+  expect(screen.getByText('Diesel: used too much.')).toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: 'Explain now' }))
   expect(onOpen).toHaveBeenCalledWith({ id: 'cement-warning', siteId: fixture.site, action: 'explain' })
   expect(fixture.calls.find(call => call.table === 'production_exceptions').ops).toEqual(expect.arrayContaining([
@@ -254,4 +255,13 @@ it('shows the complete STOCK_LOCKED message when production is blocked', async (
   fireEvent.click(screen.getByRole('button', { name: 'Save Entry' }))
   expect(await screen.findByText(fixture.lockError, { exact: true })).toBeInTheDocument()
   expect(screen.queryByText(/Failed to save/)).not.toBeInTheDocument()
+})
+
+it('shows the correction banner and highlights the entry for the selected site and date', async () => {
+  const date = '2026-11-18'
+  fixture.production = [{ id: 'correction', date, site_id: fixture.site, block_type: fixture.blockType, quantity_produced: 20 }]
+  render(session(<Production userProfile={profile} initialDate={date} initialSiteId={fixture.site} />))
+  expect(await screen.findByText('Correct the entries for 18 Nov below. The warning clears itself once the figures are right.')).toBeInTheDocument()
+  const edit = await screen.findByRole('button', { name: 'Edit' })
+  expect(edit.closest('tr').style.outline).not.toBe('')
 })

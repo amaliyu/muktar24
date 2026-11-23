@@ -1,3 +1,5 @@
+import { lineBadge, lineText } from './productionExceptions'
+
 const number = (value, digits = 2) => Number(value).toLocaleString('en-NG', { maximumFractionDigits: digits })
 const available = value => value != null
 const money = value => `₦${number(value)}`
@@ -10,10 +12,11 @@ export function shiftScorecardDate(date, days) {
 
 export const scorecardDate = date => date.split('-').reverse().join('/')
 
-export function materialVariance(pct, tolerance) {
-  if (!available(pct) || !available(tolerance)) return null
-  if (Math.abs(pct) <= tolerance) return { label: 'On budget', tone: 'green' }
-  return { label: `${number(Math.abs(pct))}% ${pct > 0 ? 'over' : 'under'}`, tone: pct > 0 ? 'red' : 'accent' }
+function warningMetric(lines, parameter, budget) {
+  if (!lines || !available(budget)) return { chip: null }
+  const line = lines.find(row => row.parameter === parameter && row.status !== 'resolved')
+  return line ? { chip: lineBadge(line), hint: lineText(line) }
+    : { chip: { label: 'Within limits', tone: 'green' } }
 }
 
 function againstBudget(actual, budget) {
@@ -23,23 +26,23 @@ function againstBudget(actual, budget) {
 
 const budgetText = (budget, format = number) => available(budget) ? ` (budget ${format(budget)})` : ''
 
-export function scorecardMetrics(score) {
-  const { cement, diesel, breakage, costs, tolerance_pct: tolerance } = score
+export function scorecardMetrics(score, lines = []) {
+  const { cement, diesel, breakage, costs } = score
   return {
     cement: {
       usage: available(cement?.bags) ? `${number(cement.bags)} bags` : null,
       rate: available(cement?.blocks_per_bag) ? `${number(cement.blocks_per_bag, 1)} per bag${budgetText(cement.budget_blocks_per_bag)}` : null,
-      chip: materialVariance(cement?.variance_pct, tolerance),
+      ...warningMetric(lines, 'cement', cement?.budget_blocks_per_bag),
     },
     diesel: {
       usage: available(diesel?.litres) ? `${number(diesel.litres)} L` : null,
       rate: available(diesel?.per_1000) ? `${number(diesel.per_1000, 1)} L per 1,000${budgetText(diesel.budget_per_1000)}` : null,
-      chip: materialVariance(diesel?.variance_pct, tolerance),
+      ...warningMetric(lines, 'diesel', diesel?.budget_per_1000),
     },
     breakage: {
       usage: available(breakage?.blocks) ? `${number(breakage.blocks)} broken` : null,
       rate: available(breakage?.pct) ? `${number(breakage.pct)}%${available(breakage.allowed_pct) ? ` (allowed ${number(breakage.allowed_pct)}%)` : ''}` : null,
-      chip: againstBudget(breakage?.pct, breakage?.allowed_pct),
+      ...warningMetric(lines, 'breakage', breakage?.allowed_pct),
     },
     materials: {
       rate: score.contract_model !== 'service_fee' && available(costs?.materials) && available(costs.materials_per_block)
@@ -63,9 +66,9 @@ export function scorecardLabour(costs, showMoney = true) {
   ].filter(Boolean).join(', ') || null
 }
 
-export function scorecardWhatsAppText(score) {
-  const { date, site_name: site, blocks_total: total, blocks_9in: nine, blocks_6in: six, costs, dust_kg: dust, breakage } = score
-  const { cement, diesel, materials } = scorecardMetrics(score)
+export function scorecardWhatsAppText(score, lines = []) {
+  const { date, site_name: site, blocks_total: total, blocks_9in: nine, blocks_6in: six, costs, dust_kg: dust } = score
+  const { cement, diesel, breakage, materials } = scorecardMetrics(score, lines)
   const showCosts = score.contract_model !== 'service_fee'
   const metric = ({ usage, rate, chip }) => [usage, rate].filter(Boolean).join(' — ') + (chip ? ` ${chip.label.toLowerCase()}` : '')
   const labour = scorecardLabour(costs, showCosts)
@@ -76,7 +79,7 @@ export function scorecardWhatsAppText(score) {
     (cement.usage || cement.rate) && `Cement: ${metric(cement)}`,
     (diesel.usage || diesel.rate) && `Diesel: ${metric(diesel)}`,
     available(dust) && `Dust: ${number(dust / 1000, 3)} t (calculated)`,
-    available(breakage?.blocks) && `Breakage: ${number(breakage.blocks)}${available(breakage.pct) ? ` (${number(breakage.pct)}%${available(breakage.allowed_pct) ? `, allowed ${number(breakage.allowed_pct)}%` : ''})` : ''}`,
+    breakage.usage && `Breakage: ${metric(breakage)}`,
     costLines.length > 0 && `Cost: ${costLines.join(' · ')}`,
     materials.rate && `Materials: ${materials.rate}`,
     labour && `Labour: ${labour}`,

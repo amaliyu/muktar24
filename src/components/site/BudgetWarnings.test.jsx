@@ -18,6 +18,11 @@ vi.mock('../../lib/supabase', async () => {
       f.rows.filter(line => line.site_id === row.site_id && line.date === row.date && line.status !== 'resolved').forEach(line => { line.status = statuses[ops.p_action] || line.status })
       return { data: { ...row }, error: null }
     }
+    if (table === 'rpc:close_explained_exceptions') {
+      const lines = f.rows.filter(line => line.status === 'explained' && (!ops.p_site_id || line.site_id === ops.p_site_id))
+      lines.forEach(line => { line.status = 'closed' })
+      return { data: lines.length, error: null }
+    }
     if (table === 'rpc:client_requisition_budget') return { data: ['dust', 'chippings'].map((material, i) => ({
       material, unit: 'kg', budget_full: 304600, requested: 301200, received: 189000, blocks_made: 690,
       budget_for_made: 180000, used_for_made: 198000, variance_pct: i ? -10 : 10,
@@ -43,9 +48,9 @@ const common = { site_id: 'life', status: 'open', date: '2026-11-18', blocks: 69
 beforeEach(() => {
   f.assignment = 'life'; f.calls.length = 0
   f.rows = [
-    { ...common, id: 'cement', parameter: 'cement', actual_qty: 27, actual_rate: 25.6, budget_rate: 40, variance_pct: 56.5, direction: 'over' },
-    { ...common, id: 'diesel', parameter: 'diesel', actual_qty: 13, actual_rate: 18.8, budget_rate: 20, variance_pct: -5.8, direction: 'under' },
-    { ...common, id: 'broken', parameter: 'breakage', actual_qty: 7, actual_rate: 1.01, budget_rate: 1, variance_pct: 1, direction: 'over' },
+    { ...common, id: 'cement', parameter: 'cement', kind: 'cost', message: 'Cement: 2 bags too many.', value_naira: 24000, actual_qty: 27, actual_rate: 25.6, budget_rate: 40, variance_pct: 56.5, direction: 'over' },
+    { ...common, id: 'diesel', parameter: 'diesel', kind: 'cost', message: 'Diesel: 3 L too many.', actual_qty: 13, actual_rate: 18.8, budget_rate: 20, variance_pct: -5.8, direction: 'under' },
+    { ...common, id: 'broken', parameter: 'breakage', kind: 'cost', message: 'Breakage: 5 blocks too many.', actual_qty: 7, actual_rate: 1.01, budget_rate: 1, variance_pct: 1, direction: 'over' },
     { ...common, id: 'kado-cement', site_id: 'kado', date: '2026-11-17', parameter: 'cement', status: 'explained' },
     { ...common, id: 'kado-diesel', site_id: 'kado', parameter: 'diesel' },
     { ...common, id: 'life-explained', parameter: 'cement', status: 'explained' },
@@ -53,24 +58,26 @@ beforeEach(() => {
 })
 afterEach(cleanup)
 const renderWithSite = node => render(<AssignedSiteProvider>{node}</AssignedSiteProvider>)
-const mount = (role, initial) => renderWithSite(<BudgetWarnings userProfile={{ role }} initial={initial} />)
+const mount = (role, initial, onCorrect) => renderWithSite(<BudgetWarnings userProfile={{ role }} initial={initial} onCorrect={onCorrect} />)
 const click = async name => fireEvent.click(await screen.findByRole('button', { name, exact: true }))
 const change = (node, value) => fireEvent.change(node, { target: { value } })
 const last = () => f.calls.filter(call => call.rpc === 'respond_production_exception').at(-1)?.args
 
 it('limits the initial list to open warnings at the assigned site and validates explanations', async () => {
+  f.rows = f.rows.filter(row => row.id !== 'life-explained')
   mount('assistant_production_manager')
   expect(await screen.findByText('Life Camp', { exact: true })).toBeInTheDocument()
-  fireEvent.click((await screen.findAllByRole('button', { name: /View warning for/ }))[0])
   await click('Explain')
   expect(screen.queryByRole('button', { name: 'Close', exact: true })).not.toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'Ask a question' })).not.toBeInTheDocument()
-  const text = screen.getByRole('textbox', { name: 'Explain' })
-  change(text, 'Too short')
+  await click('Mixer problem')
+  await click('Torn or wet bags')
+  await click('Generator ran for other work')
   expect(screen.getByRole('button', { name: 'Send explanation' })).toBeDisabled()
-  change(text, 'The cement mix was adjusted.')
+  await click('Broke while stacking')
+  change(screen.getByLabelText('Anything else? (optional)'), 'The mixer is fixed.')
   await click('Send explanation')
-  await waitFor(() => expect(last()).toEqual({ p_id: 'cement', p_action: 'explain', p_text: 'The cement mix was adjusted.' }))
+  await waitFor(() => expect(last()).toEqual({ p_id: 'cement', p_action: 'explain', p_text: 'Cement: Mixer problem; Torn or wet bags\nDiesel: Generator ran for other work\nBreakage: Broke while stacking\nNote: The mixer is fixed.' }))
   expect(f.calls.find(call => call.table === 'production_exceptions' && call.ops.some(op => op[0] === 'gte')).ops)
     .toEqual(expect.arrayContaining([['eq', 'site_id', 'life'], ['gte', 'date', warningWindowStart()]]))
 })
@@ -93,22 +100,22 @@ it.each(['md', 'ico'])('allows %s to ask and close with a note', async role => {
 
 it('shows the three production sentences and colors', async () => {
   mount('assistant_production_manager')
-  expect(await screen.findByText('27 bags for 690 blocks — 25.6 per bag against 40 (+56.5%)')).toBeInTheDocument()
-  expect(screen.getByText('13 L for 690 blocks — 18.8 L per 1,000 against 20 (−5.8%)')).toBeInTheDocument()
-  expect(screen.getByText('7 broken of 690 — 1.01% against 1% allowed')).toBeInTheDocument()
-  expect(screen.getByText('+56.5%', { exact: true })).toHaveStyle({ color: theme.red })
-  expect(screen.getByText('−5.8%', { exact: true })).toHaveStyle({ color: theme.accent })
-  expect(screen.getByText('+1%', { exact: true })).toHaveStyle({ color: theme.red })
+  expect(await screen.findByText('Cement: 2 bags too many.')).toBeInTheDocument()
+  expect(screen.getByText('Diesel: 3 L too many.')).toBeInTheDocument()
+  expect(screen.getByText('Breakage: 5 blocks too many.')).toBeInTheDocument()
+  expect(screen.getAllByText('Too much')[0]).toHaveStyle({ color: theme.red })
+  expect(screen.getByText('Extra cost: ₦24,000')).toBeInTheDocument()
+  expect(screen.getByRole('article')).not.toHaveTextContent('%')
   expect(screen.getAllByRole('article')).toHaveLength(1)
   f.rows.push({ ...f.rows[0], id: 'yesterday', date: '2026-11-17' })
-  await click('View warning for 18 Nov 2026'); await click('Back to warnings')
+  await click('Explain'); await click('Back to warnings')
   await waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(2))
 })
 
 it('shows site counts and links, and shows MD review totals', async () => {
   const onOpen = vi.fn()
   const own = renderWithSite(<BudgetWarningDashboardCards userProfile={{ role: 'assistant_production_manager' }} onOpen={onOpen} />)
-  expect(await screen.findByText('Budget warnings to explain: 1')).toBeInTheDocument()
+  expect(await screen.findByText('Please explain: 1 days')).toBeInTheDocument()
   fireEvent.click(screen.getAllByRole('button', { name: 'Explain' })[0])
   expect(onOpen).toHaveBeenCalledWith({ id: 'cement', siteId: 'life', action: 'explain' })
   own.unmount()
@@ -140,7 +147,7 @@ it('renders budget RPC lines with tonnes and site tolerance colors', async () =>
 
 it('validates both settings and accepts inclusive maximum and zero breakage', async () => {
   render(<BudgetWarningSettings userProfile={{ role: 'md' }} />)
-  const variance = await screen.findByLabelText(/Allowed variance/)
+  const variance = await screen.findByLabelText(/Warn when more than this/)
   const breakage = screen.getByLabelText(/Breakage allowed/)
   const save = screen.getByRole('button', { name: 'Save Life Camp' })
   change(variance, '0'); expect(save).toBeDisabled()
@@ -149,10 +156,18 @@ it('validates both settings and accepts inclusive maximum and zero breakage', as
   change(breakage, '-1'); expect(save).toBeDisabled()
   change(breakage, '21'); expect(save).toBeDisabled()
   change(breakage, '0'); expect(save).toBeEnabled()
+  for (const [label, invalid, valid] of [
+    [/Warn when cement/, '0', '12'], [/cement differences/, '51', '4'],
+    [/diesel differences/, '101', '0'], [/Ignore breakage/, '-1', '100'],
+  ]) {
+    const input = screen.getByLabelText(label)
+    change(input, invalid); expect(save).toBeDisabled()
+    change(input, valid); expect(save).toBeEnabled()
+  }
   fireEvent.click(save)
   await screen.findByText('Settings saved.')
   expect(f.calls.flatMap(call => call.ops || []).find(op => op[0] === 'update')[1])
-    .toEqual({ variance_tolerance_pct: 50, breakage_budget_pct: 0, material_cost_budget_per_block: null })
+    .toEqual({ variance_tolerance_pct: 50, cement_under_tolerance_pct: 12, warn_min_cement_bags: 4, warn_min_diesel_l: 0, warn_min_breakage_blocks: 100, breakage_budget_pct: 0, material_cost_budget_per_block: null })
 })
 
 it.each([
@@ -169,9 +184,10 @@ it('opens mixed days from any line id, merges the thread, and responds through a
   mount('assistant_production_manager', { id: 'cement', action: 'explain' })
   const detail = within(await screen.findByRole('region', { name: 'Budget warning detail' }))
   await detail.findByText('Later diesel comment')
-  expect(detail.getByText('fixed by a correction')).toBeInTheDocument()
+  expect(detail.getByText('Cleared: Cement')).toBeInTheDocument()
   expect(detail.getByText('Threshold exceeded').compareDocumentPosition(detail.getByText('Later diesel comment')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-  change(detail.getByRole('textbox', { name: 'Explain' }), 'Diesel usage was higher today.')
+  await click('Generator ran for other work')
+  await click('Broke while stacking')
   await click('Send explanation')
   await waitFor(() => expect(last()).toMatchObject({ p_id: 'diesel', p_action: 'explain' }))
 })
@@ -180,7 +196,7 @@ it('filters tabs by grouped day status', async () => {
   f.assignment = null
   mount('md')
   await waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(2))
-  await click('Needs review')
+  await click('To review')
   expect(screen.getAllByRole('article')).toHaveLength(1)
   expect(screen.getByRole('article')).toHaveTextContent('Kado')
   await click('All')
@@ -200,4 +216,45 @@ it('saves a positive materials budget and blocks zero and negative values', asyn
   await screen.findByText('Settings saved.')
   expect(f.calls.flatMap(call => call.ops || []).find(op => op[0] === 'update')[1])
     .toMatchObject({ material_cost_budget_per_block: 791.29 })
+})
+
+it('requires a ten-character note for Other and opens correction without responding', async () => {
+  const onCorrect = vi.fn()
+  f.rows = f.rows.filter(row => row.id !== 'life-explained')
+  mount('assistant_production_manager', { id: 'cement', action: 'explain' }, onCorrect)
+  await click('Mixer problem')
+  await click('Generator ran for other work')
+  fireEvent.click(screen.getAllByRole('button', { name: 'Other' })[2])
+  const send = screen.getByRole('button', { name: 'Send explanation' })
+  const note = screen.getByLabelText('Tell us what happened')
+  expect(send).toBeDisabled()
+  change(note, 'Short')
+  expect(send).toBeDisabled()
+  change(note, 'A pallet tipped over.')
+  expect(send).toBeEnabled()
+  await click('I recorded it wrong')
+  expect(onCorrect).toHaveBeenCalledWith({ siteId: 'life', date: common.date })
+  expect(last()).toBeUndefined()
+})
+
+it.each(['kado', null])('bulk closes explained lines for %s and reports the RPC count', async site => {
+  f.assignment = null
+  f.rows.push({ ...f.rows[3], id: 'extra-line' })
+  mount('md', { siteId: site, status: 'explained' })
+  await click('Close all explained (1)')
+  expect(screen.getByText('Close 1 explained warnings for ' + (site ? 'Kado' : 'all sites') + '?')).toBeInTheDocument()
+  change(screen.getByLabelText('Note (optional)'), 'Reviewed today')
+  await click('Yes, close them')
+  expect(await screen.findByText((site ? 2 : 3) + ' warnings closed.')).toBeInTheDocument()
+  expect(f.calls.find(call => call.rpc === 'close_explained_exceptions').args).toEqual({ p_site_id: site, p_note: 'Reviewed today' })
+})
+
+it('hides cleared lines behind a summary and keeps bulk close away from the site manager', async () => {
+  f.rows[1].status = 'resolved'
+  f.rows[2].status = 'resolved'
+  mount('assistant_production_manager')
+  expect(await screen.findByText('Cleared: Diesel, Breakage')).toBeInTheDocument()
+  expect(screen.queryByText('Diesel: 3 L too many.')).not.toBeInTheDocument()
+  await click('To review')
+  expect(screen.queryByRole('button', { name: /Close all explained/ })).not.toBeInTheDocument()
 })
