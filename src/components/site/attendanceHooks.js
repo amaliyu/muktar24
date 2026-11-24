@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { loadFaceEngine } from '../../utils/siteFace'
+import { getFaceEngineCheck, loadFaceEngine } from '../../utils/siteFace'
+
+import { siteAttendance } from '../../services/siteAttendance'
 
 export const freshFix = fix => fix && Date.now() - fix.at <= 60_000 ? fix : null
 
@@ -37,8 +39,9 @@ export function deviceId() {
   return device
 }
 
-export function useFaceCamera(enabled, facing) {
+export function useFaceCamera(enabled, facing, siteId) {
   const video = useRef(null)
+  const stopStream = useRef(() => {})
   const [state, setState] = useState({})
   const [retry, setRetry] = useState(0)
   useEffect(() => {
@@ -50,12 +53,19 @@ export function useFaceCamera(enabled, facing) {
       try {
         const engine = await loadFaceEngine()
         if (stopped) return
+        const check = getFaceEngineCheck()
+        let result
+        try { result = await siteAttendance.logEngine(siteId, check, deviceId()) }
+        catch { throw new Error('Could not confirm the face engine. Check the network and tap Retry.') }
+        if (stopped) return
+        if (!(check.score >= check.min) || result?.passed !== true) throw new Error('This phone could not run the face check correctly (self-test ' + check.score.toFixed(3) + '). Use “Check in without face” and tell the MD.')
         if (!navigator.mediaDevices?.getUserMedia) throw new Error('The camera requires a secure page and camera access.')
         stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: facing } } })
         if (stopped) { stream.getTracks().forEach(track => track.stop()); return }
+        stopStream.current = () => stream.getTracks().forEach(track => track.stop())
         video.current.srcObject = stream
         await video.current.play()
-        if (!stopped) setState({ engine })
+        if (!stopped) setState({ engine, engineCheck: { backend: check.backend, score: check.score } })
       } catch (error) {
         stream?.getTracks().forEach(track => track.stop())
         if (!stopped) setState({ error: error.message })
@@ -63,6 +73,6 @@ export function useFaceCamera(enabled, facing) {
     }
     start()
     return () => { stopped = true; stream?.getTracks().forEach(track => track.stop()) }
-  }, [enabled, facing, retry])
-  return { ...state, engine: enabled ? state.engine : null, video, retry: () => setRetry(n => n + 1) }
+  }, [enabled, facing, siteId, retry])
+  return { ...state, stop: () => { stopStream.current(); setState({}) }, engine: enabled ? state.engine : null, video, retry: () => setRetry(n => n + 1) }
 }

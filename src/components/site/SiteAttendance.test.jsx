@@ -12,7 +12,8 @@ const db = vi.hoisted(() => ({ calls: [], accuracy: 25, roster: [], status: 'pen
 vi.mock('@vladmandic/human', () => ({ default: class {
   constructor(config) {
     db.engine = config
-    this.tf = { getBackend: () => config.backend }
+    this.tf = { getBackend: () => config.backend, tensor4d: () => ({}), dispose: () => {} }
+    this.models = { models: { faceres: { inputs: [{ shape: [1, 2, 2, 3] }], execute: () => ({ shape: [1, 1024], data: async () => Array(1024).fill(.3) }) } } }
   }
   load() {}
   warmup() {}
@@ -28,6 +29,8 @@ vi.mock('../../lib/supabase', async () => {
         : [{ id: 'site', name: 'Kado', labour_pay_mode: 'daily' }],
       labour_pool: [{ id: 'crew', full_name: 'Crew member', is_active: true }],
       labour_face_profiles: [],
+      'rpc:log_face_engine': { passed: true },
+      face_engine_checks: [{ id: 'check', user_name: 'Tester', backend: 'wasm', score: .999, passed: true, user_agent: 'Mozilla/5.0 (Android test phone) rest', created_at: '2026-11-23T06:00:00Z' }],
       face_match_settings: { min_liveness: 0.7 },
       'rpc:my_assigned_site': 'site',
       'rpc:site_crew_register': { check_ins: db.roster, registered_faces: 1, on_roster_not_checked_in: [] },
@@ -46,13 +49,15 @@ vi.mock('../../lib/supabase', async () => {
 const md = { role: 'md' }
 const assigned = { role: 'assistant_production_manager' }
 const page = profile => render(<AssignedSiteProvider><SiteAttendance userProfile={profile} /></AssignedSiteProvider>)
-const face = (embedding = [1, 2]) => ({ embedding, score: .9, box: [0, 0, 100, 100], live: .8, real: .9 })
+const dense = n => Array(1024).fill(n)
+const face = (embedding = dense(.3)) => ({ embedding, score: .9, box: [0, 0, 100, 100], live: .8, real: .9 })
 const click = name => fireEvent.click(screen.getByRole('button', { name }))
 const choose = (label, value) => fireEvent.change(screen.getByLabelText(label), { target: { value } })
 const rpc = name => db.calls.filter(call => call.rpc === name)
 let updateLocation
 
 beforeEach(() => {
+  vi.stubGlobal('fetch', vi.fn(async () => ({ json: async () => ({ vector: dense(.3), minCosine: .98 }) })))
   db.calls.length = 0
   db.frame = [face()]
   db.time = 0
@@ -97,7 +102,7 @@ it('requires consent, then uploads the JPEG before enrolling the average of thre
   // The video clock advances independently of the model's inference.
   vi.spyOn(HTMLMediaElement.prototype, 'currentTime', 'get').mockImplementation(() => {
     const i = db.time++
-    db.frame = [face([i, i * 2])]
+    db.frame = [face(dense(i / 10 + .3))]
     return i
   })
   vi.useFakeTimers()
@@ -105,7 +110,7 @@ it('requires consent, then uploads the JPEG before enrolling the average of thre
   await act(() => vi.advanceTimersByTimeAsync(2100))
   const [entry] = rpc('enroll_worker_face')
   expect(entry.args).toEqual(expect.objectContaining({
-    p_site_id: 'site', p_labour_id: 'crew', p_descriptor: [2, 4], p_model: 'human-faceres', p_consent: true, p_photo_path: 'site/enrol/crew.jpg',
+    p_site_id: 'site', p_labour_id: 'crew', p_descriptor: dense(.5), p_model: 'human-faceres-v2', p_consent: true, p_photo_path: 'site/enrol/crew.jpg',
   }))
   expect(db.calls.indexOf(entry)).toBeGreaterThan(db.calls.findIndex(call => call.upload === 'site/enrol/crew.jpg'))
 })
@@ -134,7 +139,7 @@ describe('live scanning', () => {
     video.current.currentTime++
     await act(() => vi.advanceTimersByTimeAsync(1800))
     expect(rpc('crew_check_in')[0].args).toEqual({
-      p_site_id: 'site', p_descriptor: [1, 2], p_model: 'human-faceres', p_liveness: .8, p_lat: 9, p_lng: 7, p_accuracy_m: 25, p_device_id: 'phone-uuid',
+      p_site_id: 'site', p_descriptor: dense(.3), p_model: 'human-faceres-v2', p_liveness: .8, p_lat: 9, p_lng: 7, p_accuracy_m: 25, p_device_id: 'phone-uuid',
     })
     await act(() => vi.advanceTimersByTimeAsync(4000))
     expect(rpc('crew_check_in')).toHaveLength(1)
@@ -147,7 +152,7 @@ describe('live scanning', () => {
 it('requires a manual reason and photo before recording the check-in', async () => {
   page(assigned)
   fireEvent.click(await screen.findByRole('button', { name: 'Morning register' }))
-  click('Manual check-in')
+  click('Check in without face')
   await screen.findByRole('option', { name: 'Crew member' })
   choose('Worker', 'crew')
   choose('Why did the face check fail?', 'Face was not recognised.')
@@ -218,4 +223,55 @@ it('routes attendance notifications and limits site location notifications to th
   expect(notificationTarget('crew_check_ins', assigned)).toBe('site_attendance')
   expect(notificationTarget('production_sites', md)).toBe('site_attendance')
   expect(notificationTarget('production_sites', assigned)).toBeUndefined()
+})
+
+it('shows engine checks only to the MD with Lagos time and phone label', async () => {
+  page(md)
+  const summary = await screen.findByText('Face engine checks')
+  summary.closest('details').open = true
+  fireEvent(summary.closest('details'), new Event('toggle'))
+  expect(await screen.findByText(/Tester · wasm · 0.999/)).toBeInTheDocument()
+  expect(screen.getByText('Android test phone')).toBeInTheDocument()
+  expect(screen.getByText('23/11/2026, 07:00:00')).toBeInTheDocument()
+  cleanup()
+  page(assigned)
+  await screen.findByRole('button', { name: 'Register faces' })
+  expect(screen.queryByText('Face engine checks')).toBeNull()
+})
+
+it('stops capture after six implausible enrolment frames', async () => {
+  db.frame = [face(Array(1024).fill(0))]
+  page(assigned)
+  fireEvent.click(await screen.findByRole('button', { name: 'Register faces' }))
+  await screen.findByRole('option', { name: 'Crew member' })
+  choose('Worker', 'crew')
+  fireEvent.click(screen.getByLabelText('The worker agreed'))
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Capture 3 frames' })).toBeEnabled())
+  vi.useFakeTimers()
+  click('Capture 3 frames')
+  await act(() => vi.advanceTimersByTimeAsync(1500))
+  expect(screen.getByText(/The face pattern from this phone looks wrong/)).toBeInTheDocument()
+  expect(rpc('enroll_worker_face')).toHaveLength(0)
+  expect(screen.getByRole('button', { name: 'Capture 3 frames' })).toBeDisabled()
+})
+
+it('stops morning scanning after six implausible frames without checking anyone in', async () => {
+  vi.useFakeTimers()
+  const stop = vi.fn()
+  const video = { current: { videoWidth: 320, currentTime: 1 } }
+  const engine = { detect: vi.fn(async () => ({ face: [face(Array(1024).fill(0))] })) }
+  function Scan() {
+    const notice = useMorningScan({ camera: { engine, video, stop }, fix: { at: Date.now() }, threshold: .7, site: 'site', refresh: vi.fn(), lastCall: React.useRef(-Infinity), enabled: true })
+    return <p>{notice.message}</p>
+  }
+  render(<Scan />)
+  for (let i = 0; i < 6; i++) {
+    video.current.currentTime++
+    await act(() => vi.advanceTimersByTimeAsync(260))
+  }
+  expect(stop).toHaveBeenCalledTimes(1)
+  expect(screen.getByText(/The face pattern from this phone looks wrong/)).toBeInTheDocument()
+  await act(() => vi.advanceTimersByTimeAsync(5000))
+  expect(engine.detect).toHaveBeenCalledTimes(6)
+  expect(rpc('crew_check_in')).toHaveLength(0)
 })

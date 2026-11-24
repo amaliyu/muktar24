@@ -1580,6 +1580,11 @@ Interim until A–C: Umar records Kado now; Abubakar gets a temporary assistant_
   - Tested (rolled back): old model refused; v2 without a check refused; failed check (0.42) refused; passed check → enrol + check-in matched; Ransom-like pattern refused at enrol and check-in.
 - **App (b18):** face engine runs on WebAssembly only; self-test on load runs faceres on the fixed input in `public/face-selftest.json` and logs the cosine via `log_face_engine`; sends model `human-faceres-v2`. Everyone re-registers after b18.
 
+### b18 app update — WebAssembly face self-test (23 Nov)
+- Face engine now uses WebAssembly only with the pinned TFJS 4.22.0 WASM path; after warmup it runs and caches the fixed-input faceres self-test. Each camera start logs the result before requesting camera access, including failing checks. Failed local/server checks block capture; logging failures show a network retry message.
+- Enrolment and check-in send `human-faceres-v2`. Both capture paths reject implausible patterns and stop after six dropped frames with guidance to check in without face. MD can expand the latest 20 engine checks with Lagos time and a short phone label.
+- No SQL or migration changes. Live engine-check columns verified by catalog SELECT. Automated tests cover the engine, logging, failure gates, capture cutoff, model payloads and MD visibility; physical-phone/preview testing remains for MD review before merge.
+
 ### Dutse while production is on hold
 - Any block leaving the yard needs a same-day waybill; owner to be named now Abubakar has moved.
 - Weekly yard count continues; best window to close the ICO stock reconciliation (unexplained ~77,000 blocks, ₦37–48m at cost, pending ICO checks due 20 Nov).
