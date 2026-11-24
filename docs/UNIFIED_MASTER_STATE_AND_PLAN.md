@@ -1583,3 +1583,10 @@ Interim until A–C: Umar records Kado now; Abubakar gets a temporary assistant_
 ### Dutse while production is on hold
 - Any block leaving the yard needs a same-day waybill; owner to be named now Abubakar has moved.
 - Weekly yard count continues; best window to close the ICO stock reconciliation (unexplained ~77,000 blocks, ₦37–48m at cost, pending ICO checks due 20 Nov).
+
+### New-message alerts in the bell (MD 2026-11-24) — PARKED
+- **Today:** a new message shows only as the unread count on the Messages icon and sidebar (polled every 30 s while the app is open). It does not appear in the notification bell, and nothing reaches the phone while the app is closed. Site managers mostly have the app closed, so an MD message can sit unseen.
+- **First case:** MD → Abubakar (Life Camp) cement-use query, 24 Nov 06:20, new 1:1 conversation `2c6fd316…`, reply asked by 12 noon. An `action_required` bell notification was added by hand from the planning chat (`related_table = 'conversations'`).
+- **Gap found:** `NotificationBell.jsx` has no `conversations` entry in `TABLE_PAGE`, so that notification shows but tapping it goes nowhere. Add `conversations: 'messages'` (and open the thread if Messages supports a selected conversation).
+- **Designed, not applied:** `fn_notify_new_message()` SECURITY DEFINER, trigger AFTER INSERT on `messages` → one `info` notification per other **active** participant: title "New message from <sender>", body = first 120 characters, `related_table = 'conversations'`, `related_id` = conversation id. At most one unread alert per person per conversation (no stacking in busy chats). Execute revoked from public/anon/authenticated. The 24 Nov migration attempt was stopped by the tool's safety check; MD chose to park it.
+- **Build order when picked up:** (1) bell routing for `conversations` (frontend PR); (2) the trigger migration from the planning chat, with a rolled-back test that sender gets nothing, each other participant gets one alert, and a second message before reading adds none; (3) push to the phone with the app closed belongs with mobile stage C (installable app).
