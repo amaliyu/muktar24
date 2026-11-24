@@ -1,11 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { Check, ScanFace } from 'lucide-react'
+import { Check, ScanFace, X } from 'lucide-react'
 import SitePicker from '../SitePicker'
 import { withAssignedSite } from '../AssignedSite'
 import MobileScope from '../MobileScope'
 import { hasRole } from '../../lib/roles'
 import { todayLagos } from '../../utils/lagosDate'
-import { averageFaces, captureJpeg, validFace } from '../../utils/siteFace'
+import { averageFaces, captureJpeg, implausibleFace, validFace, wrongFacePattern } from '../../utils/siteFace'
 import { siteAttendance } from '../../services/siteAttendance'
 import { deviceId, freshFix, useFaceCamera, useLocation } from './attendanceHooks'
 
@@ -68,7 +68,8 @@ function LocationPanel({ site, md, location }) {
 function CameraPreview({ camera }) {
   return <>
     <video ref={camera.video} muted playsInline aria-label="Camera preview" style={{ display: 'block', width: '100%', maxWidth: 520, borderRadius: 8, background: '#111722' }} />
-    {camera.loading && <p role="status">Loading face models. The first download can take a minute on mobile data.</p>}
+    {camera.loading && <p role="status">Starting face engine… the first time can take up to a minute.</p>}
+    {camera.engineCheck && <small style={{ color: '#94a3b8' }}>Face engine checked <Check size={14} aria-label="Passed" /></small>}
     {camera.error && <p role="alert">{camera.error} <button style={control} onClick={camera.retry}>Retry</button></p>}
   </>
 }
@@ -86,7 +87,7 @@ function Enrolment({ site, workers, registered, refresh }) {
   const [capturing, setCapturing] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
-  const camera = useFaceCamera(Boolean(worker && consent), 'environment')
+  const camera = useFaceCamera(Boolean(worker && consent), 'environment', site)
   const mounted = useRef(true)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   async function capture() {
@@ -99,11 +100,17 @@ function Enrolment({ site, workers, registered, refresh }) {
       const embeddings = []
       let photo
       let lastTime = -1
+      let dropped = 0
       for (let i = 0; i < 3; i++) {
         if (i) await pause(1000)
         if (!mounted.current) return
         const frameTime = video.currentTime
-        const frame = validFace(await camera.engine.detect(video), video.videoWidth)
+        const result = await camera.engine.detect(video)
+        if (implausibleFace(result, video.videoWidth)) {
+          if (++dropped >= 6) { camera.stop(); throw new Error(wrongFacePattern) }
+          i--; await pause(250); continue
+        }
+        const frame = validFace(result, video.videoWidth)
         if (!frame || frameTime === lastTime) throw new Error('One person, closer to the camera')
         lastTime = frameTime
         embeddings.push(frame.embedding)
@@ -143,6 +150,7 @@ export function useMorningScan({ camera, fix, threshold, site, refresh, lastCall
     let stopped = false
     let timer
     let lastFrame = -1
+    let dropped = 0
     const schedule = (fn, ms) => { if (!stopped) timer = setTimeout(fn, ms) }
     async function scan() {
       const video = camera.video.current
@@ -152,7 +160,14 @@ export function useMorningScan({ camera, fix, threshold, site, refresh, lastCall
       }
       lastFrame = video.currentTime
       try {
-        const frame = validFace(await camera.engine.detect(video), video.videoWidth)
+        const result = await camera.engine.detect(video)
+        if (stopped) return
+        if (implausibleFace(result, video.videoWidth) && ++dropped >= 6) {
+          camera.stop()
+          setNotice({ message: wrongFacePattern, error: true })
+          return
+        }
+        const frame = validFace(result, video.videoWidth)
         if (stopped) return
         if (!frame) {
           setNotice({ message: 'One person, closer to the camera' })
@@ -237,7 +252,7 @@ function Morning({ site, workers, location, refresh, lastCall }) {
     }).catch(error => { if (active) setError(error.message) })
     return () => { active = false }
   }, [revision])
-  const camera = useFaceCamera(scanning && !manual, facing)
+  const camera = useFaceCamera(scanning && !manual, facing, site)
   const notice = useMorningScan({ camera, fix: location.fix, threshold, site, refresh, lastCall, enabled: scanning && !manual })
   return <section style={panel}>
     <h2>Morning register</h2>
@@ -247,7 +262,7 @@ function Morning({ site, workers, location, refresh, lastCall }) {
       <div className="m-wrap" style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
         <button style={control} disabled={!scanning && threshold == null} onClick={() => setScanning(value => !value)}>{scanning ? 'Stop camera' : 'Start camera'}</button>
         <button style={control} onClick={() => setFacing(value => value === 'environment' ? 'user' : 'environment')}>{facing === 'environment' ? 'Use front camera' : 'Use back camera'}</button>
-        <button style={control} onClick={() => { setScanning(false); setManual(true) }}>Manual check-in</button>
+        <button style={control} onClick={() => { setScanning(false); setManual(true) }}>Check in without face</button>
       </div>
       {scanning && <>
         <CameraPreview camera={camera} />
@@ -303,6 +318,31 @@ function Register({ site, date, revision, showSimilarity }) {
   </section>
 }
 
+function EngineChecks() {
+  const [open, setOpen] = useState(false)
+  const [rows, setRows] = useState(null)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    if (!open) return
+    let active = true
+    setError('')
+    siteAttendance.listEngineChecks().then(data => { if (active) setRows(data) })
+      .catch(error => { if (active) setError(error.message) })
+    return () => { active = false }
+  }, [open])
+  return <details style={panel} onToggle={event => setOpen(event.currentTarget.open)}>
+    <summary style={{ ...control, cursor: 'pointer' }}>Face engine checks</summary>
+    {error && <p role="alert">{error}</p>}
+    {open && !rows && !error && <p>Loading checks…</p>}
+    {rows?.map(row => <article key={row.id} style={panel}>
+      <time>{new Date(row.created_at).toLocaleString('en-GB', { timeZone: 'Africa/Lagos' })}</time>
+      <p>{row.user_name} · {row.backend} · {Number(row.score).toFixed(3)} · {row.passed ? <Check size={16} aria-label="Passed" /> : <X size={16} aria-label="Failed" />}</p>
+      <small>{(row.user_agent?.match(/\(([^)]*)\)/)?.[1] || 'Unknown phone').slice(0, 40)}</small>
+    </article>)}
+    {rows?.length === 0 && <p>No engine checks yet.</p>}
+  </details>
+}
+
 function SiteView({ site, userProfile }) {
   const md = hasRole(userProfile, 'md')
   const manage = hasRole(userProfile, 'md', 'production_manager', 'assistant_production_manager')
@@ -324,6 +364,7 @@ function SiteView({ site, userProfile }) {
     return () => { active = false }
   }, [manage, revision, site])
   return <>
+    {md && <EngineChecks />}
     {manage && <LocationPanel site={site} md={md} location={location} />}
     {manage && <div className="m-wrap" style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
       {[['register', 'View register'], ['enrol', 'Register faces'], ['morning', 'Morning register']].map(([id, label]) =>

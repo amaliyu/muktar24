@@ -1,13 +1,20 @@
 import { supabase } from '../lib/supabase'
 import { shiftDate } from '../utils/lagosDate'
 
-export const FACE_MODEL = 'human-faceres'
+export const FACE_MODEL = 'human-faceres-v2'
 const bucket = () => supabase.storage.from('site-attendance')
 const checked = ({ data, error }) => { if (error) throw error; return data }
 const rpc = async (name, args) => checked(await supabase.rpc(name, args))
 const geo = fix => ({ p_lat: fix.lat, p_lng: fix.lng, p_accuracy_m: fix.accuracy })
 
 export const siteAttendance = {
+  logEngine: (siteId, check, device) => rpc('log_face_engine', {
+    p_site_id: siteId, p_model: FACE_MODEL, p_backend: check.backend, p_score: check.score,
+    p_device_id: device, p_user_agent: navigator.userAgent.slice(0, 400),
+  }),
+  async listEngineChecks() {
+    return checked(await supabase.from('face_engine_checks').select('id, user_name, backend, score, passed, user_agent, created_at').order('created_at', { ascending: false }).limit(20))
+  },
   register: (site, date) => rpc('site_crew_register', { p_site_id: site, p_date: date }),
   propose: (site, fix) => rpc('propose_site_location', { p_site_id: site, ...geo(fix) }),
   review: (site, approve, radius) => rpc('approve_site_location', { p_site_id: site, p_approve: approve, p_radius_m: approve ? radius : null }),
