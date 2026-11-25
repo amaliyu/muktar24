@@ -1598,6 +1598,19 @@ Interim until A–C: Umar records Kado now; Abubakar gets a temporary assistant_
 - **Loaded 25 Nov (15 items):** Kado questions (24 Nov cement strength; 11/16/20 Nov breakage with zero breakage 23–24 Nov, breakdown times 18–21 Nov, open maintenance entry since 21 Nov); Kado 12 Nov diesel to explain; Life Camp 6 open warnings (17, 18 cement; 18, 20, 21, 24 breakage); Kado 13/14/15/22 Nov unrecorded; Kado face re-registration; generator times daily at both sites; LC wage payment-request categories (APC-PR-00164/165/166/168). One summary alert to the ICO.
 - **Warnings reviewed 25 Nov:** Kado diesel closed for 10, 11, 16, 19, 23, 24 Nov ("Diesel cost of low output. Target is 2,500 blocks a day on 30 L."); 12 Nov sent to Umar; 17/18 Nov explained by Umar (awaiting review). Kado breakage 11/16/20 and 24 Nov cement sent back as questions (only those lines; closed diesel lines stay closed).
 
+### Client funds ledger (Bilaad) and handover transport (MD 2026-11-25)
+- **Correction:** ₦725,909.44 (site operating allocation) and ₦658,000 (329 L diesel at ₦2,000/L) are what APCL **asked** Bilaad for in REQ-LIFECAMP-BIL-001 (emailed 20 Nov; still "sent", not approved). No Bilaad cash recorded as received.
+- **DB** (`20261125201937_client_funds_and_handover_transport`):
+  - `client_fund_entries` (site, fund operating|diesel, kind asked|approved|received|adjustment, date, amount, bank account, reference, proof, voided). Seeded with the two "asked" lines. `record_client_fund(...)` MD/accountant (adjustment MD only, received needs a reference); `void_client_fund_entry` MD.
+  - `payment_requests.client_fund` (operating|diesel|null); `set_payment_request_client_fund(pr, fund)` MD/accountant/ICO, client sites only. Spent = disbursed tagged PRs; pending = draft/ico_approved tagged PRs.
+  - `client_fund_summary(site)` → per fund asked/approved/received/adjustments/spent/pending/balance/client_owes + untagged disbursed spending at the site; `client_fund_statement(site, fund)`.
+  - Handovers: `block_handovers` + `vehicle_id` / `vehicle_plate` (typed, non-fleet), `driver_staff_id` / `driver_name`, `loader_ids uuid[]` (validated against labour_pool); `handover_transport_options(site, date)` → active trucks, drivers, that day's roster/checked-in crew.
+- **Addendum No. 2 (12 Oct 2026, read 25 Nov):** materials and running costs (₦135,291,443) are Bilaad's — cement, quarry dust, dust haulage, production and delivery diesel, site operating costs ₦124,278.46/day (**includes the daily labour**, MD), loading/offloading ₦10 per gross block, driver ₦150,000/month. APCL's ₦241 per accepted block service fee is separate and clear of costs. REQ-001's ₦725,909.44 = 5.84 days of site opex for 16,249 blocks.
+- **Tagged 25 Nov (MD):** Life Camp wages, plumbing → Bilaad operating; diesel → Bilaad diesel (00161, 00162, 00164, 00165, 00166, 00168 operating; 00167, 00169 diesel). Solar security light 00163 is APCL's (equipment). Disbursed: Bilaad owes ₦171,400; drafts add ₦177,900.
+- **Default fund** (`20261125205413_client_fund_default_for_service_fee_sites`): new payment requests at a service-fee site get `client_fund` automatically — diesel/fuel → diesel; machine/truck maintenance, trading purchases and equipment (solar, machine, mould, generator purchase/repair) → APCL (null); everything else → operating. A manual choice is never overwritten; an automatic value follows edits to site, category or purpose.
+- **Drafts:** 22 payment requests in draft (Abubakar 15, Umar 4, Auwalu 3 incl. APC-PR-00030 ₦6.69m cement; Auwalu's login is inactive). Each requester notified 25 Nov; ICO follow-up items added.
+- **UI:** b20.
+
 ### Dutse while production is on hold
 - Any block leaving the yard needs a same-day waybill; owner to be named now Abubakar has moved.
 - Weekly yard count continues; best window to close the ICO stock reconciliation (unexplained ~77,000 blocks, ₦37–48m at cost, pending ICO checks due 20 Nov).
