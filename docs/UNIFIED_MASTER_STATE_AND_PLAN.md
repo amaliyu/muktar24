@@ -1605,7 +1605,10 @@ Interim until A–C: Umar records Kado now; Abubakar gets a temporary assistant_
   - `payment_requests.client_fund` (operating|diesel|null); `set_payment_request_client_fund(pr, fund)` MD/accountant/ICO, client sites only. Spent = disbursed tagged PRs; pending = draft/ico_approved tagged PRs.
   - `client_fund_summary(site)` → per fund asked/approved/received/adjustments/spent/pending/balance/client_owes + untagged disbursed spending at the site; `client_fund_statement(site, fund)`.
   - Handovers: `block_handovers` + `vehicle_id` / `vehicle_plate` (typed, non-fleet), `driver_staff_id` / `driver_name`, `loader_ids uuid[]` (validated against labour_pool); `handover_transport_options(site, date)` → active trucks, drivers, that day's roster/checked-in crew.
-- Life Camp disbursed spending not yet tagged: ₦171,400 in 4 requests (plumbing 00162, wages 00165/00166, diesel 00167) — MD to decide which are Bilaad's.
+- **Addendum No. 2 (12 Oct 2026, read 25 Nov):** materials and running costs (₦135,291,443) are Bilaad's — cement, quarry dust, dust haulage, production and delivery diesel, site operating costs ₦124,278.46/day (**includes the daily labour**, MD), loading/offloading ₦10 per gross block, driver ₦150,000/month. APCL's ₦241 per accepted block service fee is separate and clear of costs. REQ-001's ₦725,909.44 = 5.84 days of site opex for 16,249 blocks.
+- **Tagged 25 Nov (MD):** Life Camp wages, plumbing → Bilaad operating; diesel → Bilaad diesel (00161, 00162, 00164, 00165, 00166, 00168 operating; 00167, 00169 diesel). Solar security light 00163 is APCL's (equipment). Disbursed: Bilaad owes ₦171,400; drafts add ₦177,900.
+- **Default fund** (`20261125205413_client_fund_default_for_service_fee_sites`): new payment requests at a service-fee site get `client_fund` automatically — diesel/fuel → diesel; machine/truck maintenance, trading purchases and equipment (solar, machine, mould, generator purchase/repair) → APCL (null); everything else → operating. A manual choice is never overwritten; an automatic value follows edits to site, category or purpose.
+- **Drafts:** 22 payment requests in draft (Abubakar 15, Umar 4, Auwalu 3 incl. APC-PR-00030 ₦6.69m cement; Auwalu's login is inactive). Each requester notified 25 Nov; ICO follow-up items added.
 - **UI:** b20.
 
 ### Dutse while production is on hold
