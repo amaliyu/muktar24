@@ -34,6 +34,7 @@ vi.mock('../../lib/supabase', async () => {
   const { createSupabaseMock } = await import('../../test/supabaseMock')
   const mock = createSupabaseMock((table, args = {}) => {
     const data = {
+      'rpc:site_generator_day': f.generator || { recorded: false },
       'rpc:my_assigned_site': f.assignment,
       'rpc:site_daily_scorecard': args.p_date === f.date ? (f.idle ? { ...kado, blocks_total: 0, day_status: { reason: 'rain', note: 'Wet yard', staff_worked: true, work_done: ['stacking', 'maintenance'] }, idle_labour: 45000 } : args.p_site_id === 'kado' ? kado : life) : null,
       'rpc:site_day_overview': f.idle ? { totals: { blocks: 500, production_days: 1, no_production_days: 1, idle_labour_cost: 45000, cost_per_block: 210, cost_per_block_excl_idle: 120, missing_records: 1, missing_rosters: 0 } } : null,
@@ -46,7 +47,7 @@ vi.mock('../../lib/supabase', async () => {
   f.calls = mock.calls
   return { supabase: mock.supabase }
 })
-beforeEach(() => { f.assignment = null; f.idle = false; f.calls.length = 0 })
+beforeEach(() => { f.assignment = null; f.idle = false; f.generator = null; f.calls.length = 0 })
 afterEach(cleanup)
 const shareText = async () => {
   const launch = vi.spyOn(window, 'open').mockImplementation(() => null)
@@ -72,6 +73,7 @@ it('shows Kado’s rates, budget chips, missing roster and the link to the warni
   expect(screen.getByText('Roster not recorded for this day')).toHaveStyle({ color: theme.red })
   expect(await shareText()).toBe([
     'Production report 18/11/2026 — Kado Site (Sequoia)',
+    'Generator times not recorded',
     'Blocks: 1,095 (9": 1,095, 6": 0)',
     'Cement: 26 bags — 42.1 per bag (budget 40) check quality',
     'Diesel: 22 L — 20.1 L per 1,000 (budget 20) within limits',
@@ -131,4 +133,12 @@ it('shows idle labour and both period cost-per-block measures on a no-production
   expect(period.getByText('Cost per block (production days only)').nextSibling).toHaveTextContent('₦120')
   fireEvent.click(period.getByRole('button', { name: 'Missing records: 1' }))
   expect(onProduction).toHaveBeenCalledWith('kado')
+})
+
+it('shows generator times and measures in the report and sharing text', async () => {
+  f.generator = { recorded: true, started_at: '07:30', stopped_at: '17:00', break_minutes: 60, running_hours: 8.5, litres_per_hour: 3.2, blocks_per_hour: 106, blocks_per_litre: 33, target_litres_per_hour: 3.75, target_blocks_per_hour: 313, target_blocks_per_litre: 83.3 }
+  render(<Scorecard initial={{ date: f.date }} />)
+  expect(await screen.findByText(/On 07:30/)).toBeInTheDocument()
+  expect(screen.getByRole('region', { name: 'Generator' })).toBeInTheDocument()
+  expect(await shareText()).toContain('Generator 07:30–17:00 (8.5 h): 3.2 L/h (target 3.8), 106 blocks/h (target 313), 33 blocks/L (target 83)')
 })

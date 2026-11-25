@@ -1230,375 +1230,1419 @@ Status key: **DONE** = live and verified · **READY** = migration written + chec
    - Site scope: when a site is selected, revenue, cash and costs are all that site's; company view = all sites.
    - Historical "as at" dates use only records dated on or before that date.
 4. **P4 — DONE 2026-10-29 (DB side):** `audit3b_payroll_links_and_expenses` — A3-3 link guard, A3-4 overlap guard, A3-8 salary_advance_id + realize uses it, A3-13 accountant line payment, A3-14 PM/APM loaders, A3-15 unique (week_ending, payroll_type), A3-17 roster expense date/zero, A3-18 salary-line expenses (18 back-filled), A3-20 trip number kept on edit. Tests (rolled back): paid roster link blocked; overlapping salary line blocked; trip kept on qty edit; accountant records payment; PM saves loader. App side → Codex 3A (docs/codex/AUDIT_3A_SPEC.md). Audit 4A app side: PR #132 merged 2026-10-29.
-5. **P2b — Audit 4A, stock owned by the database.** Part 1 (materials) DONE 2026-10-29: `stock4a1_materials_ledger` — balance moves only through stock_movements (trigger, atomic, no clamping: a shortage shows as a negative balance); direct balance writes from the app/receipt functions are ignored during transition; receipt-linked movements editable only by voiding the receipt; item site/unit locked once it has history. Test (rolled back, as Store Officer): in 100 app-style → 100 (not 200), out 130 → −30, edit/delete reverse correctly, receipt 40 → single count, void reverses. Live data note: Dutse materials history does not reconcile (e.g. cement balance 0 vs history −5,336; chippings 47,094,969 vs −1,478,029) → DUTSE COUNT DONE 29/10/2026 (signed Auwal S. Saleh, Ibrahim Abdullahi). Materials entered 2026-10-30 as movements ref COUNT-2026-10-29: cement 0→291 bags, dust 64,881→600 kg, chippings 47,094,969→375 kg, diesel 20,240→0, new item RECYCLED CRUSHED BLOCK 27,000 kg (recovered/recycled damaged blocks). Blocks NOT yet adjusted — counted 9" 6,448 / 6" 1,439 / interlock 2,844 vs system yard 70,407 / 22,384 / 2,680; by records (batched − dispatched) 9" ≈22,707, 6" ≈12,704 → unexplained ≈16,259 9" and ≈11,265 6". ICO reconciling batches vs waybills/gate records before a single signed block adjustment. Original plan: MD APPROVED a physical count (2026-10-29): Store Officer counts cement (bags), dust (kg), chippings (kg), diesel (litres) at Dutse; MD sends the four figures and count date; planning chat enters one 'in' or 'out' movement per material for the difference, note 'Physical count <date>'. Part 2 DONE 2026-10-29: `stock4a2_blocks_ledger` — Dutse yard (finished_goods_stock) and batches.qty_remaining move only from batches, waybills and batch damage records (triggers, atomic, unclamped); app balance writes ignored during transition; batch product/site locked once blocks left it; production delete returns its materials. Test (rolled back): batch 100 app-style → yard +100 not +200; Logistics waybill 30 → yard −30 and batch −30 (A4-2 fixed); edit to 40 → reversed and re-applied; Store Officer delete → 0 rows, yard unchanged (A4-1 fixed); product change after dispatch blocked; accepted 100→120 → +20; damage 5 → −5; MD deletes → back to start exactly. Remaining 4A items need the app (Codex 4A): A4-10 one deduction path for production materials, A4-12 one production entry backing two batches, A4-13 client-site batch 'remaining' should show the site yard, remove the app's own balance writes, waybill delete MD-only + 0-row check.
-   Original design (before 2B; production at Kado/Life Camp restarts the week of 2026-11-02). Design (planning chat, rejectable): every stock change — dispatch, waybill delete, production record/edit/delete, stock in/out, batch create/edit/delete, receipt edit/void, handover — becomes ONE database function that changes the balance with `balance = balance + delta` in the same transaction as its record, refuses to go below zero (no silent clamping), and rolls back entirely if any part fails. The app stops writing balances directly; balance columns become writable only by those functions. Planning chat writes the functions + tests; Codex switches the screens to call them; both go live together.
-6. All six audits recorded (2026-10-29). Further audits (bank reconciliation, Phase 7 SPV maths — flagged as not covered by audit 2) to be requested later.
-7. **Audit 2B — DONE 2026-11-12: PR #134 merged** (one accounting basis; verified on preview against live data: Sept 2026 revenue 18,325,950 / cost 865,000 / cash 19,733,425; receivables 92,997,995 / deposits 38,215,965). Bank lines use recorded current balances because imported statements fail the integrity check (Amantelcom: phone numbers parsed as credits). Balance sheet still ₦40.3m out — data, not code: opening balances (DOXIX asked 2026-11-12), Dutse block count (ICO reconciliation due 2026-11-16), customer receipts missing from the app.
-8. **TODO (MD: hold, 2026-11-12) — expense approval enforced in the database.** Today the ≥₦50,000 MD-approval rule exists only in the screen: `expenses_update`/`expenses_insert` let the accountant role set status='approved' on any expense, and the ICO currently holds an accountant grant. Proposed (not applied): only MD approves/rejects a manual expense ≥₦50,000 (DB stamps approver and date); non-MD can insert it only as pending; a non-MD edit of amount/date/category on an approved large expense returns it to pending; expenses created from roster, payroll, loading and payment requests keep their upstream approvals; `status` and `approval_status` always equal. Context: 15 expenses (₦6,053,915, May–Jun) sat status='pending' / approval_status='approved' with no approver; MD approved all 15 on 2026-11-12 (#13 engine oil ₦353,000 is a likely duplicate of the 20 May entry — MD's call).
-9. **TODO (small):** cash flow shows "(₦-740,000)" — brackets and minus together; role-grant expiry warning for the MD ~14 days before a grant lapses (grants lapsed silently 7 Oct; `grant_user_role` fixed 2026-11-11 to close lapsed grants and reject past expiry dates).
-10. **Recording has largely stopped since September (found 2026-11-12):** no Dutse batch since Aug; costs recorded Sept ₦0.87m, Oct ₦16,000; waybills entered days late. Logins: Production Manager and Store Officer accounts deactivated (last logins 22 Sep, 28 Aug); the active Store Officer last signed in 1 Jul; no in-house accountant login (only DOXIX, 22 Oct); BDM deactivated. Statements from September on are not reliable until records are caught up.
+5. **P2b — Audit 4A, stock owned by the database.** Part 1 (materials) DONE 2026-10-29: `stock4a1_materials_ledger` — balance moves only through stock_movements (trigger, atomic, no clamping: a shortage shows as a negative balance); direct balance writes from the app/receipt functions are ignored during transition; receipt-linked movements editable only by voiding the receipt; item site/unit locked once it has history. Test (rolled back, as Store Officer): in 100 app-style → 100 (not 200), out 130 → −30, edit/delete reverse correctly, receipt 40 → single count, void reverses. Live data note: Dutse materials history does not reconcile (e.g. cement balance 0 vs history −5,336; chippings 47,094,969 vs −1,478,029) → DUTSE COUNT DONE 29/10/2026 (signed Auwal S. Saleh, Ibrahim Abdullahi). Materials entered 2026-10-30 as movements ref COUNT-2026-10-29: cement 0→291 bags, dust 64,881→600 kg, chippings 47,094,969→375 kg, diesel 20,240→0, new item RECYCLED CRUSHED BLOCK 27,000 kg (recovered/recycled damaged blocks). Blocks NOT yet adjusted — counted 9" 6,448 / 6" 1,439 / interlock 2,844 vs system yard 70,407 / 22,384 / 2,680; by records (batched − dispatched) 9" ≈22,707, 6" ≈12,704 → unexplained ≈16,259 9" and ≈11,265 6". ICO reconciling batches vs waybills/gate records before a single signed block adjustment. Original plan: MD APPROVED a physical count (2026-10-29): Store Officer counts cement (bags), dust (kg), chippings (kg), diesel (litres) at Dutse; MD sends the four figures and count date; planning chat enters one 'in' or 'out' movement per material for the difference, note 'Physical count <date>'. Part 2 DONE 2026-10-29: `stock4a2_blocks_ledger` — Dutse yard (finished_goods_stock) and batches.qty_remaining move only from batches, waybills and batch damage records (triggers, atomic, unclamped); app balance writes ignored during transition; batch product/site locked once blocks left it; production delete returns its materials. Test (rolled back): batch 100 app-style → yard +100 not +200; Logistics waybill 30 → yard −30 and batch −30 (A4-2 fixed); edit to 40 → reversed and re-applied; Store Officer delete → 0 rows, yard unchanged (A4-1 fixed); product change after dispatch blocked; accepted 100→120 → +20; damage 5 → −5; MD deletes → back to start exactly. Remaining 4A items need the app (Codex …162152 tokens truncated…tries and loading rates</div>
+        </div>
+      </div>
 
-### Audit 1 — security (8 findings)
-| ID | Sev | Finding (verified live) | Status |
-|---|---|---|---|
-| A1-1 | Critical | grant/revoke_user_role callable logged-out; MD check passed on NULL role | DONE 2026-10-25 (no misuse found: 2 grants, both by MD) |
-| A1-2 | Critical | order_items_delivery / disciplinary_self writable by anon | DONE 2026-10-25 |
-| A1-3 | High | 4 financial views anon-readable | DONE (anon) 2026-10-25; signed-in part → A1-8 views |
-| A1-4 | High | any user can add themselves to any conversation and read it | DONE 2026-10-29 |
-| A1-5 | High | deactivated accounts keep working (5 inactive, 2 with live sessions; has_role ignores is_active) | DONE 2026-10-29 — login ban + session end on deactivation |
-| A1-6 | Medium | payment-request attachments readable by every requester | DONE 2026-10-29 — own requests only; MD/Acct/ICO/Board all |
-| A1-7 | Medium | weekly_labour_payroll, truck_loading_rates readable by all roles | DONE 2026-10-29 — 8 operational/finance roles |
-| A1-8 | Medium | 10 definer functions callable logged-out; 3 payment views bypass RLS | DONE 2026-10-29 |
+      {/* Tabs */}
+      <div className="m-wrap" style={{ display: 'flex', gap: '4px', borderBottom: `1px solid ${theme.border}`, marginBottom: '20px' }}>
+        {canLog && tabBtn('log', 'Log Entry')}
+        {canManageRates && tabBtn('rates', 'Rates')}
+      </div>
 
-### Audit 2 — money totals (23 findings)
-| ID | Sev | Finding | Status |
-|---|---|---|---|
-| A2-1 | High | non-MD order edit duplicated lines (RLS delete no-op) | DONE DB 2026-10-27 (replace_order_items RPC; 10 duplicate lines on 6 orders removed, MD-approved); app call → 2A |
-| A2-2 | High | v_delivered_revenue counted a delivery once per duplicate line (₦5.35m overstated) | DONE 2026-10-27 |
-| A2-3 | High | proformas shown as customer debt (fallback to order value) | partly #130; rest → 2A |
-| A2-4 | High | profit screens use incompatible revenue definitions | 2B |
-| A2-5 | High | failed dashboard queries shown as ₦0 | 2A |
-| A2-6 | High | dashboard revenue filtered by order date not payment date | 2A |
-| A2-7 | High | Financial Statements opening/closing cash always ₦0 (wrong field names) | 2A |
-| A2-8 | High | historical balance sheet shows current positions | 2B (historic stock may need DB support) |
-| A2-9 | High | balance-sheet current-year profit always ₦0 | 2A |
-| A2-10 | High | assets/liabilities differ between Financial Statements and Reports | 2B |
-| A2-11 | Medium | receivable totals treat credits differently | 2B |
-| A2-12 | Medium | expense approval filters inconsistent (pending/approved/rejected) | 2B |
-| A2-13 | Medium | payroll double-counted in Cost Analysis; payroll_runs.total_amount doesn't exist | 2A |
-| A2-14 | Medium | adjustments don't reliably hit the right statement/period | 2B |
-| A2-15 | Medium | historical customer balances use wrong cut-offs | 2A |
-| A2-16 | Medium | Trading Margin repeated orders per invoice, included quotes | DONE 2026-10-27 |
-| A2-17 | Medium | Invoice Report query fails (payments joined to orders) | 2A |
-| A2-18 | Medium | Supplier Statement empty (orders by nonexistent `name`) | 2A |
-| A2-19 | Medium | supplier returns ignored in some balances | 2A |
-| A2-20 | Medium | product revenue repeats order per instalment | 2A |
-| A2-21 | Medium | KPI profit mixes site and company scope | 2B |
-| A2-22 | Medium | Lagos timezone shifts month boundaries | 2A |
-| A2-23 | Medium | customer statement/history broken; "deposits held" meaningless | 2A (statement/history); 2B (deposits) |
-Also from audit 2 work: invoices — issued/paid now MD/Accountant-only to change or cancel, nothing returns to proforma, delete MD-only — DONE 2026-10-27. Open: Mohr Engineering APC-INV-2026-2413 ₦4,601,000 should be ₦2,386,500 (MD to confirm quantities, then cancel & reissue); Mr Festus invoice says 1,000 blocks, 1,200 delivered and ₦1,320,000 paid (MD to confirm).
+      {/* ── Log Entry ── */}
+      {tab === 'log' && (
+        <div>
+          {logAlert && <Alert msg={logAlert.msg} type={logAlert.type} onClose={() => setLogAlert(null)} />}
+          <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '14px' }}>
+            Loading payroll (weekly scoping, ICO/MD approval, payment schedules) is prepared in <strong style={{ color: theme.textMuted }}>Labour → Payroll → Loading Payroll</strong>.
+          </div>
+          <div className="m-buttons" style={{ marginBottom: '16px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            <button style={styles.btn('primary')} onClick={() => { setShowLogForm(f => !f); setLogAlert(null); setIsBackfill(false); setLogForm({ vehicle_id: '', product_id: '', date: '', quantity_loaded: '', waybill_id: '' }); setSelectedLoaders([]); }}>
+              {showLogForm ? <IconText icon={X}>Cancel</IconText> : '+ New Log Entry'}
+            </button>
+            {!showLogForm && (
+              <button style={styles.btn('secondary')} onClick={() => { setShowLogForm(true); setIsBackfill(true); loadWaybillsForLog(logs); }}>
+                Backfill Historical Entry
+              </button>
+            )}
+          </div>
 
-### Audit 3 — payroll, roster, loading, advances, leave (21 findings)
-| ID | Sev | Finding | Status |
-|---|---|---|---|
-| A3-1 | High | payroll can be inserted already approved/paid | DONE 2026-10-29 (insert must be draft) |
-| A3-2 | High | approval doesn't freeze salary lines, roster workers, loaders | DONE 2026-10-29 (lock triggers; payment fields still recordable while MD-approved) |
-| A3-3 | High | paid work can enter another weekly payroll (7 paid rosters unlinked) | 3A + LATER (DB uniqueness) |
-| A3-4 | High | salary payroll periods can overlap (1 overlapping pair exists) | 3A + LATER (DB constraint) |
-| A3-5 | High | approved payroll loses its own schedule (selection switches to unassigned rows) | 3A |
-| A3-6 | High | weekly payroll uses total_pay not net_pay (4 entries differ) | 3A |
-| A3-7 | High | approved/disbursed advances financially editable | DONE 2026-10-29 |
-| A3-8 | High | advance recovery not tied to a specific advance | LATER (DB) + 3A |
-| A3-9 | High | marking weekly payroll paid adds a second labour expense | 3A |
-| A3-10 | High | loading quantity edits don't update the expense (18 wrong, net ₦13,140 understated; 20 wrong dates) | DONE 2026-10-29 (trigger + data correction) |
-| A3-11 | High | production manager can change live labour rates / approval fields directly | DONE 2026-10-29 (MD-only rates; ICO then MD order enforced) |
-| A3-12 | High | approved leave dates/paid status editable; overlapping unpaid leave double-charged | DONE 2026-10-29 (lock); overlap → 3A |
-| A3-13 | Medium | ICO/accountant can't reach staff payroll actions; accountant can't record line payment | 3A + DB grant (LATER) |
-| A3-14 | Medium | loading saves silently drop the crew for PM/APM (136 unpaid logs without loaders) | 3A + DB policy (LATER) |
-| A3-15 | Medium | monthly fixed payroll can't load/generate (ILIKE on date, missing conflict key) | 3A + DB constraint (LATER) |
-| A3-16 | Medium | roster edits/deletes not atomic (4 headers disagree with workers) | 3A + LATER |
-| A3-17 | Medium | roster date/zero-cost changes don't correct the expense (2 wrong dates) | LATER (DB) |
-| A3-18 | Medium | new salary lines have no expense until a later header update (18 lines) | LATER (DB) |
-| A3-19 | Medium | costed loading entries can't be deleted (expense FK) | DONE 2026-10-29 |
-| A3-20 | Medium | editing an earlier trip can change its incentive rate | LATER (DB) |
-| A3-21 | Medium | salary across different-length months uses the first month's divisor | 3A |
+          {showLogForm && (
+            <div style={{ ...styles.card, marginBottom: '20px' }}>
+              {isBackfill && (
+                <div style={{ background: '#f59e0b22', border: '1px solid #f59e0b44', borderRadius: '6px', padding: '8px 12px', marginBottom: '14px', fontSize: '12px', color: '#f59e0b' }}>
+                  Backfill mode — pick a past date and link to an existing waybill. The Historical badge will appear automatically.
+                </div>
+              )}
+              <div style={styles.sectionTitle}>{isBackfill ? 'Backfill Log Entry' : 'New Log Entry'}</div>
+              <div className="m-form" style={styles.grid(2)}>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Product</label>
+                  <select style={styles.input} value={logForm.product_id} onChange={e => setLogForm(f => ({ ...f, product_id: e.target.value }))}>
+                    <option value="">Select product…</option>
+                    {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                </div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Vehicle</label>
+                  <select style={styles.input} value={logForm.vehicle_id} onChange={e => {
+                    const crew = assignments.filter(a => a.vehicle_id === e.target.value).map(a => a.labour_id);
+                    setSelectedLoaders(crew);
+                    setLogForm(f => ({ ...f, vehicle_id: e.target.value }));
+                  }}>
+                    <option value="">Select vehicle…</option>
+                    {vehicles.map(v => <option key={v.id} value={v.id}>{v.vehicle_number}{v.vehicle_name ? ` — ${v.vehicle_name}` : ''}</option>)}
+                  </select>
+                </div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Date</label>
+                  <input type="date" style={styles.input} value={logForm.date} onChange={e => setLogForm(f => ({ ...f, date: e.target.value }))} />
+                </div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Quantity Loaded</label>
+                  <input type="number" inputMode="numeric" style={styles.input} placeholder="e.g. 120" min="1" value={logForm.quantity_loaded} onChange={e => setLogForm(f => ({ ...f, quantity_loaded: e.target.value }))} />
+                </div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Link to Waybill {isBackfill ? '' : '(optional)'}</label>
+                  <select style={styles.input} value={logForm.waybill_id} onChange={e => {
+                    const wb = waybillsForLog.find(w => w.id === e.target.value);
+                    setLogForm(f => ({
+                      ...f,
+                      waybill_id: e.target.value,
+                      ...(wb ? { date: wb.waybill_date, quantity_loaded: String(wb.quantity_loaded || f.quantity_loaded), vehicle_id: wb.vehicle_id || f.vehicle_id } : {}),
+                    }));
+                  }}>
+                    <option value="">— {isBackfill ? 'Select waybill' : 'None (standalone load)'} —</option>
+                    {waybillsForLog.map(w => <option key={w.id} value={w.id}>{w.waybill_number} · {fmtDate(w.waybill_date)} · {w.block_type}</option>)}
+                  </select>
+                  {!isBackfill && waybillsForLog.length === 0 && <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '4px' }}>No unlinked waybills found. <button style={{ background: 'none', border: 'none', color: theme.blue, cursor: 'pointer', fontSize: '12px', padding: 0 }} onClick={() => loadWaybillsForLog(logs)}>Refresh</button></div>}
+                </div>
+              </div>
+              {assignments.length > 0 && (
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Loaders (optional)</label>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                    {assignments.map(a => {
+                      const sel = selectedLoaders.includes(a.labour_id);
+                      return (
+                        <button key={a.labour_id}
+                          style={{ ...styles.btn(sel ? 'primary' : 'secondary'), fontSize: '12px', padding: '4px 10px' }}
+                          onClick={() => setSelectedLoaders(l => sel ? l.filter(x => x !== a.labour_id) : [...l, a.labour_id])}>
+                          {a.worker?.full_name || '—'}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              <button style={styles.btn('primary')} onClick={handleLogSubmit} disabled={logSaving}>
+                {logSaving ? 'Saving…' : 'Save Log Entry'}
+              </button>
+            </div>
+          )}
 
-### Audit 4 — stock, production, batches, dispatch (13 findings; live check 2026-10-29: no negative balances, no production linked to two batches — holes are real in code, no damage found yet)
-| ID | Sev | Finding | Status |
-|---|---|---|---|
-| A4-1 | High | Store Officer waybill delete restores stock, delete itself refused (MD-only) and shown as success — repeatable | 4A (confirmed: App.jsx handleDeleteWaybill restores before delete; deliveries.js delete ignores 0 rows) |
-| A4-2 | High | Logistics dispatch reduces yard but not batch (batches_update excludes logistics; error ignored) | 4A (confirmed: batches.js reduceStock ignores update error) |
-| A4-3 | High | batch/movement delete adjusts stock before FK refuses the delete | 4A |
-| A4-4 | High | zero-clamping turns shortages into invented stock on reversal; negative issues accepted | 4A |
-| A4-5 | High | simultaneous entries overwrite each other (read-modify-write) | 4A |
-| A4-6 | High | production reversal ignores restore failures | 4A |
-| A4-7 | High | receipt-linked movement editable outside receipt void; void can go negative | 4A |
-| A4-8 | High | changing a batch's product leaves yard under the old product | 4A |
-| A4-9 | High | waybill keeps an old batch link after product/batch change | 4A |
-| A4-10 | High | materials issued to production and then recorded in production are deducted twice | 4A (needs one path: production record is the only deduction; "Stock Out → Production" removed or linked) |
-| A4-11 | Medium | item edits can change site/unit without transfer/conversion | 4A |
-| A4-12 | Medium | one production entry can back two batches | 4A (DB: allocated ≤ produced) |
-| A4-13 | Medium | client-site handovers reduce site yard but not batch remaining | 4A |
+          {editingLogId && (
+            <div style={{ ...styles.card, marginBottom: '16px', border: `1px solid ${theme.accent}44` }}>
+              <div style={styles.sectionTitle}>Edit Log Entry</div>
+              <div className="m-form" style={styles.grid(2)}>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Product</label>
+                  <select style={styles.input} value={editLogForm.product_id} onChange={e => setEditLogForm(f => ({ ...f, product_id: e.target.value }))}>
+                    {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                </div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Vehicle</label>
+                  <select style={styles.input} value={editLogForm.vehicle_id} onChange={e => setEditLogForm(f => ({ ...f, vehicle_id: e.target.value }))}>
+                    <option value="">— Select vehicle —</option>
+                    {vehicles.map(v => <option key={v.id} value={v.id}>{v.vehicle_number}{v.vehicle_name ? ` — ${v.vehicle_name}` : ''}</option>)}
+                  </select>
+                </div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Date</label>
+                  <input type="date" style={styles.input} value={editLogForm.date} onChange={e => setEditLogForm(f => ({ ...f, date: e.target.value }))} />
+                </div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Quantity Loaded</label>
+                  <input type="number" inputMode="numeric" style={styles.input} value={editLogForm.quantity_loaded} onChange={e => setEditLogForm(f => ({ ...f, quantity_loaded: e.target.value }))} />
+                </div>
+              </div>
+              {assignments.length > 0 && (
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Loaders</label>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                    {assignments.map(a => {
+                      const sel = editLogLoaders.includes(a.labour_id);
+                      return (
+                        <button key={a.labour_id}
+                          style={{ ...styles.btn(sel ? 'primary' : 'secondary'), fontSize: '12px', padding: '4px 10px' }}
+                          onClick={() => setEditLogLoaders(l => sel ? l.filter(x => x !== a.labour_id) : [...l, a.labour_id])}>
+                          {a.worker?.full_name || '—'}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              <div className="m-buttons" style={styles.row}>
+                <button style={styles.btn('primary')} onClick={handleEditLogSave} disabled={editLogSaving}>{editLogSaving ? 'Saving…' : 'Save'}</button>
+                <button style={styles.btn('secondary')} onClick={() => setEditingLogId(null)}>Cancel</button>
+              </div>
+            </div>
+          )}
 
-### Audit 5 — deletes & hidden errors (9 findings; mostly overlaps earlier audits)
-| ID | Sev | Finding | Status |
-|---|---|---|---|
-| A5-1 | Critical | production delete proceeds when material reversal fails | 4A (= A4-6) |
-| A5-2 | High | non-MD order edit duplicates lines | DONE DB (= A2-1); app → 2A |
-| A5-3 | High | loader replacement doesn't confirm the old crew was removed | 3A (atomic replace); paid/approved crews already locked (A3-2) |
-| A5-4 | High | stock balance changes even when movement edit/delete fails | 4A (= A4-3/A4-7) |
-| A5-5 | High | batch edit/delete continues after finished-goods failure | 4A (= A4-3/A4-8) |
-| A5-6 | High | Reports fetchers return [] on query failure; suppliers ordered by `name` | 2A item 10 |
-| A5-7 | Medium | invoice line replacement doesn't confirm old lines removed | 2A item 2 (live check: invoice_items delete allowed for the same roles that write; 0 of 15 invoices with lines mismatched) |
-| A5-8 | Medium | batch stock updates ignore errors | 4A (= A4-2) |
-| A5-9 | Medium | invoice/order/opening-balance/batch deletes without row check | 2A items 2 + 15; batch → 4A |
+          {deleteTarget && (
+            <div style={{ ...styles.card, marginBottom: '12px', border: `1px solid ${theme.red}` }}>
+              <div style={{ fontSize: '13px', marginBottom: '10px' }}>Delete this log entry? This cannot be undone.</div>
+              <div className="m-buttons" style={{ display: 'flex', gap: '8px' }}>
+                <button style={{ ...styles.btn('danger'), fontSize: '12px' }} onClick={() => handleDeleteLog(deleteTarget)} disabled={deleteSaving}>
+                  {deleteSaving ? 'Deleting…' : 'Confirm Delete'}
+                </button>
+                <button style={{ ...styles.btn('secondary'), fontSize: '12px' }} onClick={() => setDeleteTarget(null)}>Cancel</button>
+              </div>
+            </div>
+          )}
 
-### Audit 6 — role access (6 findings)
-| ID | Sev | Finding | Status |
-|---|---|---|---|
-| A6-1 | High | weekly_labour_payroll readable by every role | DONE 2026-10-29 (= A1-7) |
-| A6-2 | High | marketers could read every invoice, invoice line and payment | DONE 2026-10-29 — marketer sees only their own orders' documents (orders.marketer_id = their staff id) |
-| A6-3 | High | marketers could read every customer and site | DONE 2026-10-29 — own customers (added_by) or customers on their orders. Decision by planning chat, rejectable: portfolios private; BDM/MD/Accountant still see all. No marketer login active today |
-| A6-4 | Medium | board could list all staff-document records | DONE 2026-10-29 — MD, HR, ICO and the staff member only |
-| A6-5 | Medium | BDM opens Reports/KPI but can't read expenses | 2B (BDM sees no profit/cost figures; hide those views for BDM) |
-| A6-6 | Medium | invoice/order updates broader than the UI | DONE 2026-10-27 (invoice status/delete controls; order lines via replace_order_items) |
-Found while checking A6-2: the app loads a marketer's orders/customers by their login id, but orders.marketer_id and customers.added_by hold the STAFF id — a marketer would see an empty list. LATER (no marketer login active); fix in the next Orders PR: use userProfile.staff_id.
-Tests 2026-10-29 (rolled back): MD and BDM still see all 102 invoices / 55 payments / 126 customers; board sees 0 staff documents, ICO 2.
+          {/* Date range filter (mirrors Labour → Payroll) */}
+          <div style={{ display: 'flex', marginBottom: '14px', gap: '12px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            <div>
+              <label style={styles.label}>From</label>
+              <input type="date" style={{ ...styles.input, width: '148px' }} value={rangeFrom} onChange={e => setRangeFrom(e.target.value)} />
+            </div>
+            <div>
+              <label style={styles.label}>To</label>
+              <input type="date" style={{ ...styles.input, width: '148px' }} value={rangeTo} onChange={e => setRangeTo(e.target.value)} />
+            </div>
+            <div style={{ display: 'flex', gap: '8px', paddingBottom: '1px' }}>
+              <button style={{ ...styles.btn('secondary'), padding: '6px 10px' }} onClick={() => shiftRange(-1)}>‹</button>
+              <button style={{ ...styles.btn('secondary'), padding: '6px 10px' }} onClick={() => shiftRange(1)}>›</button>
+            </div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: theme.textMuted, cursor: 'pointer', paddingBottom: '6px' }}>
+              <input type="checkbox" checked={includeNull} onChange={e => setIncludeNull(e.target.checked)} />
+              Include entries with no date ({undatedCount})
+            </label>
+          </div>
+          {rangeFrom && rangeTo && rangeFrom > rangeTo && (
+            <div style={{ fontSize: '12px', color: theme.accent, marginBottom: '10px' }}>“From” is after “To” — showing only undated entries (if included). Swap the dates to see a range.</div>
+          )}
 
----
+          <div style={styles.card}>
+            {entriesLoading ? <Spinner /> : logs.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '20px', color: theme.textMuted }}>
+                No log entries in this range.
+                {!includeNull && undatedCount > 0 && <> Tick <em>“Include entries with no date ({undatedCount})”</em> above to show undated records.</>}
+              </div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={styles.table}>
+                  <thead>
+                    <tr>
+                      <th style={styles.th}>Date</th>
+                      <th style={styles.th}>Product</th>
+                      <th style={styles.th}>Vehicle</th>
+                      <th style={styles.th}>Trip #</th>
+                      <th style={styles.th}>Qty Loaded</th>
+                      <th style={styles.th}>Rate Used</th>
+                      <th style={styles.th}>Total</th>
+                      <th style={styles.th}>Loaders</th>
+                      {canDelete && <th style={styles.th}></th>}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {logs.map(log => {
+                      const isHistorical = log.date && log.created_at && log.date < log.created_at.split('T')[0];
+                      const isPaid = log.payment_status === 'paid';
+                      // Content lock mirrors the DB guard (truck_loading_content_guard):
+                      // unlinked logs are always editable; a linked log is editable only
+                      // while its payroll is still 'draft'. Missing linked payroll →
+                      // treat as editable (nothing is actively locking it).
+                      const payrollStatus = log.payroll?.status;
+                      const payrollEditable = !log.payroll_id || !payrollStatus || payrollStatus === 'draft';
+                      const logLoaderIds = (log.loaders || []).map(l => l.labour_id);
+                      const logLoaderNames = logLoaderIds.map(lid => {
+                        const a = assignments.find(a => a.labour_id === lid);
+                        return a?.worker?.full_name || lid;
+                      });
+                      return (
+                        <tr key={log.id}>
+                          <td style={styles.td}>
+                            {log.date ? fmtDate(log.date) : <span style={{ fontSize: '12px', padding: '1px 6px', borderRadius: '4px', background: theme.red + '22', color: theme.red, border: `1px solid ${theme.red}44`, fontWeight: '700' }}>no date</span>}
+                            {isHistorical && <span style={{ marginLeft: '6px', fontSize: '12px', padding: '1px 6px', borderRadius: '4px', background: '#f59e0b22', color: '#f59e0b', border: '1px solid #f59e0b44', fontWeight: '700' }}>Historical</span>}
+                            <div className="m-only" style={{ fontSize: '13px' }}>{log.product?.name || '—'}</div>
+                          </td>
+                          <td className="m-hide" style={styles.td}>{log.product?.name || '—'}</td>
+                          <td style={styles.td}>{log.vehicle?.vehicle_number || '—'}</td>
+                          <td style={styles.td}>{log.trip_number_for_day ?? '—'}</td>
+                          <td className="m-key" style={styles.td}>{fmt(log.quantity_loaded)}</td>
+                          <td style={styles.td}>{log.computed_rate_used != null ? naira(log.computed_rate_used) : '—'}</td>
+                          <td style={styles.td}>{log.total_amount != null ? naira(log.total_amount) : '—'}</td>
+                          <td style={styles.td}>
+                            {logLoaderNames.length > 0
+                              ? <span style={{ fontSize: '12px', color: theme.textMuted }}>{logLoaderNames.join(', ')}</span>
+                              : <span style={{ fontSize: '12px', color: theme.textDim }}>—</span>}
+                          </td>
+                          {canDelete && (
+                            <td className="m-actions" style={styles.td}>
+                              <div style={{ display: 'flex', gap: '8px' }}>
+                                {payrollEditable ? (
+                                  <button style={{ ...styles.btn('secondary'), fontSize: '12px', padding: '3px 10px' }} onClick={() => {
+                                    setEditingLogId(log.id);
+                                    setEditLogForm({ vehicle_id: log.vehicle_id || '', product_id: log.product_id || '', date: log.date || '', quantity_loaded: String(log.quantity_loaded || '') });
+                                    setEditLogLoaders(logLoaderIds);
+                                    setShowLogForm(false);
+                                  }}>Edit</button>
+                                ) : (
+                                  <span title="Locked: linked to an approved/paid payroll" style={{ fontSize: '12px', color: theme.textMuted, padding: '3px 6px' }}>{isPaid ? 'Paid' : 'Locked'}</span>
+                                )}
+                                <button style={{ ...styles.btn('danger'), fontSize: '12px', padding: '3px 10px' }} onClick={() => setDeleteTarget(log.id)} disabled={!payrollEditable}>Delete</button>
+                              </div>
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
-## 13. SITE RECORDING PLAN — Kado & Life Camp (MD approved 2026-11-18)
+      {/* ── Rates ── */}
+      {tab === 'rates' && (
+        <div>
+          {rateAlert && <Alert msg={rateAlert.msg} type={rateAlert.type} onClose={() => setRateAlert(null)} />}
+          <div style={styles.card}>
+            {!ratesLoaded ? <Spinner /> : rates.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '20px', color: theme.textMuted }}>No rates configured.</div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={styles.table}>
+                  <thead>
+                    <tr>
+                      <th style={styles.th}>Product</th>
+                      <th style={styles.th}>Base Rate / Trip</th>
+                      <th style={styles.th}>Trip Threshold</th>
+                      <th style={styles.th}>Incentive Rate</th>
+                      {canManageRates && <th style={styles.th}></th>}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rates.map(r => (
+                      <tr key={r.id}>
+                        <td style={styles.td}>{r.product?.name || '—'}</td>
+                        {editingRate === r.id ? (
+                          <>
+                            <td style={styles.td}><input className="m-full" type="number" inputMode="decimal" style={{ ...styles.input, width: '110px' }} value={rateForm.base_rate ?? ''} onChange={e => setRateForm(f => ({ ...f, base_rate: e.target.value }))} /></td>
+                            <td style={styles.td}><input className="m-full" type="number" inputMode="numeric" style={{ ...styles.input, width: '80px' }} value={rateForm.trip_threshold ?? ''} onChange={e => setRateForm(f => ({ ...f, trip_threshold: e.target.value }))} /></td>
+                            <td style={styles.td}><input className="m-full" type="number" inputMode="decimal" style={{ ...styles.input, width: '110px' }} value={rateForm.incentive_rate ?? ''} onChange={e => setRateForm(f => ({ ...f, incentive_rate: e.target.value }))} /></td>
+                            <td className="m-actions" style={styles.td}>
+                              <div style={{ display: 'flex', gap: '8px' }}>
+                                <button style={{ ...styles.btn('primary'), fontSize: '12px', padding: '4px 10px' }} onClick={handleRateSave} disabled={rateSaving}>{rateSaving ? '…' : 'Save'}</button>
+                                <button style={{ ...styles.btn('secondary'), fontSize: '12px', padding: '4px 10px' }} onClick={() => setEditingRate(null)}>Cancel</button>
+                              </div>
+                            </td>
+                          </>
+                        ) : (
+                          <>
+                            <td className="m-key" style={styles.td}>{naira(r.base_rate)}</td>
+                            <td style={styles.td}>{r.trip_threshold ?? '—'}</td>
+                            <td style={styles.td}>{r.incentive_rate != null ? naira(r.incentive_rate) : '—'}</td>
+                            {canManageRates && (
+                              <td className="m-actions" style={styles.td}>
+                                <button style={{ ...styles.btn('secondary'), fontSize: '12px', padding: '4px 10px' }}
+                                  onClick={() => { setEditingRate(r.id); setRateForm({ base_rate: r.base_rate ?? '', trip_threshold: r.trip_threshold ?? '', incentive_rate: r.incentive_rate ?? '' }); }}>
+                                  Edit
+                                </button>
+                              </td>
+                            )}
+                          </>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
-**Context (live check 2026-11-18).** Production has started at both client sites; Dutse production is on hold. Site managers: **Umar Mohammed Idris — Kado** (assistant_production_manager, can already record) and **Abubakar Suleman Aliyu — Life Camp** (logistics_manager, cannot record production/batches/handovers/roster). Recording is near zero: Kado's app entries stop at 12 Nov (WhatsApp reports exist for 16–17 Nov); Life Camp has nothing in the app. Both contract cycles still show "awaiting payment, not started". No material receipts at either site (Kado items negative: cement −48 bags, diesel −60 L). Site managers currently report by WhatsApp each evening.
+    </div>
+  );
+};
 
-**Contract models (already modelled in the app):**
-- **Kado — Sequoia, full supply (materials + labour).** ₦1,000 per 9", ₦969 per 6" (app holds ₦960 — to correct). Phase 1 = 125,000 9" + 25,000 6". Sequoia has paid ₦12m against phase 1 (MD, 2026-11-18). APCL funds all materials, so production value must be tracked against money received.
-- **Life Camp — Bilaad, labour only.** ₦241 per *accepted* block; Bilaad funds materials through its own procurement. Award BR/PMO/BALI GROVE/APCL/2026/001 + NEC4 ECSC, signed.
+// ── TRADING MARGIN REPORT ─────────────────────────────────────
+const TradingMarginReport = () => {
+  const [rows, setRows]       = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError]     = useState(null);
 
-### Bilaad contract rules the app must follow
-- **Cement yield is contractual:** planning yields 40 9" and 43 6" blocks per 50 kg bag, 1% production damage allowance (Award 3a). Material ratios cannot change without Bilaad's written approval, and unexplained material variance holds back certification (Clause 7). First Life Camp WhatsApp report shows **26 blocks/bag** — investigate immediately.
-- **Production only against an approved written requisition** (3c). Mobilisation advance ₦10,542,665.50 covers the initial target 30,162 9" + 13,583 6" = 43,745; all of it must be accepted before the next payment is certified (6a, 6c).
-- **Batch-level records** of materials received and consumed, gross production, rejected blocks, wastage and material balances (3c); receipts, consumption, gross production, rejected and accepted reconciled separately (3a).
-- **Acceptance:** inspected and verified by Bilaad's Site Inventory Officer (and technical rep where required) and satisfied by Bilaad QMU. **No deemed acceptance** — app correctly leaves Bilaad handovers pending until signed.
-- **After acceptance** blocks are in Bilaad's inventory; release to Trifekta Projects only on the Project Manager's instruction with issue notes and signed delivery acknowledgements (3e). APCL is not liable after handover.
-- **Certificates:** cumulative accepted × ₦241 − all previous gross payments (incl. mobilisation); withholding tax deducted from each; needs invoice + verified production and material records (6d).
-- **Completion:** 63 days from starting date (starting date = 7 days after mobilisation received). No delay damages stated. Programme of Work must be approved before commencement and kept updated.
-- **Idle period (Clause 9):** other customers only if production is blocked by Bilaad dependencies for more than 3 weeks, with prior written notice **and** Bilaad's approval, using no Bilaad materials.
-- **Plant:** the award names the QTJ4-26B for Bali Grove; the app shows the QTJ4-40 there and the QTJ4-26B at Kado — regularise in writing.
+  useEffect(() => {
+    supabase.rpc('get_order_trading_margin')
+      .then(({ data, error: e }) => {
+        if (e) throw e;
+        const normalized = (data || []).map(r => {
+          const sale     = Number(r.resale_sale_amount)     || 0;
+          const purchase = Number(r.purchase_cost)          || 0;
+          const fuel     = Number(r.attributed_fuel_cost)   || 0;
+          const loading  = Number(r.attributed_loading_cost)|| 0;
+          const haulage  = Number(r.attributed_haulage_cost)|| 0;
+          const landed   = purchase + fuel + loading + haulage;
+          return { ...r, sale_amount: sale, purchase_cost: purchase, gross_margin: sale - purchase, fuel_cost: fuel, loading_cost: loading, haulage_cost: haulage, landed_cost: landed, true_margin: sale - landed };
+        });
+        setRows(normalized);
+      })
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
 
-### Who does what
-| Person | Responsible for |
-|---|---|
-| Site manager | Everything at their site, recorded the same day |
-| Client rep (Sequoia / Bilaad Site Inventory Officer) | Signing every handover |
-| ICO | Monday check: paper book vs app vs Friday count; differences to MD within a day |
-| MD / Accountant | Client payments (gross and WHT) and site expenses |
+  const totals = rows.reduce((acc, r) => ({
+    sale:          acc.sale          + (r.sale_amount   || 0),
+    purchase:      acc.purchase      + (r.purchase_cost || 0),
+    grossMargin:   acc.grossMargin   + (r.gross_margin  || 0),
+    fuel:          acc.fuel          + (r.fuel_cost     || 0),
+    loading:       acc.loading       + (r.loading_cost  || 0),
+    haulage:       acc.haulage       + (r.haulage_cost  || 0),
+    landed:        acc.landed        + (r.landed_cost   || 0),
+    trueMargin:    acc.trueMargin    + (r.true_margin   || 0),
+  }), { sale: 0, purchase: 0, grossMargin: 0, fuel: 0, loading: 0, haulage: 0, landed: 0, trueMargin: 0 });
 
-### Daily routine — one entry, two outputs
-- One daily form per site, shaped by the contract: date; blocks by type (9" and 6" separately); breakage; cement bags; dust (**tonnes**); diesel (litres); names of workers present. Kado also records material purchases with prices; Life Camp records Bilaad's deliveries as quantities only.
-- The app calculates cost per block (Kado), blocks per bag against the contract yield (Life Camp 40/43), output against plan, days of materials left. Managers never type prices; Kado prices come from purchase receipts.
-- **"Send to WhatsApp" button** produces the evening report in today's format from the app entry — no app entry, no WhatsApp report.
-- Materials received: quantity delivered/accepted/rejected + photo of delivery note. Machine downtime and stacking breakage when they happen. Friday yard + materials count, signed, photographed — the yard count separates APCL's unaccepted blocks from blocks already accepted into the client's inventory.
+  const pct = (num, den) => den > 0 ? ((num / den) * 100).toFixed(1) + '%' : '—';
+  const mc  = v => v > 0 ? theme.green : v < 0 ? theme.red : theme.textMuted;
 
-### Deliveries
-- **Blocks do not leave client plots by truck** (MD, 2026-11-18): the app refuses waybills at client sites; the handover is the delivery. If the idle clause is ever used for other customers, add site sales then.
-- Each day's production becomes a batch automatically, ready after curing (14 days for 9"/6"). The handover screen shows cured blocks available and warns above that.
-- Handover recorded the same day: quantity by type, client rep's name, photo of signed note; accept/reject with reason.
-- Accepted blocks drive billing. Life Camp: certificate value per the rule above, WHT recorded. Kado: warn before produced value exceeds money received / paid milestone.
-- Friday check: produced − breakage − handed over = blocks in the yard.
+  const SummaryCard = ({ label, value, sub, color }) => (
+    <div style={{ flex: 1, minWidth: '160px', background: theme.card, border: `1px solid ${theme.border}`, borderRadius: '10px', padding: '16px 18px' }}>
+      <div style={{ fontSize: '10px', fontWeight: '700', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '6px' }}>{label}</div>
+      <div style={{ fontSize: '19px', fontWeight: '700', color }}>{value}</div>
+      {sub && <div style={{ fontSize: '11px', color, opacity: 0.75, marginTop: '2px' }}>{sub} of sales</div>}
+    </div>
+  );
 
-### Rules
-- Same day; anything entered >24 h late needs a reason, reviewed by the ICO.
-- No block leaves without a handover record.
-- Corrections go through the ICO and MD; nobody edits past days.
-- Production at Life Camp only against an approved Bilaad requisition.
+  const thD = { ...styles.th, color: '#f59e0b' };
+  const tdD = (v) => ({ ...styles.td, color: v > 0 ? '#f59e0b' : theme.textMuted });
 
-### Catch-up (this week)
-- Start cycle 1 at both sites: start date, mix (Life Camp 30,162 / 13,583; Sequoia per its schedule), payments received (Sequoia ₦12m; Bilaad mobilisation if received). Correct Kado 6" price to ₦969; confirm Kado milestone size (app 25,000; agreed 50,000 combined).
-- Kado: all material deliveries; production from 13 Nov onward from the book and WhatsApp reports.
-- Life Camp: everything since production started — Bilaad's materials, production, roster, requisition.
-- ICO checks the catch-up against the books before sign-off.
+  return (
+    <div>
+      <div className="m-header" style={styles.header}>
+        <div>
+          <div style={styles.pageTitle}>Trading Margin Report</div>
+          <div style={styles.pageSubtitle}>Per-order gross margin vs. true margin after delivery costs</div>
+        </div>
+      </div>
 
-### App build order
-| Step | What | Who |
-|---|---|---|
-| A | Site Manager role locked to one site: site fills itself and cannot be changed; nothing defaults to Dutse; waybills refused at client sites; can raise site payment requests | Planning chat (database) |
-| B | Site Manager home screen: one daily form per contract, WhatsApp share, handover with cured-stock check, site figures | Codex, reviewed by planning chat |
-| C | Install to home screen and stay signed in (mobile stage 1) | Codex, reviewed by planning chat |
-Interim until A–C: Umar records Kado now; Abubakar gets a temporary assistant_production_manager grant.
+      {!loading && !error && rows.length > 0 && (
+        <div style={{ display: 'flex', gap: '12px', marginBottom: '20px', flexWrap: 'wrap' }}>
+          <SummaryCard label="Total Sale Value"   value={naira(totals.sale)}        color={theme.text} />
+          <SummaryCard label="Gross Margin"        value={naira(totals.grossMargin)} sub={pct(totals.grossMargin, totals.sale)} color={mc(totals.grossMargin)} />
+          <SummaryCard label="Total Delivery Costs" value={naira(totals.fuel + totals.loading + totals.haulage)} sub={pct(totals.fuel + totals.loading + totals.haulage, totals.sale)} color="#f59e0b" />
+          <SummaryCard label="True Margin"         value={naira(totals.trueMargin)}  sub={pct(totals.trueMargin, totals.sale)}  color={mc(totals.trueMargin)} />
+        </div>
+      )}
 
-**Step A — DONE 2026-11-18** (migration `20261118163957_site_manager_assigned_site_lock`). Implemented as a site *assignment* (`user_profiles.assigned_site_id`, MD-only) rather than a new role, so it works with today's screens: anyone with an assigned site has the site filled automatically, cannot record for, see or change another site's production, damage, batches, handovers, material receipts, roster, downtime, stock or payment requests, and cannot create waybills at a client site. Site-assigned users can raise payment requests for their site. Verified with rolled-back tests as each user; MD and ICO unchanged. Applied: Umar → Kado; Abubakar → Life Camp, plus assistant_production_manager grant to 31 Dec 2026. Material receipt function confirmed to change stock exactly once.
-**Payments recorded 2026-11-18** (TAJ 0001732895): Sequoia ₦5,000,000 (22 Oct) + ₦7,000,000 (25 Oct) against Kado cycle 1; Bilaad ₦10,542,665.50 mobilisation (6 Nov, paid gross — WHT expected on the next certificate) against Life Camp cycle 1. Life Camp cycle 1 = 30,162 9" + 13,583 6", active from 13 Nov (contract start); completion 15 Jan 2027. Kado cycle 1 active from 10 Nov, started before full payment on MD's decision (first job with Sequoia); milestone size and 9"/6" split still to confirm from Sequoia's schedule. Kado 6" price corrected to ₦969. Note: TAJ alert shows ₦11,354,561.99 available on 6 Nov against the app's recorded ₦97,979.48.
+      <div style={styles.card}>
+        {loading ? <Spinner /> : error ? (
+          <div style={{ color: theme.red, padding: '20px', fontSize: '13px' }}>{error}</div>
+        ) : rows.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '30px', color: theme.textMuted }}>No orders with resale line items found.</div>
+        ) : (
+          <>
+            <div style={{ fontSize: '11px', color: theme.textMuted, marginBottom: '14px' }}>
+              <span style={{ color: theme.green }}>■</span> Gross margin (before delivery) &nbsp;
+              <span style={{ color: '#f59e0b' }}>■</span> Delivery cost drag (fuel · loading · haulage) &nbsp;
+              <span style={{ color: theme.green }}>■</span>/<span style={{ color: theme.red }}>■</span> True margin (after delivery)
+            </div>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={styles.table}>
+                <thead>
+                  <tr>
+                    <th style={styles.th}>Reference</th>
+                    <th style={styles.th}>Customer</th>
+                    <th style={styles.th}>Date</th>
+                    <th style={styles.th}>Sale Amount</th>
+                    <th style={styles.th}>Purchase Cost</th>
+                    <th style={{ ...styles.th, color: theme.green }}>Gross Margin</th>
+                    <th style={thD}>Fuel Cost</th>
+                    <th style={thD}>Loading Cost</th>
+                    <th style={thD}>Haulage Cost</th>
+                    <th style={styles.th}>Landed Cost</th>
+                    <th style={{ ...styles.th, color: theme.green }}>True Margin</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r, i) => {
+                    const drag = (r.gross_margin || 0) - (r.true_margin || 0);
+                    return (
+                      <tr key={r.order_id || i}>
+                        <td style={styles.td}><strong style={{ fontFamily: 'monospace', fontSize: '12px' }}>{r.invoice_number || (r.order_id ? r.order_id.slice(0, 8) + ' (not invoiced)' : '—')}</strong></td>
+                        <td style={styles.td}>{r.customer_name || '—'}</td>
+                        <td style={styles.td}>{fmtDate(r.order_date)}</td>
+                        <td style={styles.td}><strong>{naira(r.sale_amount)}</strong></td>
+                        <td style={styles.td}>{naira(r.purchase_cost)}</td>
+                        <td style={styles.td}>
+                          <div style={{ fontWeight: '700', color: mc(r.gross_margin) }}>{naira(r.gross_margin)}</div>
+                          <div style={{ fontSize: '11px', color: theme.textMuted }}>{pct(r.gross_margin, r.sale_amount)}</div>
+                        </td>
+                        <td style={tdD(r.fuel_cost)}>{naira(r.fuel_cost || 0)}</td>
+                        <td style={tdD(r.loading_cost)}>{naira(r.loading_cost || 0)}</td>
+                        <td style={tdD(r.haulage_cost)}>{naira(r.haulage_cost || 0)}</td>
+                        <td style={styles.td}>{naira(r.landed_cost)}</td>
+                        <td style={styles.td}>
+                          <div style={{ fontWeight: '700', color: mc(r.true_margin) }}>{naira(r.true_margin)}</div>
+                          <div style={{ fontSize: '11px', color: theme.textMuted }}>{pct(r.true_margin, r.sale_amount)}</div>
+                          {drag > 0 && (
+                            <div style={{ fontSize: '10px', color: '#f59e0b', marginTop: '2px' }}><IconText icon={TrendingDown} size={12}>{naira(drag)} delivery drag</IconText></div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr style={{ background: theme.surface, fontWeight: '600' }}>
+                    <td colSpan={3} style={{ ...styles.td, fontWeight: '700', color: theme.textMuted }}>Totals ({rows.length} orders)</td>
+                    <td style={styles.td}><strong>{naira(totals.sale)}</strong></td>
+                    <td style={styles.td}>{naira(totals.purchase)}</td>
+                    <td style={styles.td}>
+                      <div style={{ fontWeight: '700', color: mc(totals.grossMargin) }}>{naira(totals.grossMargin)}</div>
+                      <div style={{ fontSize: '11px', color: theme.textMuted }}>{pct(totals.grossMargin, totals.sale)}</div>
+                    </td>
+                    <td style={{ ...styles.td, color: '#f59e0b', fontWeight: '700' }}>{naira(totals.fuel)}</td>
+                    <td style={{ ...styles.td, color: '#f59e0b', fontWeight: '700' }}>{naira(totals.loading)}</td>
+                    <td style={{ ...styles.td, color: '#f59e0b', fontWeight: '700' }}>{naira(totals.haulage)}</td>
+                    <td style={{ ...styles.td, fontWeight: '700' }}>{naira(totals.landed)}</td>
+                    <td style={styles.td}>
+                      <div style={{ fontWeight: '700', color: mc(totals.trueMargin) }}>{naira(totals.trueMargin)}</div>
+                      <div style={{ fontSize: '11px', color: theme.textMuted }}>{pct(totals.trueMargin, totals.sale)}</div>
+                      {totals.grossMargin > totals.trueMargin && (
+                        <div style={{ fontSize: '10px', color: '#f59e0b', marginTop: '2px' }}><IconText icon={TrendingDown} size={12}>{naira(totals.grossMargin - totals.trueMargin)} total delivery drag</IconText></div>
+                      )}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
 
-### B1 and late-entry rule (2026-11-18)
-- **B1 — DONE:** PR #138 merged (afe3e21) and `production_materials_in_db` switched ON 18 Nov 21:40. Dust is calculated as blocks produced (gross, incl. breakage) × kg per block from `site_block_standards` (MD: 9" 23 kg, 6" 20 kg at Kado and Life Camp; MD-editable in Products). The database posts all production materials. Kado's three earlier entries recalculated (they had been typed in tonnes): dust stock −43,493 kg until deliveries are entered. Material Receiving defaults dust/chippings to tonnes and confirms any kg delivery under 100.
-- **Late-entry rule (MD 2026-11-18) — database live, enforcement OFF:** production, standalone damage, waybills, handovers, material receipts, roster and downtime may be entered up to 1 day after their date. Every older entry (insert, or an edit that moves its date) is logged to `late_entries` for ICO review from now on. Future dates are refused except on waybills. When `late_entry_reason_required` is switched ON (after the screens collect `late_reason`), older entries without a reason (10+ characters) are refused. `record_material_receipt` gained `p_late_reason`. ICO/MD review via `review_late_entry`.
+// ── NAV ───────────────────────────────────────────────────────
+const navItems = [
+  { section: "Overview", items: [{ id: "dashboard", label: "Dashboard", icon: "dashboard" }] },
+  { section: "Production", items: [
+    { id: "production", label: "Production", icon: "production" },
+    { id: "site_attendance", label: "Site Attendance", icon: "site_attendance" },
+    { id: "inventory", label: "Inventory", icon: "inventory" },
+    { id: "stock_counts", label: "Stock Count", icon: "stock_counts" },
+    { id: "batches", label: "Batches", icon: "batches" },
+    { id: "maintenance", label: "Maintenance", icon: "maintenance" },
+    { id: "asset_register", label: "Asset Register", icon: "asset_register" },
+    { id: "site_contracts", label: "Site Contracts", icon: "site_contracts" },
+    { id: "material_receiving", label: "Material Receiving", icon: "material_receiving" },
+    { id: "requisitions", label: "Material Requisitions", icon: "requisitions" },
+    { id: "site_scorecard", label: "Daily Scorecard", icon: "site_scorecard" },
+    { id: "production_exceptions", label: "Budget Warnings", icon: "production_exceptions" },
+    { id: "handovers", label: "Handovers", icon: "handovers" },
+  ]},
+  { section: "Logistics", items: [
+    { id: "waybills", label: "Waybills", icon: "waybills" },
+    { id: "vehicles", label: "Vehicles", icon: "vehicles" },
+    { id: "truck_loading", label: "Truck Loading", icon: "truck_loading" },
+    { id: "pending_register", label: "Pending Deliveries", icon: "pending_register" },
+    { id: "daily_schedule", label: "Daily Schedule", icon: "daily_schedule" },
+  ]},
+  { section: "HR & Workforce", items: [
+    { id: "staff", label: "Staff", icon: "staff" },
+    { id: "payroll_approvals", label: "Payroll approvals", icon: "accounting" },
+    { id: "labour", label: "Labour", icon: "labour" },
+    { id: "disciplinary", label: "Disciplinary", icon: "disciplinary" },
+    { id: "attendance_kiosk", label: "Attendance Kiosk", icon: "attendance_kiosk" },
+    { id: "attendance_flags", label: "Attendance Flags", icon: "attendance_flags" },
+    { id: "leave", label: "Leave Requests", icon: "leave" },
+    { id: "advances", label: "Salary Advances", icon: "advances" },
+  ]},
+  { section: "Sales", items: [{ id: "customers", label: "Customers", icon: "customers" }, { id: "orders", label: "Orders & Invoicing", icon: "orders" }] },
+  { section: "Approvals", items: [
+    { id: "lpo_approvals", label: "LPO Approvals", icon: "lpo_approvals" },
+    { id: "schedule_approvals", label: "Schedule Approvals", icon: "schedule_approvals" },
+    { id: "late_entries", label: "Late entries", icon: "late_entries" },
+  ]},
+  { section: "Analytics", items: [
+    { id: "reports", label: "Reports", icon: "reports" },
+    { id: "kpi_dashboard", label: "KPI Dashboard", icon: "kpi_dashboard" },
+    { id: "trading_margin", label: "Trading Margin", icon: "trading_margin" },
+  ]},
+  { section: "Finance", items: [
+    { id: "accounting", label: "Accounting", icon: "accounting" },
+    { id: "staff_tasks", label: "Staff Tasks", icon: "staff_tasks" },
+    { id: "payment_requests", label: "Payment Requests", icon: "payment_requests" },
+  ]},
+  { section: "Investors (SPV)", items: [
+    { id: "my_investment", label: "My Investment", icon: "my_investment" },
+    { id: "investor_register", label: "Investor Register", icon: "investor_register" },
+    { id: "capital", label: "Capital", icon: "capital" },
+    { id: "terms", label: "Terms", icon: "terms" },
+    { id: "monthly_close", label: "Monthly Close", icon: "monthly_close" },
+    { id: "spv_ledger", label: "SPV Ledger", icon: "spv_ledger" },
+    { id: "reserve_budget", label: "Reserve Budget", icon: "reserve_budget" },
+  ]},
+  { section: "Settings", items: [
+    { id: "products", label: "Products", icon: "products" },
+    { id: "suppliers", label: "Suppliers", icon: "suppliers" },
+    { id: "data_import", label: "Data Import", icon: "data_import" },
+    { id: "user_management", label: "User Management", icon: "user_management" },
+  ]},
+  { section: "Account", items: [
+    { id: "messages", label: "Messages", icon: "messages" },
+    { id: "my_hr", label: "My HR", icon: "my_hr" },
+    { id: "my_profile", label: "My Profile", icon: "my_profile" },
+  ]},
+];
 
-### Recorder stamp and staff cleanup (2026-11-19)
-- **Production recorder — DONE** (migration `20261119051556_production_log_recorded_by_stamp`): none of the 96 production records had `recorded_by` filled; the screens never sent it. The database now sets it from the login's staff link on every new entry (whatever the form sends) and keeps it unchanged on later edits (`updated_by` tracks edits). Verified with a rolled-back test as Umar. Kado entries for 16–18 Nov backfilled to Umar (entered 21:57–22:03 on 18 Nov; late-entry log names him for 16 Nov; he confirmed at 22:10); their stock movements checked unchanged. Earlier Kado entries (10–12 Nov) and all Dutse entries stay blank.
-- **Late-entry rule switched ON** 18 Nov 22:21 after PR #140 was live; Umar's 16 Nov entry (21:57) predates it, so it is logged for ICO review without a reason.
-- **#141 merged and live** 18 Nov: site forms open on the user's assigned site as fixed text.
-- **Staff cleanup (MD 2026-11-19: every deactivated login is a leaver):** three test logins (two accountant, one production manager) switched off and blocked from sign-in; attendance PINs switched off for all 9 leavers (the kiosk drops them on its next sync); Emmanuel Igbudu and Godfrey Micah marked terminated. MD: keep all advances and their requests — leaver advances and Auwalu's open leave request left as they were. Abubakar's profile name corrected (67 of his records renamed; 4 approved/paid payrolls are locked and keep the old name).
-- **Open from cleanup:** fired vs resigned, last day and reason for each leaver; new line manager for Ransom Abang Osang, Ibrahim Abdullahi and Musa Tahir (reported to Auwalu); Auwalu's 42 unfinished payment requests (₦14.0m) and 12 paid-but-not-closed (₦1.69m) await ICO; system-wide 102 approved requests (₦16.4m) never marked paid; the app has no way to cancel a payment request; deactivating a staff member does not switch off their PIN and rejecting an advance does not clear its balance (both need a database fix); Auwal Saleh clocked in on 5 Nov — confirm his last day.
-- **Next frontend PR (b4):** site managers can raise payment requests for their site — prompt issued 19 Nov.
+// ── ROLE GRANTS (MD-only) ─────────────────────────────────────
+// Temporary additional roles: grant/revoke, with a separation-of-duties
+// warning (advisory — MD may accept and proceed). MD is never grantable.
+export const RoleGrantsManager = ({ users }) => {
+  const [grants, setGrants]   = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [gErr, setGErr]       = useState('');
+  const [gOk, setGOk]         = useState('');
+  const [form, setForm]       = useState({ user_id: '', role: '', reason: '', expires_at: '' });
+  const [conflict, setConflict] = useState(null);   // warning string awaiting confirmation
+  const [busy, setBusy]       = useState(false);
+  const [revoking, setRevoking] = useState(null);
 
-### Client material requisitions — Life Camp (MD 2026-11-19)
-- **Flow (MD approved):** site manager raises → MD approves → marked sent to the client PM (Bilaad: Abdulkadir, Bali Grove PM) → client approval recorded (who, date, screenshot). ICO sees all, does not hold. Needed-by at least tomorrow (MD gives Bilaad 24 h notice).
-- **Requisition 1 (MD):** Bilaad's own figures — 11,994 9" + 4,255 6" = 16,249 (Award target is 43,745; MD accepts 16k first). At 50% of the current approved requisition the app asks for the balance (18,168 9" + 9,328 6") and, once sent, reminds daily until Bilaad approves; every reminder is logged as Clause 9 evidence.
-- **Materials:** contract yields 40 / 43 blocks per bag + 1% (Award 3a); 23 kg (9") / 20 kg (6") = dust and 3/8 together (MD: cement weight negligible) with an optional 3/8 figure per block; diesel 20 L per 1,000 blocks (Kado actual) until Life Camp's own is known. Requisition 1 calculated: cement 403 bags, dust+3/8 364.6 t, diesel 329 L. Lines editable until MD approval.
-- **Database — DONE** (`20261119063612_client_material_requisitions`, `20261119063711_client_requisition_progress_order_by_reference`): `client_requisitions` / `_lines` / `_events`; RPCs `create_client_requisition`, `set_client_requisition_line`, `advance_client_requisition` (submit, return, approve, mark_sent, record_client_approval, close, cancel, log_reminder), `client_requisition_progress(site)`, `client_requisition_supplied(req)`; `material_receipts.requisition_id` via `record_material_receipt(..., p_requisition_id)`; `site_block_standards` + `chippings_kg_per_block`, `blocks_per_bag`, `diesel_l_per_1000`; Life Camp 3/8 stock item (Bilaad-owned). Read-only tables; writes only through the RPCs; visible to MD/ICO/accountant/board/production manager and the site's assigned users. Inert until the screens ship.
-- **Live check 19 Nov:** Abubakar entered 17 Nov (690 9", 27 bags) and 18 Nov (771 9", 27 bags) at 07:14 — **25.6 and 28.6 blocks per bag against the contract's 40**; at that rate 403 bags make about 10,900 blocks, not 16,249, and Clause 7 holds back certification for unexplained material variance. Life Camp pace ~700–770/day, so 16,249 lasts ~3 weeks and the 50% point comes ~day 11.
-- **Diesel cash from Bilaad — deferred:** Clause 3b bars APCL buying at Bilaad's expense without prior written authorisation. Get it in writing first; then record Bilaad's diesel money as funds held (not income) and each purchase as a Life Camp payment request against it (needs accounting design — payment requests post an APCL expense today).
-- **Next:** Codex screens (Requisitions page, Material Receiving link, standards fields, notification link).
-### Production variance exceptions (MD 2026-11-19)
-- **MD:** warn whenever production parameters fall below or over budget; the site manager must explain; MD and ICO comment and ask questions; each requisition compared to budget. Life Camp 17–18 Nov were test production (MD) — they will be the first exceptions, explained as such (Clause 7 record).
-- **Decisions:** checked per site per day against `site_block_standards` — cement (blocks per bag) and diesel (L per 1,000 blocks) in both directions outside the site tolerance (default 5%, MD-editable); breakage (production + stacking damage) only when over the site's breakage budget (default 1%, Award 3a). Dust is not checked daily (it is calculated); the Friday stock count checks it. Kado needs its blocks-per-bag and diesel standards set by the MD before cement/diesel checks apply there.
-- **Database — DONE, inert** (`20261119065817_production_variance_exceptions_and_requisition_budget`): `production_exceptions` + `_comments`; triggers on production_log and damage_log; `respond_production_exception(id, explain|comment|ask|close, text)`; notifications to the site's assigned users, MD and ICO at each step; `backfill_production_exceptions(from)`; `client_requisition_budget(req)` (budget, requested, received, budget for blocks made, used, variance). Flag `production_variance_checks` OFF until the screens ship; then switch on and backfill from 10 Nov.
-- **Next:** Codex b6 (exceptions screens, dashboard cards, requisition-vs-budget table, site tolerance settings) after b5.
+  // 'investor' is a separate external login (investors.user_id), never a grant.
+  const grantableRoles = APP_ROLES.filter(r => r.id !== 'md' && r.id !== 'investor');
+  const userName = (id) => users.find(u => u.id === id)?.full_name || users.find(u => u.id === id)?.email || 'Unknown';
+  const userPrimary = (id) => { const u = users.find(u => u.id === id); return u ? (APP_ROLES.find(r => r.id === u.role)?.label || u.role) : '—'; };
 
-### Budget warnings live (2026-11-19)
-- **Switched ON** 19 Nov after PR #147; backfilled from 10 Nov: 16 lines (Kado 10, Life Camp 6). Kado standards set: 40 / 43 blocks per bag; diesel 20 L per 1,000 (Kado's own figure from site reports — larger generator than Life Camp). Life Camp diesel stays 20 provisionally (matches requisition 1); its own figure to be proposed after the first full week (review scheduled 26 Nov). Life Camp 17–18 Nov = test production (MD).
-- **One warning per site per day (MD, `20261119083947_production_warnings_one_per_site_day`):** lines stay per parameter; one notification per site-day listing every line out; explain / ask / close act on the whole day; a line added later the same day sends one more note. Screens to group by day next (Codex b7).
-- **Duplicate-deduction check 19 Nov:** clean — one movement per material per entry since the switch; dust = blocks × standard.
+  const load = async () => {
+    setLoading(true);
+    try { setGrants(await authService.listActiveGrants()); }
+    catch (e) { setGErr(e?.message || 'Could not load grants'); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
 
-### Site scorecard — step B (MD 2026-11-19)
-- **Database — DONE** (`20261119165008_site_delivery_prices_and_material_costing`, `20261119165101_site_daily_scorecard`): price per unit on deliveries (`material_receipts.unit_cost`, `record_material_receipt(..., p_unit_cost)`); `inventory_items.unit_cost` is a running weighted average (replaced by the new price when stock is zero or negative); production consumption is costed at it; Bilaad (client) materials never priced; flag `site_delivery_price_required` (Kado price compulsory) OFF until the price field ships. Kado opening prices from Umar's 18 Nov report (MD): cement ₦11,600/bag, dust ₦17,000/t, diesel ₦1,970/L; Kado consumption 10–18 Nov costed at ₦2,863,452 = ~₦736 per block vs ₦791.29 budget (`production_sites.material_cost_budget_per_block`). `site_daily_scorecard(site, date)` returns quantities, yields and costs vs budget, labour from the roster, and the day's warning lines.
-- **Data fix 19 Nov:** all six Kado production entries had the day's dust tonnes typed into "Chippings (kg)" (e.g. 21.9 on 18 Nov). Cleared (no stock effect — Kado has no 3/8 item); Umar is still working dust out by hand. The 3/8 box comes off the form for sites with standards.
-- **Gaps for the scorecard:** no Kado roster has ever been recorded, so labour is blank until Umar records the daily roster; only one Kado delivery is recorded, so Kado stock is negative.
-- **Weekly review:** Kado and Life Camp diesel/cement standards reviewed 26 Nov (scheduled).
-- **Umar's Kado explanations (19 Nov):** MD asked questions back on 11 Nov (2.49% breakage) and 16–17 Nov (material box shifted three times — cause, fix, maintenance record; cement +10.5% on 17 Nov). 10 and 12 Nov await close.
+  // Grant: check conflict first; if the DB flags one, require explicit confirm.
+  const submitGrant = async (bypassConflict = false) => {
+    setGErr(''); setGOk('');
+    if (!form.user_id || !form.role) { setGErr('Pick a user and a role.'); return; }
+    if (form.role === 'md') { setGErr('MD cannot be granted.'); return; }
+    setBusy(true);
+    try {
+      if (!bypassConflict) {
+        const warning = await authService.checkRoleConflict(form.user_id, form.role);
+        if (warning) { setConflict(warning); setBusy(false); return; }
+      }
+      const expiresIso = form.expires_at ? form.expires_at + 'T23:59:59+01:00' : null;
+      await authService.grantRole(form.user_id, form.role, form.reason.trim() || null, expiresIso);
+      setConflict(null);
+      setForm({ user_id: '', role: '', reason: '', expires_at: '' });
+      setGOk('Role granted.');
+      setTimeout(() => setGOk(''), 3000);
+      await load();
+    } catch (e) { setGErr(e?.message || 'Grant failed.'); setConflict(null); }
+    finally { setBusy(false); }
+  };
 
-### Deliveries linked to payment requests + two fixes (MD 2026-11-19)
-- **Database — DONE** (`20261119190922_delivery_payment_request_link_and_small_fixes`):
-  - `material_receipts.payment_request_id`; `record_material_receipt(..., p_unit_cost, p_payment_request_id uuid default null)` (13 args; old 12-arg version dropped). Optional link, APCL items only, same site, request status `md_approved` / `funded` / `disbursed`, category with `closure_mechanism = 'stock_movements'`; Production Fuel ⇔ diesel, Raw Materials ⇔ not diesel. The 'in' stock movement carries the same `payment_request_id`.
-  - A `disbursed` request is **closed by the delivery** (audit row "Closed by delivery RCPT-…"). A request linked while still approved/funded closes the moment it is marked disbursed (`trg_zz_pr_close_when_delivered`, runs after the expense trigger so the expense is still created).
-  - One delivery closes a paid request, so a request covering several trucks closes on the first linked truck — the later trucks are recorded without a link. Revisit if this bites.
-  - Staff set to `terminated` or `suspended` have their attendance PIN switched off (`trg_zz_staff_pin_off_when_inactive`).
-  - `advance_salary_advance`: reject / cancel now set `outstanding_balance = 0` (existing rejected rows left as they are, per MD).
-- **Tested (rolled back):** paid request closes with audit; approved request closes on payment and still gets its expense; wrong material, wrong category, other site, pending/closed request and client item all refused; unlinked deliveries unchanged; suspend switches PIN off; rejected advance balance 0.
-- **Picker lookup** (`20261119191152_site_open_material_requests`): site staff can only read payment requests they raised, so `site_open_material_requests(site)` returns the site's approved/funded/paid Production Fuel and Raw Materials requests (whoever raised them) for the picker. Same roles as recording deliveries plus md/ico/accountant; site access via `can_see_site`.
-- **Note (19 Nov):** Kado has only one payment request ever (a draft diesel request by Umar), so Kado materials are currently bought outside payment requests. The link only helps once purchases go through payment requests.
-- **Frontend:** b9 — "Paid by payment request" picker on Material Receiving; linked deliveries shown on the payment request.
+  const revoke = async (g) => {
+    setRevoking(g.id);
+    try { await authService.revokeRole(g.user_id, g.role); await load(); }
+    catch (e) { setGErr(e?.message || 'Revoke failed.'); }
+    finally { setRevoking(null); }
+  };
 
-### Payment request clean-up and staff tasks (MD 2026-11-19)
-- **Data, 19 Nov:** MD confirmed every approved request was paid. 52 `md_approved` requests (₦8,301,800, raised 9 Jul–7 Aug by Auwalu 23, Emmanuel 7, Abubakar 22) set to `disbursed`, `transaction_date` = approval date, so their auto-created expenses fall in July (7, ₦2.49m) and August (45, ₦5.81m); audit note "Historical clean-up: MD confirmed on 19 Nov 2026…"; no notifications sent. APC-PR-00051 and APC-PR-00088 have no category. Bank statements in the app end 18 May, so payment could not be checked against the bank; APC-PR-00064 (₦3.42m, 300 bags cement) matches 300 bags received 25 Jul.
-- **Gap:** no payment request has been raised since early September — Sept–Nov spending (beyond payroll and roster) is not in the app. MD: Kayode backfills it.
-- **Database — DONE** (`20261119200301_staff_tasks_and_payment_role_grants`, `20261119200418_backfill_payment_request_with_site`):
-  - `advance_payment_request` and `backfill_payment_request` now honour granted roles (`has_any_role`, i.e. `user_role_grants`) instead of only `user_profiles.role`. Kayode (ico) holds accountant (to 31 Dec 2026) and hr_officer (to 11 Feb 2027) grants, so he can fund, disburse, close and override-close. MD accepted that he closes entries he backfills.
-  - Backfill allowed for ico and accountant too. `backfill_payment_request_at_site(p_site_id, …same args…)` puts backfilled spending (and its expense) on the right site; plain backfill still defaults to Dutse.
-  - `staff_tasks` + `staff_task_events` (read: assignee or MD; writes only through functions). Kinds: `manual` (checklist; assignee ticks; all ticked → `submitted`; MD confirms or returns) and `pr_closure` (list of payment requests; finishes itself when all are closed — trigger `trg_zz_staff_task_pr_closed`).
-  - Functions: `create_staff_task` (MD), `list_staff_tasks(p_include_closed)`, `tick_staff_task_item`, `submit_staff_task`, `review_staff_task(confirm|return|cancel)`, `comment_staff_task`.
-  - `run_staff_task_reminders()` via pg_cron `staff-task-reminders-daily` at 07:00 UTC (08:00 Lagos): one notification per open task per day to the assignee with progress; overdue → daily copy to MD; submitted → MD reminded to confirm.
-- **Kayode's tasks (created 19 Nov, due 4 Dec):** "Receipts for 95 paid payment requests (₦11,869,800)" (pr_closure) and "Backfill September–November 2026 spending" (checklist Sep / Oct / Nov).
-- **Frontend:** b10 — My Tasks on the profile, banner on every page, MD task page, payment request screens honouring granted roles, site on backfill.
+  const fmtD = fmtDay;
 
-### Every site day accounted for (MD 2026-11-19)
-- **Problem:** a day without production was a blank — no way to tell a rest day from a breakdown or a forgotten entry. Kado 13–15 Nov had nothing; no Kado or Life Camp roster ever; attendance not site-based. Idle-day wages fell out of cost per block.
-- **Database — DONE** (`20261119205758_site_day_status_and_daily_checks`, `20261119205826_site_day_status_breakdown_join_fix`):
-  - `production_sites.day_status_from` (Kado 10 Nov, Life Camp 17 Nov, Dutse null while on hold).
-  - `site_day_status` (one per site per day): reason `rest_day | breakdown | no_materials | no_diesel_power | rain | client_hold | other` (other needs a note), `staff_worked` + `work_done` (`stacking, offloading, maintenance, cleaning, other`) + note. Late-entry rules apply (`fn_entry_date` knows it). Writes only via `record_site_day_status(site, date, reason, note, staff_worked, work_done[], work_note, late_reason)` / `clear_site_day_status(site, date)`; roles md / production_manager / assistant_production_manager; site access enforced.
-  - Breakdown opens a downtime record for the site machine at 07:00 that day, or joins an open one that started on or before the day.
-  - Cannot mark a day that has production; production cannot be recorded on a marked day (`DAY_MARKED:` error) — remove the status first.
-  - `site_daily_scorecard` now returns `day_status` and `idle_labour`. New `site_day_overview(site, from, to)` (≤ 3 months): per day blocks, status, roster, labour and material cost, `missing_record`, `missing_roster`; totals incl. idle labour and cost per block with and without idle days.
-  - `run_site_day_checks()` via pg_cron `site-day-checks-daily` 05:05 UTC (06:05 Lagos): for yesterday, "no production and no day status" and/or "no labour roster" (when blocks were made or staff worked) → one notification to the site's users and the MD (`related_table = 'site_day_status'`, `related_id` = site).
-- **Open:** Umar to fill Kado 13–15 Nov; no Kado/Life Camp roster yet, so the roster warning fires daily until rosters are recorded.
-- **Fix 20 Nov** (`20261120042128_site_day_overview_null_cost_per_block`): cost per block is null (shown as —), not ₦0, when no material cost or labour is recorded (Life Camp: client materials, no roster).
-- **Frontend:** b11 — DONE (PR #157, live 20 Nov).
+  return (
+    <div style={{ ...styles.card, marginTop: '20px' }}>
+      <div style={{ fontWeight: '700', fontSize: '15px', marginBottom: '4px' }}>Role Grants — temporary additional roles</div>
+      <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '16px' }}>
+        Grant a user extra roles beyond their primary one (e.g. cover HR or accounting while short-staffed). MD cannot be granted. Grants default to 90 days if no expiry is set.
+      </div>
+      {gErr && <Alert msg={gErr} onClose={() => setGErr('')} />}
+      {gOk  && <Alert msg={gOk} type="success" onClose={() => setGOk('')} />}
 
-### Granted-role expiry warnings and one-step extend (MD 2026-11-20)
-- **Why:** Kayode's accountant grant (needed for the receipts/backfill tasks) and Abubakar's assistant production manager grant (needed to record Life Camp production, deliveries and day status) both end 31 Dec 2026; Kayode's HR grant ends 11 Feb 2027. Nothing warned anyone, and changing an end date meant revoke + re-grant.
-- **Database — DONE** (`20261120044500_role_grant_expiry_warnings_and_extend`, `20261120044510_extend_role_grant_keep_old_expiry`):
-  - `role_grant_events` (extended / warned_14 / warned_3 / ended_notice; one warning of each kind per end date).
-  - `extend_role_grant(grant_id, new_expires_at, note)` — MD only; active grants only; new date must be later; notifies the person.
-  - `run_role_grant_expiry_warnings()` via pg_cron `role-grant-expiry-warnings-daily` 07:10 UTC (08:10 Lagos): at ≤14 days and again at ≤3 days, notifies the person and the MD; when a grant ends (within the last 7 days), an "access has ended" notice. `related_table = 'user_role_grants'`.
-  - `fn_role_label(role)` for friendly names.
-- **Frontend:** b12 — Extend on User Management grants, days-left display, "My access" on My Profile, bell routing.
+      {/* Grant form */}
+      <div style={{ ...styles.grid(4), marginBottom: '10px' }}>
+        <div style={styles.formGroup}>
+          <label style={styles.label}>User</label>
+          <select style={styles.input} value={form.user_id} onChange={e => { setForm(f => ({ ...f, user_id: e.target.value })); setConflict(null); }}>
+            <option value="">— Select user —</option>
+            {[...users].sort((a,b)=>(a.full_name||'').localeCompare(b.full_name||'')).map(u => <option key={u.id} value={u.id}>{u.full_name || u.email} ({roleLabel(u.role)})</option>)}
+          </select>
+        </div>
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Role to grant</label>
+          <select style={styles.input} value={form.role} onChange={e => { setForm(f => ({ ...f, role: e.target.value })); setConflict(null); }}>
+            <option value="">— Select role —</option>
+            {grantableRoles.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}
+          </select>
+        </div>
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Expiry (optional)</label>
+          <input type="date" style={styles.input} value={form.expires_at} onChange={e => setForm(f => ({ ...f, expires_at: e.target.value }))} />
+        </div>
+        <div style={styles.formGroup}>
+          <label style={styles.label}>Reason (optional)</label>
+          <input style={styles.input} placeholder="e.g. covering HR leave" value={form.reason} onChange={e => setForm(f => ({ ...f, reason: e.target.value }))} />
+        </div>
+      </div>
 
-### Weekly stock count (MD 2026-11-20) — first input for the weekly KPI
-- **Why:** the weekly KPI (Claude Doc "Site Manager Daily Scorecard and Weekly KPI") needs material variance (physical count vs app) and accepted blocks; neither existed (no count screen; zero handovers recorded at any site). KPI build deferred until two Fridays of counts and handovers exist. MD to tell Umar and Abubakar to record handovers.
-- **Data fixes 20 Nov:**
-  - Kado dust deliveries entered 19 Nov evening as 30,440,000 kg (16 Nov) and 28,760,000 kg (18 Nov) — tonnes typed as kg (₦1.0bn at ₦17/kg). Voided and re-entered by the MD account as 30,440 kg and 28,760 kg with notes; reversal movements re-dated to the delivery dates. Kado dust book stock −49.8 t (only these two deliveries recorded vs ~109 t used).
-  - Old test receipt "TEST 7B1" (cement, dated 30 Dec 2026, voided 22 Oct): reversal re-dated to 30 Dec so balances between 22 Oct and 30 Dec are right.
-- **Database — DONE** (`20261120051319_stock_counts_weekly_and_receipt_limits`, `20261120051410_void_receipt_reversal_on_receipt_date`):
-  - `record_material_receipt` rejects > 100 t (kg items), > 40,000 L, > 3,000 bags in one delivery.
-  - `void_material_receipt` dates the reversal on the delivery date (today if that date is locked by a count).
-  - `stock_counts` (one live per site per day; `is_opening`; submitted → approved | rejected) + `stock_count_lines` (counted, book, variance qty/%, value at weighted cost for APCL items, over-tolerance vs `production_sites.variance_tolerance_pct`). Late-entry rules on `count_date`.
-  - `fn_stock_as_of(item, date)` = book stock at end of a day. `stock_count_sheet(site)` (ico/md; blind — no book figures). `submit_stock_count(site, date, lines jsonb [{item_id, counted_qty, note}], notes, is_opening, late_reason)` (ico/md; every item at the site required; MD notified with a variance summary). `review_stock_count(id, approve|reject, note)` (MD): approval needs the day's production or day status; recomputes against book stock and posts adjustments (`COUNT-xxxxxxxx`, dated the count day; supplier/issued_to 'Stock count'); notifies site users and counter.
-  - Lock: after an approved count, stock movements dated on or before the count date for that site's items are refused (`STOCK_LOCKED:`), except the count's own postings.
-  - `run_stock_count_reminders()` via pg_cron `stock-count-reminders-daily` 07:20 UTC (08:20 Lagos): Friday → ICO reminder for sites not yet counted this week; Saturday → MD + ICO notice for any site not counted this week.
-- **Frontend:** b13.
+      {conflict ? (
+        <div style={{ padding: '12px 14px', borderRadius: '8px', background: theme.red + '18', border: `1px solid ${theme.red}55`, marginBottom: '12px' }}>
+          <div style={{ fontSize: '13px', color: theme.text, fontWeight: '600', marginBottom: '6px' }}><IconText icon={AlertTriangle} size={20}>Separation-of-duties warning</IconText></div>
+          <div style={{ fontSize: '12px', color: theme.textMuted, marginBottom: '10px' }}>{conflict}</div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button style={styles.btn('danger')} disabled={busy} onClick={() => submitGrant(true)}>{busy ? 'Granting…' : 'Grant anyway'}</button>
+            <button style={styles.btn('secondary')} disabled={busy} onClick={() => setConflict(null)}>Cancel</button>
+          </div>
+        </div>
+      ) : (
+        <button style={styles.btn('primary')} disabled={busy} onClick={() => submitGrant(false)}>{busy ? 'Checking…' : '+ Grant Role'}</button>
+      )}
 
-### Clock warning fix and delivery guidance (MD 2026-11-21)
-- **False clock banner:** "Your phone's date/time looks wrong" compared `session.expires_at` with device time + `expires_in`. auth-js computes `expires_at` from the device clock at sign-in and keeps `expires_in` fixed on a restored session, so the check can never detect a wrong clock and fires whenever the app is reopened more than 5 minutes after sign-in. Seen on correct phones and a correct PC.
-- **Database — DONE** (`20261121020853_server_time_for_clock_check`): `server_time()` (authenticated) so the app compares the device clock with the server's.
-- **Guides updated 21 Nov:** "Recording a delivery, box by box" added to the Life Camp (Abubakar) and Kado (Umar) app guides — Supplier/Source = the company on the waybill (Life Camp: the quarry/depot/seller Bilaad bought from; Kado: the supplier APCL paid).
-- **Open:** Requisition 1 is not in the app (no client requisitions recorded), so Life Camp deliveries cannot be linked to it. Abubakar to enter it, MD approve, mark sent.
-- **Frontend:** b15 — server-based clock check; delivery box hints and source suggestions.
-### REQ-LIFECAMP-BIL-001 in the app; material position (MD 2026-11-21)
-- **Email of 20 Nov to Bilaad** (contract BR/PMO/BALI GROVE/APCL/2026/001): 11,994 nine-inch + 4,255 six-inch = 16,249 blocks; 403 bags cement (BUA or Mangal only); 8 trips stone dust + 5 trips 3/8 granite on 24-hour call-off; cash ₦725,909.44 site operating allocation + ₦658,000 for 329 L production diesel at ₦2,000/L = ₦1,383,909.44. Delivery logistics to follow separately.
-- **Data 21 Nov:** Life Camp `site_block_standards.chippings_kg_per_block` set to 8.8 kg (9") and 7.7 kg (6") — the 23/20 kg aggregate split 8:5 like the trips (MD: "use the split"). REQ-LIFECAMP-BIL-001 created by the MD account (submit → approve → mark sent on 21 Nov; note records the 20 Nov email): cement 403 bags, dust 224,878 kg, 3/8 139,694 kg, diesel 329 L — same cement and diesel as the email. Abubakar's 20 Nov dust (29,530 kg) and cement (12 bags) receipts linked to it; 19 Nov diesel (30 L, before the email) left unlinked.
-- **Interim Excel log** (made in another chat): duplicates the app (manual usage, trips as a unit) — use only until the app view ships, then stop.
-- **Database — DONE** (`20261121025244_client_requisition_material_position`): `client_requisition_material_position(site)` — per material across the site's sent/client-approved/closed requisitions: requested, received, rejected, deliveries, outstanding, over-supplied, client-owned receipts not linked to a requisition, used in production since `covers_from`, on site now.
-- **Position 21 Nov (Life Camp):** cement 12 of 403 received, 66 used, −54 on site; dust 29.5 of 224.9 t received, 43.2 t used, −13.7 t on site; 3/8 none; diesel 30 L received unlinked, 30 L used. The 17–18 Nov test production used Bilaad material that was never recorded as received — opening stock count resets the balance.
-- **Not in the app yet:** Bilaad's cash (operating allocation and diesel fund), what it was spent on and the balance — next build (client funds ledger).
-- **Frontend:** b14 (combined: share menu, clock fix, delivery hints, material position card).
+      {/* Active grants */}
+      <div style={{ fontWeight: '700', fontSize: '13px', margin: '20px 0 8px' }}>Active grants ({grants.length})</div>
+      {loading && grants.length === 0 ? <Spinner /> : grants.length === 0 ? (
+        <div style={{ fontSize: '13px', color: theme.textMuted, padding: '8px 0' }}>No active role grants.</div>
+      ) : (
+        <StackTable headers={['User', 'Primary Role', 'Granted Role', 'Granted By', 'Granted', 'End date', '']}>
+          {grants.map(g => (
+            <tr key={g.id}>
+              <td style={styles.td}>{userName(g.user_id)}</td>
+              <td style={styles.td}><span style={{ fontSize: '12px', color: theme.textMuted }}>{userPrimary(g.user_id)}</span></td>
+              <td style={styles.td}><span style={styles.badge(theme.accent)}>{roleLabel(g.role)}</span></td>
+              <td style={styles.td}>{g.granted_by_name || '—'}</td>
+              <td style={styles.td}>{fmtD(g.granted_at)}</td>
+              <td style={styles.td}><GrantExpiry expiresAt={g.expires_at} /></td>
+              <td style={styles.td}><GrantActions grant={g} onExtended={load} onRevoke={revoke} revoking={revoking === g.id} /></td>
+            </tr>
+          ))}
+        </StackTable>
+      )}
+    </div>
+  );
+};
 
-### Site crews paid daily (MD 2026-11-21)
-- **MD:** Kado and Life Camp crews are temporary (no permanent workers yet) and paid every day by one bank transfer per site; Life Camp ₦8,000/day, Kado daily (₦6,000/day from Umar's reports). May move to weekly once settled.
-- **Database — DONE** (`20261121045958_site_daily_wages`):
-  - `production_sites.labour_pay_mode` ('weekly' | 'daily'); Kado and Life Camp 'daily', Dutse 'weekly'.
-  - `labour_roles.site_id`; new roles "Site crew — Kado" ₦6,000/day and "Site crew — Life Camp" ₦8,000/day. Trigger `trg_roster_entry_site_role`: an entry's job must belong to the roster's site; client sites must use their own site jobs.
-  - `daily_roster` + paid_at, paid_amount, paid_to, payment_reference, paid_by_name, paid_from_account_id.
-  - `pay_daily_roster(roster, amount, paid_to, reference, bank_account, note)` — md/accountant; daily-pay sites only; amount must equal the roster total; accountant needs MD approval first (MD paying approves); sets payment_status 'paid' (so it can never join a weekly payroll — existing `fn_payroll_link_guard`); notifies the site.
-  - `daily_wages_due()` — md/accountant/ico: unpaid rosters at daily-pay sites.
-  - Labour expense is still created from the roster when it is recorded (`sync_expense_from_roster`); no payment request for daily wages.
-- **Later:** Life Camp wages draw on Bilaad's operating allocation (client funds ledger); a signed pay sheet photo when the transfer goes to one person who pays the crew.
-- **Guard 21 Nov** (`20261121054815_daily_wages_paid_only_via_payment`): at daily-pay sites a roster becomes 'paid' only through `pay_daily_roster` (trigger `trg_daily_roster_paid_guard`); direct updates by site managers/HR/ICO are refused.
-- **Frontend:** b15 — PR #168.
+// ── USER MANAGEMENT ───────────────────────────────────────────
+const UserManagement = ({ userProfile }) => {
+  const [users, setUsers]         = useState([]);
+  const [staffList, setStaffList] = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [err, setErr]             = useState('');
+  const [ok, setOk]               = useState('');
+  const [search, setSearch]       = useState('');
+  const [showCreate, setShowCreate] = useState(false);
+  const [creating, setCreating]   = useState(false);
 
-### Site attendance: face recognition on the site manager's phone (MD 2026-11-21)
-- **MD:** proof the crew were present is needed because the single daily transfer goes to one person. Not all labourers have smartphones, so the crew register runs on the site manager's phone, with face recognition (no daily photos) and a location stamp. Site managers no longer report at Dutse (kiosk there, PIN only, last punch 10 Nov), so they clock themselves in on their own phones with a location stamp. Claude flagged: geotag proves the phone, not the person; face data is sensitive personal data under the NDPA 2023 (consent recorded at enrolment); no liveness check is perfect.
-- **Database — DONE** (`20261121052821_site_attendance_face_and_geo`, `20261121052909_site_manager_clock_enum_fix`):
-  - Site location: `production_sites.geo_lat/geo_lng/geo_radius_m (300)/geo_status (unset|pending|approved)`; `propose_site_location(site, lat, lng, accuracy ≤ 50 m)` by site manager (MD's own = approved), `approve_site_location(site, approve, radius)` MD. `fn_site_geo_check` (approved location, accuracy ≤ 150 m, inside radius) used by every clock-in.
-  - Storage bucket `site-attendance` (private; folder = site id) for enrolment photos and manual check-in photos only.
-  - `face_match_settings` (model 'human-faceres': min cosine similarity 0.6, min liveness 0.5, replay ≥ 0.9995 — tune here). `fn_vec_cosine`.
-  - `labour_face_profiles` (one per worker: descriptor, enrolment photo, consent, witness). `enroll_worker_face(labour, site, descriptor, model, photo_path, consent)` — refuses a face already registered under another name.
-  - `crew_check_ins` (one per worker per day; face or manual). `crew_check_in(site, descriptor, model, liveness, lat, lng, accuracy, device)` — matching on the server; refuses low liveness, off-site, identical replayed capture (30 days), unknown face. `crew_check_in_manual(...)` needs a reason ≥ 10 chars and a photo; notifies the MD. `site_crew_register(site, date)` — check-ins and roster workers not checked in. Check-in descriptors cleared after 30 days (cron `purge-check-in-descriptors`).
-  - `pay_daily_roster` now refuses until every worker on the roster has checked in that day.
-  - `attendance_punches` + lat/lng/accuracy_m/distance_m/site_id; enum value `geo_mobile`. `site_manager_clock(IN|OUT, lat, lng, accuracy, device)` for users with a staff record and an assigned site; feeds the normal attendance reconciliation.
-- **Next:** site managers set each site's location from the site; MD approves. Frontend b16 (after b15).
-- **21 Nov** (`20261121055443_daily_wages_checkin_rule_after_site_setup`): the "everyone on the roster checked in" rule in `pay_daily_roster` applies only once the site's location is approved, so daily wages are not blocked before the attendance screens (b16) are in use.
+  // Create-form state
+  const [form, setForm]           = useState({ full_name: '', email: '', password: '', role: 'staff', staff_id: null });
+  const [staffSearch, setStaffSearch] = useState('');
+  const [showStaffDrop, setShowStaffDrop] = useState(false);
+  const [staffMode, setStaffMode] = useState('search'); // 'search' | 'manual'
+  const [selectedStaff, setSelectedStaff] = useState(null);
+  const [duplicateUser, setDuplicateUser] = useState(null);
 
-### Face matching calibrated (21 Nov, first field use)
-- **Field:** Kado location set and approved by the MD at 15:31 (9.0870731, 7.4261653). First worker (Ransom Osang) registered; the next two were refused as "already registered as Ransom Osang".
-- **Cause:** faceres embeddings are 1,024 non-negative values; cosine between different people is high. Emulated-phone test (Playwright Chromium as Pixel 5, fake camera from StyleGAN synthetic faces, fake GPS, the app's own siteFace.js and Human 3.3.6 models from the npm package): different people 0.28–0.73, same person on another "day" ~0.97 (Euclid 2.6–3.5 vs 9.2–14.4). Human's own similarity (order 2, ×25, 0.2–0.8) also lets impostors through at its 0.5 default (max 0.565).
-- **Fix** (`20261121150228_face_match_threshold_and_margin`): min_similarity 0.6 → 0.85; `min_margin` 0.03 — refuse to guess when two registered workers are both ≥ threshold and within the margin; scores shown in refusal messages; `labour_face_profiles.nearest_other_similarity` kept for tuning. Tested: look-alike (0.82) registers, same face under a new name refused, same person matched 0.997, stranger refused (0.69), halfway face refused as too close to call.
-- **Watch:** live check — a video of a still picture scored real/live ≈ 0.55 / 0.98, so min_liveness 0.5 would not stop a photo held to the camera. Compare with the first real check-ins and raise it.
+  useEffect(() => {
+    Promise.all([authService.listUsers(), authService.getStaffList()])
+      .then(([u, s]) => { setUsers(u); setStaffList(s); })
+      .catch(e => setErr(e?.message || 'An error occurred'))
+      .finally(() => setLoading(false));
+  }, []);
 
-### Simpler budget warnings (MD 2026-11-23)
-- **Why:** site managers and the ICO could not follow the warnings (percentages, rates per 1,000 blocks); some made no sense (diesel *under* budget). LC had 14 open, Kado 13 explained awaiting the MD.
-- **Rules** (`20261123132351_simpler_budget_warnings`, wording fixes `…132720`, `…132834`):
-  - Diesel warns only when **over**; breakage only when **over** the allowance (whole blocks, 1% of blocks made, rounded down).
-  - Cement over = **cost** warning; cement more than 10% under (`production_sites.cement_under_tolerance_pct`) = **quality** warning ("check the blocks are strong").
-  - Small differences ignored: under 2 bags, 3 L or 5 blocks (`warn_min_cement_bags`, `warn_min_diesel_l`, `warn_min_breakage_blocks`, per site).
-  - Plain-words `production_exceptions.message` in units, e.g. "Cement: used 14 bags for 480 blocks. Allowed 12. 2 bags too many." APCL materials add ₦ (`value_naira`, from the site's inventory unit cost); client materials say "The client's material — they can charge for it." (`client_owned`). Also `kind` (cost | quality) and `difference`.
-  - Notification title "Please explain: <site>, <DD Mon>", body = the messages + "Tap to explain."
-  - Lines that stop qualifying resolve from `open` **or** `explained`, with the system note "No longer flagged under the simpler warning rules of 23 Nov." (rule-change re-check) or "Back within budget after a correction."
-- **New RPC:** `close_explained_exceptions(p_site_id default null, p_note default null)` — MD/ICO bulk close of explained lines, adds a 'closed' comment each.
-- **Re-check of every client-site production day since 1 Nov (quiet, no notifications):** LC 14 open → 6 (cement 17, 18, 22 Nov; breakage 18, 20, 21 Nov); Kado 13 explained → 7 (diesel 10, 11, 16, 19 Nov; breakage 11, 16, 20 Nov).
-- **Tested (rolled back):** cement 20% under → quality warning + 3 notifications; corrected to 13 bags → cost warning; corrected to 10 → resolved with the correction note; MD bulk close of Kado → 7 closed with comments; site manager refused.
-- **UI:** b17 — one card per site-day from `message`, Cost/Quality badge, tap-to-pick reasons, "I recorded it wrong" → Production page for that day, MD "Close all explained". The old `fn_upsert_production_exception` is no longer called (left in place).
+  const resetForm = () => {
+    setForm({ full_name: '', email: '', password: '', role: 'staff', staff_id: null });
+    setStaffSearch(''); setStaffMode('search'); setSelectedStaff(null); setDuplicateUser(null);
+  };
 
-### Face check paused: the phone's engine computed wrong face patterns (23 Nov)
-- **Field:** two more different workers were refused as "matches Ransom Osang" (0.91, 0.92).
-- **Finding:** not the face model. The same two photos, computed correctly (Human 3.3.6 faceres, f32), are only 0.64 alike. Every correctly computed face pattern scores 0.11–0.23 against Ransom's phone-made pattern (strangers normally ~0.39). Correct patterns have 504–718 components ≥ 0.02 and a top value of 1.4–2.9 (102 captures, 17 faces); Ransom's has 322 and 4.5. The phone's WebGL engine (likely GPU precision / pixel upload on budget Android GPUs) produces wrong numbers that make everyone look alike. WebAssembly gives identical results to the reference (cosine ≥ 0.9988 on all 102); forced half-float WebGL in the emulator was also fine, so the fault is device-specific.
-- **Stronger models tried** (insightface mobilenet-emore / efficientnet-b0 / ghostnet, mobilefacenet from the Human repos): none better than faceres with Human's preprocessing; faceres stays.
-- **DB** (`20261123151532_face_engine_self_check_and_pause`, `20261123152044_face_pattern_plausibility_check`):
-  - Model `human-faceres` retired → enrol/face check-in refused with "Face check is paused until the app updates… Use 'Check in without face'". Manual check-in unchanged. Ransom's pattern switched off (`active = false`, kept).
-  - New model key `human-faceres-v2`; `face_engine_checks` table + `log_face_engine(site, model, backend, score, device_id, user_agent)` → passed when score ≥ `face_match_settings.engine_min_check` (0.98). Enrol and face check-in need a passing engine check by the same user in the last 12 h.
-  - `fn_face_pattern_check`: refuses a pattern unless it is 1,024 long, has ≥ 380 components ≥ 0.02 and a top value ≤ 4.0.
-  - Tested (rolled back): old model refused; v2 without a check refused; failed check (0.42) refused; passed check → enrol + check-in matched; Ransom-like pattern refused at enrol and check-in.
-- **App (b18):** face engine runs on WebAssembly only; self-test on load runs faceres on the fixed input in `public/face-selftest.json` and logs the cosine via `log_face_engine`; sends model `human-faceres-v2`. Everyone re-registers after b18.
+  const filteredStaff = staffList.filter(s =>
+    !staffSearch || s.full_name.toLowerCase().includes(staffSearch.toLowerCase())
+  );
 
-### b18 app update — WebAssembly face self-test (23 Nov)
-- Face engine now uses WebAssembly only with the pinned TFJS 4.22.0 WASM path; after warmup it runs and caches the fixed-input faceres self-test. Each camera start logs the result before requesting camera access, including failing checks. Failed local/server checks block capture; logging failures show a network retry message.
-- Enrolment and check-in send `human-faceres-v2`. Both capture paths reject implausible patterns and stop after six dropped frames with guidance to check in without face. MD can expand the latest 20 engine checks with Lagos time and a short phone label.
-- No SQL or migration changes. Live engine-check columns verified by catalog SELECT. Automated tests cover the engine, logging, failure gates, capture cutoff, model payloads and MD visibility; physical-phone/preview testing remains for MD review before merge.
+  const selectStaff = (s) => {
+    const dup = users.find(u => u.staff_id === s.id);
+    setDuplicateUser(dup || null);
+    setSelectedStaff(s);
+    setForm(p => ({ ...p, full_name: s.full_name, staff_id: s.id }));
+    setStaffSearch(s.full_name);
+    setShowStaffDrop(false);
+  };
 
-### Missed check-ins, Kado diesel yardsticks, generator times (MD 2026-11-25)
-- **Missed check-ins** (`20261125050906_md_record_missed_check_ins`): `record_missed_check_ins(p_roster_id, p_reason)` — MD only, past unpaid roster within 7 days, reason ≥ 10 chars; inserts check-ins with method `md_backfill` ("Entered by MD: …") for everyone on the roster without one, so `pay_daily_roster` can pass. Used for Kado 23 Nov (7 workers, face check paused that day).
-- **LC duplicate cement voided** 25 Nov: RCPT-e1b62c61 (12 bags, 20 Nov, entered again 22 Nov). LC cement book stock now −49 bags → fixed when the opening count is approved.
-- **Kado diesel — two yardsticks** (`…052106_kado_diesel_daily_allowance`, `…052547_kado_diesel_two_yardsticks`): MD: 30 L per 8-hour day AND by output — 30 L should make 2,500–3,000 blocks → 12 L per 1,000 blocks (2,500 low end). `production_sites.diesel_l_per_day` (Kado 30); Kado `site_block_standards.diesel_l_per_1000` 20 → 12. Allowed diesel = lower of the two. Wording: "At 12 L per 1,000 blocks that output needs X L. Y L too much — too few blocks for the diesel used." or "Daily allowance 30 L…". Re-check: 9 Kado diesel days flagged (≈ ₦197,000); 6 previously explained kept 'explained' with a "Re-flagged" note; 12, 17, 18 Nov open.
-- **Generator times** (`…053940_site_generator_days`): table `site_generator_days` (one per site-day: on/off time, minutes off during the day, optional hour-meter start/end, `running_hours` generated), late-entry rule applies. `record_generator_day(...)` (site manager / MD) recomputes warnings; `site_generator_day(site, date)` returns litres/hour, blocks/hour, blocks/litre with targets (Kado: 3.75 L/h, 313 blocks/h, 83 blocks/L from `target_blocks_per_day` 2,500, `diesel_l_per_day` 30, `production_hours` 8). Diesel warnings append "N blocks per litre (target 83)" and the generator figures, or "Generator on/off times not recorded." `run_site_day_checks` adds "no generator on/off times recorded" for production days. Hour meter: MD to confirm whether Kado's generator has a working one (reminder set); meter readings optional until then.
-- **UI (b19):** generator entry on Production, three measures on the daily report, MD "Record missed check-ins" on Wages to pay, "Entered by MD" label on the register.
+  const selectManual = () => {
+    setStaffMode('manual'); setSelectedStaff(null);
+    setForm(p => ({ ...p, full_name: '', staff_id: null }));
+    setStaffSearch(''); setShowStaffDrop(false); setDuplicateUser(null);
+  };
 
-### Dutse while production is on hold
-- Any block leaving the yard needs a same-day waybill; owner to be named now Abubakar has moved.
-- Weekly yard count continues; best window to close the ICO stock reconciliation (unexplained ~77,000 blocks, ₦37–48m at cost, pending ICO checks due 20 Nov).
+  const emailDuplicate = form.email ? users.find(u => u.email === form.email) : null;
 
-### New-message alerts in the bell (MD 2026-11-24) — PARKED
-- **Today:** a new message shows only as the unread count on the Messages icon and sidebar (polled every 30 s while the app is open). It does not appear in the notification bell, and nothing reaches the phone while the app is closed. Site managers mostly have the app closed, so an MD message can sit unseen.
-- **First case:** MD → Abubakar (Life Camp) cement-use query, 24 Nov 06:20, new 1:1 conversation `2c6fd316…`, reply asked by 12 noon. An `action_required` bell notification was added by hand from the planning chat (`related_table = 'conversations'`).
-- **Gap found:** `NotificationBell.jsx` has no `conversations` entry in `TABLE_PAGE`, so that notification shows but tapping it goes nowhere. Add `conversations: 'messages'` (and open the thread if Messages supports a selected conversation).
-- **Designed, not applied:** `fn_notify_new_message()` SECURITY DEFINER, trigger AFTER INSERT on `messages` → one `info` notification per other **active** participant: title "New message from <sender>", body = first 120 characters, `related_table = 'conversations'`, `related_id` = conversation id. At most one unread alert per person per conversation (no stacking in busy chats). Execute revoked from public/anon/authenticated. The 24 Nov migration attempt was stopped by the tool's safety check; MD chose to park it.
-- **Build order when picked up:** (1) bell routing for `conversations` (frontend PR); (2) the trigger migration from the planning chat, with a rolled-back test that sender gets nothing, each other participant gets one alert, and a second message before reading adds none; (3) push to the phone with the app closed belongs with mobile stage C (installable app).
+  const handleCreate = async (e) => {
+    e.preventDefault();
+    if (form.password.length < 8) { setErr('Password must be at least 8 characters'); return; }
+    if (emailDuplicate) { setErr(`This email is already in use by ${emailDuplicate.full_name}.`); return; }
+    if (duplicateUser) { setErr(`${selectedStaff?.full_name} already has a system account.`); return; }
+    setCreating(true); setErr('');
+    try {
+      const profile = await authService.createUser(form.email, form.password, form.full_name, form.role, form.staff_id || null);
+      setUsers(p => [...p, profile].sort((a, b) => (a.full_name||'').localeCompare(b.full_name||'')));
+      setOk(`${form.full_name} created. Share the temporary password with them.`);
+      setTimeout(() => setOk(''), 5000);
+      resetForm(); setShowCreate(false);
+    } catch(e) { setErr(e?.message || 'An error occurred'); }
+    finally { setCreating(false); }
+  };
+
+  const updateRole = async (id, role) => {
+    try { await authService.updateUserRole(id, role); setUsers(p => p.map(u => u.id === id ? {...u, role} : u)); setOk('Role updated'); setTimeout(() => setOk(''), 2000); }
+    catch(e) { setErr(e?.message || 'An error occurred'); }
+  };
+  const toggleActive = async (id, isActive) => {
+    try { await authService.toggleUserActive(id, isActive); setUsers(p => p.map(u => u.id === id ? {...u, is_active: isActive} : u)); }
+    catch(e) { setErr(e?.message || 'An error occurred'); }
+  };
+  const handleResetPwd = async (email, name) => {
+    try { await authService.resetPassword(email); setOk(`Password reset email sent to ${name}.`); setTimeout(() => setOk(''), 4000); }
+    catch(e) { setErr(e?.message || 'An error occurred'); }
+  };
+
+  const isMD = userProfile?.role === 'md';
+
+  const filteredUsers = users.filter(u =>
+    !search ||
+    (u.full_name||'').toLowerCase().includes(search.toLowerCase()) ||
+    (u.email||'').toLowerCase().includes(search.toLowerCase()) ||
+    (APP_ROLES.find(r => r.id === u.role)?.label || '').toLowerCase().includes(search.toLowerCase())
+  );
+
+  const avatarColors = ['#4f8ef7','#27ae60','#e67e22','#9b59b6','#e74c3c','#16a085','#2980b9','#8e44ad'];
+  const avatarColor = (name) => { let h = 0; for (let c of (name||'')) h = (h*31 + c.charCodeAt(0)) % avatarColors.length; return avatarColors[Math.abs(h)]; };
+  const initials = (name) => (name||'?').split(' ').map(p=>p[0]).join('').slice(0,2).toUpperCase();
+
+  const labelSt = { display:'block', fontSize:'11px', color:theme.textMuted, marginBottom:'4px', textTransform:'uppercase', letterSpacing:'0.06em' };
+  const isRoleBoard = form.role === 'board_member';
+
+  return (
+    <div>
+      <div className="m-header" style={styles.header}>
+        <div><div style={styles.pageTitle}>User Management</div><div style={styles.pageSubtitle}>Manage system users and roles — MD access only</div></div>
+        {isMD && <button style={styles.btn('primary')} onClick={() => { setShowCreate(s => !s); setErr(''); if (showCreate) resetForm(); }}>{showCreate ? <IconText icon={X}>Cancel</IconText> : '+ Add User'}</button>}
+      </div>
+      {err && <Alert msg={err} onClose={() => setErr('')} />}
+      {ok  && <Alert msg={ok} type="success" onClose={() => setOk('')} />}
+
+      {showCreate && (
+        <div style={{ ...styles.card, marginBottom:'16px' }}>
+          <div style={{ fontWeight:'700', fontSize:'14px', marginBottom:'16px' }}>Create New User</div>
+          <form onSubmit={handleCreate}>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px', marginBottom:'14px' }}>
+
+              {/* STAFF COMBO */}
+              <div style={{ position:'relative' }}>
+                <label style={labelSt}>Staff Member *</label>
+                {staffMode === 'search' ? (
+                  <>
+                    <input
+                      style={styles.input}
+                      value={staffSearch}
+                      onChange={e => { setStaffSearch(e.target.value); setShowStaffDrop(true); setSelectedStaff(null); setForm(p=>({...p, full_name:'', staff_id:null})); setDuplicateUser(null); }}
+                      onFocus={() => setShowStaffDrop(true)}
+                      onBlur={() => setTimeout(() => setShowStaffDrop(false), 200)}
+                      onKeyDown={e => e.key === 'Escape' && setShowStaffDrop(false)}
+                      placeholder="Search staff by name…"
+                      autoComplete="off"
+                    />
+                    {showStaffDrop && (
+                      <div style={{ position:'absolute', top:'100%', left:0, right:0, background:theme.surface, border:`1px solid ${theme.border}`, borderRadius:'8px', zIndex:Z.overlay, maxHeight:'220px', overflowY:'auto', boxShadow:'0 8px 24px rgba(0,0,0,0.4)', marginTop:'2px' }}>
+                        {filteredStaff.length === 0 && staffSearch && (
+                          <div style={{ padding:'10px 12px', color:theme.textMuted, fontSize:'12px' }}>No staff match "{staffSearch}"</div>
+                        )}
+                        {filteredStaff.map(s => (
+                          <div key={s.id} onMouseDown={() => selectStaff(s)} style={{ padding:'10px 12px', cursor:'pointer', borderBottom:`1px solid ${theme.border}22` }}>
+                            <div style={{ fontWeight:'600', fontSize:'13px' }}>{s.full_name}</div>
+                            <div style={{ fontSize:'11px', color:theme.textMuted }}>{s.role} · {s.staff_type === 'permanent' ? 'Permanent' : 'Daily'}</div>
+                          </div>
+                        ))}
+                        <div onMouseDown={selectManual} style={{ padding:'10px 12px', cursor:'pointer', borderTop:`1px solid ${theme.border}`, color:theme.accent, fontSize:'12px', fontWeight:'600' }}>
+                          + Not in staff list — enter manually
+                        </div>
+                      </div>
+                    )}
+                    {selectedStaff && !duplicateUser && (
+                      <div style={{ marginTop:'6px', fontSize:'11px', color:theme.textMuted, padding:'6px 10px', background:theme.accent+'11', borderRadius:'6px' }}>
+                        <Ico icon={Check} style={{ marginRight: '8px' }} />{selectedStaff.full_name} · {selectedStaff.role} · {selectedStaff.staff_type === 'permanent' ? 'Permanent' : 'Daily'}
+                      </div>
+                    )}
+                    {duplicateUser && (
+                      <div style={{ marginTop:'6px', padding:'8px 10px', background:theme.red+'18', border:`1px solid ${theme.red}44`, borderRadius:'6px', fontSize:'12px' }}>
+                        <div style={{ color:theme.red, fontWeight:'700' }}><IconText icon={AlertTriangle}>{selectedStaff?.full_name} already has a system account</IconText></div>
+                        <div style={{ color:theme.textMuted, marginTop:'2px' }}>{duplicateUser.email} · {APP_ROLES.find(r=>r.id===duplicateUser.role)?.label || duplicateUser.role}</div>
+                        <div style={{ marginTop:'6px', fontSize:'11px', color:theme.textMuted }}>Update their role using the table below instead.</div>
+                      </div>
+                    )}
+                    {isRoleBoard && !duplicateUser && (
+                      <div style={{ marginTop:'6px', fontSize:'11px', color:theme.accent }}>
+                        Board members are typically not in the staff list — select "Not in staff list" above.
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <input style={styles.input} value={form.full_name} onChange={e => setForm(p=>({...p, full_name:e.target.value}))} placeholder="Full name" required />
+                    <div style={{ marginTop:'6px', fontSize:'11px', color:theme.textMuted }}>
+                      This user will not be linked to a staff record.{' '}
+                      <span style={{ color:theme.accent, cursor:'pointer', textDecoration:'underline' }} onClick={() => { setStaffMode('search'); setForm(p=>({...p, full_name:'', staff_id:null})); }}>Search staff instead</span>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* EMAIL */}
+              <div>
+                <label style={labelSt}>Email Address *</label>
+                <input style={{ ...styles.input, ...(emailDuplicate ? { borderColor:theme.red } : {}) }} type="email" value={form.email} onChange={e => setForm(p=>({...p, email:e.target.value}))} placeholder="user@company.com" required />
+                {emailDuplicate && <div style={{ marginTop:'4px', fontSize:'11px', color:theme.red }}>Already in use by {emailDuplicate.full_name}.</div>}
+              </div>
+
+              {/* PASSWORD */}
+              <div>
+                <label style={labelSt}>Temporary Password *</label>
+                <input style={styles.input} type="password" value={form.password} onChange={e => setForm(p=>({...p, password:e.target.value}))} placeholder="Min. 6 characters" required minLength={6} />
+              </div>
+
+              {/* ROLE */}
+              <div>
+                <label style={labelSt}>Role *</label>
+                <select style={styles.input} value={form.role} onChange={e => setForm(p=>({...p, role:e.target.value}))}>
+                  {APP_ROLES.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}
+                </select>
+                {isRoleBoard && (
+                  <div style={{ marginTop:'6px', fontSize:'11px', color:theme.accent, padding:'6px 10px', background:theme.accent+'11', borderRadius:'6px' }}>
+                    Board Members have read-only access to all modules including financial statements.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div style={{ display:'flex', gap:'10px', alignItems:'center' }}>
+              <button type="submit" style={styles.btn('primary')} disabled={creating || !!duplicateUser || !!emailDuplicate}>
+                {creating ? 'Creating…' : 'Create User'}
+              </button>
+              <button type="button" style={styles.btn('secondary')} onClick={() => { setShowCreate(false); resetForm(); }}>Cancel</button>
+            </div>
+            <div style={{ marginTop:'10px', fontSize:'11px', color:theme.textMuted }}>
+              Share the temporary password privately — the user can log in immediately.
+            </div>
+          </form>
+        </div>
+      )}
+
+      {loading ? <Spinner /> : (
+        <div style={styles.card}>
+          <input style={{ ...styles.input, maxWidth:'320px', marginBottom:'14px' }} value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name, email or role…" />
+          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'13px' }}>
+            <thead>
+              <tr style={{ borderBottom:`2px solid ${theme.border}` }}>
+                {['','Name','Email','Role','Staff Record','Status','Last Login','Actions'].map(h =>
+                  <th key={h} style={{ padding:'8px 10px', textAlign:'left', color:theme.textMuted, fontWeight:'700', fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.06em' }}>{h}</th>
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {filteredUsers.map(u => {
+                const col = avatarColor(u.full_name);
+                const linked = staffList.find(s => s.id === u.staff_id);
+                return (
+                  <tr key={u.id} style={{ borderBottom:`1px solid ${theme.border}22` }}>
+                    <td style={{ padding:'8px 10px' }}>
+                      <div style={{ width:'34px', height:'34px', borderRadius:'50%', background:col, display:'flex', alignItems:'center', justifyContent:'center', color:'#fff', fontWeight:'700', fontSize:'12px' }}>
+                        {initials(u.full_name)}
+                      </div>
+                    </td>
+                    <td style={{ padding:'8px 10px', fontWeight:'600' }}>{u.full_name}</td>
+                    <td style={{ padding:'8px 10px', color:theme.textMuted, fontSize:'12px' }}>{u.email}</td>
+                    <td style={{ padding:'8px 10px' }}>
+                      {isMD && u.id !== userProfile?.id ? (
+                        <select style={{ ...styles.input, padding:'3px 6px', fontSize:'12px', width:'auto' }} value={u.role} onChange={e => updateRole(u.id, e.target.value)}>
+                          {APP_ROLES.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}
+                        </select>
+                      ) : (
+                        <span style={{ background:col+'22', color:col, borderRadius:'4px', padding:'2px 8px', fontSize:'11px', fontWeight:'700', whiteSpace:'nowrap' }}>
+                          {APP_ROLES.find(r=>r.id===u.role)?.label || u.role}
+                        </span>
+                      )}
+                    </td>
+                    <td style={{ padding:'8px 10px', fontSize:'12px' }}>
+                      {linked
+                        ? <span style={{ color:theme.green, fontWeight:'600' }}><IconText icon={Check}>{linked.full_name}</IconText></span>
+                        : <span style={{ color:theme.textMuted }}>—</span>}
+                    </td>
+                    <td style={{ padding:'8px 10px' }}>
+                      <span style={{ background:u.is_active?theme.green+'22':theme.red+'22', color:u.is_active?theme.green:theme.red, borderRadius:'4px', padding:'2px 8px', fontSize:'11px', fontWeight:'700' }}>
+                        {u.is_active?'Active':'Inactive'}
+                      </span>
+                    </td>
+                    <td style={{ padding:'8px 10px', color:theme.textMuted, fontSize:'11px' }}>
+                      {u.last_login ? fmtDateTime(u.last_login) : '—'}
+                    </td>
+                    <td style={{ padding:'8px 10px' }}>
+                      {u.id !== userProfile?.id && isMD && (
+                        <div style={{ display:'flex', gap:'6px', flexWrap:'wrap' }}>
+                          <button style={{ ...styles.btn('secondary'), padding:'3px 8px', fontSize:'11px' }} onClick={() => handleResetPwd(u.email, u.full_name)}>Reset Pwd</button>
+                          <button style={{ ...styles.btn(u.is_active?'danger':'secondary'), padding:'3px 8px', fontSize:'11px' }} onClick={() => toggleActive(u.id, !u.is_active)}>
+                            {u.is_active?'Deactivate':'Activate'}
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+              {!filteredUsers.length && (
+                <tr><td colSpan={8} style={{ padding:'20px', textAlign:'center', color:theme.textMuted }}>
+                  {search ? `No users match "${search}"` : 'No users found. Create the first user above.'}
+                </td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {isMD && <RoleGrantsManager users={users} />}
+    </div>
+  );
+};
+
+// ── APP ───────────────────────────────────────────────────────
+export default function App() {
+  const [session, setSession] = useState(undefined); // undefined = loading
+  const [userProfile, setUserProfile] = useState(null);
+  const taskSource = useTaskReminders(userProfile?.id);
+  const [initialPayment, setInitialPayment] = useState(null);
+  const [initialTask, setInitialTask] = useState(null);
+  const [authMessage, setAuthMessage] = useState(''); // shown on LoginScreen after a forced sign-out
+  const [profileLoadError, setProfileLoadError] = useState(false); // transient fetch failure, not a missing/inactive verdict
+  const [active, setActive] = useState("dashboard");
+  // Site preselected when the Dashboard opens Site Contracts from a site card.
+  const [contractsSite, setContractsSite] = useState('');
+  const [requisitionSite, setRequisitionSite] = useState('');
+  const [receivingSite, setReceivingSite] = useState('');
+  const [initialScorecard, setInitialScorecard] = useState(null);
+  const [initialProduction, setInitialProduction] = useState(null);
+  const [attendanceSite, setAttendanceSite] = useState(null);
+  const [initialRoster, setInitialRoster] = useState(null);
+  const [initialStockCount, setInitialStockCount] = useState(null);
+  const [initialWarning, setInitialWarning] = useState(null);
+  const [contractsReport, setContractsReport] = useState(false);
+  const [lowStockCount, setLowStockCount] = useState(0);
+  const [lpoCount, setLpoCount] = useState(0);
+  const [scheduleCount, setScheduleCount] = useState(0);
+  const [unreadMsgCount, setUnreadMsgCount] = useState(0);
+  const [showChangePwd, setShowChangePwd] = useState(false);
+  const sessionReceivedAt = useRef(performance.now());
+  const acceptSession = (next) => { sessionReceivedAt.current = performance.now(); setSession(next || null); };
+  const [sessionWarning, setSessionWarning] = useState(false); // 15-min expiry warning
+  const [sessionMinutes, setSessionMinutes] = useState(15);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' && window.innerWidth <= 768);
+
+  // ── Auth ──────────────────────────────────────────────────
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      acceptSession(session);
+      if (session) loadProfile(session.user);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      acceptSession(session);
+      if (!session) { setUserProfile(null); setInitialPayment(null); setInitialTask(null); }
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // Re-check is_active when the tab regains focus, so a session left open
+  // in another tab gets kicked promptly rather than waiting for the next
+  // page reload. Only runs while a session+profile are already loaded.
+  useEffect(() => {
+    if (!session) return;
+    const recheck = () => { if (document.visibilityState === 'visible') loadProfile(session.user); };
+    window.addEventListener('focus', recheck);
+    document.addEventListener('visibilitychange', recheck);
+    return () => {
+      window.removeEventListener('focus', recheck);
+      document.removeEventListener('visibilitychange', recheck);
+    };
+  }, [session]);
+
+  // ── Session expiry monitor ────────────────────────────────
+  useEffect(() => {
+    if (!session) { setSessionWarning(false); return; }
+    return startSessionMonitor({
+      session, receivedAt: sessionReceivedAt.current, auth: supabase.auth,
+      onSession: acceptSession,
+      onWarning: (show, minutes) => { setSessionWarning(show); setSessionMinutes(minutes); },
+      onRefreshFailure: () => setAuthMessage('Your session could not be refreshed. Please sign in again.'),
+    });
+  }, [session]);
+
+  // ── Mobile sidebar ────────────────────────────────────────
+  useEffect(() => {
+    const onResize = () => {
+      const mobile = window.innerWidth <= 768;
+      setIsMobile(mobile);
+      if (!mobile) setSidebarOpen(false);
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  const handleExtendSession = async () => {
+    try {
+      const { data, error } = await supabase.auth.refreshSession();
+      if (error) throw error;
+      if (!data?.session) throw new Error('Session could not be refreshed.');
+      acceptSession(data.session); setSessionWarning(false);
+    } catch {
+      setAuthMessage('Your session could not be refreshed. Please sign in again.');
+      await supabase.auth.signOut();
+    }
+  };
+
+  // Attach the user's effective roles (primary + active grants) from the DB.
+  // Falls back to [primary role] on null/empty/error so a hiccup degrades to
+  // single-role behaviour rather than locking the user out.
+  const attachEffectiveRoles = async (profile) => {
+    if (!profile) return profile;
+    try {
+      const { data, error } = await supabase.rpc('my_effective_roles');
+      if (error) throw error;
+      const roles = Array.isArray(data) && data.length ? data : [profile.role];
+      return { ...profile, effectiveRoles: roles };
+    } catch {
+      return { ...profile, effectiveRoles: profile.role ? [profile.role] : [] };
+    }
+  };
+
+  const loadProfile = async (user) => {
+    setProfileLoadError(false);
+    try {
+      const profile = await authService.getProfile(user.id);
+      const access = checkProfileAccess(profile);
+      if (!access.ok) {
+        // Only 'inactive' can reach here — getProfile() throws (caught below,
+        // PGRST116) rather than returning null for a missing row.
+        await authService.signOut();
+        setSession(null);
+        setUserProfile(null);
+        setAuthMessage('This account has been deactivated. Contact the MD.');
+        return;
+      }
+      setUserProfile(await attachEffectiveRoles(profile));
+      supabase.from('user_profiles').update({ last_login: new Date().toISOString() }).eq('id', user.id).then(() => {}).catch(() => {}); // last-login stamp only
+    } catch (err) {
+      if (err?.code === 'PGRST116') {
+        // No profile row at all — do not auto-create one.
+        await authService.signOut();
+        setSession(null);
+        setUserProfile(null);
+        setAuthMessage('No profile is set up for this account. Contact the MD.');
+        return;
+      }
+      // Transient error (network, etc.) — do not sign the user out or
+      // fabricate a profile; let them retry.
+      setProfileLoadError(true);
+    }
+  };
+
+  const handleLogin = async (profile) => { setUserProfile(await attachEffectiveRoles(profile)); };
+  const handleLogout = async () => { await authService.signOut(); setSession(null); setUserProfile(null); setActive('dashboard'); };
+
+  // Load approval badge counts (must be before any conditional returns)
+  // An investor login never requests staff tables (7C).
+  const investorOnly = userProfile?.role === 'investor';
+  useEffect(() => {
+    if (investorOnly) return;
+    // Sidebar badge counts only; the pages load and report their own errors.
+    lpoService.getPending().then(l => setLpoCount(l.length)).catch(() => {});
+    schedulesService.getSubmitted().then(s => setScheduleCount(s.length)).catch(() => {});
+  }, [active, investorOnly]);
+
+  // Poll unread message count for the nav badge (30s interval; skip while on Messages page).
+  // Badge only, so a failed poll is safe to ignore — the next one retries.
+  useEffect(() => {
+    if (!userProfile || active === 'messages' || userProfile.role === 'investor') return;
+    messagesService.getTotalUnread(userProfile.id).then(setUnreadMsgCount).catch(() => {});
+    const interval = setInterval(() => {
+      messagesService.getTotalUnread(userProfile.id).then(setUnreadMsgCount).catch(() => {});
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [active, userProfile]);
+
+  if (session === undefined) return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#0f1117' }}>
+      <div style={{ color: '#e8eaf0', fontSize: '14px' }}>Loading…</div>
+    </div>
+  );
+  if (!session) return <LoginScreen onLogin={handleLogin} initialError={authMessage} />;
+
+  if (!userProfile) {
+    if (profileLoadError) return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#0f1117', gap: '14px', padding: '24px', textAlign: 'center' }}>
+        <div style={{ color: '#e8eaf0', fontSize: '14px' }}>Couldn't load your profile. Try again.</div>
+        <button
+          onClick={() => loadProfile(session.user)}
+          style={{ background: '#f5a623', color: '#1a0e00', border: 'none', borderRadius: '8px', padding: '10px 20px', fontWeight: '700', fontSize: '13px', cursor: 'pointer', fontFamily: 'inherit' }}
+        >
+          Retry
+        </button>
+      </div>
+    );
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#0f1117' }}>
+        <div style={{ color: '#e8eaf0', fontSize: '14px' }}>Loading…</div>
+      </div>
+    );
+  }
+
+  const role = userProfile?.role || 'staff';
+  const isBoard = role === 'board_member';
+  const isICO   = role === 'ico';
+  const isMD    = role === 'md';
+
+  // Multi-role: navigable pages are the UNION across all effective roles.
+  // 'md' → 'all' is preserved (md can't be a granted role, so only a primary
+  // md yields 'all').
+  const effRoles = effectiveRolesOf(userProfile).length ? effectiveRolesOf(userProfile) : ['staff'];
+  const allowedPages = effRoles.some(r => ROLE_PAGES[r] === 'all')
+    ? 'all'
+    : [...new Set(effRoles.flatMap(r => ROLE_PAGES[r] || ['dashboard']))];
+  // Pages unlocked specifically by a granted (non-primary) role — used to relax
+  // the ICO/board read-only mask on exactly those pages, not everywhere.
+  const grantedRoles = effRoles.filter(r => r !== role);
+  const grantedPages = new Set(grantedRoles.flatMap(r => (ROLE_PAGES[r] && ROLE_PAGES[r] !== 'all') ? ROLE_PAGES[r] : []));
+  const canSee = (pageId) => {
+    if (pageId === 'production') return allowedPages === 'all' || allowedPages.includes(pageId) || hasRole(userProfile, ...SITE_DAY_READ_ROLES);
+    if (pageId === 'staff_tasks') return hasRole(userProfile, 'md');
+    if (pageId === 'late_entries') return hasRole(userProfile, 'md', 'ico');
+    if (pageId === 'my_profile') return true;
+    if (pageId === 'my_hr') return !!userProfile?.staff_id;
+    // The investor portal is only for a login with the investor role (md's
+    // 'all' does not include it — md has no investor record).
+    if (pageId === 'my_investment') return effRoles.includes('investor');
+    return allowedPages === 'all' || allowedPages.includes(pageId);
+  };
+  const visibleNav = navItems
+    .map(s => ({ ...s, items: s.items.filter(it => canSee(it.id)) }))
+    .filter(s => s.items.length > 0);
+  const safePage = canSee(active) ? active : (visibleNav[0]?.items[0]?.id || 'dashboard');
+  // The read-only mask still applies to a primary board/ICO viewer, but is
+  // relaxed on any page a granted role unlocks (so a granted write role works).
+  const boardMasked = isBoard && safePage !== 'late_entries' && !BOARD_EXEMPT_PAGES.includes(safePage) && !grantedPages.has(safePage);
+  const icoMasked   = isICO   && !ICO_EXEMPT_PAGES.includes(safePage)   && !grantedPages.has(safePage);
+
+  const openSiteContracts = (siteId, opts = {}) => { setContractsSite(siteId || ''); setContractsReport(!!opts.report); setActive('site_contracts'); };
+
+  const openReceiving = canSee("material_receiving") ? siteId => { setReceivingSite(siteId); setActive("material_receiving"); } : undefined;
+  const openRequisitions = siteId => { setRequisitionSite(siteId); setActive("requisitions"); };
+  const openBudgetWarnings = initial => {
+    setInitialWarning(previous => initial && { ...initial, navigationKey: (previous?.navigationKey || 0) + 1 });
+    setActive("production_exceptions");
+  };
+  const openScorecard = (siteId, date) => {
+    setInitialScorecard({ siteId, date });
+    setActive("site_scorecard");
+  };
+  const scorecardDashboard = canSee("site_scorecard")
+    ? <ScorecardDashboard userProfile={userProfile} onOpen={openScorecard} /> : null;
+  const openProduction = (siteId, date) => { setInitialProduction(previous => ({ siteId, date, key: (previous?.key || 0) + 1 })); setActive("production"); };
+  const openStockCount = id => { setInitialStockCount(previous => ({ id, key: (previous?.key || 0) + 1 })); setActive("stock_counts"); };
+  const stockCountCards = <StockCountDashboard userProfile={userProfile} onOpen={openStockCount} />;
+  const dayCards = <SiteDayDashboard userProfile={userProfile} onProduction={openProduction} />;
+  const budgetCards = <BudgetWarningDashboardCards userProfile={userProfile} onOpen={openBudgetWarnings} />;
+  const openPaymentRequest = id => {
+    setInitialPayment(id && canSee('payment_requests') ? { id } : null);
+    setActive('payment_requests');
+  };
+  const pages = {
+    dashboard: isBoard
+      ? <>{stockCountCards}{dayCards}{budgetCards}{scorecardDashboard}<SiteDashboardCards userProfile={userProfile} onOpenSite={openSiteContracts} /><RequisitionsDashboardBanner userProfile={userProfile} onOpen={openRequisitions} onReceive={openReceiving} /><BoardDashboard userProfile={userProfile} /></>
+      : <MobileScope><SiteManagerClock userProfile={userProfile} /><WageDashboard userProfile={userProfile} onOpen={() => { setInitialRoster(null); setActive('labour'); }} />{stockCountCards}{dayCards}{budgetCards}{scorecardDashboard}<Dashboard onOpenReceiving={openReceiving} onOpenRequisitions={openRequisitions} onNavigate={setActive} onOpenSite={openSiteContracts} userProfile={userProfile} /></MobileScope>,
+    late_entries: <MobileScope fit><LateEntries /></MobileScope>,
+    stock_counts: <StockCountPage key={initialStockCount?.key || "default"} initial={initialStockCount} userProfile={userProfile} />,
+    production: <MobileScope><Production key={initialProduction?.key || 'default'} userProfile={userProfile}
+      initialSiteId={initialProduction?.siteId} initialDate={initialProduction?.date} onLabour={() => setActive("labour")} onOpenBudgetWarnings={openBudgetWarnings} /></MobileScope>,
+    inventory: <MobileScope><Inventory onLowStockChange={setLowStockCount} userProfile={userProfile} onNavigate={setActive} /></MobileScope>,
+    site_contracts: <SiteContracts userProfile={userProfile} initialSiteId={contractsSite} initialReport={contractsReport} />,
+    asset_register: <AssetRegister userProfile={userProfile} />,
+    material_receiving: <MaterialReceiving key={receivingSite || "default"} userProfile={userProfile} initialSiteId={receivingSite}
+      onNavigate={canSee("requisitions") ? (_page, siteId) => openRequisitions(siteId) : undefined} />,
+    site_scorecard: <SiteScorecard userProfile={userProfile} initial={initialScorecard} onProduction={openProduction} onOpenBudgetWarnings={openBudgetWarnings} />,
+    site_attendance: <SiteAttendance key={attendanceSite || 'default'} initialSiteId={attendanceSite} userProfile={userProfile} />,
+    production_exceptions: <BudgetWarnings key={initialWarning?.navigationKey || 'default'} userProfile={userProfile} initial={initialWarning} onCorrect={({ siteId, date }) => openProduction(siteId, date)} />,
+    requisitions: <Requisitions userProfile={userProfile} initialSiteId={requisitionSite} onReceive={openReceiving} />,
+    handovers: <Handovers userProfile={userProfile} />,
+    batches: <MobileScope><Batches userProfile={userProfile} onOpenBudgetWarnings={openBudgetWarnings} /></MobileScope>,
+    waybills: <MobileScope><Waybills userProfile={userProfile} /></MobileScope>,
+    vehicles: <MobileScope fit><VehicleRegistry /></MobileScope>,
+    staff: <MobileScope fit><Staff userProfile={userProfile} /></MobileScope>,
+    payroll_approvals: <MobileScope fit><PayrollTab userProfile={userProfile} approvalsOnly /></MobileScope>,
+    customers: <MobileScope fit><Customers userProfile={userProfile} /></MobileScope>,
+    orders: <MobileScope fit><Orders onNavigate={setActive} userProfile={userProfile} /></MobileScope>,
+    pending_register: <MobileScope><PendingDeliveryRegister /></MobileScope>,
+    daily_schedule: <MobileScope fit><DailySchedule /></MobileScope>,
+    lpo_approvals: <MobileScope fit><LPOApprovals /></MobileScope>,
+    schedule_approvals: <MobileScope fit><ScheduleApprovals /></MobileScope>,
+    reports: <MobileScope fit><Reports userProfile={userProfile} /></MobileScope>,
+    kpi_dashboard: <MobileScope fit><KPIDashboard userProfile={userProfile} /></MobileScope>,
+    trading_margin: <MobileScope fit><TradingMarginReport /></MobileScope>,
+    products: <MobileScope fit><Products userProfile={userProfile} /></MobileScope>,
+    suppliers: <MobileScope fit><SupplierRegistry /></MobileScope>,
+    accounting: <MobileScope fit><Accounting userProfile={userProfile} /></MobileScope>,
+    data_import: <MobileScope fit><DataImport /></MobileScope>,
+    user_management: <MobileScope fit><UserManagement userProfile={userProfile} /></MobileScope>,
+    labour: <MobileScope><Labour key={initialRoster?.key || 'default'} initialRosterId={initialRoster?.id} userProfile={userProfile} /></MobileScope>,
+    maintenance: <MobileScope fit><Maintenance userProfile={userProfile} /></MobileScope>,
+    truck_loading: <MobileScope><TruckLoadingPage userProfile={userProfile} /></MobileScope>,
+    advances: <MobileScope fit><AdvancesPage userProfile={userProfile} /></MobileScope>,
+    payment_requests: <MobileScope fit><PaymentRequestsPage userProfile={userProfile} initialRequest={initialPayment} /></MobileScope>,
+    leave: <MobileScope fit><LeavePage userProfile={userProfile} /></MobileScope>,
+    disciplinary: <MobileScope fit><DisciplinaryPage userProfile={userProfile} /></MobileScope>,
+    attendance_kiosk: <AttendanceKiosk userProfile={userProfile} />,
+    attendance_flags: <MobileScope fit><AttendanceFlagsPage userProfile={userProfile} /></MobileScope>,
+    messages: <MobileScope fit><Messages userProfile={userProfile} onUnreadChange={setUnreadMsgCount} /></MobileScope>,
+    my_hr: <MyHRPage userProfile={userProfile} />,
+    staff_tasks: <MobileScope fit><StaffTasks key={initialTask || 'staff-tasks'} userProfile={userProfile} source={taskSource} targetId={initialTask} onPaymentRequest={openPaymentRequest} /></MobileScope>,
+    my_profile: <MobileScope fit><MyProfile userProfile={userProfile} taskSource={taskSource} targetId={initialTask} onPaymentRequest={openPaymentRequest} /></MobileScope>,
+    investor_register: <InvestorRegister userProfile={userProfile} />,
+    capital: <Capital userProfile={userProfile} />,
+    terms: <Terms userProfile={userProfile} />,
+    monthly_close: <MonthlyClose userProfile={userProfile} />,
+    spv_ledger: <SpvLedger userProfile={userProfile} />,
+    reserve_budget: <ReserveBudget userProfile={userProfile} />,
+    my_investment: <MyInvestment userProfile={userProfile} />,
+  };
+
+  const getBadge = (id) => {
+    if (id === "inventory" && lowStockCount > 0) return lowStockCount;
+    if (id === "lpo_approvals" && lpoCount > 0) return lpoCount;
+    if (id === "schedule_approvals" && scheduleCount > 0) return scheduleCount;
+    if (id === "messages" && unreadMsgCount > 0) return unreadMsgCount;
+    return 0;
+  };
+
+  return (
+    <>
+    <style>{`
+      @media (max-width: 768px) {
+        * { box-sizing: border-box; }
+        table { min-width: 520px !important; }
+        div:has(> table) { overflow-x: auto !important; -webkit-overflow-scrolling: touch; }
+        input, select, textarea { font-size: 16px !important; }
+        button { touch-action: manipulation; }
+      }
+    `}</style>
+    <div style={styles.app}>
+      {/* Mobile overlay */}
+      {isMobile && sidebarOpen && (
+        <div onClick={() => setSidebarOpen(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: Z.sidebarBackdrop }} />
+      )}
+      <div style={{ ...styles.sidebar, overflowY: "auto", ...(isMobile ? { transform: sidebarOpen ? 'translateX(0)' : 'translateX(-240px)', transition: 'transform 0.25s ease', zIndex: Z.sidebar } : {}) }}>
+        <div style={styles.logo}>
+          <img src="/logo.png" alt="Abuja Precast Concrete Limited" style={{ width: "100%", maxWidth: "180px", marginBottom: "10px", display: "block" }} />
+          <div style={styles.logoSub}>Quality Precast products. Reliable Delivery.</div>
+        </div>
+        <nav style={styles.nav}>
+          {visibleNav.map(section => (
+            <div key={section.section}>
+              <div style={styles.navSection}>{section.section}</div>
+              {section.items.map(item => {
+                const badge = getBadge(item.id);
+                return (
+                  <div key={item.id} style={{ ...styles.navItem(active === item.id), ...(isMobile ? { minHeight: '44px' } : {}) }} onClick={() => { if (item.id === 'payment_requests') setInitialPayment(null); if (item.id === 'staff_tasks' || item.id === 'my_profile') setInitialTask(null); if (item.id === 'production_exceptions') setInitialWarning(null); if (item.id === 'site_scorecard') setInitialScorecard(null); if (item.id === 'production') setInitialProduction(null); if (item.id === 'stock_counts') setInitialStockCount(null); if (item.id === 'material_receiving') setReceivingSite(''); setActive(item.id); setContractsReport(false); if (isMobile) setSidebarOpen(false); }}>
+                    <Icon name={item.icon} size={20} />
+                    <span style={{ flex: 1 }}>{item.label}</span>
+                    {badge > 0 && (
+                      <span style={{ background: theme.red, color: "#fff", fontSize: "10px", fontWeight: "700", borderRadius: "10px", padding: "1px 6px", minWidth: "18px", textAlign: "center" }}>{badge}</span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </nav>
+        <div style={{ padding: "14px 20px", borderTop: `1px solid ${theme.border}`, fontSize: "11px", color: theme.textMuted, lineHeight: "1.7" }}>
+          <div style={{ fontWeight: "700", color: theme.text, fontSize: "12px", marginBottom: "2px" }}>{userProfile?.full_name || 'User'}</div>
+          <div style={{ color: theme.accent, fontSize: "11px", marginBottom: "6px" }}>{APP_ROLES.find(r => r.id === role)?.label || role} {(isBoard || isICO) ? '· View Only' : ''}</div>
+          <div style={{ display: "flex", gap: "8px" }}><Ico icon={MapPin} style={{ marginTop: "3px" }} /><span>1, Dutse Alhaji, Behind Tipper Garage, Off Bwari Expressway, Abuja.</span></div>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}><Ico icon={Phone} /><span>+234 905 554 4433</span></div>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", wordBreak: "break-all" }}><Ico icon={Mail} /><span>abujaprecastconcreteltd@gmail.com</span></div>
+          <div style={{ display:"flex", gap:"8px", marginTop:"10px" }}>
+            <button onClick={() => setShowChangePwd(true)} style={{ flex:1, padding:"6px", minHeight: isMobile ? '44px' : undefined, background:"transparent", border:`1px solid ${theme.border}`, borderRadius:"6px", color:theme.textMuted, fontSize:"11px", cursor:"pointer", fontWeight:"600" }}>Change Password</button>
+            <button onClick={handleLogout} style={{ flex:1, padding:"6px", minHeight: isMobile ? '44px' : undefined, background:"transparent", border:`1px solid ${theme.border}`, borderRadius:"6px", color:theme.textMuted, fontSize:"11px", cursor:"pointer", fontWeight:"600" }}>Sign Out</button>
+          </div>
+        </div>
+      </div>
+      {showChangePwd && <MobileScope fit><ChangePasswordModal onClose={() => setShowChangePwd(false)} /></MobileScope>}
+      {!investorOnly && <MessagesBell
+        unreadMsgCount={unreadMsgCount}
+        onNavigate={(page) => { setActive(page); if (isMobile) setSidebarOpen(false); }}
+        isMobile={isMobile}
+      />}
+      {!investorOnly && <NotificationBell
+        userProfile={userProfile}
+        onNavigate={(page, relatedId) => {
+          if (page === "production_exceptions") openBudgetWarnings(relatedId ? { id: relatedId } : null);
+          else if (page === "stock_counts") openStockCount(relatedId);
+          else if (page === "site_attendance") { setAttendanceSite(relatedId); setActive(page); }
+          else if (page === "production" && relatedId) openProduction(relatedId);
+          else if (page === "payment_requests") openPaymentRequest(relatedId);
+          else if (page === "labour") { setInitialRoster(previous => ({ id: relatedId, key: (previous?.key || 0) + 1 })); setActive(page); }
+          else {
+            if (page === "staff_tasks" || page === "my_profile") setInitialTask(relatedId || null);
+            setActive(page);
+          }
+          if (isMobile) setSidebarOpen(false);
+        }}
+        isMobile={isMobile}
+      />}
+      <main style={{ ...styles.main, ...(isMobile ? { marginLeft: 0, minWidth: 0, padding: '16px 14px', paddingTop: '68px' } : {}) }} {...(boardMasked ? { 'data-board-view': 'true' } : {})} {...(icoMasked ? { 'data-ico-view': 'true' } : {})}>
+        {/* Mobile hamburger */}
+        {isMobile && (
+          <IconButton data-board-allow data-ico-allow aria-label="Open menu" onClick={() => setSidebarOpen(s => !s)} style={{ position: 'fixed', top: '10px', left: '12px', zIndex: Z.floating, width: '44px', height: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: '8px', padding: 0, cursor: 'pointer', fontSize: '20px', color: theme.text, lineHeight: 1, boxShadow: '0 2px 8px rgba(0,0,0,0.3)' }}><Ico icon={Menu} size={20} /></IconButton>
+        )}
+        <TaskReminder tasks={taskSource.rows} userId={userProfile.id} onView={() => { setInitialTask(null); setActive('my_profile'); }} />
+        <DeviceClockBanner userId={userProfile.id} />
+        {sessionWarning && (
+          <div style={{ background: "#7c3a0022", border: "1px solid #c47d0e88", borderRadius: "8px", padding: "10px 16px", marginBottom: "16px", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "13px", color: theme.accent }}>
+            <span><Ico icon={AlertTriangle} size={20} style={{ marginRight: "8px" }} />Your session expires in <strong>{sessionMinutes} minute{sessionMinutes !== 1 ? 's' : ''}</strong>. Unsaved work may be lost.</span>
+            <div style={{ display: "flex", gap: "8px" }}>
+              <button data-board-allow data-ico-allow onClick={handleExtendSession} style={{ padding: "5px 14px", borderRadius: "6px", background: theme.accent, color: "#000", border: "none", fontSize: "12px", fontWeight: "700", cursor: "pointer" }}>Extend Session</button>
+              <button data-board-allow data-ico-allow onClick={() => setSessionWarning(false)} style={{ padding: "5px 10px", borderRadius: "6px", background: "transparent", color: theme.textMuted, border: `1px solid ${theme.border}`, fontSize: "12px", cursor: "pointer" }}>Dismiss</button>
+            </div>
+          </div>
+        )}
+        {isBoard && (
+          <style>{`
+            [data-board-view] button:not([data-board-allow]) { display: none !important; }
+            [data-board-view] input { pointer-events: none; opacity: 0.8; }
+            [data-board-view] select { pointer-events: none; opacity: 0.8; }
+            [data-board-view] select[data-board-allow] { pointer-events: auto; opacity: 1; }
+          `}</style>
+        )}
+        {isICO && (
+          <style>{`
+            [data-ico-view] button:not([data-ico-allow], [data-task-controls] *) { display: none !important; }
+          `}</style>
+        )}
+        {boardMasked && (
+          <div style={{ background: theme.accent+'22', border: `1px solid ${theme.accent}44`, borderRadius: '8px', padding: '8px 16px', margin: '0 0 16px', fontSize: '12px', color: theme.accent, fontWeight: '600' }}>
+            <IconText icon={Eye}>View Only Mode — Board Member access</IconText>
+          </div>
+        )}
+        {icoMasked && (
+          <div style={{ background: theme.blue+'22', border: `1px solid ${theme.blue}44`, borderRadius: '8px', padding: '8px 16px', margin: '0 0 16px', fontSize: '12px', color: theme.blue, fontWeight: '600' }}>
+            <Ico icon={Lock} style={{ marginRight: '8px' }} />Read-Only Mode — Internal Control Officer. Approvals available in Schedule Approvals and Labour modules.
+          </div>
+        )}
+        <AssignedSiteProvider key={userProfile.id}>{pages[safePage]}</AssignedSiteProvider>
+      </main>
+    </div>
+    </>
+  );
+}

@@ -330,6 +330,11 @@ export const payrollService = {
 
 
 export const dailyWagesService = {
+  async recordMissedCheckIns(rosterId, reason) {
+    const { data, error } = await supabase.rpc('record_missed_check_ins', { p_roster_id: rosterId, p_reason: reason.trim() })
+    if (error) throw error
+    return data
+  },
   async due() {
     const { data, error } = await supabase.rpc('daily_wages_due')
     if (error) throw error

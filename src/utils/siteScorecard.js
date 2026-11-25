@@ -1,3 +1,4 @@
+import { generatorWhatsApp } from './siteGenerator'
 import { lineBadge, lineText } from './productionExceptions'
 
 const number = (value, digits = 2) => Number(value).toLocaleString('en-NG', { maximumFractionDigits: digits })
@@ -66,7 +67,7 @@ export function scorecardLabour(costs, showMoney = true) {
   ].filter(Boolean).join(', ') || null
 }
 
-export function scorecardWhatsAppText(score, lines = []) {
+export function scorecardWhatsAppText(score, lines = [], generator) {
   const { date, site_name: site, blocks_total: total, blocks_9in: nine, blocks_6in: six, costs, dust_kg: dust } = score
   const { cement, diesel, breakage, materials } = scorecardMetrics(score, lines)
   const showCosts = score.contract_model !== 'service_fee'
@@ -75,6 +76,7 @@ export function scorecardWhatsAppText(score, lines = []) {
   const costLines = showCosts && available(costs?.materials) ? scorecardCostLines(costs) : []
   return [
     `Production report ${scorecardDate(date)} — ${site}`,
+    generatorWhatsApp(generator),
     available(total) && `Blocks: ${number(total)} (9": ${number(nine)}, 6": ${number(six)})`,
     (cement.usage || cement.rate) && `Cement: ${metric(cement)}`,
     (diesel.usage || diesel.rate) && `Diesel: ${metric(diesel)}`,

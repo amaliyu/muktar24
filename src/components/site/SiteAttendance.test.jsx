@@ -275,3 +275,13 @@ it('stops morning scanning after six implausible frames without checking anyone 
   expect(engine.detect).toHaveBeenCalledTimes(6)
   expect(rpc('crew_check_in')).toHaveLength(0)
 })
+
+it('labels face, manual and MD entries and shows the MD reason without a photo', async () => {
+  db.roster = ['face', 'manual', 'md_backfill'].map((method, i) => ({ labour_id: String(i), name: method, method, checked_at: '2026-11-21T06:12:00Z', manual_reason: method === 'md_backfill' ? 'Entered by MD: Face check paused' : 'Manual reason', manual_photo_path: method === 'md_backfill' ? 'should-not-show' : null }))
+  page(md)
+  expect(await screen.findByText(/· Face$/)).toBeInTheDocument()
+  expect(screen.getByText(/· Manual$/)).toBeInTheDocument()
+  expect(screen.getByText(/· Entered by MD$/)).toBeInTheDocument()
+  expect(screen.getByText('Entered by MD: Face check paused')).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'View photo' })).toBeNull()
+})

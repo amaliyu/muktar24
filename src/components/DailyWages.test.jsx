@@ -145,3 +145,28 @@ it('shows the paid transfer and keeps the roster read-only', async () => {
   expect(await screen.findByRole('button', { name: 'View', exact: true })).toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'Edit', exact: true })).toBeNull()
 })
+
+it('lets MD record missing check-ins and refreshes coverage', async () => {
+  const { todayLagos, shiftDate } = await import('../utils/lagosDate')
+  let recorded = false
+  db.resolve = (table, ops) => {
+    if (table === 'rpc:daily_wages_due') return ok([{ ...due, roster_date: shiftDate(todayLagos(), -1) }])
+    if (table === 'rpc:site_crew_register') return ok({ on_roster_not_checked_in: recorded ? [] : [{}, {}] })
+    if (table === 'rpc:record_missed_check_ins') { recorded = true; return ok(2) }
+    return base(table, ops)
+  }
+  render(<WagesToPay userProfile={{ role: 'md' }} />)
+  await userEvent.click(await screen.findByRole('button', { name: 'Record missed check-ins' }))
+  await userEvent.type(screen.getByLabelText('Reason'), 'Face check paused that day')
+  await userEvent.click(screen.getByRole('button', { name: 'Record', exact: true }))
+  expect(await screen.findByText('2 check-ins recorded (entered by MD)')).toBeInTheDocument()
+  expect(await screen.findByText('Register: 3 of 3 checked in')).toBeInTheDocument()
+  expect(db.calls.find(c => c.rpc === 'record_missed_check_ins').args).toEqual({ p_roster_id: 'r', p_reason: 'Face check paused that day' })
+})
+it.each([['accountant', -1, 1], ['assistant_production_manager', -1, 1], ['md', 0, 1], ['md', -8, 1], ['md', -1, 0]])('hides missed-check-in action for %s offset %i missing %i', async (role, offset, missing) => {
+  const { todayLagos, shiftDate } = await import('../utils/lagosDate')
+  db.resolve = (table, ops) => table === 'rpc:daily_wages_due' ? ok([{ ...due, roster_date: shiftDate(todayLagos(), offset) }]) : table === 'rpc:site_crew_register' ? ok({ on_roster_not_checked_in: Array(missing).fill({}) }) : base(table, ops)
+  render(<WagesToPay userProfile={{ role }} />)
+  if (role !== 'assistant_production_manager') await screen.findByText(/Register:/)
+  expect(screen.queryByRole('button', { name: 'Record missed check-ins' })).toBeNull()
+})

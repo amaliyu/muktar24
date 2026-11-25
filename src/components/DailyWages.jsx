@@ -1,3 +1,4 @@
+import { todayLagos, shiftDate } from '../utils/lagosDate'
 import React, { useEffect, useState } from 'react'
 import { Banknote } from 'lucide-react'
 import { hasRole } from '../lib/roles'
@@ -92,8 +93,9 @@ function PaymentForm({ row, onClose, onPaid }) {
   </dialog>
 }
 
-function RosterCoverage({ site, date, workers, revision }) {
+function RosterCoverage({ site, date, workers, revision, md, rosterId }) {
   const [missing, setMissing] = useState(null)
+  const [open, setOpen] = useState(false), [reason, setReason] = useState(''), [busy, setBusy] = useState(false), [message, setMessage] = useState(''), [localRevision, setLocalRevision] = useState(0)
   const [error, setError] = useState('')
   useEffect(() => {
     let active = true
@@ -104,9 +106,28 @@ function RosterCoverage({ site, date, workers, revision }) {
       }
     }).catch(error => { if (active) setError(error.message) })
     return () => { active = false }
-  }, [site, date, revision])
-  if (error) return <p role="alert">{error}</p>
-  return missing == null ? null : <p>Register: {Math.max(0, workers - missing)} of {workers} checked in</p>
+  }, [site, date, revision, localRevision])
+  async function record(event) {
+    event.preventDefault(); setBusy(true); setError('')
+    try {
+      const count = await dailyWagesService.recordMissedCheckIns(rosterId, reason)
+      setMessage(count + ' check-ins recorded (entered by MD)'); setOpen(false); setLocalRevision(n => n + 1)
+    } catch (error) { setError(error.message) }
+    finally { setBusy(false) }
+  }
+  return <>
+    {error && <p role="alert">{error}</p>}
+    {missing != null && <p>Register: {Math.max(0, workers - missing)} of {workers} checked in</p>}
+    {message && <p role="status">{message}</p>}
+    {md && missing > 0 && date < todayLagos() && date >= shiftDate(todayLagos(), -7) && <>
+      {!open ? <button style={control} onClick={() => setOpen(true)}>Record missed check-ins</button> : <form onSubmit={record}>
+        <label>Reason<textarea style={{ ...control, width: '100%' }} minLength={10} required value={reason} onChange={e => setReason(e.target.value)} /></label>
+        <p>e.g. Face check paused that day</p>
+        <button style={control} disabled={busy || reason.trim().length < 10}>Record</button>{' '}
+        <button type="button" style={control} disabled={busy} onClick={() => setOpen(false)}>Cancel</button>
+      </form>}
+    </>}
+  </>
 }
 
 export function WagesToPay({ userProfile, onRoster, revision, onPaid }) {
@@ -121,7 +142,7 @@ export function WagesToPay({ userProfile, onRoster, revision, onPaid }) {
       return <div key={row.roster_id} style={panel}>
         <button style={control} onClick={() => onRoster(row.roster_id)}>{row.site_name} · {row.roster_date} · View roster</button>
         <p>{row.workers} workers · {money(row.total)} · MD approval: {row.md_status || 'pending'}</p>
-        <RosterCoverage site={row.site_id} date={row.roster_date} workers={row.workers} revision={revision} />
+        <RosterCoverage md={hasRole(userProfile, 'md')} rosterId={row.roster_id} site={row.site_id} date={row.roster_date} workers={row.workers} revision={revision} />
         <p style={{ color: row.days_waiting > 1 ? '#f06b6b' : undefined }}>{row.days_waiting} days waiting</p>
         <button style={control} disabled={waiting} onClick={() => setSelected(row.roster_id)}>{waiting ? 'Waiting for MD approval' : 'Record payment'}</button>
         {selected === row.roster_id && !waiting && <PaymentForm row={row} onClose={() => setSelected(null)} onPaid={() => {
