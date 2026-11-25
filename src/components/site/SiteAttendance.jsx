@@ -302,12 +302,12 @@ function Register({ site, date, revision, showSimilarity }) {
     <h2>Crew register</h2>
     {error ? <p role="alert">{error}</p> : !data ? <p>Loading register…</p> : <>
       <p>{data.check_ins.length} checked in · {data.registered_faces} registered</p>
-      {data.check_ins.map(row => <article key={row.labour_id} style={{ ...panel, ...(row.method === 'manual' ? { borderColor: '#f5a623', background: '#f5a62315' } : {}) }}>
-        <strong>{row.name}</strong> · {attendanceTime(row.checked_at)} · {row.method === 'manual' ? 'Manual' : 'Face'}
+      {data.check_ins.map(row => <article key={row.labour_id} style={{ ...panel, ...(row.method !== 'face' ? { borderColor: '#f5a623', background: '#f5a62315' } : {}) }}>
+        <strong>{row.name}</strong> · {attendanceTime(row.checked_at)} · {row.method === 'md_backfill' ? 'Entered by MD' : row.method === 'manual' ? 'Manual' : 'Face'}
         {showSimilarity && row.similarity != null && <small> · Match {Math.round(row.similarity * 100)}%</small>}
-        {row.method === 'manual' && <>
+        {row.method !== 'face' && <>
           <p>{row.manual_reason}</p>
-          {row.manual_photo_path && <ManualPhoto path={row.manual_photo_path} />}
+          {row.method === 'manual' && row.manual_photo_path && <ManualPhoto path={row.manual_photo_path} />}
         </>}
       </article>)}
       {data.on_roster_not_checked_in.length > 0 && <div style={{ color: '#f06b6b' }}>

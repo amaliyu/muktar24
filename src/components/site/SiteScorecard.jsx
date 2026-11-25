@@ -1,3 +1,5 @@
+import { siteGenerator } from '../../services/siteGenerator'
+import { GeneratorSummary } from './GeneratorDay'
 import ShareActions from '../ShareActions'
 import { NoProductionDay, SiteDayPeriod } from './SiteDays'
 import { useState } from 'react'
@@ -26,7 +28,7 @@ function Metric({ label, metric, compact }) {
   </div>{metric.hint && <div style={ui.hint}>{metric.hint}</div>}</div>
 }
 
-function ScorecardBody({ score, onOpenBudgetWarnings }) {
+function ScorecardBody({ score, onOpenBudgetWarnings, generator }) {
   const warnings = useSiteRead(() => productionExceptionsService.list({ siteId: score.site_id, date: score.date }), [score.site_id, score.date])
   const lines = warnings.data ?? null
   const { costs } = score
@@ -59,7 +61,8 @@ function ScorecardBody({ score, onOpenBudgetWarnings }) {
         : labour && <div>Labour: {labour}{costs.labour_per_block != null && ` — ${fmtNaira(costs.labour_per_block)} per block`}</div>}
       {costs?.total != null && <div><strong>Total: {fmtNaira(costs.total)}</strong>
         {costs.total_per_block != null && ` — ${fmtNaira(costs.total_per_block)} per block`}</div>}
-      <ShareActions text={scorecardWhatsAppText(score, lines)} title="Production report" label="Share report" />
+      <ErrorBox error={generator.error} /><GeneratorSummary day={generator.data} />
+      <ShareActions text={scorecardWhatsAppText(score, lines, generator.data)} title="Production report" label="Share report" />
     </section>
   </>
 }
@@ -70,6 +73,7 @@ export function SiteScorecard({ assignedSiteId, initial, onOpenBudgetWarnings, o
   const [date, setDate] = useState(initial?.date || lagosToday)
   const siteId = assignedSiteId || selected || sites.find(site => site.code === 'KADO-SEQ')?.id || sites[0]?.id || ''
   const result = useSiteRead(() => siteId && date ? getSiteScorecard(siteId, date) : null, [siteId, date])
+  const generator = useSiteRead(() => siteId && date ? siteGenerator.day(siteId, date) : null, [siteId, date])
   const score = result.data?.site_id === siteId && result.data?.date === date ? result.data : null
 
   return <section>
@@ -92,8 +96,9 @@ export function SiteScorecard({ assignedSiteId, initial, onOpenBudgetWarnings, o
     <ErrorBox error={error || result.error} />
     {result.loading && siteId && <p role="status">Loading scorecard…</p>}
     {score?.day_status ? <NoProductionDay status={score.day_status} idleLabour={score.idle_labour} />
-      : score?.blocks_total > 0 ? <ScorecardBody key={`${siteId}:${date}`} score={score} onOpenBudgetWarnings={onOpenBudgetWarnings} />
+      : score?.blocks_total > 0 ? <ScorecardBody key={`${siteId}:${date}`} score={score} generator={generator} onOpenBudgetWarnings={onOpenBudgetWarnings} />
       : !result.loading && !result.error && siteId && <p>No production recorded for {scorecardDate(date)}.</p>}
+    {!(score?.blocks_total > 0 && !score?.day_status) && <><ErrorBox error={generator.error} /><GeneratorSummary day={generator.data} /></>}
     <SiteDayPeriod siteId={siteId} onProduction={onProduction} />
   </section>
 }
