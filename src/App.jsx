@@ -1,3 +1,4 @@
+import GeneratorDay from './components/site/GeneratorDay'
 import DeviceClockBanner from './components/DeviceClockBanner'
 import StockCountPage, { StockCountDashboard } from './components/site/StockCounts'
 import { GrantActions, GrantExpiry, MyAccess } from './components/GrantExpiry'
@@ -1384,6 +1385,7 @@ export const Production = withAssignedSite(function Production({ userProfile, as
           </table>
         )}
       </div>
+      {hasRole(userProfile, ...SITE_DAY_READ_ROLES) && <GeneratorDay key={daySite} siteId={daySite} canWrite={canWriteDay} onSaved={async date => { refreshDays(); await savedWarnings.refresh(daySite, date) }} />}
     </div>
   );
 });
