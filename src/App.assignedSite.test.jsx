@@ -58,8 +58,8 @@ vi.mock('./lib/supabase', async () => {
       ],
       v_site_yard: [{ site_id: fixture.site, site_name: fixture.siteName, block_type: fixture.blockType, in_yard: 100 }],
     }[table] || []
-    const filters = ops.filter(op => op[0] === 'eq' && op[1] === 'site_id')
-    return { data: rows.filter(row => filters.every(([, key, value]) => row[key] === value)), error: null }
+    const filters = ops.filter(op => op[0] === 'eq' && (op[1] === 'site_id' || table === 'block_handovers'))
+    return { data: rows.filter(row => filters.every(([, key, value]) => row[key] === value) && ops.filter(op => op[0] === 'neq').every(([, key, value]) => row[key] !== value)), error: null }
   })
   fixture.calls = mock.calls
   return { supabase: mock.supabase }
@@ -76,6 +76,7 @@ beforeEach(() => {
   fixture.calls.length = 0
   fixture.assignment = () => ({ data: fixture.site, error: null })
   fixture.production = []
+  fixture.handovers = []
   fixture.marked = false
   fixture.lockError = null
   fixture.warnings = []
@@ -180,6 +181,7 @@ it('uses one assignment request across Receiving and Handovers and locks both en
   change(block.parentElement, block.value)
   change(within(handover).getByLabelText(/Quantity handed over/), '10')
   await within(handover).findByRole('option', { name: 'Truck' })
+  change(within(handover).getByLabelText(/Waybill no/), ' wb1 ')
   change(within(handover).getByLabelText('Truck'), 'v')
   fireEvent.click(within(handover).getByRole('button', { name: 'Loader' }))
   fireEvent.click(within(handover).getByRole('button', { name: 'Record handover' }))
@@ -274,12 +276,63 @@ it('shows the correction banner and highlights the entry for the selected site a
 it('repairs an old handover using only transport columns', async () => {
   fixture.handovers = [{ id: 'old', site_id: fixture.site, handover_date: lagosToday(), block_type: fixture.blockType, qty_handed_over: 10, status: 'pending' }]
   render(session(<Handovers userProfile={profile} />))
-  fireEvent.click(await screen.findByRole('button', { name: 'Add truck & loaders' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Add waybill, truck & loaders' }))
   const dialog = screen.getByRole('button', { name: 'Save transport' }).parentElement.parentElement
   await within(dialog).findByRole('option', { name: 'Truck' })
+  change(within(dialog).getByLabelText(/Waybill no/), ' wb1 ')
   change(within(dialog).getByLabelText('Truck'), 'v')
   fireEvent.click(within(dialog).getByRole('button', { name: 'Loader' }))
   fireEvent.click(within(dialog).getByRole('button', { name: 'Save transport' }))
-  await waitFor(() => expect(fixture.calls.find(c => c.table === 'block_handovers' && c.ops.some(o => o[0] === 'update'))?.ops.find(o => o[0] === 'update')[1]).toEqual({ vehicle_id: 'v', vehicle_plate: null, driver_staff_id: 'd', driver_name: null, loader_ids: ['l'] }))
+  await waitFor(() => expect(fixture.calls.find(c => c.table === 'block_handovers' && c.ops.some(o => o[0] === 'update'))?.ops.find(o => o[0] === 'update')[1]).toEqual({ waybill_no: 'WB1', vehicle_id: 'v', vehicle_plate: null, driver_staff_id: 'd', driver_name: null, loader_ids: ['l'] }))
   fixture.handovers = []
+})
+
+it('prefills an existing truck and crew; duplicate waybill warns but permits repair', async () => {
+  fixture.handovers = [
+    { id: 'old', site_id: fixture.site, handover_date: lagosToday(), block_type: fixture.blockType, qty_handed_over: 10, status: 'pending', vehicle_id: 'v', vehicle_plate: null, driver_staff_id: 'd', driver_name: 'Driver', loader_ids: ['l'] },
+    { id: 'duplicate', site_id: fixture.site, handover_date: lagosToday(), block_type: '6 Inch Block', qty_handed_over: 20, waybill_no: 'WB2', vehicle_id: 'v' },
+  ]
+  render(session(<Handovers userProfile={profile} />))
+  fireEvent.click(await screen.findByRole('button', { name: 'Add waybill, truck & loaders' }))
+  const dialog = screen.getByRole('button', { name: 'Save transport' }).parentElement.parentElement
+  await within(dialog).findByRole('option', { name: 'Truck' })
+  expect(within(dialog).getByLabelText('Truck')).toHaveValue('v')
+  expect(within(dialog).getByLabelText('Driver')).toHaveValue('d')
+  expect(within(dialog).getByRole('button', { name: 'Loader' })).toHaveAttribute('aria-pressed', 'true')
+  change(within(dialog).getByLabelText(/Waybill no/), ' wb2 ')
+  expect(await within(dialog).findByText(/Waybill WB2 is already on the handover/)).toHaveTextContent('20 6 Inch Block')
+  expect(within(dialog).getByRole('button', { name: 'Save transport' })).toBeEnabled()
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Save transport' }))
+  await waitFor(() => expect(fixture.calls.find(c => c.table === 'block_handovers' && c.ops.some(o => o[0] === 'update'))?.ops.find(o => o[0] === 'update')[1]).toEqual({ waybill_no: 'WB2', vehicle_id: 'v', vehicle_plate: null, driver_staff_id: 'd', driver_name: null, loader_ids: ['l'] }))
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'Save transport' })).not.toBeInTheDocument())
+  fixture.handovers = []
+})
+
+it('warns about a duplicate on create and still saves a normalized waybill', async () => {
+  fixture.handovers = [{ id: 'existing', site_id: fixture.site, handover_date: lagosToday(), block_type: '6 Inch Block', qty_handed_over: 20, waybill_no: 'WB3', vehicle_id: 'v' }]
+  render(session(<Handovers userProfile={profile} />))
+  const form = await screen.findByRole('form', { name: 'Record a handover' })
+  const block = await within(form).findByRole('option', { name: fixture.blockType })
+  change(block.parentElement, block.value)
+  change(within(form).getByLabelText(/Quantity handed over/), '10')
+  await within(form).findByRole('option', { name: 'Truck' })
+  change(within(form).getByLabelText('Truck'), 'v')
+  fireEvent.click(within(form).getByRole('button', { name: 'Loader' }))
+  change(within(form).getByLabelText(/Waybill no/), ' wb3 ')
+  expect(await within(form).findByText(/Only save if the same trip carried two block types/)).toHaveTextContent('20 6 Inch Block')
+  fireEvent.click(within(form).getByRole('button', { name: 'Record handover' }))
+  await waitFor(() => expect(fixture.calls.find(c => c.table === 'block_handovers' && c.ops.some(o => o[0] === 'insert'))?.ops.find(o => o[0] === 'insert')[1]).toMatchObject({ waybill_no: 'WB3', vehicle_id: 'v', loader_ids: ['l'] }))
+})
+it('prefills typed truck, driver and existing waybill during repair', async () => {
+  fixture.handovers = [{ id: 'typed', site_id: fixture.site, handover_date: lagosToday(), block_type: fixture.blockType, qty_handed_over: 10, status: 'pending', waybill_no: 'WB4', vehicle_plate: '', driver_name: 'Guest', loader_ids: ['l'] }]
+  render(session(<Handovers userProfile={profile} />))
+  fireEvent.click(await screen.findByRole('button', { name: 'Add waybill, truck & loaders' }))
+  const dialog = screen.getByRole('button', { name: 'Save transport' }).parentElement.parentElement
+  await within(dialog).findByRole('option', { name: 'Truck' })
+  expect(within(dialog).getByLabelText(/Waybill no/)).toHaveValue('WB4')
+  expect(within(dialog).getByLabelText('Driver name')).toHaveValue('Guest')
+  change(within(dialog).getByLabelText('Truck'), 'other')
+  change(within(dialog).getByLabelText('Truck plate'), 'XYZ')
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Save transport' }))
+  await waitFor(() => expect(fixture.calls.find(c => c.table === 'block_handovers' && c.ops.some(o => o[0] === 'update'))?.ops.find(o => o[0] === 'update')[1]).toMatchObject({ waybill_no: 'WB4', vehicle_plate: 'XYZ', driver_name: 'Guest', loader_ids: ['l'] }))
 })

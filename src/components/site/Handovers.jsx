@@ -21,6 +21,35 @@ export const HANDOVER_WRITE_ROLES = ['md', 'production_manager', 'assistant_prod
 
 const emptyForm = (siteId = '') => ({ siteId, date: lagosToday(), blockType: '', qty: '', clientRep: '', notes: '', photo: null })
 
+// Look up while typing so a repeated waybill stays visible without disabling Save.
+function useWaybillWarning(siteId, value, excludeId) {
+  const [result, setResult] = useState({ key: '', rows: [], error: null })
+  const number = value?.trim().toUpperCase() || ''
+  const key = JSON.stringify([siteId, number, excludeId])
+  useEffect(() => {
+    let active = true
+    setResult({ key: '', rows: [], error: null })
+    if (siteId && number) siteContractsService.findByWaybill(siteId, number, excludeId)
+      .then(rows => { if (active) setResult({ key, rows, error: null }) })
+      .catch(error => { if (active) setResult({ key, rows: [], error }) })
+    return () => { active = false }
+  }, [key])
+  return {
+    rows: result.key === key ? result.rows : [], error: result.key === key ? result.error : null,
+    async check() {
+      const rows = await siteContractsService.findByWaybill(siteId, number, excludeId)
+      setResult({ key, rows, error: null })
+      // If a duplicate only appeared at save time, let the user see it first.
+      return !rows.length || (result.key === key && rows.every(row => result.rows.some(old => old.id === row.id)))
+    },
+  }
+}
+function WaybillWarning({ number, result }) {
+  return <><ErrorBox error={result.error} />{result.rows.map(row => <p key={row.id} role="status" style={{ color: theme.accent }}>
+    Waybill {number.trim().toUpperCase()} is already on the handover of {fmtDate(row.handover_date)} ({fmtQty(row.qty_handed_over)} {row.block_type}). Only save if the same trip carried two block types.
+  </p>)}</>
+}
+
 function Handovers({ userProfile, assignedSiteId }) {
   const canWrite = hasRole(userProfile, ...HANDOVER_WRITE_ROLES)
   const isMD = userProfile?.role === 'md'
@@ -40,6 +69,8 @@ function Handovers({ userProfile, assignedSiteId }) {
   const [transportTarget, setTransportTarget] = useState(null)
   const repairOptions = useTransportOptions(transportTarget?.site_id, transportTarget?.handover_date)
   const [repair, setRepair] = useState(emptyTransport)
+  const duplicate = useWaybillWarning(form.siteId, transport.waybill_no)
+  const repairDuplicate = useWaybillWarning(transportTarget?.site_id, repair.waybill_no, transportTarget?.id)
   useEffect(() => { setTransport(emptyTransport()) }, [form.siteId, form.date])
   const [busy, setBusy] = useState(false)
   const [formErr, setFormErr] = useState(null)
@@ -103,6 +134,7 @@ function Handovers({ userProfile, assignedSiteId }) {
     let photoPath = null
     let photoWarn = ''
     try {
+      if (!await duplicate.check()) return
       if (form.photo) {
         try {
           const site = sites.find(s => s.id === form.siteId)
@@ -113,7 +145,7 @@ function Handovers({ userProfile, assignedSiteId }) {
       }
       await siteContractsService.createHandover({
         ...lateEntry.payload,
-        ...transport, vehicle_id: transport.vehicle_id || null, vehicle_plate: transport.vehicle_id ? null : transport.vehicle_plate.trim(), driver_staff_id: transport.driver_staff_id || null, driver_name: transport.driver_staff_id ? null : transport.driver_name.trim(),
+        ...transport, waybill_no: transport.waybill_no.trim().toUpperCase(), vehicle_id: transport.vehicle_id || null, vehicle_plate: transport.vehicle_id ? null : transport.vehicle_plate.trim(), driver_staff_id: transport.driver_staff_id || null, driver_name: transport.driver_staff_id ? null : transport.driver_name.trim(),
         site_id: form.siteId, handover_date: form.date, block_type: form.blockType,
         qty_handed_over: Math.round(Number(form.qty)), client_rep: form.clientRep.trim() || null,
         photo_path: photoPath, notes: form.notes.trim() || null,
@@ -224,9 +256,10 @@ function Handovers({ userProfile, assignedSiteId }) {
           <div style={ui.field}>
             <label style={ui.label} htmlFor="ho-notes">Notes</label>
             <textarea id="ho-notes" style={ui.textarea} value={form.notes} onChange={set('notes')} />
+            <div style={ui.hint}>Where the blocks went</div>
           </div>
           <TransportFields value={transport} onChange={setTransport} options={options.data} error={options.error} />
-          <div style={ui.hint}>Trip number and where the blocks went</div>
+          <WaybillWarning number={transport.waybill_no} result={duplicate} />
           <LateReasonField entry={lateEntry} />
           <button type="submit" style={{ ...ui.btn('primary', !!formProblem || lateEntry.invalid || busy), width: '100%', minHeight: '52px' }} disabled={!!formProblem || lateEntry.invalid || busy}>
             {busy ? 'Saving…' : 'Record handover'}
@@ -279,7 +312,7 @@ function Handovers({ userProfile, assignedSiteId }) {
                         {r.rectified_on && <div style={{ color: theme.green, fontSize: '12px' }}>Rectified {fmtDate(r.rectified_on)}{r.rectification_notes ? ` — ${r.rectification_notes}` : ''}</div>}
                         {r.deemed && <div style={ui.hint}>Applied by the nightly job</div>}
                       </td>
-                      <td style={ui.td}>{r.client_rep || '—'}{r.notes && <div style={ui.hint}>{r.notes}</div>}<TransportLabel row={r} vehicles={options.data?.vehicles} />{canWrite && !r.vehicle_id && !r.vehicle_plate && <button style={ui.btn()} onClick={() => { setTransportTarget(r); setRepair(emptyTransport()); setDlgErr(null) }}>Add truck &amp; loaders</button>}</td>
+                      <td style={ui.td}>{r.client_rep || '—'}{r.notes && <div style={ui.hint}>{r.notes}</div>}<TransportLabel row={r} vehicles={options.data?.vehicles} />{canWrite && ((!r.vehicle_id && !r.vehicle_plate) || !r.waybill_no) && <button style={ui.btn()} onClick={() => { setTransportTarget(r); setRepair({ ...emptyTransport(), waybill_no: r.waybill_no || '', vehicle_id: r.vehicle_id || '', vehicle_plate: r.vehicle_plate || '', driver_staff_id: r.driver_staff_id || '', driver_name: r.driver_name || '', loader_ids: r.loader_ids || [], otherTruck: !!r.vehicle_plate && !r.vehicle_id, otherDriver: !!r.driver_name && !r.driver_staff_id }); setDlgErr(null) }}>Add waybill, truck &amp; loaders</button>}</td>
                       <td style={ui.td}><PhotoLink path={r.photo_path} /></td>
                       <td style={ui.td}>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'flex-start' }}>
@@ -302,9 +335,10 @@ function Handovers({ userProfile, assignedSiteId }) {
         )}
       </div>
 
-      {transportTarget && <ConfirmDialog title="Add truck & loaders" confirmLabel="Save transport" busy={dlgBusy} confirmDisabled={!repairOptions.data || !!transportProblem(repair, repairOptions.data, transportTarget.notes || 'Legacy handover')} onCancel={() => setTransportTarget(null)} onConfirm={() => runDialog(async () => {
-        await siteContractsService.updateTransport(transportTarget.id, { vehicle_id: repair.vehicle_id || null, vehicle_plate: repair.vehicle_id ? null : repair.vehicle_plate.trim(), driver_staff_id: repair.driver_staff_id || null, driver_name: repair.driver_staff_id ? null : repair.driver_name.trim(), loader_ids: repair.loader_ids }); setTransportTarget(null)
-      })}><TransportFields value={repair} onChange={setRepair} options={repairOptions.data} error={repairOptions.error} /><ErrorBox error={dlgErr} /></ConfirmDialog>}
+      {transportTarget && <ConfirmDialog title="Add waybill, truck & loaders" confirmLabel="Save transport" busy={dlgBusy} confirmDisabled={!repairOptions.data || !!transportProblem(repair, repairOptions.data, transportTarget.notes || 'Legacy handover')} onCancel={() => setTransportTarget(null)} onConfirm={() => runDialog(async () => {
+        if (!await repairDuplicate.check()) return
+        await siteContractsService.updateTransport(transportTarget.id, { waybill_no: repair.waybill_no.trim().toUpperCase(), vehicle_id: repair.vehicle_id || null, vehicle_plate: repair.vehicle_id ? null : repair.vehicle_plate.trim(), driver_staff_id: repair.driver_staff_id || null, driver_name: repair.driver_staff_id ? null : repair.driver_name.trim(), loader_ids: repair.loader_ids }); setTransportTarget(null)
+      })}><TransportFields value={repair} onChange={setRepair} options={repairOptions.data} error={repairOptions.error} /><WaybillWarning number={repair.waybill_no} result={repairDuplicate} /><ErrorBox error={dlgErr} /></ConfirmDialog>}
       {verdict && (
         <ConfirmDialog
           title={`Client verdict — ${fmtQty(verdict.row.qty_handed_over)} ${verdict.row.block_type}`}

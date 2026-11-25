@@ -7,7 +7,7 @@ vi.mock('../lib/supabase', async () => {
   return state.mock
 })
 
-import { siteContractsService, isCycleFunded } from './siteContracts'
+import { siteContractsService, isCycleFunded, clientLabel } from './siteContracts'
 
 const GUARD = 'Cycle 1 cannot start: it is not fully paid or the production schedule is missing. Only the MD can start it early, with a written reason.'
 
@@ -63,7 +63,7 @@ describe('siteContractsService — errors are surfaced, never swallowed (Rule 10
   })
   it('sends transport options and whitelists transport fields on create/update', async () => {
     state.resolve = () => ({ data: [{ id: 'h' }], error: null })
-    const transport = { vehicle_id: null, vehicle_plate: 'XYZ', driver_staff_id: null, driver_name: 'Guest', loader_ids: ['l'] }
+    const transport = { waybill_no: 'WB1', vehicle_id: null, vehicle_plate: 'XYZ', driver_staff_id: null, driver_name: 'Guest', loader_ids: ['l'] }
     await siteContractsService.transportOptions('s', '2026-11-25')
     expect(state.mock.calls[0]).toEqual({ rpc: 'handover_transport_options', args: { p_site_id: 's', p_date: '2026-11-25' } })
     await siteContractsService.createHandover({ ...transport, site_id: 's', otherTruck: true })
@@ -72,4 +72,23 @@ describe('siteContractsService — errors are surfaced, never swallowed (Rule 10
     expect(state.mock.calls[2].ops.find(x => x[0] === 'update')[1]).toEqual(transport)
   })
 
+})
+
+it('uses trimmed short names and falls back to the full name or Client', () => {
+  expect(clientLabel({ client_short_name: ' Bilaad ', client_name: 'Bilaad Realty' })).toBe('Bilaad')
+  expect(clientLabel({ client_short_name: ' ', client_name: 'Bilaad Realty' })).toBe('Bilaad Realty')
+  expect(clientLabel({})).toBe('Client')
+  expect(clientLabel(null)).toBe('Client')
+})
+it('finds duplicate waybills only at this site and excludes the edited row', async () => {
+  state.resolve = () => ({ data: [], error: null }); state.mock.calls.length = 0
+  await siteContractsService.findByWaybill('s', 'WB1', 'h')
+  expect(state.mock.calls[0]).toEqual({ table: 'block_handovers', ops: [
+    ['select', 'id, handover_date, block_type, qty_handed_over'],
+    ['eq', 'site_id', 's'], ['eq', 'waybill_no', 'WB1'], ['neq', 'id', 'h'],
+  ] })
+  await siteContractsService.findByWaybill('s', 'WB1')
+  expect(state.mock.calls[1].ops.some(x => x[0] === 'neq')).toBe(false)
+  state.resolve = () => ({ data: null, error: { message: 'lookup failed' } })
+  await expect(siteContractsService.findByWaybill('s', 'WB1')).rejects.toMatchObject({ message: 'lookup failed' })
 })

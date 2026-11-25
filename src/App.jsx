@@ -18,7 +18,7 @@ import UnpricedDeliveries from './components/UnpricedDeliveries'
 import AccountingSummary from './components/AccountingSummary'
 import { accountingBasisService } from './services/accountingBasis'
 import { startSessionMonitor } from './utils/sessionMonitor'
-import { siteContractsService } from './services/siteContracts'
+import { siteContractsService, clientLabel } from './services/siteContracts'
 import { expenseCosts } from './utils/financialTotals'
 import { queryRows } from './utils/moneyQueries'
 import { monthEnd, todayLagos, periodRange, shiftDate } from './utils/lagosDate'
@@ -8143,7 +8143,7 @@ function PaymentRequests({ userProfile, assignedSiteId, initialRequest }) {
   const { sites: prSites } = useSites();
   const [fundContracts, setFundContracts] = useState([]);
   useEffect(() => { let active = true; siteContractsService.listContracts().then(rows => { if (active) setFundContracts(rows) }).catch(error => { if (active) setAlert({ type: 'error', msg: 'Could not load client names: ' + error.message }) }); return () => { active = false } }, []);
-  const fundClient = id => fundContracts.find(c => c.site_id === id)?.client_name;
+  const fundClient = id => clientLabel(fundContracts.find(c => c.site_id === id));
 
 
   const canBackfill = hasRole(userProfile, 'md', 'ico', 'accountant', ...INITIATOR_ROLES);

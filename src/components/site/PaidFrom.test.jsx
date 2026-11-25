@@ -1,7 +1,7 @@
 import React from 'react'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
-import PaidFrom from './PaidFrom'
+import PaidFrom, { FundPill } from './PaidFrom'
 import { clientFunds } from '../../services/clientFunds'
 vi.mock('../../services/clientFunds', () => ({ clientFunds: { setRequestFund: vi.fn(async () => {}) } }))
 vi.mock('../../services/storage', () => ({ getSignedDocUrl: vi.fn() }))
@@ -21,4 +21,11 @@ it('shows a read-only label to site managers and nothing for factory requests', 
   expect(screen.queryByRole('combobox')).toBeNull()
   rerender(<PaidFrom {...props} site={{ site_type: 'factory' }} />)
   expect(screen.queryByText(/Paid from/)).toBeNull()
+})
+
+it('uses short client names in fund choices and pills', () => {
+  render(<><PaidFrom request={{}} site={{ site_type: 'client_site' }} client="Bilaad" userProfile={{ role: 'md' }} /><FundPill request={{ client_fund: 'diesel' }} client="Bilaad" /></>)
+  expect(screen.getByRole('option', { name: 'Bilaad operating fund' })).toBeInTheDocument()
+  expect(screen.getByRole('option', { name: 'Bilaad diesel fund' })).toBeInTheDocument()
+  expect(screen.getByText('Bilaad diesel')).toBeInTheDocument()
 })

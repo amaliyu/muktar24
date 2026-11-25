@@ -13,8 +13,9 @@ it('loads options for site and date', async () => {
   expect(siteContractsService.transportOptions).toHaveBeenCalledWith('site', '2026-11-25')
 })
 it('requires truck, driver, and crew, or a note without crew', () => {
-  expect(transportProblem(emptyTransport(), options)).toContain('truck')
-  const v = { ...emptyTransport(), vehicle_plate: 'ABC' }
+  expect(transportProblem(emptyTransport(), options)).toBe('Enter the waybill number.')
+  expect(transportProblem({ ...emptyTransport(), waybill_no: 'WB1' }, options)).toContain('truck')
+  const v = { ...emptyTransport(), waybill_no: 'WB1', vehicle_plate: 'ABC' }
   expect(transportProblem(v, options)).toContain('driver')
   v.driver_name = 'Name'
   expect(transportProblem(v, options)).toContain('loader')
@@ -33,4 +34,29 @@ it('preselects fleet driver, supports typed values and toggles loader chips', ()
   fireEvent.change(screen.getByLabelText('Driver'), { target: { value: 'other' } })
   fireEvent.change(screen.getByLabelText('Driver name'), { target: { value: 'Guest' } })
   expect(screen.getByRole('status')).toHaveTextContent('XYZ'); expect(screen.getByRole('status')).toHaveTextContent('Guest')
+})
+
+it('fills and replaces truck crews, filters unavailable ids, and keeps chips editable', () => {
+  const opts = {
+    vehicles: [{ id: 'a', label: 'AAA', driver_id: 'da', loader_ids: ['1', '2', 'missing'] }, { id: 'b', label: 'BBB', driver_id: 'db', loader_ids: ['3'] }],
+    drivers: [{ id: 'da', name: 'A driver' }, { id: 'db', name: 'B driver' }],
+    loaders: [{ id: '3', name: 'Third', truck: 'BBB' }, { id: '1', name: 'First', truck: 'AAA' }, { id: '2', name: 'Second', truck: 'AAA' }],
+  }
+  function Test() { const [v, setV] = React.useState(emptyTransport); return <TransportFields value={v} onChange={setV} options={opts} /> }
+  render(<Test />)
+  fireEvent.change(screen.getByLabelText('Truck'), { target: { value: 'a' } })
+  expect(screen.getByLabelText('Driver')).toHaveValue('da')
+  expect(screen.getAllByRole('button').map(x => x.textContent)).toEqual(['First · AAA', 'Second · AAA', 'Third · BBB'])
+  expect(screen.getByRole('button', { name: 'First · AAA' })).toHaveAttribute('aria-pressed', 'true')
+  expect(screen.getByRole('button', { name: 'Second · AAA' })).toHaveAttribute('aria-pressed', 'true')
+  fireEvent.change(screen.getByLabelText('Truck'), { target: { value: 'b' } })
+  expect(screen.getByLabelText('Driver')).toHaveValue('db')
+  expect(screen.getByRole('button', { name: 'First · AAA' })).toHaveAttribute('aria-pressed', 'false')
+  expect(screen.getByRole('button', { name: 'Third · BBB' })).toHaveAttribute('aria-pressed', 'true')
+  fireEvent.change(screen.getByLabelText('Truck'), { target: { value: 'other' } })
+  expect(screen.getByRole('button', { name: 'Third · BBB' })).toHaveAttribute('aria-pressed', 'true')
+  fireEvent.change(screen.getByLabelText('Truck'), { target: { value: '' } })
+  expect(screen.getByRole('button', { name: 'Third · BBB' })).toHaveAttribute('aria-pressed', 'true')
+  fireEvent.click(screen.getByRole('button', { name: 'Third · BBB' }))
+  expect(screen.getByRole('button', { name: 'Third · BBB' })).toHaveAttribute('aria-pressed', 'false')
 })

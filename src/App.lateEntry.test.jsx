@@ -181,6 +181,7 @@ it('handover requires and writes a reason for a late entry', async () => {
   const save = button('Record handover')
   set(screen.getByLabelText('Handover date *'), '2026-11-16')
   await screen.findByRole('option', { name: 'Truck' })
+  set(screen.getByLabelText(/Waybill no/), 'WB1')
   set(screen.getByLabelText('Truck'), 'v')
   fireEvent.click(screen.getByRole('button', { name: 'Loader' }))
   set(screen.getByLabelText(reasonLabel), explanation)
