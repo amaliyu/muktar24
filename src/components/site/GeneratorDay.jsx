@@ -10,8 +10,8 @@ export function GeneratorMeasures({ day }) {
   if (!day) return null
   return <div>{measures(day).filter(r => r.value != null).map(r => <p key={r.label}>{r.label}: {r.value} {r.target != null && <> · target {r.target} <Pill label={r.pill} color={r.good ? theme.green : theme.red} /></>}</p>)}<p>{reading(day)}</p></div>
 }
-export function GeneratorSummary({ day }) {
-  return <section aria-label="Generator"><h3>Generator</h3><p style={{ color: day?.recorded ? undefined : theme.accent }}>{generatorLine(day)}</p>
+export function GeneratorSummary({ day, missingLabel }) {
+  return <section aria-label="Generator"><h3>Generator</h3><p style={{ color: day?.recorded ? undefined : theme.accent }}>{!day?.recorded && missingLabel ? missingLabel : generatorLine(day)}</p>
     {day?.hour_meter_start != null && day?.hour_meter_end != null && <p>Meter: {day.hour_meter_start} → {day.hour_meter_end} ({day.meter_hours} h)</p>}
     <GeneratorMeasures day={day} /></section>
 }
@@ -45,7 +45,7 @@ export default function GeneratorDay({ siteId, canWrite, onSaved }) {
   return <section style={{ ...ui.panel, minWidth: 0, overflowWrap: 'anywhere' }}>
     <label>Generator date<input data-ico-allow data-board-allow style={ui.input} type="date" value={date} max={todayLagos()} onChange={e => { if (e.target.value && e.target.value <= todayLagos()) { setDate(e.target.value); setSaved(false) } }} /></label>
     <ErrorBox error={result.error} />
-    {result.data && <><GeneratorSummary day={result.data} />{!result.data.recorded && <p style={{ color: theme.accent }}>Generator times not recorded for {new Date(date + 'T12:00:00Z').toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}.</p>}
+    {result.data && <><GeneratorSummary day={result.data} missingLabel={'Generator times not recorded for ' + new Date(date + 'T12:00:00Z').toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) + '.'} />
       {canWrite && <Editor key={`${siteId}:${date}:${revision}`} siteId={siteId} date={date} day={result.data} onSaved={async () => { setRevision(n => n + 1); setSaved(true); await onSaved?.(date) }} />}</>}
     {saved && <p role="status">Saved</p>}
   </section>

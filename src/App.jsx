@@ -1,3 +1,4 @@
+import PaidFrom, { FundPill } from './components/site/PaidFrom'
 import GeneratorDay from './components/site/GeneratorDay'
 import DeviceClockBanner from './components/DeviceClockBanner'
 import StockCountPage, { StockCountDashboard } from './components/site/StockCounts'
@@ -8140,6 +8141,10 @@ function PaymentRequests({ userProfile, assignedSiteId, initialRequest }) {
   const [statusFilter, setStatusFilter] = useState('all');
   const [prSiteFilter, setPrSiteFilter] = useState('');
   const { sites: prSites } = useSites();
+  const [fundContracts, setFundContracts] = useState([]);
+  useEffect(() => { let active = true; siteContractsService.listContracts().then(rows => { if (active) setFundContracts(rows) }).catch(error => { if (active) setAlert({ type: 'error', msg: 'Could not load client names: ' + error.message }) }); return () => { active = false } }, []);
+  const fundClient = id => fundContracts.find(c => c.site_id === id)?.client_name;
+
 
   const canBackfill = hasRole(userProfile, 'md', 'ico', 'accountant', ...INITIATOR_ROLES);
   const canQuery = hasRole(userProfile, 'ico', 'accountant');
@@ -8949,6 +8954,9 @@ function PaymentRequests({ userProfile, assignedSiteId, initialRequest }) {
                 </div>
               </div>
               <div style={{ borderTop: `1px solid ${theme.border}`, paddingTop: '16px' }}>
+                <PaidFrom request={req} site={prSites.find(s => s.id === req.site_id)} client={fundClient(req.site_id)} userProfile={userProfile} onChanged={fund => {
+                  setDetailReq(current => ({ ...current, client_fund: fund })); setRequests(rows => rows.map(r => r.id === req.id ? { ...r, client_fund: fund } : r));
+                }} />
                 <DL label="Purpose" value={req.purpose} />
                 <DL label="Category" value={req.expense_category_id ? catMap[req.expense_category_id] : null} />
                 {req.category_other_note && <DL label="Category note" value={req.category_other_note} />}
@@ -9097,7 +9105,7 @@ function PaymentRequests({ userProfile, assignedSiteId, initialRequest }) {
                   return (
                     <tr key={req.id}>
                       <td style={styles.td}><strong style={{ fontFamily: 'monospace', fontSize: '12px' }}>{req.reference}</strong></td>
-                      <td style={styles.td}>{siteName(req.site_id, prSites)}</td>
+                      <td style={styles.td}>{siteName(req.site_id, prSites)}<FundPill request={req} client={fundClient(req.site_id)} /></td>
                       <td style={styles.td}><strong style={{ color: theme.accent }}>{naira(req.amount)}</strong></td>
                       <td style={styles.td}>{req.purpose || '—'}</td>
                       <td style={styles.td}>{req.expense_category_id ? (catMap[req.expense_category_id] || '—') : <span style={{ color: theme.textMuted }}>—</span>}</td>

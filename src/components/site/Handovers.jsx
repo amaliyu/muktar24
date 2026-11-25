@@ -1,3 +1,4 @@
+import { emptyTransport, TransportFields, TransportLabel, transportProblem, useTransportOptions } from './HandoverTransport'
 import { withAssignedSite } from '../AssignedSite'
 import { LateReasonField, useLateReason } from '../LateReasonField'
 import { withPhase7Touch } from './siteUi'
@@ -34,6 +35,12 @@ function Handovers({ userProfile, assignedSiteId }) {
   const [err, setErr] = useState(null)
   const [form, setForm] = useState(() => emptyForm(assignedSiteId || ''))
   const lateEntry = useLateReason(form.date)
+  const [transport, setTransport] = useState(emptyTransport)
+  const options = useTransportOptions(form.siteId, form.date)
+  const [transportTarget, setTransportTarget] = useState(null)
+  const repairOptions = useTransportOptions(transportTarget?.site_id, transportTarget?.handover_date)
+  const [repair, setRepair] = useState(emptyTransport)
+  useEffect(() => { setTransport(emptyTransport()) }, [form.siteId, form.date])
   const [busy, setBusy] = useState(false)
   const [formErr, setFormErr] = useState(null)
   const [ok, setOk] = useState('')
@@ -73,7 +80,7 @@ function Handovers({ userProfile, assignedSiteId }) {
   const formYard = form.blockType ? yardFor(form.siteId, form.blockType) : null
   const overYard = formYard && Number(form.qty) > Number(formYard.in_yard)
   const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }))
-  const formProblem = !form.siteId ? 'Choose the site.' : !form.blockType ? 'Choose the block type.' : !(Number(form.qty) > 0) ? 'Enter the quantity handed over.' : !form.date ? 'Enter the date.' : null
+  const formProblem = !form.siteId ? 'Choose the site.' : !form.blockType ? 'Choose the block type.' : !(Number(form.qty) > 0) ? 'Enter the quantity handed over.' : !form.date ? 'Enter the date.' : !options.data ? 'Wait for transport options.' : transportProblem(transport, options.data, form.notes)
 
   const submit = (e) => {
     e.preventDefault()
@@ -106,11 +113,13 @@ function Handovers({ userProfile, assignedSiteId }) {
       }
       await siteContractsService.createHandover({
         ...lateEntry.payload,
+        ...transport, vehicle_id: transport.vehicle_id || null, vehicle_plate: transport.vehicle_id ? null : transport.vehicle_plate.trim(), driver_staff_id: transport.driver_staff_id || null, driver_name: transport.driver_staff_id ? null : transport.driver_name.trim(),
         site_id: form.siteId, handover_date: form.date, block_type: form.blockType,
         qty_handed_over: Math.round(Number(form.qty)), client_rep: form.clientRep.trim() || null,
         photo_path: photoPath, notes: form.notes.trim() || null,
       })
       setOk(`Handover recorded: ${fmtQty(form.qty)} ${form.blockType}.${photoWarn}`)
+      setTransport(emptyTransport())
       lateEntry.reset()
       setForm(f => ({ ...emptyForm(f.siteId), date: f.date }))
       await load()
@@ -216,6 +225,8 @@ function Handovers({ userProfile, assignedSiteId }) {
             <label style={ui.label} htmlFor="ho-notes">Notes</label>
             <textarea id="ho-notes" style={ui.textarea} value={form.notes} onChange={set('notes')} />
           </div>
+          <TransportFields value={transport} onChange={setTransport} options={options.data} error={options.error} />
+          <div style={ui.hint}>Trip number and where the blocks went</div>
           <LateReasonField entry={lateEntry} />
           <button type="submit" style={{ ...ui.btn('primary', !!formProblem || lateEntry.invalid || busy), width: '100%', minHeight: '52px' }} disabled={!!formProblem || lateEntry.invalid || busy}>
             {busy ? 'Saving…' : 'Record handover'}
@@ -268,7 +279,7 @@ function Handovers({ userProfile, assignedSiteId }) {
                         {r.rectified_on && <div style={{ color: theme.green, fontSize: '12px' }}>Rectified {fmtDate(r.rectified_on)}{r.rectification_notes ? ` — ${r.rectification_notes}` : ''}</div>}
                         {r.deemed && <div style={ui.hint}>Applied by the nightly job</div>}
                       </td>
-                      <td style={ui.td}>{r.client_rep || '—'}{r.notes && <div style={ui.hint}>{r.notes}</div>}</td>
+                      <td style={ui.td}>{r.client_rep || '—'}{r.notes && <div style={ui.hint}>{r.notes}</div>}<TransportLabel row={r} vehicles={options.data?.vehicles} />{canWrite && !r.vehicle_id && !r.vehicle_plate && <button style={ui.btn()} onClick={() => { setTransportTarget(r); setRepair(emptyTransport()); setDlgErr(null) }}>Add truck &amp; loaders</button>}</td>
                       <td style={ui.td}><PhotoLink path={r.photo_path} /></td>
                       <td style={ui.td}>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'flex-start' }}>
@@ -291,6 +302,9 @@ function Handovers({ userProfile, assignedSiteId }) {
         )}
       </div>
 
+      {transportTarget && <ConfirmDialog title="Add truck & loaders" confirmLabel="Save transport" busy={dlgBusy} confirmDisabled={!repairOptions.data || !!transportProblem(repair, repairOptions.data, transportTarget.notes || 'Legacy handover')} onCancel={() => setTransportTarget(null)} onConfirm={() => runDialog(async () => {
+        await siteContractsService.updateTransport(transportTarget.id, { vehicle_id: repair.vehicle_id || null, vehicle_plate: repair.vehicle_id ? null : repair.vehicle_plate.trim(), driver_staff_id: repair.driver_staff_id || null, driver_name: repair.driver_staff_id ? null : repair.driver_name.trim(), loader_ids: repair.loader_ids }); setTransportTarget(null)
+      })}><TransportFields value={repair} onChange={setRepair} options={repairOptions.data} error={repairOptions.error} /><ErrorBox error={dlgErr} /></ConfirmDialog>}
       {verdict && (
         <ConfirmDialog
           title={`Client verdict — ${fmtQty(verdict.row.qty_handed_over)} ${verdict.row.block_type}`}

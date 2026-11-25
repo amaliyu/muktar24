@@ -1627,3 +1627,8 @@ Interim until A–C: Umar records Kado now; Abubakar gets a temporary assistant_
 - Shared generator measures and plain readings appear on the card and daily scorecard; WhatsApp includes generator time, measures and available targets. Missing times remain visible and blocks per litre can still be shown.
 - MD may record missed check-ins for unpaid past rosters within seven days, with a reason and refreshed coverage. Register marks these rows “Entered by MD” in amber with the reason and no photo link.
 - Uses the already-live b19 RPCs; no SQL changes. Automated service, helper and UI coverage added. Authenticated preview and physical device checks remain for MD review before merge.
+
+### b20 — Handover transport and client funds (25 Nov 2026)
+- Handover form records fleet/typed truck and driver plus loader chips from the selected day's crew. Legacy handovers offer a transport-only repair dialog. Transport columns verified by catalog SELECT; writes whitelist the five fields.
+- Service-fee contracts show Operating and Diesel client-fund summaries, statements with running balances and void reasons, role-scoped money recording and MD void. MD/accountant/ICO can assign untagged disbursed requests and change Paid from on client-site request details; tagged list rows show client/fund pills.
+- Generator missing-times notice now appears once. No SQL or migrations changed; uses PR #183's live interfaces. Automated helper/service/UI tests added; authenticated preview and mobile device checks remain for MD review before merge.
