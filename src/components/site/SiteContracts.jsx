@@ -1,3 +1,4 @@
+import ClientFunds from './ClientFunds'
 import { withPhase7Touch } from './siteUi'
 import { useEffect, useMemo, useState } from 'react'
 import { useSites } from '../SitePicker'
@@ -311,6 +312,7 @@ function ContractBlock({ contract: c, sites, cycles, forecasts, isMD, canEditCyc
         <SiteReceipts siteId={c.site_id} siteLabel={site} cycles={cycles} currentCycleId={current?.id}
           canWrite={canEditCycle} onChanged={onChanged} />
       )}
+      {c.contract_model === 'service_fee' && <ClientFunds contract={c} userProfile={userProfile} />}
       {showReport && canReport && <WeeklyReportPanel contract={c} site={{ id: c.site_id, name: site }} userProfile={userProfile} />}
       {showHistory && <CycleHistory cycles={cycles} seeMoney={seeMoney} />}
       {showSettings && isMD && <ContractSettings contract={c} onSaved={onChanged} />}

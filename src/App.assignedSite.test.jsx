@@ -31,6 +31,7 @@ vi.mock('./lib/supabase', async () => {
     if (table === 'production_log' && fixture.marked && ops.some(op => op[0] === 'insert')) {
       return { data: null, error: { message: 'DAY_MARKED: Remove the day status before saving.' } }
     }
+    if (table === 'rpc:handover_transport_options') return { data: { vehicles: [{ id: 'v', label: 'Truck', driver_id: 'd' }], drivers: [{ id: 'd', name: 'Driver' }], loaders: [{ id: 'l', name: 'Loader' }] }, error: null }
     if (table === 'rpc:app_flag') return { data: true, error: null }
     if (table === 'rpc:record_material_receipt') return { data: 'receipt', error: null }
     if (ops.some(op => op[0] === 'insert')) return { data: { id: 'inserted' }, error: null }
@@ -48,6 +49,7 @@ vi.mock('./lib/supabase', async () => {
       assets: [{ id: 'life-camp-machine', site_id: fixture.site, name: 'Bilaad machine', code: 'LC-1' }],
       products: [{ id: 'product', name: fixture.blockType, category: 'Blocks' }],
       production_log: fixture.production,
+      block_handovers: fixture.handovers || [],
       production_exceptions: fixture.warnings,
       inventory_items: [
         { id: 'bilaad-cement', name: 'Bilaad cement', site_id: fixture.site, unit: 'bags', owner: 'client' },
@@ -177,10 +179,13 @@ it('uses one assignment request across Receiving and Handovers and locks both en
   const block = await within(handover).findByRole('option', { name: fixture.blockType })
   change(block.parentElement, block.value)
   change(within(handover).getByLabelText(/Quantity handed over/), '10')
+  await within(handover).findByRole('option', { name: 'Truck' })
+  change(within(handover).getByLabelText('Truck'), 'v')
+  fireEvent.click(within(handover).getByRole('button', { name: 'Loader' }))
   fireEvent.click(within(handover).getByRole('button', { name: 'Record handover' }))
   await waitFor(() => expect(fixture.calls.find(call => call.table === 'block_handovers'
     && call.ops.some(op => op[0] === 'insert'))?.ops.find(op => op[0] === 'insert')[1])
-    .toMatchObject({ site_id: fixture.site }))
+    .toMatchObject({ site_id: fixture.site, vehicle_id: 'v', vehicle_plate: null, driver_staff_id: 'd', driver_name: null, loader_ids: ['l'] }))
   expect(fixture.calls.filter(call => call.rpc === 'my_assigned_site')).toHaveLength(1)
 })
 
@@ -264,4 +269,17 @@ it('shows the correction banner and highlights the entry for the selected site a
   expect(await screen.findByText('Correct the entries for 18 Nov below. The warning clears itself once the figures are right.')).toBeInTheDocument()
   const edit = await screen.findByRole('button', { name: 'Edit' })
   expect(edit.closest('tr').style.outline).not.toBe('')
+})
+
+it('repairs an old handover using only transport columns', async () => {
+  fixture.handovers = [{ id: 'old', site_id: fixture.site, handover_date: lagosToday(), block_type: fixture.blockType, qty_handed_over: 10, status: 'pending' }]
+  render(session(<Handovers userProfile={profile} />))
+  fireEvent.click(await screen.findByRole('button', { name: 'Add truck & loaders' }))
+  const dialog = screen.getByRole('button', { name: 'Save transport' }).parentElement.parentElement
+  await within(dialog).findByRole('option', { name: 'Truck' })
+  change(within(dialog).getByLabelText('Truck'), 'v')
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Loader' }))
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Save transport' }))
+  await waitFor(() => expect(fixture.calls.find(c => c.table === 'block_handovers' && c.ops.some(o => o[0] === 'update'))?.ops.find(o => o[0] === 'update')[1]).toEqual({ vehicle_id: 'v', vehicle_plate: null, driver_staff_id: 'd', driver_name: null, loader_ids: ['l'] }))
+  fixture.handovers = []
 })

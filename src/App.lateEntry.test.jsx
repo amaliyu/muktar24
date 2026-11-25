@@ -21,6 +21,7 @@ vi.mock('./lib/supabase', async () => {
       if (fixture.reject?.table === table) return { data: null, error: fixture.reject.error }
       return { data: ops.some(op => op[0] === 'single') ? { id: 'saved-entry' } : [{ id: 'saved-entry' }], error: null }
     }
+    if (table === 'rpc:handover_transport_options') return { data: { vehicles: [{ id: 'v', label: 'Truck', driver_id: 'd' }], drivers: [{ id: 'd', name: 'Driver' }], loaders: [{ id: 'l', name: 'Loader' }] }, error: null }
     if (table === 'rpc:app_flag') return { data: true, error: null }
     if (table === 'rpc:record_material_receipt') return { data: 'saved-entry', error: null }
     if (table === 'rpc:review_late_entry') {
@@ -178,7 +179,11 @@ it('handover requires and writes a reason for a late entry', async () => {
   set(await screen.findByLabelText(/Block type/i), fixture.type)
   set(screen.getByLabelText(/Quantity handed over/i), '30')
   const save = button('Record handover')
-  enterLateReason(screen.getByLabelText('Handover date *'), save)
+  set(screen.getByLabelText('Handover date *'), '2026-11-16')
+  await screen.findByRole('option', { name: 'Truck' })
+  set(screen.getByLabelText('Truck'), 'v')
+  fireEvent.click(screen.getByRole('button', { name: 'Loader' }))
+  set(screen.getByLabelText(reasonLabel), explanation)
   fireEvent.click(save)
   fireEvent.click(await screen.findByRole('button', { name: 'Save anyway' }))
   await waitFor(() => expect(writes('block_handovers')[0]).toMatchObject({ late_reason: explanation }))

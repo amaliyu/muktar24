@@ -169,8 +169,12 @@ export const siteContractsService = {
     return must(await q)
   },
 
+  async transportOptions(site, date) { return must(await supabase.rpc('handover_transport_options', { p_site_id: site, p_date: date })) },
+  async updateTransport(id, patch) {
+    return mustTouch(await supabase.from('block_handovers').update(pick(patch, ['vehicle_id', 'vehicle_plate', 'driver_staff_id', 'driver_name', 'loader_ids'])).eq('id', id).select(), 'Transport')
+  },
   async createHandover(row) {
-    const payload = pick(row, ['site_id', 'handover_date', 'block_type', 'qty_handed_over', 'client_rep', 'photo_path', 'notes', 'late_reason'])
+    const payload = pick(row, ['site_id', 'handover_date', 'block_type', 'qty_handed_over', 'client_rep', 'photo_path', 'notes', 'late_reason', 'vehicle_id', 'vehicle_plate', 'driver_staff_id', 'driver_name', 'loader_ids'])
     return must(await supabase.from('block_handovers').insert(payload).select().single())
   },
 

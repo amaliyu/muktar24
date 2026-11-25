@@ -61,4 +61,15 @@ describe('siteContractsService — errors are surfaced, never swallowed (Rule 10
     expect(isCycleFunded({ amount_due: 100, amount_received: 100, schedule_received_on: '2026-12-21' }, 'full_supply')).toBe(true)
     expect(isCycleFunded({ amount_due: null, amount_received: 0 }, 'service_fee')).toBe(false)
   })
+  it('sends transport options and whitelists transport fields on create/update', async () => {
+    state.resolve = () => ({ data: [{ id: 'h' }], error: null })
+    const transport = { vehicle_id: null, vehicle_plate: 'XYZ', driver_staff_id: null, driver_name: 'Guest', loader_ids: ['l'] }
+    await siteContractsService.transportOptions('s', '2026-11-25')
+    expect(state.mock.calls[0]).toEqual({ rpc: 'handover_transport_options', args: { p_site_id: 's', p_date: '2026-11-25' } })
+    await siteContractsService.createHandover({ ...transport, site_id: 's', otherTruck: true })
+    expect(state.mock.calls[1].ops.find(x => x[0] === 'insert')[1]).toEqual({ ...transport, site_id: 's' })
+    await siteContractsService.updateTransport('h', { ...transport, qty_handed_over: 900, status: 'accepted' })
+    expect(state.mock.calls[2].ops.find(x => x[0] === 'update')[1]).toEqual(transport)
+  })
+
 })

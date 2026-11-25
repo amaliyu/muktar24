@@ -27,6 +27,11 @@ export const paymentRequestsService = {
     return data || [];
   },
 
+  async listUntagged(siteId) {
+    const { data, error } = await supabase.from('payment_requests').select('id, reference, transaction_date, purpose, amount, site_id, client_fund').eq('site_id', siteId).eq('status', 'disbursed').is('client_fund', null).order('transaction_date');
+    if (error) throw error;
+    return data || [];
+  },
   async list() {
     const { data, error } = await supabase
       .from('payment_requests')

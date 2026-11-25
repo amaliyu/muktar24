@@ -16,6 +16,7 @@ async function form() {
 it('shows missing times and efficiency to readers without an edit form', async () => {
   render(<GeneratorDay siteId="site" canWrite={false} />)
   expect(await screen.findByText(/Generator times not recorded for/)).toBeInTheDocument()
+  expect(screen.getAllByText(/Generator times not recorded/)).toHaveLength(1)
   expect(screen.getByText(/Blocks per litre: 33/)).toBeInTheDocument()
   expect(screen.queryByLabelText('Generator on')).toBeNull()
 })
