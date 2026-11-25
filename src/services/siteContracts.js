@@ -5,6 +5,8 @@ import { supabase } from '../lib/supabase'
 // (Rule 10.5): a DB guard message ("Cycle 1 cannot start: …") reaches the UI
 // verbatim, and a failed query never looks like an empty list.
 
+export const clientLabel = contract => contract?.client_short_name?.trim() || contract?.client_name || 'Client'
+
 const must = ({ data, error }) => {
   if (error) throw error
   return data
@@ -169,12 +171,19 @@ export const siteContractsService = {
     return must(await q)
   },
 
+  async findByWaybill(siteId, waybillNo, excludeId) {
+    let q = supabase.from('block_handovers').select('id, handover_date, block_type, qty_handed_over')
+      .eq('site_id', siteId).eq('waybill_no', waybillNo)
+    if (excludeId) q = q.neq('id', excludeId)
+    return must(await q)
+  },
+
   async transportOptions(site, date) { return must(await supabase.rpc('handover_transport_options', { p_site_id: site, p_date: date })) },
   async updateTransport(id, patch) {
-    return mustTouch(await supabase.from('block_handovers').update(pick(patch, ['vehicle_id', 'vehicle_plate', 'driver_staff_id', 'driver_name', 'loader_ids'])).eq('id', id).select(), 'Transport')
+    return mustTouch(await supabase.from('block_handovers').update(pick(patch, ['waybill_no', 'vehicle_id', 'vehicle_plate', 'driver_staff_id', 'driver_name', 'loader_ids'])).eq('id', id).select(), 'Transport')
   },
   async createHandover(row) {
-    const payload = pick(row, ['site_id', 'handover_date', 'block_type', 'qty_handed_over', 'client_rep', 'photo_path', 'notes', 'late_reason', 'vehicle_id', 'vehicle_plate', 'driver_staff_id', 'driver_name', 'loader_ids'])
+    const payload = pick(row, ['waybill_no', 'site_id', 'handover_date', 'block_type', 'qty_handed_over', 'client_rep', 'photo_path', 'notes', 'late_reason', 'vehicle_id', 'vehicle_plate', 'driver_staff_id', 'driver_name', 'loader_ids'])
     return must(await supabase.from('block_handovers').insert(payload).select().single())
   },
 

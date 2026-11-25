@@ -1599,6 +1599,8 @@ Interim until A–C: Umar records Kado now; Abubakar gets a temporary assistant_
 - **Warnings reviewed 25 Nov:** Kado diesel closed for 10, 11, 16, 19, 23, 24 Nov ("Diesel cost of low output. Target is 2,500 blocks a day on 30 L."); 12 Nov sent to Umar; 17/18 Nov explained by Umar (awaiting review). Kado breakage 11/16/20 and 24 Nov cement sent back as questions (only those lines; closed diesel lines stay closed).
 
 ### Client funds ledger (Bilaad) and handover transport (MD 2026-11-25)
+- migration 20261125211636: client_short_name, block_handovers.waybill_no, truck-assigned loaders in handover_transport_options;
+- b20.1: short names in fund labels, truck fills driver and loaders, waybill number on handovers, with a duplicate warning.
 - **Correction:** ₦725,909.44 (site operating allocation) and ₦658,000 (329 L diesel at ₦2,000/L) are what APCL **asked** Bilaad for in REQ-LIFECAMP-BIL-001 (emailed 20 Nov; still "sent", not approved). No Bilaad cash recorded as received.
 - **DB** (`20261125201937_client_funds_and_handover_transport`):
   - `client_fund_entries` (site, fund operating|diesel, kind asked|approved|received|adjustment, date, amount, bank account, reference, proof, voided). Seeded with the two "asked" lines. `record_client_fund(...)` MD/accountant (adjustment MD only, received needs a reference); `void_client_fund_entry` MD.

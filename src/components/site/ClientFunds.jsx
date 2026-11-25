@@ -1,3 +1,4 @@
+import { clientLabel } from '../../services/siteContracts'
 import { useState } from 'react'
 import { hasRole } from '../../lib/roles'
 import { todayLagos } from '../../utils/lagosDate'
@@ -55,14 +56,14 @@ export default function ClientFunds({ contract, userProfile }) {
   const untagged = useSiteRead(() => allowed && edit && assigning ? paymentRequestsService.listUntagged(contract.site_id) : null, [allowed, edit, assigning, contract.site_id, revision])
   const refresh = () => setRevision(n => n + 1)
   if (!allowed || contract.contract_model !== 'service_fee') return null
-  return <section style={{ ...ui.panel, minWidth: 0, overflowWrap: 'anywhere' }}><h3>Client funds — {contract.client_name}</h3><ErrorBox error={summary.error} />
+  return <section style={{ ...ui.panel, minWidth: 0, overflowWrap: 'anywhere' }}><h3>Client funds — {clientLabel(contract)}</h3><ErrorBox error={summary.error} />
     {['operating', 'diesel'].map(fund => { const f = summary.data?.funds?.find(x => x.fund === fund); return <section key={fund} style={ui.panel}><h4>{fund === 'operating' ? 'Operating' : 'Diesel'}</h4>
       {f && <><p>{['asked', 'approved', 'received', 'spent', 'pending'].map(k => `${kinds[k] || 'Approved'} ${fmtNaira(f[k])}`).join(' · ')}</p>
-        <strong style={{ fontSize: 20, color: f.client_owes > 0 ? theme.red : theme.green }}>{f.client_owes > 0 ? `${contract.client_name} owes APCL ${fmtNaira(f.client_owes)}` : `Holding ${fmtNaira(f.balance)} of ${contract.client_name}'s money`}</strong></>}
+        <strong style={{ fontSize: 20, color: f.client_owes > 0 ? theme.red : theme.green }}>{f.client_owes > 0 ? `${clientLabel(contract)} owes APCL ${fmtNaira(f.client_owes)}` : `Holding ${fmtNaira(f.balance)} of ${clientLabel(contract)}'s money`}</strong></>}
       <Statement siteId={contract.site_id} fund={fund} md={md} revision={revision} refresh={refresh} /></section> })}
     {summary.data?.untagged_count > 0 && <><p style={{ color: theme.accent }}>{fmtNaira(summary.data.untagged_spent)} spent at this site in {summary.data.untagged_count} payment requests not assigned to a fund</p>
       {edit && <button data-ico-allow style={ui.btn()} onClick={() => setAssigning(!assigning)}>Assign</button>}
-      {assigning && <><ErrorBox error={untagged.error} />{untagged.data?.map(r => <article key={r.id} style={ui.panel}>{r.reference} · {r.transaction_date} · {r.purpose} · {fmtNaira(r.amount)}<PaidFrom request={r} site={{ site_type: 'client_site' }} client={contract.client_name} userProfile={userProfile} onChanged={refresh} /></article>)}</>}
+      {assigning && <><ErrorBox error={untagged.error} />{untagged.data?.map(r => <article key={r.id} style={ui.panel}>{r.reference} · {r.transaction_date} · {r.purpose} · {fmtNaira(r.amount)}<PaidFrom request={r} site={{ site_type: 'client_site' }} client={clientLabel(contract)} userProfile={userProfile} onChanged={refresh} /></article>)}</>}
     </>}
     {hasRole(userProfile, 'md', 'accountant') && <button style={ui.btn()} onClick={() => setRecording(!recording)}>Record money</button>}
     {recording && <MoneyForm siteId={contract.site_id} md={md} onSaved={() => { setRecording(false); refresh() }} onCancel={() => setRecording(false)} />}
