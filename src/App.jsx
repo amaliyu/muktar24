@@ -1299,6 +1299,7 @@ export const Production = withAssignedSite(function Production({ userProfile, as
               <div key={f.key} style={styles.formGroup}>
                 <label style={styles.label}>{f.label}</label>
                 <input style={styles.input} type="number" inputMode={["produced", "dmgProd", "dmgStack"].includes(f.key) ? "numeric" : "decimal"} placeholder={f.placeholder} value={form[f.key]} onChange={e => setForm({ ...form, [f.key]: e.target.value })} />
+                {f.key === 'dmgStack' && <div style={{ fontSize: 12, color: theme.textMuted }}>Stacking is done the next morning — come back and enter it on the day the blocks were made.</div>}
               </div>
             ))}
             <div style={{ ...styles.formGroup, minWidth: 0 }}>

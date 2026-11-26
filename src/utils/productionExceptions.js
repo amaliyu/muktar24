@@ -1,9 +1,9 @@
 import { number } from './requisitionText'
 import { lagosToday } from './lateEntry'
 
-export const parameterName = { cement: 'Cement', diesel: 'Diesel', breakage: 'Breakage' }
+export const parameterName = { cement: 'Cement', diesel: 'Diesel', breakage: 'Production breakage', stacking_breakage: 'Stacking breakage', loading_breakage: 'Loading breakage', offloading_breakage: 'Offloading breakage' }
 export const varianceLabel = value => (Number(value) > 0 ? '+' : Number(value) < 0 ? '−' : '') + number(Math.abs(Number(value))) + '%'
-export const isAdverse = row => row.parameter === 'breakage' || row.direction === 'over'
+export const isAdverse = row => row.parameter?.endsWith('breakage') || row.direction === 'over'
 
 export function warningSentence(row) {
   const actual = number(row.actual_qty)
@@ -13,6 +13,9 @@ export function warningSentence(row) {
   switch (row.parameter) {
     case 'cement': return `${actual} bags for ${blocks} blocks — ${rate} per bag against ${budget} (${varianceLabel(row.variance_pct)})`
     case 'diesel': return `${actual} L for ${blocks} blocks — ${rate} L per 1,000 against ${budget} (${varianceLabel(row.variance_pct)})`
+    case 'stacking_breakage':
+    case 'loading_breakage':
+    case 'offloading_breakage':
     case 'breakage': return `${actual} broken of ${blocks} — ${rate}% against ${budget}% allowed`
     default: return ''
   }
@@ -43,7 +46,7 @@ export function warningAge(row) {
   return Math.max(0, Math.round((Date.parse(lagosToday()) - Date.parse(date)) / 86400000)) || 0
 }
 
-const parameterOrder = ['cement', 'diesel', 'breakage']
+const parameterOrder = ['cement', 'diesel', 'breakage', 'stacking_breakage', 'loading_breakage', 'offloading_breakage']
 const statusOrder = ['open', 'explained', 'closed', 'resolved']
 
 export function groupWarningDays(rows) {

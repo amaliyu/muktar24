@@ -185,11 +185,14 @@ export const siteContractsService = {
   },
 
   async transportOptions(site, date) { return must(await supabase.rpc('handover_transport_options', { p_site_id: site, p_date: date })) },
+  async updateBreakage(id, patch) {
+    return mustTouch(await supabase.from('block_handovers').update(pick(patch, ['broken_loading', 'broken_offloading', 'early_reason'])).eq('id', id).select(), 'Breakage')
+  },
   async updateTransport(id, patch) {
     return mustTouch(await supabase.from('block_handovers').update(pick(patch, ['waybill_no', 'vehicle_id', 'vehicle_plate', 'driver_staff_id', 'driver_name', 'loader_ids'])).eq('id', id).select(), 'Transport')
   },
   async createHandover(row) {
-    const payload = pick(row, ['early_reason', 'waybill_no', 'site_id', 'handover_date', 'block_type', 'qty_handed_over', 'client_rep', 'photo_path', 'notes', 'late_reason', 'vehicle_id', 'vehicle_plate', 'driver_staff_id', 'driver_name', 'loader_ids'])
+    const payload = pick(row, ['broken_loading', 'broken_offloading', 'early_reason', 'waybill_no', 'site_id', 'handover_date', 'block_type', 'qty_handed_over', 'client_rep', 'photo_path', 'notes', 'late_reason', 'vehicle_id', 'vehicle_plate', 'driver_staff_id', 'driver_name', 'loader_ids'])
     return must(await supabase.from('block_handovers').insert(payload).select().single())
   },
 

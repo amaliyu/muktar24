@@ -1629,6 +1629,9 @@ Interim until A–C: Umar records Kado now; Abubakar gets a temporary assistant_
   - Until b21 ships, the handover form has no reason box, so above the available count the save stops with the message.
 - **Next:** b21 (handover form shows available/next-ready and a reason box; Batches page hides "create" for client sites and tags auto batches); breakage types (production / stacking / loading / offloading) judged separately.
 
+### Breakage judged by type (MD 2026-11-26)
+- b22: handover form and Edit breakage enter loading/offloading breakage; warning names and reason chips per type; four allowance settings; scorecard shows any breakage line.
+
 ### Dutse while production is on hold
 - Any block leaving the yard needs a same-day waybill; owner to be named now Abubakar has moved.
 - Weekly yard count continues; best window to close the ICO stock reconciliation (unexplained ~77,000 blocks, ₦37–48m at cost, pending ICO checks due 20 Nov).
