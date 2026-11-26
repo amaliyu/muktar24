@@ -31,6 +31,7 @@ export function lineBadge(row) {
 }
 
 export function statusText(day, viewer) {
+  if (day.escalated) return 'Escalated to the MD'
   if (day.status === 'open') return viewer === day.site_id ? 'Please explain' : 'Waiting for the site manager'
   if (day.status === 'explained') return 'Explained — waiting for review'
   return day.status === 'closed' ? 'Closed' : 'Cleared'
@@ -60,9 +61,11 @@ export function groupWarningDays(rows) {
     const lines = day.lines.sort((a, b) => parameterOrder.indexOf(a.parameter) - parameterOrder.indexOf(b.parameter))
     const status = statusOrder.find(value => lines.some(line => line.status === value))
     const actionLine = lines.find(line => ['open', 'explained'].includes(line.status)) || lines.find(line => line.status !== 'resolved')
+    const escalation = lines.find(line => ['open', 'explained'].includes(line.status) && line.escalated_at)
+    const escalated = escalation ? { at: escalation.escalated_at, by: escalation.escalated_by_name, note: escalation.escalation_note } : null
     const oldestOpen = lines.filter(line => line.status === 'open').sort((a, b) =>
       String(a.created_at || a.date).localeCompare(String(b.created_at || b.date)))[0]
-    return { ...day, lines, status, actionLine, age: oldestOpen ? warningAge(oldestOpen) : null }
+    return { ...day, lines, status, actionLine, escalated, age: oldestOpen ? warningAge(oldestOpen) : null }
   }).sort((a, b) => b.date.localeCompare(a.date) || a.key.localeCompare(b.key))
 }
 

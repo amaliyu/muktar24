@@ -1648,7 +1648,7 @@ Interim until A–C: Umar records Kado now; Abubakar gets a temporary assistant_
   - Question items now name who asked ("answer KAYODE OJO's question").
   - Backfill: review items for the 5 explained Kado days (12, 16, 20, 24, 25 Nov).
   - `20261126051515_ico_bulk_close_skips_escalated`: the ICO's "close all explained" skips days he escalated to the MD.
-- **Next:** b23 UI — "Escalate to the MD" for the ICO, escalation banner/badge, MD sees escalated days first.
+- b23: ICO can escalate active warning days with a reason of at least 10 characters. Escalation shows in the badge, banner and thread; escalated days leave the ICO review count and bulk-close count, and appear first for the MD. No SQL changes.
 
 ### Dutse while production is on hold
 - Any block leaving the yard needs a same-day waybill; owner to be named now Abubakar has moved.
