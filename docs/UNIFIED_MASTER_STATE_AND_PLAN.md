@@ -1639,6 +1639,16 @@ Interim until A–C: Umar records Kado now; Abubakar gets a temporary assistant_
   - Re-judged client-site days since 1 Nov quietly. Cleared: Kado 11 Nov; Life Camp 18, 21, 23, 24 Nov (their ICO items ticked). Still flagged: Kado 16, 20, 25 Nov production (4.0%, 4.5%, 3.6%); Life Camp 20 Nov production (3.4%) and new stacking line (9 of 417). Kayode's Life Camp handling visit stays on his list.
 - b22: handover form and Edit breakage enter loading/offloading breakage; warning names and reason chips per type; four allowance settings; scorecard shows any breakage line.
 
+### ICO reviews explained warnings (MD 2026-11-26)
+- MD: "The ICO should be the one reviewing as control officer, I get notified or he can escalate to me if necessary."
+- **DB** (`20261126051351_ico_reviews_warnings`):
+  - Explanation → ICO follow-up item `review:<site>:<date>` ("review X's explanation — close it, send a question back, or escalate to the MD"), ticked when the day is closed/cleared, sent back, or escalated. MD now gets an `info` notification ("— the ICO will review") instead of `action_required`; the ICO is told through the follow-up item.
+  - ICO close / send back (single or bulk) → MD `info` notification.
+  - New `respond_production_exception(id, 'escalate', text)` — ICO only, ≥ 10 chars, open/explained days: sets `escalated_at`, `escalated_by_name`, `escalation_note` on the day, adds an `escalation` comment, MD gets `action_required` "Escalated to you". Explaining again or sending back clears the escalation.
+  - Question items now name who asked ("answer KAYODE OJO's question").
+  - Backfill: review items for the 5 explained Kado days (12, 16, 20, 24, 25 Nov).
+- **Next:** b23 UI — "Escalate to the MD" for the ICO, escalation banner/badge, MD sees escalated days first.
+
 ### Dutse while production is on hold
 - Any block leaving the yard needs a same-day waybill; owner to be named now Abubakar has moved.
 - Weekly yard count continues; best window to close the ICO stock reconciliation (unexplained ~77,000 blocks, ₦37–48m at cost, pending ICO checks due 20 Nov).
