@@ -1629,6 +1629,16 @@ Interim until A–C: Umar records Kado now; Abubakar gets a temporary assistant_
   - Until b21 ships, the handover form has no reason box, so above the available count the save stops with the message.
 - **Next:** b21 (handover form shows available/next-ready and a reason box; Batches page hides "create" for client sites and tags auto batches); breakage types (production / stacking / loading / offloading) judged separately.
 
+### Breakage judged by type (MD 2026-11-26)
+- MD: production breakage can be recycled straight away; stacking happens the day after production; loading and offloading are separate. Each type has its own effect and points to a different cause. Allowances agreed: production 2%, stacking 1% (of blocks made), loading 0.5%, offloading 0.5% (of blocks loaded).
+- **DB** (`20261126035706_breakage_by_type`):
+  - `production_sites.production_breakage_pct` / `stacking_breakage_pct` / `loading_breakage_pct` / `offloading_breakage_pct` (defaults 2 / 1 / 0.5 / 0.5). `breakage_budget_pct` no longer used by warnings; the site scorecard uses production + stacking.
+  - Warning lines: `breakage` (now production only, keeps its history), new `stacking_breakage`, `loading_breakage`, `offloading_breakage`. Messages name the type and the likely cause (machine/mix/operator — recyclable; handling/pallets/ground; loaders/truck packing; offloading/client's ground).
+  - `block_handovers.broken_loading`, `broken_offloading` → synced to `damage_log` (stages `loading` / `delivery`, `handover_id`, cascade). Base for both = blocks handed over + broken loading + broken offloading that day. Handover breakage leaves the yard (`v_site_yard`) and uses cured stock (`site_cured_stock`, the curing check counts quantity + breakage).
+  - Late check skips handover-linked damage rows (the handover carries the late reason). Handover changes recompute that site-day.
+  - Re-judged client-site days since 1 Nov quietly. Cleared: Kado 11 Nov; Life Camp 18, 21, 23, 24 Nov (their ICO items ticked). Still flagged: Kado 16, 20, 25 Nov production (4.0%, 4.5%, 3.6%); Life Camp 20 Nov production (3.4%) and new stacking line (9 of 417). Kayode's Life Camp handling visit stays on his list.
+- **Next:** b22 UI (handover breakage fields, warning names and reason chips, four allowance settings, scorecard).
+
 ### Dutse while production is on hold
 - Any block leaving the yard needs a same-day waybill; owner to be named now Abubakar has moved.
 - Weekly yard count continues; best window to close the ICO stock reconciliation (unexplained ~77,000 blocks, ₦37–48m at cost, pending ICO checks due 20 Nov).
