@@ -15,8 +15,8 @@ const tabs = [
   ['closed', 'Done', ['closed', 'resolved']],
   ['all', 'All', null],
 ]
-const actions = { explain: ['Explain', 10], comment: ['Add a note', 2], ask: ['Ask a question', 2], close: ['Close', 0] }
-const kinds = { explanation: 'Explanation', comment: 'Note', question: 'Question', closed: 'Closed', system: 'App' }
+const actions = { explain: ['Explain', 10], comment: ['Add a note', 2], ask: ['Ask a question', 2], close: ['Close', 0], escalate: ['Escalate to the MD', 10] }
+const kinds = { explanation: 'Explanation', comment: 'Note', question: 'Question', closed: 'Closed', system: 'App', escalation: 'Escalated to the MD' }
 const rowStyle = { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }
 const panel = { ...ui.panel, minWidth: 0, overflowWrap: 'anywhere' }
 const input = { ...ui.input, width: '100%', minWidth: 0, minHeight: 44, boxSizing: 'border-box' }
@@ -44,7 +44,7 @@ function WarningFacts({ day, sites, assignedSiteId }) {
   return <>
     <strong>{siteName(day.site_id, sites)} · {shortDate(day.date)} · {fmtDec(day.lines[0].blocks)} blocks</strong>
     <div style={rowStyle}>
-      <Pill status={day.status} label={statusText(day, assignedSiteId)} />
+      <Pill status={day.status} color={day.escalated ? theme.accent : undefined} label={statusText(day, assignedSiteId)} />
       {day.age !== null && <span>waiting {dayCount(day.age)}</span>}
     </div>
     {day.lines.filter(line => line.status !== 'resolved').map(line => {
@@ -83,6 +83,7 @@ function WarningDetail({ id, initialAction, assignedSiteId, userProfile, sites, 
     ...(md || siteManager ? ['explain'] : []),
     ...(review || siteManager ? ['comment'] : []),
     ...(review ? ['ask', 'close'] : []),
+    ...(hasRole(userProfile, 'ico') && !md && !day?.escalated ? ['escalate'] : []),
   ] : []
   const selected = options.includes(action) ? action : ''
   const lines = day?.lines.filter(line => ['open', 'explained'].includes(line.status)) || []
@@ -116,10 +117,14 @@ function WarningDetail({ id, initialAction, assignedSiteId, userProfile, sites, 
     {!record.loading && !record.error && !day && <p>Warning unavailable.</p>}
     {day && <>
       <h3>Budget warning</h3><WarningFacts day={day} sites={sites} assignedSiteId={assignedSiteId} />
+      {day.escalated && <div style={{ ...panel, color: theme.accent, borderColor: theme.accent }} role="status">
+        <strong>Escalated to the MD</strong> · {day.escalated.by || 'ICO'} · {fmtDateTime(day.escalated.at)}
+        <p style={{ whiteSpace: 'pre-wrap' }}>{day.escalated.note}</p>
+      </div>}
       <h4>Thread</h4>
       {thread.loading && <p role="status">Loading thread…</p>}
       {!thread.loading && !thread.error && thread.data?.length === 0 && <p>No responses yet.</p>}
-      {thread.data?.map(entry => <div key={entry.id} style={{ borderBottom: '1px solid ' + theme.border, padding: '10px 0', color: entry.kind === 'system' ? theme.textMuted : theme.text }}>
+      {thread.data?.map(entry => <div key={entry.id} style={{ borderBottom: '1px solid ' + theme.border, padding: '10px 0', color: entry.kind === 'escalation' ? theme.accent : entry.kind === 'system' ? theme.textMuted : theme.text }}>
         <strong>{kinds[entry.kind] || entry.kind}</strong> · {entry.author_name || '—'}{entry.author_role && ' · ' + entry.author_role.replaceAll('_', ' ')} · {fmtDateTime(entry.created_at)}
         <div style={{ whiteSpace: 'pre-wrap' }}>{entry.body}</div>
       </div>)}
@@ -142,11 +147,12 @@ function WarningDetail({ id, initialAction, assignedSiteId, userProfile, sites, 
           </div>)}
           {onCorrect && <button type="button" style={{ ...button('secondary'), width: '100%' }} onClick={() => onCorrect({ siteId: day.site_id, date: day.date })}>I recorded it wrong</button>}
         </>}
-        <label style={{ display: 'block', marginTop: 12 }}>{selected === 'explain' ? (needsNote ? 'Tell us what happened' : 'Anything else? (optional)') : selected === 'close' ? 'Closing note (optional)' : actions[selected][0]}
+        <label style={{ display: 'block', marginTop: 12 }}>{selected === 'explain' ? (needsNote ? 'Tell us what happened' : 'Anything else? (optional)') : selected === 'escalate' ? 'Why should the MD decide?' : selected === 'close' ? 'Closing note (optional)' : actions[selected][0]}
           <textarea style={{ ...input, display: 'block' }} rows={3} minLength={selected === 'explain' ? (needsNote ? 10 : 0) : actions[selected][1]} value={message} onChange={e => setMessage(e.target.value)} />
         </label>
+        {selected === 'escalate' && <p style={ui.hint}>The MD is asked to decide. It leaves your review list.</p>}
         {selected === 'ask' && <p style={ui.hint}>This sends it back to the site manager.</p>}
-        <button style={button('primary')} disabled={busy || !valid}>{selected === 'close' ? 'Close warning' : 'Send ' + (selected === 'ask' ? 'question' : selected === 'explain' ? 'explanation' : 'note')}</button>
+        <button style={button('primary')} disabled={busy || !valid}>{selected === 'escalate' ? 'Escalate to the MD' : selected === 'close' ? 'Close warning' : 'Send ' + (selected === 'ask' ? 'question' : selected === 'explain' ? 'explanation' : 'note')}</button>
       </form>}
     </>}
   </section>
@@ -163,6 +169,8 @@ function BudgetWarnings({ assignedSiteId, userProfile, initial, onCorrect }) {
   const [bulkError, setBulkError] = useState(null)
   const [closedCount, setClosedCount] = useState(null)
   const [revision, setRevision] = useState(0)
+  const md = hasRole(userProfile, 'md')
+  const ico = hasRole(userProfile, 'ico') && !md
   const allSites = hasRole(userProfile, 'md', 'ico')
   const siteId = assignedSiteId || (choice ?? (allSites ? '' : sites[0]?.id))
   const list = useSiteRead(async () => {
@@ -170,7 +178,12 @@ function BudgetWarnings({ assignedSiteId, userProfile, initial, onCorrect }) {
     return groupWarningDays(await api.list({ siteId, since: warningWindowStart() }))
   }, [siteId, allSites, id, revision])
   const statuses = tabs.find(tab => tab[0] === filter)?.[2]
-  const days = list.data?.filter(day => (!siteId || day.site_id === siteId) && (!statuses || statuses.includes(day.status)))
+  const days = list.data?.filter(day => (!siteId || day.site_id === siteId) && (
+    filter === 'explained'
+      ? (day.status === 'explained' || (md && day.escalated)) && !(ico && day.escalated)
+      : !statuses || statuses.includes(day.status)
+  )).sort((a, b) => md ? Number(!!b.escalated) - Number(!!a.escalated) : 0)
+  const closableDays = days?.filter(day => day.status === 'explained' && !(ico && day.escalated)) || []
   async function closeAll(event) {
     event.preventDefault()
     if (bulkBusy || !bulk || !allSites || filter !== 'explained') return
@@ -200,7 +213,7 @@ function BudgetWarnings({ assignedSiteId, userProfile, initial, onCorrect }) {
         </div>
         <ErrorBox error={list.error} />
         {list.loading && <p role="status">Loading budget warnings…</p>}
-        {allSites && filter === 'explained' && days?.length > 0 && !bulk && <button style={button('secondary')} onClick={() => { setBulk({ note: '', count: days.length }); setClosedCount(null) }}>Close all explained ({dayCount(days.length)})</button>}
+        {allSites && filter === 'explained' && closableDays.length > 0 && !bulk && <button style={button('secondary')} onClick={() => { setBulk({ note: '', count: closableDays.length }); setClosedCount(null) }}>Close all explained ({dayCount(closableDays.length)})</button>}
         {bulk && <form onSubmit={closeAll} style={panel}>
           <strong>Close the explained warnings for {dayCount(bulk.count)} at {siteId ? siteName(siteId, sites) : 'all sites'}?</strong>
           <label style={{ display: 'block' }}>Note (optional)
@@ -238,11 +251,12 @@ export function BudgetWarningDashboardCards({ userProfile, onOpen }) {
     return groupWarningDays(await api.list({ siteId })).filter(day => day.status === 'open')
       .sort((a, b) => a.date.localeCompare(b.date))
   }, [siteId])
+  const md = hasRole(userProfile, 'md')
   const oversight = useSiteRead(async () => {
     if (!review) return null
     const days = groupWarningDays(await api.list())
-    return { explained: days.filter(day => day.status === 'explained').length, open: days.filter(day => day.status === 'open').length }
-  }, [review])
+    return { explained: days.filter(day => md ? day.status === 'explained' || day.escalated : day.status === 'explained' && !day.escalated).length, open: days.filter(day => day.status === 'open' && !day.escalated).length }
+  }, [review, md])
   return <>
     {siteId && <ErrorBox error={own.error} />}
     {siteId && own.data?.length > 0 && <section aria-label="Budget warnings to explain" style={panel}>

@@ -13,9 +13,15 @@ vi.mock('../../lib/supabase', async () => {
   const mock = createSupabaseMock((table, ops) => {
     if (table === 'rpc:my_assigned_site') return { data: f.assignment, error: null }
     if (table === 'rpc:respond_production_exception') {
+      if (f.respondError) return { data: null, error: { message: f.respondError } }
       const statuses = { ask: 'open', explain: 'explained', close: 'closed' }
       const row = f.rows.find(row => row.id === ops.p_id)
-      f.rows.filter(line => line.site_id === row.site_id && line.date === row.date && line.status !== 'resolved').forEach(line => { line.status = statuses[ops.p_action] || line.status })
+      f.rows.filter(line => line.site_id === row.site_id && line.date === row.date && ['open', 'explained'].includes(line.status)).forEach(line => {
+        line.status = statuses[ops.p_action] || line.status
+        if (ops.p_action === 'escalate') Object.assign(line, { escalated_at: '2026-11-26T05:00:00Z', escalated_by_name: 'ICO reviewer', escalation_note: ops.p_text })
+        if (['ask','explain'].includes(ops.p_action)) Object.assign(line, { escalated_at: null, escalated_by_name: null, escalation_note: null })
+      })
+      if (ops.p_action === 'escalate') f.comments.push({ id: 'escalation', exception_id: row.id, kind: 'escalation', author_name: 'ICO reviewer', body: ops.p_text, created_at: '2026-11-26T05:00:00Z' })
       return { data: { ...row }, error: null }
     }
     if (table === 'rpc:close_explained_exceptions') {
@@ -30,7 +36,7 @@ vi.mock('../../lib/supabase', async () => {
     const rows = {
       production_exceptions: f.rows,
       production_sites: [{ id: 'life', name: 'Life Camp', site_type: 'client_site', is_active: true, variance_tolerance_pct: 5, breakage_budget_pct: 1 }],
-      production_exception_comments: [{ id: 'later', exception_id: 'diesel', kind: 'comment', body: 'Later diesel comment', created_at: '2026-11-19T12:00:00Z' }, { id: 'system', exception_id: 'cement', kind: 'system', body: 'Threshold exceeded', created_at: '2026-11-19T10:00:00Z' }],
+      production_exception_comments: [...f.comments, { id: 'later', exception_id: 'diesel', kind: 'comment', body: 'Later diesel comment', created_at: '2026-11-19T12:00:00Z' }, { id: 'system', exception_id: 'cement', kind: 'system', body: 'Threshold exceeded', created_at: '2026-11-19T10:00:00Z' }],
     }[table] || []
     const matches = rows.filter(row => ops.every(([kind, column, value]) => kind === 'eq' ? row[column] === value : kind === 'in' ? value.includes(row[column]) : true))
     if (table === 'production_exception_comments') matches.sort((a, b) => a.created_at.localeCompare(b.created_at))
@@ -46,7 +52,7 @@ vi.mock('../SitePicker', () => {
 })
 const common = { site_id: 'life', status: 'open', date: '2026-11-18', blocks: 690 }
 beforeEach(() => {
-  f.assignment = 'life'; f.calls.length = 0
+  f.assignment = 'life'; f.calls.length = 0; f.comments = []; f.respondError = null
   f.rows = [
     { ...common, id: 'cement', parameter: 'cement', kind: 'cost', message: 'Cement: 2 bags too many.', value_naira: 24000, actual_qty: 27, actual_rate: 25.6, budget_rate: 40, variance_pct: 56.5, direction: 'over' },
     { ...common, id: 'diesel', parameter: 'diesel', kind: 'cost', message: 'Diesel: 3 L too many.', actual_qty: 13, actual_rate: 18.8, budget_rate: 20, variance_pct: -5.8, direction: 'under' },
@@ -296,4 +302,103 @@ it('shows four independent allowance defaults, validates each 0–20 and saves a
   const columns = f.calls.find(c => c.table === 'production_sites' && c.ops.some(o => o[0] === 'maybeSingle')).ops.find(o => o[0] === 'select')[1]
   expect(columns).not.toContain('breakage_budget_pct')
   for (const key of ['production_breakage_pct','stacking_breakage_pct','loading_breakage_pct','offloading_breakage_pct']) expect(columns).toContain(key)
+})
+
+const escalation = { escalated_at: '2026-11-26T05:00:00Z', escalated_by_name: 'ICO reviewer', escalation_note: 'Needs MD decision on replacement' }
+it('lets the ICO escalate with ten trimmed characters and renders an amber banner/thread', async () => {
+  f.assignment = null
+  f.rows = [{ ...common, id: 'active', parameter: 'cement', status: 'explained' }]
+  mount('ico', { id: 'active' })
+  await click('Escalate to the MD')
+  const textarea = await screen.findByLabelText('Why should the MD decide?')
+  expect(screen.getByText('The MD is asked to decide. It leaves your review list.')).toBeInTheDocument()
+  const submit = textarea.closest('form').querySelector('button[type=submit]') || within(textarea.closest('form')).getByRole('button', { name: 'Escalate to the MD' })
+  change(textarea, '  short  '); expect(submit).toBeDisabled()
+  change(textarea, '  Please decide this issue  '); expect(submit).toBeEnabled()
+  fireEvent.click(submit)
+  await waitFor(() => expect(last()).toEqual({ p_id: 'active', p_action: 'escalate', p_text: 'Please decide this issue' }))
+  expect(await screen.findByText('Please decide this issue', { selector: 'p' })).toBeInTheDocument()
+  await waitFor(() => expect(screen.getByText('Please decide this issue', { selector: 'div' }).parentElement).toHaveStyle({ color: theme.accent }))
+  expect(screen.queryByRole('button', { name: 'Escalate to the MD' })).toBeNull()
+  await click('Back to warnings')
+  await click('To review')
+  expect(await screen.findByText('No warnings in this view.')).toBeInTheDocument()
+})
+it.each([
+  ['md', ['md']],
+  ['md', ['md', 'ico']],
+  ['production_manager', ['production_manager']],
+])('does not offer escalation to %s with roles %j', async (role, effectiveRoles) => {
+  f.assignment = null
+  renderWithSite(<BudgetWarnings userProfile={{ role, effectiveRoles }} initial={{ id: 'cement' }} />)
+  await screen.findByRole('heading', { name: 'Budget warning' })
+  expect(screen.queryByRole('button', { name: 'Escalate to the MD' })).toBeNull()
+})
+it.each(['closed', 'resolved'])('does not offer escalation for a %s day', async status => {
+  f.assignment = null
+  f.rows = [{ ...common, id: 'inactive', parameter: 'cement', status }]
+  mount('ico', { id: 'inactive' })
+  await screen.findByRole('heading', { name: 'Budget warning' })
+  expect(screen.queryByRole('button', { name: 'Escalate to the MD' })).toBeNull()
+})
+it('uses the active action line when opened through a resolved line, and shows RPC errors verbatim', async () => {
+  f.assignment = null
+  f.rows = [{ ...common, id: 'anchor', parameter: 'cement', status: 'resolved' }, { ...common, id: 'live', parameter: 'diesel', status: 'open' }]
+  f.respondError = 'Only the ICO can escalate a warning to the MD.'
+  mount('ico', { id: 'anchor' })
+  await click('Escalate to the MD')
+  const field = await screen.findByLabelText('Why should the MD decide?')
+  change(field, 'Please decide this issue')
+  fireEvent.click(within(field.closest('form')).getByRole('button', { name: 'Escalate to the MD' }))
+  expect(await screen.findByText(f.respondError)).toBeInTheDocument()
+  expect(last()).toMatchObject({ p_id: 'live', p_action: 'escalate' })
+})
+it('excludes escalated days from ICO review and bulk counts while All retains them', async () => {
+  f.assignment = null
+  f.rows = [
+    { ...common, id: 'plain', parameter: 'cement', status: 'explained', message: 'Ordinary review day' },
+    { ...common, ...escalation, id: 'escalated', date: '2026-11-17', parameter: 'cement', status: 'explained', message: 'Escalated day' },
+  ]
+  mount('ico', { status: 'explained' })
+  expect(await screen.findByRole('button', { name: 'Close all explained (1 day)' })).toBeInTheDocument()
+  expect(screen.queryByText('Escalated day')).toBeNull()
+  await click('Close all explained (1 day)')
+  expect(screen.getByText('Close the explained warnings for 1 day at all sites?')).toBeInTheDocument()
+  await click('Cancel')
+  await click('All')
+  expect(await screen.findByText('Escalated day')).toBeInTheDocument()
+})
+it('puts escalated days first for the MD and includes open escalations in review without bulk-counting them', async () => {
+  f.assignment = null
+  f.rows = [
+    { ...common, id: 'plain', date: '2026-11-25', parameter: 'cement', status: 'explained', message: 'Ordinary review day' },
+    { ...common, ...escalation, id: 'escalated', date: '2026-11-17', parameter: 'cement', status: 'open', message: 'Escalated day' },
+  ]
+  mount('md', { status: 'explained' })
+  expect(await screen.findByText('Escalated day')).toBeInTheDocument()
+  const articles = document.querySelectorAll('article')
+  expect(articles[0]).toHaveTextContent('Escalated day')
+  expect(articles[1]).toHaveTextContent('Ordinary review day')
+  expect(screen.getByRole('button', { name: 'Close all explained (1 day)' })).toBeInTheDocument()
+})
+it.each([['ico', 1], ['md', 2]])('dashboard review count for %s handles escalation', async (role, count) => {
+  f.assignment = null
+  f.rows = [
+    { ...common, id: 'plain', parameter: 'cement', status: 'explained' },
+    { ...common, ...escalation, id: 'escalated', date: '2026-11-17', parameter: 'cement', status: 'open' },
+  ]
+  renderWithSite(<BudgetWarningDashboardCards userProfile={{ role }} onOpen={vi.fn()} />)
+  expect(await screen.findByText(`Budget warnings: ${count} to review · 0 waiting for site managers`)).toBeInTheDocument()
+})
+it('clears the escalation display after a question is sent back and allows escalation again', async () => {
+  f.assignment = null
+  f.rows = [{ ...common, ...escalation, id: 'sent-back', parameter: 'cement', status: 'explained' }]
+  mount('ico', { id: 'sent-back' })
+  expect(await screen.findByText(escalation.escalation_note, { selector: 'p' })).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Escalate to the MD' })).toBeNull()
+  await click('Ask a question')
+  change(await screen.findByRole('textbox', { name: 'Ask a question' }), 'Please explain the broken blocks.')
+  await click('Send question')
+  expect(await screen.findByRole('button', { name: 'Escalate to the MD' })).toBeInTheDocument()
+  expect(screen.queryByText(escalation.escalation_note, { selector: 'p' })).toBeNull()
 })
