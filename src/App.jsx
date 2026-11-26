@@ -4955,6 +4955,7 @@ function BatchesPage({ userProfile, assignedSiteId, onOpenBudgetWarnings }) {
   const toggleProdLink = (id) => setForm(f => ({ ...f, linkedProds: f.linkedProds.includes(id) ? f.linkedProds.filter(p => p !== id) : [...f.linkedProds, id] }));
 
   const handleCreate = async () => {
+    if (!isFactorySite(form.siteId || DUTSE_SITE_ID, sites)) return;
     // Normal mode requires a product selection (product_id); the degraded
     // fallback (products failed to load) requires a block_type instead.
     if (!productsLoadFailed && !form.productId) return setAlert({ type: "error", msg: "Please select a block type." });
@@ -5103,7 +5104,7 @@ function BatchesPage({ userProfile, assignedSiteId, onOpenBudgetWarnings }) {
       <SavedBudgetWarnings result={savedWarnings} onOpen={onOpenBudgetWarnings} userProfile={userProfile} assignedSiteId={assignedSiteId} />
       <div className="m-header" style={styles.header}>
         <div><div style={styles.pageTitle}>Batch Management</div><div style={styles.pageSubtitle}>Finished goods batches after curing — link to production logs</div></div>
-        {canWriteBatch && <button style={styles.btn("primary")} onClick={() => setShowForm(!showForm)}>+ Create Batch</button>}
+        {canWriteBatch && (!assignedSiteId || isFactorySite(assignedSiteId, sites)) && <button style={styles.btn("primary")} onClick={() => setShowForm(!showForm)}>+ Create Batch</button>}
       </div>
       {alert && <Alert msg={alert.msg} type={alert.type} onClose={() => setAlert(null)} />}
 
@@ -5193,7 +5194,7 @@ function BatchesPage({ userProfile, assignedSiteId, onOpenBudgetWarnings }) {
             <div style={styles.formGroup}>
               <label style={styles.label}>Site *</label>
               <SitePicker value={form.siteId} onChange={v => setForm({ ...form, siteId: v, linkedProds: [] })} style={styles.input} />
-              {!isFactorySite(form.siteId || DUTSE_SITE_ID, sites) && <div style={{ fontSize: "12px", color: theme.accent, marginTop: "4px" }}>Client site — will not be added to Dutse yard stock.</div>}
+              {!isFactorySite(form.siteId || DUTSE_SITE_ID, sites) && <div style={{ fontSize: "12px", color: theme.accent, marginTop: "4px" }}>Batches at client sites are made automatically from each day's production entry.</div>}
             </div>
             {productsLoadFailed ? (
               // Degraded: products couldn't load (network hiccup) — fall back to
@@ -5240,7 +5241,7 @@ function BatchesPage({ userProfile, assignedSiteId, onOpenBudgetWarnings }) {
             </div>
           )}
           <div className="m-buttons" style={styles.row}>
-            <button style={styles.btn("primary")} onClick={handleCreate} disabled={saving}>{saving ? "Creating…" : isFactorySite(form.siteId || DUTSE_SITE_ID, sites) ? "Create Batch & Update Stock" : "Create Batch"}</button>
+            <button style={styles.btn("primary")} onClick={handleCreate} disabled={saving || !isFactorySite(form.siteId || DUTSE_SITE_ID, sites)}>{saving ? "Creating…" : isFactorySite(form.siteId || DUTSE_SITE_ID, sites) ? "Create Batch & Update Stock" : "Create Batch"}</button>
             <button style={styles.btn("secondary")} onClick={() => { setShowForm(false); setForm(emptyForm); }}>Cancel</button>
           </div>
         </div>
@@ -5251,6 +5252,7 @@ function BatchesPage({ userProfile, assignedSiteId, onOpenBudgetWarnings }) {
           <div style={{ ...styles.sectionTitle, marginBottom: 0 }}>{siteFilter ? `Batches at ${scopeLabel}` : "All Batches"} ({shownBatches.length})</div>
           <div className="m-full" style={{ width: "220px" }}><SitePicker allowAll value={siteFilter} onChange={setSiteFilter} style={styles.input} /></div>
         </div>
+        {(siteFilter || assignedSiteId) && !isFactorySite(siteFilter || assignedSiteId, sites) && <p style={{ color: theme.textMuted, fontSize: "12px" }}>Made automatically from each production entry: blocks made minus production and stacking breakage. Enter stacking breakage on the previous day's production entry.</p>}
         {loading ? <Spinner /> : shownBatches.length === 0 ? (
           <div style={{ textAlign: "center", padding: "40px", color: theme.textMuted }}>{batches.length === 0 ? "No batches created yet." : `No batches at ${scopeLabel}.`}</div>
         ) : shownBatches.map(b => {
@@ -5266,6 +5268,7 @@ function BatchesPage({ userProfile, assignedSiteId, onOpenBudgetWarnings }) {
               <div className="m-col" style={{ padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }} onClick={() => setExpandedId(isOpen ? null : b.id)}>
                 <div>
                   <strong style={{ fontSize: "14px" }}>{b.batch_number}</strong>
+                  {b.auto_from_production && <span style={styles.badge(theme.blue)}>Auto</span>}
                   <span style={{ ...styles.badge(theme.blue), marginLeft: "8px" }}>{b.block_type}</span>
                   <span style={styles.badge(b.status === "active" ? theme.green : theme.textMuted)}>{b.status}</span>
                   {ci === null
@@ -5274,6 +5277,7 @@ function BatchesPage({ userProfile, assignedSiteId, onOpenBudgetWarnings }) {
                       ? <span style={styles.badge(theme.green)}><IconText icon={Check}>Cured</IconText></span>
                       : <span style={styles.badge(theme.accent)}>Curing</span>}
                   <div style={{ fontSize: "12px", color: theme.textMuted, marginTop: "3px" }}>Site: <span style={{ color: theme.text }}>{siteName(b.site_id, sites)}</span> · Batch date: {fmtDate(b.date_cured)} · Created by: {b.created_by || "—"}</div>
+                  {!factory && !siteFilter && !assignedSiteId && <p style={{ color: theme.textMuted, fontSize: "12px" }}>Made automatically from each production entry: blocks made minus production and stacking breakage. Enter stacking breakage on the previous day's production entry.</p>}
                   {ci && ci.state === "curing" && !ci.ready && ci.daysRemaining != null && (
                     <div style={{ fontSize: "12px", color: theme.accent, marginTop: "3px" }}>Curing — ready in {ci.daysRemaining} day{ci.daysRemaining === 1 ? "" : "s"}</div>
                   )}
@@ -5290,8 +5294,8 @@ function BatchesPage({ userProfile, assignedSiteId, onOpenBudgetWarnings }) {
                     {canWriteBatch && (!assignedSiteId || b.site_id === assignedSiteId) && b.status === "active" && (
                       <button style={{ ...styles.btn("danger"), padding: "5px 12px", fontSize: "12px" }} onClick={() => openDmgModal(b)}>Log Damage</button>
                     )}
-                    {canWriteBatch && (!assignedSiteId || b.site_id === assignedSiteId) && <button style={{ ...styles.btn("secondary"), padding: "5px 12px", fontSize: "12px" }} onClick={() => startEdit(b)}>Edit</button>}
-                    {canDeleteBatch && <button style={{ ...styles.btn("danger"), padding: "5px 12px", fontSize: "12px" }} onClick={() => setConfirmDel(b)} disabled={deleting === b.id}>{deleting === b.id ? "…" : "Delete"}</button>}
+                    {canWriteBatch && !b.auto_from_production && (!assignedSiteId || b.site_id === assignedSiteId) && <button style={{ ...styles.btn("secondary"), padding: "5px 12px", fontSize: "12px" }} onClick={() => startEdit(b)}>Edit</button>}
+                    {canDeleteBatch && !b.auto_from_production && <button style={{ ...styles.btn("danger"), padding: "5px 12px", fontSize: "12px" }} onClick={() => setConfirmDel(b)} disabled={deleting === b.id}>{deleting === b.id ? "…" : "Delete"}</button>}
                   </div>
                 </div>
               </div>

@@ -1614,6 +1614,7 @@ Interim until A–C: Umar records Kado now; Abubakar gets a temporary assistant_
 - **UI:** b20.
 
 ### Client-site batches made automatically (MD 2026-11-26)
+- b21: handover form shows ready-to-hand-over count and next ready date, asks for a reason above it; Batches page tags Auto batches and blocks manual client-site batches.
 - **Why:** the curing system already existed (Batches page, `products.min_cure_days` = 14 for 9" and 4" 3-hole, "Mark Cured", `v_site_yard` = batched − breakage after batching − handed over) but Kado and Life Camp never recorded a batch, so Kado's yard read −1,200 after the 25 Nov handovers. MD: "Blocks should automatically be batched after that day's production has been stacked."
 - **DB** (`20261126032135_site_auto_batches_from_production`):
   - `batches.auto_from_production`; `fn_site_auto_batch(site, date, block_type)` keeps one batch per client-site production day: qty = blocks made − production and stacking breakage that day, `date_cured` = production date (Dutse practice), product set from the block type, numbering continues APC-BATCH-NNN, all that day's production entries linked.
