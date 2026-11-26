@@ -2,7 +2,7 @@ import { emptyTransport, TransportFields, TransportLabel, transportProblem, useT
 import { withAssignedSite } from '../AssignedSite'
 import { LateReasonField, useLateReason } from '../LateReasonField'
 import { withPhase7Touch } from './siteUi'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { FixedSite, useSites } from '../SitePicker'
 import { siteName } from '../../services/sites'
 import { productsService } from '../../services/products'
@@ -50,6 +50,30 @@ function WaybillWarning({ number, result }) {
   </p>)}</>
 }
 
+function useCuredStock(siteId, blockType, date) {
+  const [state, setState] = useState({})
+  const request = useRef(0)
+  const key = JSON.stringify([siteId, blockType, date])
+  const currentKey = useRef(key)
+  currentKey.current = key
+  const refresh = async () => {
+    const id = ++request.current
+    setState({ key, loading: true })
+    if (!siteId || !blockType || !date) { setState({ key }); return }
+    try {
+      const data = await siteContractsService.curedStock(siteId, blockType, date)
+      if (id === request.current && currentKey.current === key) setState({ key, data })
+    } catch (error) {
+      if (id === request.current && currentKey.current === key) setState({ key, error })
+    }
+  }
+  useEffect(() => {
+    refresh()
+    return () => { request.current++ }
+  }, [key])
+  return { ...(state.key === key ? state : { loading: true }), refresh }
+}
+
 function Handovers({ userProfile, assignedSiteId }) {
   const canWrite = hasRole(userProfile, ...HANDOVER_WRITE_ROLES)
   const isMD = userProfile?.role === 'md'
@@ -64,6 +88,11 @@ function Handovers({ userProfile, assignedSiteId }) {
   const [err, setErr] = useState(null)
   const [form, setForm] = useState(() => emptyForm(assignedSiteId || ''))
   const lateEntry = useLateReason(form.date)
+  const cured = useCuredStock(form.siteId, form.blockType, form.date)
+  const [earlyReason, setEarlyReason] = useState('')
+  const aboveCured = cured.data?.applies && Number(form.qty) > Number(cured.data.available)
+  useEffect(() => { setEarlyReason('') }, [form.siteId, form.blockType, form.date])
+  useEffect(() => { if (!aboveCured) setEarlyReason('') }, [aboveCured])
   const [transport, setTransport] = useState(emptyTransport)
   const options = useTransportOptions(form.siteId, form.date)
   const [transportTarget, setTransportTarget] = useState(null)
@@ -111,14 +140,14 @@ function Handovers({ userProfile, assignedSiteId }) {
   const formYard = form.blockType ? yardFor(form.siteId, form.blockType) : null
   const overYard = formYard && Number(form.qty) > Number(formYard.in_yard)
   const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }))
-  const formProblem = !form.siteId ? 'Choose the site.' : !form.blockType ? 'Choose the block type.' : !(Number(form.qty) > 0) ? 'Enter the quantity handed over.' : !form.date ? 'Enter the date.' : !options.data ? 'Wait for transport options.' : transportProblem(transport, options.data, form.notes)
+  const formProblem = !form.siteId ? 'Choose the site.' : !form.blockType ? 'Choose the block type.' : !(Number(form.qty) > 0) ? 'Enter the quantity handed over.' : !form.date ? 'Enter the date.' : cured.loading ? 'Wait for the curing check.' : aboveCured && earlyReason.trim().length < 10 ? 'Give a reason for handing over early (at least 10 characters).' : !options.data ? 'Wait for transport options.' : transportProblem(transport, options.data, form.notes)
 
   const submit = (e) => {
     e.preventDefault()
     if (formProblem || lateEntry.invalid || busy) return
     // Compare with the yard balance first; a missing yard row means 0 in the
     // yard. If the yard did not load, there is nothing to compare against.
-    const warning = handoverYardWarning({
+    const warning = cured.data?.applies ? null : handoverYardWarning({
       qty: form.qty,
       balance: err || loading ? null : (formYard ? formYard.in_yard : 0),
       blockType: form.blockType,
@@ -129,7 +158,7 @@ function Handovers({ userProfile, assignedSiteId }) {
   }
 
   const save = async () => {
-    if (lateEntry.invalid) return
+    if (formProblem || lateEntry.invalid) return
     setBusy(true); setFormErr(null); setOk('')
     let photoPath = null
     let photoWarn = ''
@@ -145,6 +174,7 @@ function Handovers({ userProfile, assignedSiteId }) {
       }
       await siteContractsService.createHandover({
         ...lateEntry.payload,
+        early_reason: aboveCured ? earlyReason.trim() : null,
         ...transport, waybill_no: transport.waybill_no.trim().toUpperCase(), vehicle_id: transport.vehicle_id || null, vehicle_plate: transport.vehicle_id ? null : transport.vehicle_plate.trim(), driver_staff_id: transport.driver_staff_id || null, driver_name: transport.driver_staff_id ? null : transport.driver_name.trim(),
         site_id: form.siteId, handover_date: form.date, block_type: form.blockType,
         qty_handed_over: Math.round(Number(form.qty)), client_rep: form.clientRep.trim() || null,
@@ -153,6 +183,8 @@ function Handovers({ userProfile, assignedSiteId }) {
       setOk(`Handover recorded: ${fmtQty(form.qty)} ${form.blockType}.${photoWarn}`)
       setTransport(emptyTransport())
       lateEntry.reset()
+      setEarlyReason('')
+      await cured.refresh()
       setForm(f => ({ ...emptyForm(f.siteId), date: f.date }))
       await load()
     } catch (e2) {
@@ -241,8 +273,16 @@ function Handovers({ userProfile, assignedSiteId }) {
             <div style={ui.field}>
               <label style={ui.label} htmlFor="ho-qty">Quantity handed over *</label>
               <input id="ho-qty" type="number" inputMode="numeric" min="1" step="1" style={ui.input} value={form.qty} onChange={set('qty')} />
+              <ErrorBox error={cured.error} />
+              {cured.data?.applies && <div style={ui.hint}>Ready to hand over (14+ days old): {fmtQty(cured.data.available)}.{cured.data.next_ready_on && <> Next {fmtQty(cured.data.next_ready_qty)} ready on {fmtDate(cured.data.next_ready_on)}.</>}</div>}
+              {aboveCured && <div style={{ ...ui.panel, color: theme.accent, borderColor: theme.accent }}>
+                <p>Only {fmtQty(cured.data.available)} blocks here are {cured.data.min_cure_days} days old (made on or before {fmtDate(cured.data.cutoff)}). {fmtQty(Number(form.qty) - Number(cured.data.available))} of these {fmtQty(form.qty)} would be younger than {cured.data.min_cure_days} days.</p>
+                <label style={ui.label} htmlFor="ho-early-reason">Reason for handing over early</label>
+                <textarea id="ho-early-reason" style={ui.textarea} required minLength={10} value={earlyReason} onChange={e => setEarlyReason(e.target.value)} />
+                {earlyReason.trim().length < 10 && <div style={ui.hint}>Give a reason for handing over early (at least 10 characters).</div>}
+              </div>}
               {formYard && <div style={ui.hint}>In yard: {fmtQty(formYard.in_yard)}</div>}
-              {overYard && <div style={{ ...ui.fieldError, color: theme.accent }}>More than the {fmtQty(formYard.in_yard)} recorded in the yard. Check batches and damages — you can still save.</div>}
+              {!cured.loading && !cured.data?.applies && overYard && <div style={{ ...ui.fieldError, color: theme.accent }}>More than the {fmtQty(formYard.in_yard)} recorded in the yard. Check batches and damages — you can still save.</div>}
             </div>
             <div style={ui.field}>
               <label style={ui.label} htmlFor="ho-rep">Client representative</label>
@@ -297,6 +337,7 @@ function Handovers({ userProfile, assignedSiteId }) {
                       <td style={{ ...ui.td, ...ui.right, color: r.qty_rejected > 0 ? theme.red : theme.text }}>{fmtQty(r.qty_rejected)}</td>
                       <td style={ui.td}>
                         <Pill status={r.status} />
+                        {r.under_cure_qty > 0 && <div style={{ ...ui.hint, color: theme.accent }}>{fmtQty(r.under_cure_qty)} under 14 days — {r.early_reason || 'no reason given'}</div>}
                         {r.verdict_on && <div style={ui.hint}>verdict {fmtDate(r.verdict_on)}</div>}
                         {r.rejection_reason && <div style={ui.hint}>{r.rejection_reason}</div>}
                       </td>
@@ -379,7 +420,7 @@ function Handovers({ userProfile, assignedSiteId }) {
         </ConfirmDialog>
       )}
 
-      {yardConfirm && (
+      {yardConfirm && !cured.data?.applies && (
         <ConfirmDialog
           title="Yard balance too low"
           body={yardConfirm}

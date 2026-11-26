@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-const svc = vi.hoisted(() => ({ waybills: vi.fn(), active: vi.fn(), batches: vi.fn(), productions: vi.fn(), yard: vi.fn(), items: vi.fn(), history: vi.fn(), movements: vi.fn(), calls: null, zeroDelete: false, errorUpdate: null }))
+const svc = vi.hoisted(() => ({ waybills: vi.fn(), active: vi.fn(), batches: vi.fn(), productions: vi.fn(), yard: vi.fn(), items: vi.fn(), history: vi.fn(), movements: vi.fn(), calls: null, zeroDelete: false, errorUpdate: null, assignment: null }))
 const DUTSE = '00000000-0000-4000-8000-000000000001'
 const KADO = '00000000-0000-4000-8000-000000000002'
 vi.mock('./lib/supabase', async () => {
   const { createSupabaseMock } = await import('./test/supabaseMock')
   const mock = createSupabaseMock((table, ops) => {
+    if (table === 'rpc:my_assigned_site') return { data: svc.assignment, error: null }
     if (ops.some(o => o[0] === 'update') && svc.errorUpdate) return { data: null, error: svc.errorUpdate }
     if (ops.some(o => o[0] === 'delete')) return { data: svc.zeroDelete ? [] : [{ id: 'w' }], error: null }
     if (ops.some(o => o[0] === 'update' || o[0] === 'insert')) return { data: [{ id: 'w' }], error: null }
@@ -34,7 +35,7 @@ vi.mock('./services/inventory', async importOriginal => {
   const actual = await importOriginal()
   return { inventoryService: { ...actual.inventoryService, getAllItems: svc.items, getMovements: svc.movements, hasMovements: svc.history } }
 })
-vi.mock('./services/products', () => ({ productsService: { getActive: async () => [{ id: 'p9', name: '9 Inch 3 Hole Block', category: 'Blocks' }, { id: 'p6', name: '6 Inch Block', category: 'Blocks' }] } }))
+vi.mock('./services/products', () => ({ productsService: { getActive: async () => [{ id: 'p9', name: '9 Inch 3 Hole Block', category: 'Blocks', is_own_production: true, min_cure_days: 14 }, { id: 'p6', name: '6 Inch Block', category: 'Blocks' }] } }))
 vi.mock('./services/orders', () => ({ ordersService: { getForDelivery: async () => [] }, customersService: {}, customerSitesService: {} }))
 vi.mock('./services/staff', () => ({ staffService: { getPublicActive: async () => [] } }))
 vi.mock('./services/vehicles', () => ({ vehiclesService: { getActive: async () => [] }, fuelLogService: { getByWaybill: async () => [] } }))
@@ -43,6 +44,7 @@ vi.mock('./services/schedules', () => ({ schedulesService: { getApproved: async 
 vi.mock('./services/pendingDelivery', () => ({ pendingDeliveryService: { getByOrder: async () => [] } }))
 vi.mock('./services/suppliers', () => ({ suppliersService: { getActive: async () => [] }, supplierTransactionsService: {} }))
 vi.mock('./services/finishedGoods', () => ({ finishedGoodsService: { getAll: vi.fn(async () => []) } }))
+import { AssignedSiteProvider } from './components/AssignedSite'
 import { Waybills, Batches, Inventory, ISSUED_TO } from './App'
 import { finishedGoodsService } from './services/finishedGoods'
 
@@ -55,6 +57,7 @@ beforeEach(() => {
   svc.calls.length = 0
   svc.zeroDelete = false
   svc.errorUpdate = null
+  svc.assignment = null
   svc.waybills.mockResolvedValue([wb])
   svc.batches.mockResolvedValue([batch])
   svc.active.mockResolvedValue([batch, { ...batch, id: 'b6', block_type: '6 Inch Block' }, { ...batch, id: 'k', site_id: KADO }, { ...batch, id: 'exhausted', status: 'exhausted' }])
@@ -199,4 +202,34 @@ it('9: item site and unit stay editable when there are no movements', async () =
   await waitFor(() => expect(screen.getByRole('combobox', { name: 'Site', exact: true })).not.toBeDisabled())
   expect(screen.getByText('Unit of Measure *').parentElement.querySelector('select')).not.toBeDisabled()
   expect(screen.queryByText('Locked — this item has stock history. Create a new item instead.')).toBeNull()
+})
+
+it('b21: auto batches show Auto, retain Mark Cured and Log Damage, and hide Edit/Delete', async () => {
+  svc.batches.mockResolvedValue([{ ...batch, site_id: KADO, auto_from_production: true, product_id: 'p9', date_cured: '2026-10-01' }])
+  render(<Batches userProfile={{ role: 'md' }} />)
+  await screen.findByText('TEST-B9')
+  expect(screen.getByText('Auto')).toHaveStyle({ color: '#5b8dee' })
+  expect(screen.queryByRole('button', { name: 'Edit', exact: true })).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Delete', exact: true })).toBeNull()
+  expect(screen.getByRole('button', { name: 'Log Damage', exact: true })).toBeInTheDocument()
+  expect(await screen.findByRole('button', { name: 'Mark Cured' })).toBeInTheDocument()
+  expect(screen.getByText(/Made automatically from each production entry/)).toBeInTheDocument()
+})
+it('b21: manual client-site batch creation is disabled, factory creation stays available', async () => {
+  render(<Batches userProfile={{ role: 'md' }} />)
+  await screen.findByText('TEST-B9')
+  await userEvent.click(screen.getByRole('button', { name: '+ Create Batch' }))
+  await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Site', exact: true }), KADO)
+  expect(screen.getByText("Batches at client sites are made automatically from each day's production entry.")).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Create Batch', exact: true })).toBeDisabled()
+  await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Site', exact: true }), DUTSE)
+  expect(screen.getByRole('button', { name: 'Create Batch & Update Stock' })).toBeEnabled()
+  expect(screen.queryByText(/Made automatically from each production entry/)).toBeNull()
+})
+it('b21: assigned client-site staff have no Create Batch button', async () => {
+  svc.assignment = KADO
+  render(<AssignedSiteProvider><Batches userProfile={{ role: 'assistant_production_manager' }} /></AssignedSiteProvider>)
+  await screen.findByText('TEST-B9')
+  expect(screen.queryByRole('button', { name: '+ Create Batch' })).toBeNull()
+  expect(screen.getByText(/Made automatically from each production entry/)).toBeInTheDocument()
 })

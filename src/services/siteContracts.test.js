@@ -66,8 +66,8 @@ describe('siteContractsService — errors are surfaced, never swallowed (Rule 10
     const transport = { waybill_no: 'WB1', vehicle_id: null, vehicle_plate: 'XYZ', driver_staff_id: null, driver_name: 'Guest', loader_ids: ['l'] }
     await siteContractsService.transportOptions('s', '2026-11-25')
     expect(state.mock.calls[0]).toEqual({ rpc: 'handover_transport_options', args: { p_site_id: 's', p_date: '2026-11-25' } })
-    await siteContractsService.createHandover({ ...transport, site_id: 's', otherTruck: true })
-    expect(state.mock.calls[1].ops.find(x => x[0] === 'insert')[1]).toEqual({ ...transport, site_id: 's' })
+    await siteContractsService.createHandover({ ...transport, early_reason: 'Client requested early', under_cure_qty: 130, site_id: 's', otherTruck: true })
+    expect(state.mock.calls[1].ops.find(x => x[0] === 'insert')[1]).toEqual({ ...transport, early_reason: 'Client requested early', site_id: 's' })
     await siteContractsService.updateTransport('h', { ...transport, qty_handed_over: 900, status: 'accepted' })
     expect(state.mock.calls[2].ops.find(x => x[0] === 'update')[1]).toEqual(transport)
   })
@@ -91,4 +91,21 @@ it('finds duplicate waybills only at this site and excludes the edited row', asy
   expect(state.mock.calls[1].ops.some(x => x[0] === 'neq')).toBe(false)
   state.resolve = () => ({ data: null, error: { message: 'lookup failed' } })
   await expect(siteContractsService.findByWaybill('s', 'WB1')).rejects.toMatchObject({ message: 'lookup failed' })
+})
+
+it('passes cured stock arguments including the optional exclusion and surfaces errors', async () => {
+  state.mock.calls.length = 0
+  state.resolve = () => ({ data: { applies: true, available: 70 }, error: null })
+  await expect(siteContractsService.curedStock('s', '9 Inch Block', '2026-11-26')).resolves.toMatchObject({ available: 70 })
+  expect(state.mock.calls[0]).toEqual({ rpc: 'site_cured_stock', args: { p_site_id: 's', p_block_type: '9 Inch Block', p_date: '2026-11-26', p_exclude_id: null } })
+  await siteContractsService.curedStock('s', '9 Inch Block', '2026-11-26', 'h')
+  expect(state.mock.calls[1].args.p_exclude_id).toBe('h')
+  state.resolve = () => ({ data: null, error: { message: 'Curing lookup failed' } })
+  await expect(siteContractsService.curedStock('s', '9 Inch Block', '2026-11-26')).rejects.toMatchObject({ message: 'Curing lookup failed' })
+})
+it('sends early_reason on create but never sends computed under_cure_qty', async () => {
+  state.mock.calls.length = 0
+  state.resolve = () => ({ data: { id: 'h' }, error: null })
+  await siteContractsService.createHandover({ site_id: 's', early_reason: 'Urgent client request', under_cure_qty: 999 })
+  expect(state.mock.calls[0].ops.find(o => o[0] === 'insert')[1]).toEqual({ site_id: 's', early_reason: 'Urgent client request' })
 })

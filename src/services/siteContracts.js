@@ -171,6 +171,12 @@ export const siteContractsService = {
     return must(await q)
   },
 
+  async curedStock(siteId, blockType, date, excludeId) {
+    return must(await supabase.rpc('site_cured_stock', {
+      p_site_id: siteId, p_block_type: blockType, p_date: date, p_exclude_id: excludeId || null,
+    }))
+  },
+
   async findByWaybill(siteId, waybillNo, excludeId) {
     let q = supabase.from('block_handovers').select('id, handover_date, block_type, qty_handed_over')
       .eq('site_id', siteId).eq('waybill_no', waybillNo)
@@ -183,7 +189,7 @@ export const siteContractsService = {
     return mustTouch(await supabase.from('block_handovers').update(pick(patch, ['waybill_no', 'vehicle_id', 'vehicle_plate', 'driver_staff_id', 'driver_name', 'loader_ids'])).eq('id', id).select(), 'Transport')
   },
   async createHandover(row) {
-    const payload = pick(row, ['waybill_no', 'site_id', 'handover_date', 'block_type', 'qty_handed_over', 'client_rep', 'photo_path', 'notes', 'late_reason', 'vehicle_id', 'vehicle_plate', 'driver_staff_id', 'driver_name', 'loader_ids'])
+    const payload = pick(row, ['early_reason', 'waybill_no', 'site_id', 'handover_date', 'block_type', 'qty_handed_over', 'client_rep', 'photo_path', 'notes', 'late_reason', 'vehicle_id', 'vehicle_plate', 'driver_staff_id', 'driver_name', 'loader_ids'])
     return must(await supabase.from('block_handovers').insert(payload).select().single())
   },
 
