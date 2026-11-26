@@ -11,7 +11,10 @@ const fields = [
   { key: 'warn_min_cement_bags', label: 'Ignore cement differences smaller than (bags)', initial: 2, min: 0, max: 50 },
   { key: 'warn_min_diesel_l', label: 'Ignore diesel differences smaller than (L)', initial: 3, min: 0, max: 100 },
   { key: 'warn_min_breakage_blocks', label: 'Ignore breakage smaller than (blocks)', initial: 5, min: 0, max: 100 },
-  { key: 'breakage_budget_pct', label: 'Breakage allowed (% of blocks made)', initial: 1, min: 0, max: 20 },
+  { key: 'production_breakage_pct', label: 'Production breakage allowed (% of blocks made)', initial: 2, min: 0, max: 20 },
+  { key: 'stacking_breakage_pct', label: 'Stacking breakage allowed (% of blocks made)', initial: 1, min: 0, max: 20 },
+  { key: 'loading_breakage_pct', label: 'Loading breakage allowed (% of blocks loaded)', initial: 0.5, min: 0, max: 20 },
+  { key: 'offloading_breakage_pct', label: 'Offloading breakage allowed (% of blocks loaded)', initial: 0.5, min: 0, max: 20 },
   { key: 'material_cost_budget_per_block', label: 'Materials budget per block (₦)', initial: '', min: 0, exclusive: true, optional: true },
 ]
 const input = { ...ui.input, width: '100%', minWidth: 0, maxWidth: 120, minHeight: 44, boxSizing: 'border-box' }

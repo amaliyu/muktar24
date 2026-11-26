@@ -14,8 +14,13 @@ export function shiftScorecardDate(date, days) {
 export const scorecardDate = date => date.split('-').reverse().join('/')
 
 function warningMetric(lines, parameter, budget) {
-  if (!lines || !available(budget)) return { chip: null }
-  const line = lines.find(row => row.parameter === parameter && row.status !== 'resolved')
+  if (!lines) return { chip: null }
+  const breakage = parameter === 'breakage'
+  const matches = lines.filter(row => breakage
+    ? row.parameter?.endsWith('breakage') && ['open', 'explained'].includes(row.status)
+    : row.parameter === parameter && row.status !== 'resolved')
+  const line = breakage ? matches.find(row => row.kind === 'cost') || matches[0] : matches[0]
+  if (!available(budget) && (!breakage || !line)) return { chip: null }
   return line ? { chip: lineBadge(line), hint: lineText(line) }
     : { chip: { label: 'Within limits', tone: 'green' } }
 }

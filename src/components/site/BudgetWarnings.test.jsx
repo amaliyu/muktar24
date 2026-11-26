@@ -74,10 +74,10 @@ it('limits the initial list to open warnings at the assigned site and validates 
   await click('Torn or wet bags')
   await click('Generator ran for other work')
   expect(screen.getByRole('button', { name: 'Send explanation' })).toBeDisabled()
-  await click('Broke while stacking')
+  await click('Machine problem')
   change(screen.getByLabelText('Anything else? (optional)'), 'The mixer is fixed.')
   await click('Send explanation')
-  await waitFor(() => expect(last()).toEqual({ p_id: 'cement', p_action: 'explain', p_text: 'Cement: Mixer problem; Torn or wet bags\nDiesel: Generator ran for other work\nBreakage: Broke while stacking\nNote: The mixer is fixed.' }))
+  await waitFor(() => expect(last()).toEqual({ p_id: 'cement', p_action: 'explain', p_text: 'Cement: Mixer problem; Torn or wet bags\nDiesel: Generator ran for other work\nProduction breakage: Machine problem\nNote: The mixer is fixed.' }))
   expect(f.calls.find(call => call.table === 'production_exceptions' && call.ops.some(op => op[0] === 'gte')).ops)
     .toEqual(expect.arrayContaining([['eq', 'site_id', 'life'], ['gte', 'date', warningWindowStart()]]))
 })
@@ -148,7 +148,7 @@ it('renders budget RPC lines with tonnes and site tolerance colors', async () =>
 it('validates both settings and accepts inclusive maximum and zero breakage', async () => {
   render(<BudgetWarningSettings userProfile={{ role: 'md' }} />)
   const variance = await screen.findByLabelText(/Warn when more than this/)
-  const breakage = screen.getByLabelText(/Breakage allowed/)
+  const breakage = screen.getByLabelText(/Production breakage allowed/)
   const save = screen.getByRole('button', { name: 'Save Life Camp' })
   change(variance, '0'); expect(save).toBeDisabled()
   change(variance, '51'); expect(save).toBeDisabled()
@@ -167,7 +167,7 @@ it('validates both settings and accepts inclusive maximum and zero breakage', as
   fireEvent.click(save)
   await screen.findByText('Settings saved.')
   expect(f.calls.flatMap(call => call.ops || []).find(op => op[0] === 'update')[1])
-    .toEqual({ variance_tolerance_pct: 50, cement_under_tolerance_pct: 12, warn_min_cement_bags: 4, warn_min_diesel_l: 0, warn_min_breakage_blocks: 100, breakage_budget_pct: 0, material_cost_budget_per_block: null })
+    .toEqual({ variance_tolerance_pct: 50, cement_under_tolerance_pct: 12, warn_min_cement_bags: 4, warn_min_diesel_l: 0, warn_min_breakage_blocks: 100, production_breakage_pct: 0, stacking_breakage_pct: 1, loading_breakage_pct: 0.5, offloading_breakage_pct: 0.5, material_cost_budget_per_block: null })
 })
 
 it.each([
@@ -187,7 +187,7 @@ it('opens mixed days from any line id, merges the thread, and responds through a
   expect(detail.getByText('Cleared: Cement')).toBeInTheDocument()
   expect(detail.getByText('Threshold exceeded').compareDocumentPosition(detail.getByText('Later diesel comment')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   await click('Generator ran for other work')
-  await click('Broke while stacking')
+  await click('Machine problem')
   await click('Send explanation')
   await waitFor(() => expect(last()).toMatchObject({ p_id: 'diesel', p_action: 'explain' }))
 })
@@ -254,8 +254,46 @@ it('hides cleared lines behind a summary and keeps bulk close away from the site
   f.rows[1].status = 'resolved'
   f.rows[2].status = 'resolved'
   mount('assistant_production_manager')
-  expect(await screen.findByText('Cleared: Diesel, Breakage')).toBeInTheDocument()
+  expect(await screen.findByText('Cleared: Diesel, Production breakage')).toBeInTheDocument()
   expect(screen.queryByText('Diesel: 3 L too many.')).not.toBeInTheDocument()
   await click('To review')
   expect(screen.queryByRole('button', { name: /Close all explained/ })).not.toBeInTheDocument()
+})
+
+it.each([
+  ['breakage', ['Machine problem', 'Weak mix', 'Operator', 'Other']],
+  ['stacking_breakage', ['Rough handling', 'Pallets', 'Uneven ground', 'Other']],
+  ['loading_breakage', ['Rough loading', 'Truck packing', 'Other']],
+  ['offloading_breakage', ['Rough offloading', 'Uneven ground at the client', 'Other']],
+])('uses the right reason chips for %s', async (parameter, reasons) => {
+  f.rows = [{ ...common, id: 'type', parameter, kind: 'cost', message: 'Broken blocks need an explanation.' }]
+  mount('assistant_production_manager')
+  await click('Explain')
+  for (const reason of reasons) expect(await screen.findByRole('button', { name: reason, exact: true })).toBeInTheDocument()
+  await click(reasons[0])
+  await click('Send explanation')
+  await waitFor(() => expect(last().p_text).toContain(reasons[0]))
+})
+it('shows four independent allowance defaults, validates each 0–20 and saves all four', async () => {
+  render(<BudgetWarningSettings userProfile={{ role: 'md' }} />)
+  const labels = [/Production breakage allowed/, /Stacking breakage allowed/, /Loading breakage allowed/, /Offloading breakage allowed/]
+  const defaults = [2, 1, 0.5, 0.5]
+  const save = await screen.findByRole('button', { name: 'Save Life Camp' })
+  for (let i = 0; i < labels.length; i++) {
+    const input = screen.getByLabelText(labels[i])
+    expect(input).toHaveValue(defaults[i])
+    expect(input).toHaveAttribute('min', '0'); expect(input).toHaveAttribute('max', '20')
+    change(input, '-1'); expect(save).toBeDisabled()
+    change(input, '20.1'); expect(save).toBeDisabled()
+    change(input, String(i)); expect(save).toBeEnabled()
+  }
+  expect(screen.queryByLabelText(/^Breakage allowed/)).toBeNull()
+  fireEvent.click(save)
+  await screen.findByText('Settings saved.')
+  const payload = f.calls.flatMap(c => c.ops || []).find(o => o[0] === 'update')[1]
+  expect(payload).toMatchObject({ production_breakage_pct: 0, stacking_breakage_pct: 1, loading_breakage_pct: 2, offloading_breakage_pct: 3 })
+  expect(payload).not.toHaveProperty('breakage_budget_pct')
+  const columns = f.calls.find(c => c.table === 'production_sites' && c.ops.some(o => o[0] === 'maybeSingle')).ops.find(o => o[0] === 'select')[1]
+  expect(columns).not.toContain('breakage_budget_pct')
+  for (const key of ['production_breakage_pct','stacking_breakage_pct','loading_breakage_pct','offloading_breakage_pct']) expect(columns).toContain(key)
 })

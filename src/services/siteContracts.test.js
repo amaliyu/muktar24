@@ -66,8 +66,8 @@ describe('siteContractsService — errors are surfaced, never swallowed (Rule 10
     const transport = { waybill_no: 'WB1', vehicle_id: null, vehicle_plate: 'XYZ', driver_staff_id: null, driver_name: 'Guest', loader_ids: ['l'] }
     await siteContractsService.transportOptions('s', '2026-11-25')
     expect(state.mock.calls[0]).toEqual({ rpc: 'handover_transport_options', args: { p_site_id: 's', p_date: '2026-11-25' } })
-    await siteContractsService.createHandover({ ...transport, early_reason: 'Client requested early', under_cure_qty: 130, site_id: 's', otherTruck: true })
-    expect(state.mock.calls[1].ops.find(x => x[0] === 'insert')[1]).toEqual({ ...transport, early_reason: 'Client requested early', site_id: 's' })
+    await siteContractsService.createHandover({ ...transport, broken_loading: 3, broken_offloading: 2, early_reason: 'Client requested early', under_cure_qty: 130, site_id: 's', otherTruck: true })
+    expect(state.mock.calls[1].ops.find(x => x[0] === 'insert')[1]).toEqual({ ...transport, broken_loading: 3, broken_offloading: 2, early_reason: 'Client requested early', site_id: 's' })
     await siteContractsService.updateTransport('h', { ...transport, qty_handed_over: 900, status: 'accepted' })
     expect(state.mock.calls[2].ops.find(x => x[0] === 'update')[1]).toEqual(transport)
   })
@@ -108,4 +108,17 @@ it('sends early_reason on create but never sends computed under_cure_qty', async
   state.resolve = () => ({ data: { id: 'h' }, error: null })
   await siteContractsService.createHandover({ site_id: 's', early_reason: 'Urgent client request', under_cure_qty: 999 })
   expect(state.mock.calls[0].ops.find(o => o[0] === 'insert')[1]).toEqual({ site_id: 's', early_reason: 'Urgent client request' })
+})
+
+it('updateBreakage whitelists three keys and surfaces zero-row and database failures', async () => {
+  state.mock.calls.length = 0
+  state.resolve = () => ({ data: [{ id: 'h' }], error: null })
+  const patch = { broken_loading: 3, broken_offloading: 4, early_reason: 'Urgent client request' }
+  await siteContractsService.updateBreakage('h', { ...patch, qty_handed_over: 900, under_cure_qty: 5 })
+  expect(state.mock.calls[0].ops.find(o => o[0] === 'update')[1]).toEqual(patch)
+  expect(state.mock.calls[0].ops).toContainEqual(['eq', 'id', 'h'])
+  state.resolve = () => ({ data: [], error: null })
+  await expect(siteContractsService.updateBreakage('h', patch)).rejects.toThrow(/not saved/)
+  state.resolve = () => ({ data: null, error: { message: 'Only 70 blocks are ready.' } })
+  await expect(siteContractsService.updateBreakage('h', patch)).rejects.toMatchObject({ message: 'Only 70 blocks are ready.' })
 })
