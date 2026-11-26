@@ -1613,6 +1613,21 @@ Interim until A–C: Umar records Kado now; Abubakar gets a temporary assistant_
 - **Drafts:** 22 payment requests in draft (Abubakar 15, Umar 4, Auwalu 3 incl. APC-PR-00030 ₦6.69m cement; Auwalu's login is inactive). Each requester notified 25 Nov; ICO follow-up items added.
 - **UI:** b20.
 
+### Client-site batches made automatically (MD 2026-11-26)
+- **Why:** the curing system already existed (Batches page, `products.min_cure_days` = 14 for 9" and 4" 3-hole, "Mark Cured", `v_site_yard` = batched − breakage after batching − handed over) but Kado and Life Camp never recorded a batch, so Kado's yard read −1,200 after the 25 Nov handovers. MD: "Blocks should automatically be batched after that day's production has been stacked."
+- **DB** (`20261126032135_site_auto_batches_from_production`):
+  - `batches.auto_from_production`; `fn_site_auto_batch(site, date, block_type)` keeps one batch per client-site production day: qty = blocks made − production and stacking breakage that day, `date_cured` = production date (Dutse practice), product set from the block type, numbering continues APC-BATCH-NNN, all that day's production entries linked.
+  - Triggers on `production_log` and `damage_log` (production/stacking) refresh it on every insert, correction or delete; stacking breakage entered the next day lowers the batch. Deleting the production entry removes the batch.
+  - `fn_site_batch_auto_only`: manual insert, quantity/date/type edits and deletes of client-site batches are refused ("correct the production entry instead"); Mark Cured and notes still work. Dutse batches unchanged.
+  - Backfill: Kado 11 batches / 7,737 blocks (yard now 6,537), Life Camp 7 / 4,137. Tested with a rolled-back block (stacking +10 → −10, edit, delete, production +5, manual insert/edit/delete refused, mark cured allowed).
+- **No "stacking done" step exists**, so the batch is made with the production entry and its count drops when stacking breakage is entered; harmless because nothing can leave before 14 days.
+- **14-day handover check** (`20261126032702_handover_cure_check`):
+  - `site_cured_stock(site, block_type, date, exclude_id)` → available = batches dated on or before date − `min_cure_days` − breakage after batching − handovers up to that date; plus `next_ready_on` / `next_ready_qty`. Client sites only.
+  - `block_handovers.under_cure_qty`, `early_reason`. Trigger refuses a handover above the available count unless `early_reason` is given ("Only N blocks of X here are 14 days old (made on or before D). M of these Q would be younger. Give a reason for handing over early."), stores the under-cured count, and adds an ICO follow-up item.
+  - Backfill: Kado 25 Nov — 1,057 blocks were 14 days old after breakage, 1,200 went out, so the third 400 had 143 under-cured (ICO follow-up raised). Kado available 26 Nov: 670; next 314 ready 30 Nov. Life Camp: first 683 ready 1 Dec.
+  - Until b21 ships, the handover form has no reason box, so above the available count the save stops with the message.
+- **Next:** b21 (handover form shows available/next-ready and a reason box; Batches page hides "create" for client sites and tags auto batches); breakage types (production / stacking / loading / offloading) judged separately.
+
 ### Dutse while production is on hold
 - Any block leaving the yard needs a same-day waybill; owner to be named now Abubakar has moved.
 - Weekly yard count continues; best window to close the ICO stock reconciliation (unexplained ~77,000 blocks, ₦37–48m at cost, pending ICO checks due 20 Nov).
