@@ -1647,6 +1647,7 @@ Interim until A–C: Umar records Kado now; Abubakar gets a temporary assistant_
   - New `respond_production_exception(id, 'escalate', text)` — ICO only, ≥ 10 chars, open/explained days: sets `escalated_at`, `escalated_by_name`, `escalation_note` on the day, adds an `escalation` comment, MD gets `action_required` "Escalated to you". Explaining again or sending back clears the escalation.
   - Question items now name who asked ("answer KAYODE OJO's question").
   - Backfill: review items for the 5 explained Kado days (12, 16, 20, 24, 25 Nov).
+  - `20261126051515_ico_bulk_close_skips_escalated`: the ICO's "close all explained" skips days he escalated to the MD.
 - **Next:** b23 UI — "Escalate to the MD" for the ICO, escalation banner/badge, MD sees escalated days first.
 
 ### Dutse while production is on hold
