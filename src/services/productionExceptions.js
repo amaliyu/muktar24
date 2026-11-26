@@ -31,7 +31,7 @@ export const productionExceptionsService = {
   comments: ids => readPages(() => supabase.from('production_exception_comments').select('*')
     .in('exception_id', ids).order('created_at').order('id')),
   budget: id => read(supabase.rpc('client_requisition_budget', { p_requisition_id: id })),
-  getSettings: id => read(supabase.from('production_sites').select('variance_tolerance_pct, cement_under_tolerance_pct, warn_min_cement_bags, warn_min_diesel_l, warn_min_breakage_blocks, breakage_budget_pct, material_cost_budget_per_block').eq('id', id).maybeSingle()),
+  getSettings: id => read(supabase.from('production_sites').select('variance_tolerance_pct, cement_under_tolerance_pct, warn_min_cement_bags, warn_min_diesel_l, warn_min_breakage_blocks, production_breakage_pct, stacking_breakage_pct, loading_breakage_pct, offloading_breakage_pct, material_cost_budget_per_block').eq('id', id).maybeSingle()),
   closeExplained: (siteId, note) => read(supabase.rpc('close_explained_exceptions', { p_site_id: siteId || null, p_note: note || null })),
   respond: (id, action, message) => read(supabase.rpc('respond_production_exception', {
     p_id: id, p_action: action, p_text: message,

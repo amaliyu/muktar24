@@ -1637,7 +1637,7 @@ Interim until A–C: Umar records Kado now; Abubakar gets a temporary assistant_
   - `block_handovers.broken_loading`, `broken_offloading` → synced to `damage_log` (stages `loading` / `delivery`, `handover_id`, cascade). Base for both = blocks handed over + broken loading + broken offloading that day. Handover breakage leaves the yard (`v_site_yard`) and uses cured stock (`site_cured_stock`, the curing check counts quantity + breakage).
   - Late check skips handover-linked damage rows (the handover carries the late reason). Handover changes recompute that site-day.
   - Re-judged client-site days since 1 Nov quietly. Cleared: Kado 11 Nov; Life Camp 18, 21, 23, 24 Nov (their ICO items ticked). Still flagged: Kado 16, 20, 25 Nov production (4.0%, 4.5%, 3.6%); Life Camp 20 Nov production (3.4%) and new stacking line (9 of 417). Kayode's Life Camp handling visit stays on his list.
-- **Next:** b22 UI (handover breakage fields, warning names and reason chips, four allowance settings, scorecard).
+- b22: handover form and Edit breakage enter loading/offloading breakage; warning names and reason chips per type; four allowance settings; scorecard shows any breakage line.
 
 ### Dutse while production is on hold
 - Any block leaving the yard needs a same-day waybill; owner to be named now Abubakar has moved.

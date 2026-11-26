@@ -32,7 +32,10 @@ const reasonOptions = {
   cement: ['Mixer problem', 'Machine adjustment', 'Torn or wet bags', 'Other'],
   quality: ['Ran short of cement', 'Blocks checked — they are strong', 'Other'],
   diesel: ['Machine adjustment', 'Generator ran for other work', 'Machine ran idle (breakdown)', 'Other'],
-  breakage: ['Broke while stacking', 'Machine problem', 'Weak mix', 'Other'],
+  breakage: ['Machine problem', 'Weak mix', 'Operator', 'Other'],
+  stacking_breakage: ['Rough handling', 'Pallets', 'Uneven ground', 'Other'],
+  loading_breakage: ['Rough loading', 'Truck packing', 'Other'],
+  offloading_breakage: ['Rough offloading', 'Uneven ground at the client', 'Other'],
 }
 
 function WarningFacts({ day, sites, assignedSiteId }) {

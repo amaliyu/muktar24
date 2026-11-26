@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import Handovers from './Handovers'
 import { siteContractsService } from '../../services/siteContracts'
@@ -20,7 +20,7 @@ async function form(qty = 200) {
 vi.mock('../../services/siteContracts', () => ({
   lagosToday: () => '2026-11-26',
   siteContractsService: {
-    curedStock: vi.fn(), createHandover: vi.fn(),
+    curedStock: vi.fn(), createHandover: vi.fn(), updateBreakage: vi.fn(),
     listHandovers: vi.fn(async () => f.rows),
     listYard: vi.fn(async () => [{ site_id: 'site', block_type: '9 Inch Block', in_yard: 0 }]),
     transportOptions: vi.fn(async () => ({ vehicles: [{ id: 'v', label: 'Truck', driver_id: 'd', loader_ids: ['l'] }], drivers: [{ id: 'd', name: 'Driver' }], loaders: [{ id: 'l', name: 'Loader' }] })),
@@ -113,4 +113,70 @@ it('ignores a stale cured-stock response after the block type changes', async ()
   await act(async () => { finish({ ...stock, available: 9999 }) })
   expect(screen.getByText(/Ready to hand over/)).toHaveTextContent('70.')
   expect(screen.getByLabelText('Reason for handing over early')).toBeInTheDocument()
+})
+
+it('counts loading and offloading breakage in the curing total and sends whole numbers', async () => {
+  await form(60)
+  await screen.findByText(/Ready to hand over/)
+  change('Broken while loading', '8')
+  change('Broken while offloading', '7')
+  expect(screen.getByText(/Only 70 blocks here/)).toHaveTextContent('5 of these 75 would be younger than 14 days.')
+  expect(save()).toBeDisabled()
+  change('Reason for handing over early', '  Urgent client collection  ')
+  fireEvent.click(save())
+  await waitFor(() => expect(siteContractsService.createHandover).toHaveBeenCalledWith(expect.objectContaining({ qty_handed_over: 60, broken_loading: 8, broken_offloading: 7, early_reason: 'Urgent client collection' })))
+})
+it.each(['-1', '1.5'])('rejects invalid breakage %s and treats blank as zero', async value => {
+  await form(60)
+  await screen.findByText(/Ready to hand over/)
+  change('Broken while loading', value)
+  expect(screen.getByText('Enter broken blocks as whole numbers (0 or more).')).toBeInTheDocument()
+  expect(save()).toBeDisabled()
+  change('Broken while loading', '')
+  change('Broken while offloading', '')
+  fireEvent.click(save())
+  await waitFor(() => expect(siteContractsService.createHandover).toHaveBeenCalledWith(expect.objectContaining({ broken_loading: 0, broken_offloading: 0, early_reason: null })))
+})
+it('prefills and edits row breakage using a curing lookup excluding that handover', async () => {
+  f.rows = [{ id: 'h', site_id: 'site', block_type: '9 Inch Block', handover_date: '2026-11-26', qty_handed_over: 60, broken_loading: 8, broken_offloading: 7, early_reason: 'Original urgent request' }]
+  siteContractsService.updateBreakage.mockResolvedValue({ id: 'h' })
+  render(<Handovers userProfile={{ role: 'md' }} />)
+  expect(await screen.findByText('Broken: 8 loading · 7 offloading')).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Edit breakage' }))
+  const dialog = within(screen.getByRole('button', { name: 'Save breakage' }).parentElement.parentElement)
+  await waitFor(() => expect(siteContractsService.curedStock).toHaveBeenCalledWith('site', '9 Inch Block', '2026-11-26', 'h'))
+  expect(dialog.getByLabelText('Broken while loading')).toHaveValue(8)
+  expect(dialog.getByLabelText('Broken while offloading')).toHaveValue(7)
+  expect(await dialog.findByLabelText('Reason for handing over early')).toHaveValue('Original urgent request')
+  expect(dialog.getByText(/Only 70 blocks here/)).toHaveTextContent('5 of these 75')
+  fireEvent.change(dialog.getByLabelText('Broken while offloading'), { target: { value: '1.5' } })
+  expect(dialog.getByRole('button', { name: 'Save breakage' })).toBeDisabled()
+  fireEvent.change(dialog.getByLabelText('Broken while offloading'), { target: { value: '9' } })
+  fireEvent.change(dialog.getByLabelText('Reason for handing over early'), { target: { value: 'short' } })
+  expect(dialog.getByRole('button', { name: 'Save breakage' })).toBeDisabled()
+  fireEvent.change(dialog.getByLabelText('Reason for handing over early'), { target: { value: '  Revised urgent collection  ' } })
+  fireEvent.click(dialog.getByRole('button', { name: 'Save breakage' }))
+  await waitFor(() => expect(siteContractsService.updateBreakage).toHaveBeenCalledWith('h', { broken_loading: 8, broken_offloading: 9, early_reason: 'Revised urgent collection' }))
+})
+it('shows edit-breakage database errors verbatim and sends null below the cured balance', async () => {
+  f.rows = [{ id: 'h', site_id: 'site', block_type: '9 Inch Block', handover_date: '2026-11-26', qty_handed_over: 60, early_reason: 'Obsolete early reason' }]
+  siteContractsService.updateBreakage.mockRejectedValue(new Error('The handover could not be changed.'))
+  render(<Handovers userProfile={{ role: 'md' }} />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit breakage' }))
+  const dialog = within(screen.getByRole('button', { name: 'Save breakage' }).parentElement.parentElement)
+  await waitFor(() => expect(dialog.getByRole('button', { name: 'Save breakage' })).toBeEnabled())
+  expect(dialog.queryByLabelText('Reason for handing over early')).toBeNull()
+  fireEvent.click(dialog.getByRole('button', { name: 'Save breakage' }))
+  expect(await dialog.findByText('The handover could not be changed.')).toBeInTheDocument()
+  expect(siteContractsService.updateBreakage).toHaveBeenCalledWith('h', { broken_loading: 0, broken_offloading: 0, early_reason: null })
+})
+
+it('retains the saved early reason when new breakage pushes an existing row over the limit', async () => {
+  f.rows = [{ id: 'h', site_id: 'site', block_type: '9 Inch Block', handover_date: '2026-11-26', qty_handed_over: 60, early_reason: 'Existing urgent client request' }]
+  render(<Handovers userProfile={{ role: 'md' }} />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit breakage' }))
+  const dialog = within(screen.getByRole('button', { name: 'Save breakage' }).parentElement.parentElement)
+  await waitFor(() => expect(dialog.getByRole('button', { name: 'Save breakage' })).toBeEnabled())
+  fireEvent.change(dialog.getByLabelText('Broken while loading'), { target: { value: '11' } })
+  expect(dialog.getByLabelText('Reason for handing over early')).toHaveValue('Existing urgent client request')
 })

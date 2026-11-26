@@ -19,7 +19,7 @@ import { theme, ui, Pill, fmtQty, fmtDate, countdown, daysFrom, ErrorBox, Skelet
 
 export const HANDOVER_WRITE_ROLES = ['md', 'production_manager', 'assistant_production_manager', 'store_officer']
 
-const emptyForm = (siteId = '') => ({ siteId, date: lagosToday(), blockType: '', qty: '', clientRep: '', notes: '', photo: null })
+const emptyForm = (siteId = '') => ({ siteId, date: lagosToday(), blockType: '', qty: '', clientRep: '', notes: '', photo: null, broken_loading: '0', broken_offloading: '0' })
 
 // Look up while typing so a repeated waybill stays visible without disabling Save.
 function useWaybillWarning(siteId, value, excludeId) {
@@ -50,10 +50,10 @@ function WaybillWarning({ number, result }) {
   </p>)}</>
 }
 
-function useCuredStock(siteId, blockType, date) {
+function useCuredStock(siteId, blockType, date, excludeId) {
   const [state, setState] = useState({})
   const request = useRef(0)
-  const key = JSON.stringify([siteId, blockType, date])
+  const key = JSON.stringify([siteId, blockType, date, excludeId])
   const currentKey = useRef(key)
   currentKey.current = key
   const refresh = async () => {
@@ -61,7 +61,7 @@ function useCuredStock(siteId, blockType, date) {
     setState({ key, loading: true })
     if (!siteId || !blockType || !date) { setState({ key }); return }
     try {
-      const data = await siteContractsService.curedStock(siteId, blockType, date)
+      const data = await siteContractsService.curedStock(siteId, blockType, date, excludeId)
       if (id === request.current && currentKey.current === key) setState({ key, data })
     } catch (error) {
       if (id === request.current && currentKey.current === key) setState({ key, error })
@@ -72,6 +72,52 @@ function useCuredStock(siteId, blockType, date) {
     return () => { request.current++ }
   }, [key])
   return { ...(state.key === key ? state : { loading: true }), refresh }
+}
+
+const breakageProblem = value => [value.broken_loading, value.broken_offloading].some(raw => !Number.isInteger(Number(raw || 0)) || Number(raw || 0) < 0)
+  ? 'Enter broken blocks as whole numbers (0 or more).' : null
+
+function BreakageFields({ value, onChange, id }) {
+  return <>{[['broken_loading', 'Broken while loading'], ['broken_offloading', 'Broken while offloading']].map(([key, label]) => <div key={key} style={ui.field}>
+    <label style={ui.label} htmlFor={id + key}>{label}</label>
+    <input id={id + key} style={ui.input} type="number" inputMode="numeric" min="0" step="1" value={value[key]} onChange={e => onChange({ [key]: e.target.value })} />
+    <div style={ui.hint}>Not counted in the quantity handed over.</div>
+  </div>)}</>
+}
+
+function CuringWarning({ data, total, reason, onChange, id }) {
+  return <div style={{ ...ui.panel, color: theme.accent, borderColor: theme.accent }}>
+    <p>Only {fmtQty(data.available)} blocks here are {data.min_cure_days} days old (made on or before {fmtDate(data.cutoff)}). {fmtQty(total - Number(data.available))} of these {fmtQty(total)} would be younger than {data.min_cure_days} days.</p>
+    <label style={ui.label} htmlFor={id}>Reason for handing over early</label>
+    <textarea id={id} style={ui.textarea} required minLength={10} value={reason} onChange={e => onChange(e.target.value)} />
+    {reason.trim().length < 10 && <div style={ui.hint}>Give a reason for handing over early (at least 10 characters).</div>}
+  </div>
+}
+
+function BreakageDialog({ row, onCancel, onSaved }) {
+  const [value, setValue] = useState({ broken_loading: String(row.broken_loading || 0), broken_offloading: String(row.broken_offloading || 0) })
+  const [reason, setReason] = useState(row.early_reason || '')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+  const cured = useCuredStock(row.site_id, row.block_type, row.handover_date, row.id)
+  const total = Number(row.qty_handed_over) + Number(value.broken_loading || 0) + Number(value.broken_offloading || 0)
+  const above = cured.data?.applies && total > Number(cured.data.available)
+  const problem = breakageProblem(value) || (above && reason.trim().length < 10 ? 'Give a reason for handing over early (at least 10 characters).' : null)
+  return <ConfirmDialog title="Edit breakage" confirmLabel="Save breakage" busy={busy} confirmDisabled={cured.loading || !!problem} onCancel={onCancel} onConfirm={async () => {
+    if (cured.loading || problem || busy) return
+    setBusy(true); setError(null)
+    try {
+      await siteContractsService.updateBreakage(row.id, { broken_loading: Number(value.broken_loading || 0), broken_offloading: Number(value.broken_offloading || 0), early_reason: above ? reason.trim() : null })
+      await onSaved()
+    } catch (e) { setError(e) }
+    finally { setBusy(false) }
+  }}>
+    <BreakageFields value={value} onChange={patch => setValue(v => ({ ...v, ...patch }))} id="edit-breakage" />
+    <ErrorBox error={cured.error} />
+    {above && <CuringWarning data={cured.data} total={total} reason={reason} onChange={setReason} id="edit-early-reason" />}
+    {breakageProblem(value) && <div style={{ color: theme.red }}>{breakageProblem(value)}</div>}
+    <ErrorBox error={error} />
+  </ConfirmDialog>
 }
 
 function Handovers({ userProfile, assignedSiteId }) {
@@ -90,11 +136,13 @@ function Handovers({ userProfile, assignedSiteId }) {
   const lateEntry = useLateReason(form.date)
   const cured = useCuredStock(form.siteId, form.blockType, form.date)
   const [earlyReason, setEarlyReason] = useState('')
-  const aboveCured = cured.data?.applies && Number(form.qty) > Number(cured.data.available)
+  const handoverTotal = Number(form.qty) + Number(form.broken_loading || 0) + Number(form.broken_offloading || 0)
+  const aboveCured = cured.data?.applies && handoverTotal > Number(cured.data.available)
   useEffect(() => { setEarlyReason('') }, [form.siteId, form.blockType, form.date])
   useEffect(() => { if (!aboveCured) setEarlyReason('') }, [aboveCured])
   const [transport, setTransport] = useState(emptyTransport)
   const options = useTransportOptions(form.siteId, form.date)
+  const [breakageTarget, setBreakageTarget] = useState(null)
   const [transportTarget, setTransportTarget] = useState(null)
   const repairOptions = useTransportOptions(transportTarget?.site_id, transportTarget?.handover_date)
   const [repair, setRepair] = useState(emptyTransport)
@@ -140,7 +188,7 @@ function Handovers({ userProfile, assignedSiteId }) {
   const formYard = form.blockType ? yardFor(form.siteId, form.blockType) : null
   const overYard = formYard && Number(form.qty) > Number(formYard.in_yard)
   const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }))
-  const formProblem = !form.siteId ? 'Choose the site.' : !form.blockType ? 'Choose the block type.' : !(Number(form.qty) > 0) ? 'Enter the quantity handed over.' : !form.date ? 'Enter the date.' : cured.loading ? 'Wait for the curing check.' : aboveCured && earlyReason.trim().length < 10 ? 'Give a reason for handing over early (at least 10 characters).' : !options.data ? 'Wait for transport options.' : transportProblem(transport, options.data, form.notes)
+  const formProblem = !form.siteId ? 'Choose the site.' : !form.blockType ? 'Choose the block type.' : !(Number(form.qty) > 0) ? 'Enter the quantity handed over.' : !form.date ? 'Enter the date.' : breakageProblem(form) ? breakageProblem(form) : cured.loading ? 'Wait for the curing check.' : aboveCured && earlyReason.trim().length < 10 ? 'Give a reason for handing over early (at least 10 characters).' : !options.data ? 'Wait for transport options.' : transportProblem(transport, options.data, form.notes)
 
   const submit = (e) => {
     e.preventDefault()
@@ -177,7 +225,7 @@ function Handovers({ userProfile, assignedSiteId }) {
         early_reason: aboveCured ? earlyReason.trim() : null,
         ...transport, waybill_no: transport.waybill_no.trim().toUpperCase(), vehicle_id: transport.vehicle_id || null, vehicle_plate: transport.vehicle_id ? null : transport.vehicle_plate.trim(), driver_staff_id: transport.driver_staff_id || null, driver_name: transport.driver_staff_id ? null : transport.driver_name.trim(),
         site_id: form.siteId, handover_date: form.date, block_type: form.blockType,
-        qty_handed_over: Math.round(Number(form.qty)), client_rep: form.clientRep.trim() || null,
+        qty_handed_over: Math.round(Number(form.qty)), broken_loading: Number(form.broken_loading || 0), broken_offloading: Number(form.broken_offloading || 0), client_rep: form.clientRep.trim() || null,
         photo_path: photoPath, notes: form.notes.trim() || null,
       })
       setOk(`Handover recorded: ${fmtQty(form.qty)} ${form.blockType}.${photoWarn}`)
@@ -273,14 +321,11 @@ function Handovers({ userProfile, assignedSiteId }) {
             <div style={ui.field}>
               <label style={ui.label} htmlFor="ho-qty">Quantity handed over *</label>
               <input id="ho-qty" type="number" inputMode="numeric" min="1" step="1" style={ui.input} value={form.qty} onChange={set('qty')} />
+              <BreakageFields value={form} onChange={patch => setForm(f => ({ ...f, ...patch }))} id="ho" />
+              {breakageProblem(form) && <div style={{ color: theme.red }}>{breakageProblem(form)}</div>}
               <ErrorBox error={cured.error} />
               {cured.data?.applies && <div style={ui.hint}>Ready to hand over (14+ days old): {fmtQty(cured.data.available)}.{cured.data.next_ready_on && <> Next {fmtQty(cured.data.next_ready_qty)} ready on {fmtDate(cured.data.next_ready_on)}.</>}</div>}
-              {aboveCured && <div style={{ ...ui.panel, color: theme.accent, borderColor: theme.accent }}>
-                <p>Only {fmtQty(cured.data.available)} blocks here are {cured.data.min_cure_days} days old (made on or before {fmtDate(cured.data.cutoff)}). {fmtQty(Number(form.qty) - Number(cured.data.available))} of these {fmtQty(form.qty)} would be younger than {cured.data.min_cure_days} days.</p>
-                <label style={ui.label} htmlFor="ho-early-reason">Reason for handing over early</label>
-                <textarea id="ho-early-reason" style={ui.textarea} required minLength={10} value={earlyReason} onChange={e => setEarlyReason(e.target.value)} />
-                {earlyReason.trim().length < 10 && <div style={ui.hint}>Give a reason for handing over early (at least 10 characters).</div>}
-              </div>}
+              {aboveCured && <CuringWarning data={cured.data} total={handoverTotal} reason={earlyReason} onChange={setEarlyReason} id="ho-early-reason" />}
               {formYard && <div style={ui.hint}>In yard: {fmtQty(formYard.in_yard)}</div>}
               {!cured.loading && !cured.data?.applies && overYard && <div style={{ ...ui.fieldError, color: theme.accent }}>More than the {fmtQty(formYard.in_yard)} recorded in the yard. Check batches and damages — you can still save.</div>}
             </div>
@@ -337,6 +382,7 @@ function Handovers({ userProfile, assignedSiteId }) {
                       <td style={{ ...ui.td, ...ui.right, color: r.qty_rejected > 0 ? theme.red : theme.text }}>{fmtQty(r.qty_rejected)}</td>
                       <td style={ui.td}>
                         <Pill status={r.status} />
+                        {(r.broken_loading > 0 || r.broken_offloading > 0) && <div style={ui.hint}>Broken: {fmtQty(r.broken_loading || 0)} loading · {fmtQty(r.broken_offloading || 0)} offloading</div>}
                         {r.under_cure_qty > 0 && <div style={{ ...ui.hint, color: theme.accent }}>{fmtQty(r.under_cure_qty)} under 14 days — {r.early_reason || 'no reason given'}</div>}
                         {r.verdict_on && <div style={ui.hint}>verdict {fmtDate(r.verdict_on)}</div>}
                         {r.rejection_reason && <div style={ui.hint}>{r.rejection_reason}</div>}
@@ -357,6 +403,7 @@ function Handovers({ userProfile, assignedSiteId }) {
                       <td style={ui.td}><PhotoLink path={r.photo_path} /></td>
                       <td style={ui.td}>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'flex-start' }}>
+                          {canWrite && <button type="button" style={ui.btn()} onClick={() => setBreakageTarget(r)}>Edit breakage</button>}
                           {canWrite && r.status === 'pending' && (
                             <button type="button" style={ui.small()} onClick={() => { setDlgErr(null); setVerdict({ row: r, accepted: String(r.qty_handed_over), rejected: '0', reason: '', date: today }) }}>Verdict</button>
                           )}
@@ -376,6 +423,11 @@ function Handovers({ userProfile, assignedSiteId }) {
         )}
       </div>
 
+      {breakageTarget && <BreakageDialog row={breakageTarget} onCancel={() => setBreakageTarget(null)} onSaved={async () => {
+        setBreakageTarget(null)
+        await load()
+        await cured.refresh()
+      }} />}
       {transportTarget && <ConfirmDialog title="Add waybill, truck & loaders" confirmLabel="Save transport" busy={dlgBusy} confirmDisabled={!repairOptions.data || !!transportProblem(repair, repairOptions.data, transportTarget.notes || 'Legacy handover')} onCancel={() => setTransportTarget(null)} onConfirm={() => runDialog(async () => {
         if (!await repairDuplicate.check()) return
         await siteContractsService.updateTransport(transportTarget.id, { waybill_no: repair.waybill_no.trim().toUpperCase(), vehicle_id: repair.vehicle_id || null, vehicle_plate: repair.vehicle_id ? null : repair.vehicle_plate.trim(), driver_staff_id: repair.driver_staff_id || null, driver_name: repair.driver_staff_id ? null : repair.driver_name.trim(), loader_ids: repair.loader_ids }); setTransportTarget(null)
