@@ -1650,6 +1650,11 @@ Interim until A–C: Umar records Kado now; Abubakar gets a temporary assistant_
   - `20261126051515_ico_bulk_close_skips_escalated`: the ICO's "close all explained" skips days he escalated to the MD.
 - b23: ICO can escalate active warning days with a reason of at least 10 characters. Escalation shows in the badge, banner and thread; escalated days leave the ICO review count and bulk-close count, and appear first for the MD. No SQL changes.
 
+### Weekly standards review — Life Camp diesel (MD 2026-11-26)
+- Review of 19–25 Nov: Kado 42.3 blocks/bag (keep 40), diesel 24.4 L per 1,000 at 786 blocks/day average — within 30 L/day every day; keep 30 L/day + 12 L/1,000 (the per-block breach reflects low output). Life Camp 35.0 blocks/bag vs 40 (≈10 bags of Bilaad cement over in 5 days), diesel 17.0 L per 1,000 at 6–12 L/day; the borrowed 20 L/1,000 never fired.
+- `20261126162115_life_camp_diesel_two_yardsticks`: Life Camp `diesel_l_per_day` = 12, `diesel_l_per_1000` = 17 (interim until its machine capacity is known; proper figure = daily litres ÷ capacity). Re-judged quietly; no Life Camp diesel line flagged (17 Nov 1.3 L over, 22 Nov 0.8 L over — below the 3 L minimum).
+- MD: Bilaad asked for vendor invoices — labour/opex is paid to APCL, other materials are paid to the vendors who supply them.
+
 ### Dutse while production is on hold
 - Any block leaving the yard needs a same-day waybill; owner to be named now Abubakar has moved.
 - Weekly yard count continues; best window to close the ICO stock reconciliation (unexplained ~77,000 blocks, ₦37–48m at cost, pending ICO checks due 20 Nov).
